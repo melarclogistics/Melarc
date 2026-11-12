@@ -1,5 +1,8 @@
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { freezeClock, TODAY } from './clock';
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the manifest screens (S1.25) put in place of the API: a small, stateful stand-in for the operations the four screens
  * use. A manifest is made from the pool of confirmed requests under a key, with the reason of each overdue request; its stops are ordered whole
@@ -37,7 +40,7 @@ export const REQUESTS = {
 } as const;
 
 /** The day the stand-in takes for today: a run for an earlier day is never made or sent, as the server's clock says. */
-export const TODAY = '2026-11-03';
+export { TODAY };
 
 /** A count of the hub's no custody answer carries. If it is ever drawn, a screen showed what it must not: a handover is not a count. */
 export const PLANTED_HUB_COUNT = 4242;
@@ -308,6 +311,8 @@ function manifestWire(w: World, m: WorldManifest, withStops = true) {
     started_at:
       m.state === 'IN_PROGRESS' || m.state === 'COMPLETED' ? '2026-11-04T07:30:00Z' : null,
     completed_at: m.state === 'COMPLETED' ? '2026-11-04T10:00:00Z' : null,
+    // The moment the run was made (contract 5.100.0): carried, as the API does, and drawn by no screen yet.
+    created_at: '2026-11-02T09:00:00Z',
     ...(withStops ? { stops: m.stops.map((s) => stopWire(w, m, s)) } : {}),
   };
 }
@@ -768,7 +773,10 @@ export async function stubManifestApi(
   initial: World = world(),
 ): Promise<ManifestApi> {
   const state: ManifestApi = { world: initial, calls: [], unexpected: [] };
+  // The clock of the world: "today or later" and "last checked" are the world's, whatever day the machine thinks it is.
+  await freezeClock(target);
   await target.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const headers = request.headers();

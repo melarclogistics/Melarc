@@ -1,18 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import type { DataColumn } from '../../../components/ui/data-table/DataTable';
+import { EmptyStateV2 } from '../../../components/ui/empty-state/EmptyStateV2';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
-import { Table, type TableColumn } from '../../../components/ui/table/Table';
+import { QueueWorkspace, type QueueResult } from '../../../components/ui/templates/QueueWorkspace';
 import { useApiClient } from '../../../platform/api/api-client';
 import { isNotFound } from '../../../platform/api/api-response';
+import { cannotText, refusalText } from '../../../platform/problem/capability-words';
 import { problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { revokeSession } from '../../../platform/staff/staff-commands';
@@ -82,19 +83,37 @@ function Sessions({
   const who = name ?? KIND[type];
   const canRevoke = me.holds('staff.session.revoke');
   const mine = target?.id === me.session.id;
-  const problem =
-    sessions.status === 'error'
-      ? problemOf(sessions.error, { operation: 'listSessions' })
+  const updatedAt =
+    sessions.dataUpdatedAt > 0
+      ? formatInstant(new Date(sessions.dataUpdatedAt).toISOString())
       : undefined;
 
   function refresh(): Promise<unknown> {
     return sessions.refetch();
   }
 
-  const columns: TableColumn<SessionRecordView>[] = [
+  /** The act on a session, which names the session it ends (by when it started), so that each is told from the others by a person who hears only the button. */
+  function endButton(row: SessionRecordView): ReactNode {
+    const started = row.issued_at === undefined ? undefined : formatInstant(row.issued_at);
+    return (
+      <Button
+        type="button"
+        variant="danger"
+        {...(started === undefined ? {} : { 'aria-label': `End session started ${started}` })}
+        onClick={() => {
+          setTarget(row);
+        }}
+      >
+        End session
+      </Button>
+    );
+  }
+
+  const columns: DataColumn<SessionRecordView>[] = [
     {
-      key: 'started',
+      id: 'started',
       header: 'Started',
+      rowHeader: true,
       cell: (row) => (
         <>
           <Time instant={row.issued_at} />
@@ -104,39 +123,58 @@ function Sessions({
         </>
       ),
     },
+    // When it was last active matters beside when it started; when it expires is the first to go where the box is short (the table takes the lesser columns away, the most lesser first,
+    // only as far as it takes for it not to scroll sideways, and a card shows every fact).
     {
-      key: 'active',
+      id: 'active',
       header: 'Last active',
+      kind: 'date',
       cell: (row) => <Time instant={row.last_activity_at} />,
     },
-    { key: 'expires', header: 'Expires', cell: (row) => <Time instant={row.expires_at} /> },
+    {
+      id: 'expires',
+      header: 'Expires',
+      kind: 'date',
+      cell: (row) => <Time instant={row.expires_at} />,
+    },
     ...(canRevoke
-      ? [
-          {
-            key: 'action',
-            header: 'Action',
-            cell: (row: SessionRecordView) => {
-              const started =
-                row.issued_at === undefined ? undefined : formatInstant(row.issued_at);
-              return (
-                <Button
-                  type="button"
-                  variant="danger"
-                  {...(started === undefined
-                    ? {}
-                    : { 'aria-label': `End session started ${started}` })}
-                  onClick={() => {
-                    setTarget(row);
-                  }}
-                >
-                  End session
-                </Button>
-              );
-            },
-          },
-        ]
+      ? [{ id: 'action', header: 'Action', cell: (row: SessionRecordView) => endButton(row) }]
       : []),
   ];
+
+  const result: QueueResult<SessionRecordView> = (() => {
+    if (sessions.status === 'pending') return { status: 'loading' };
+    if (sessions.status === 'error') {
+      const problem = problemOf(sessions.error, { operation: 'listSessions' });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale') {
+        return { status: 'loading' };
+      }
+      const message =
+        problem.kind === 'forbidden'
+          ? problem.forbidden === 'insufficient-authority'
+            ? // The words of this act (staff-copy): they say whose sessions a session of this tier may see, which the table's general sentence does not.
+              problem.message
+            : refusalText(problem.forbidden, 'staff.read', { of: 'this person' })
+          : problem.reference === undefined
+            ? problem.message
+            : `${problem.message} Reference: ${problem.reference}`;
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void sessions.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    // The list is read again after an act (an ended session) and its rows stay where they are while it is.
+    return { status: 'ready', rows: sessions.data, refreshing: sessions.isFetching };
+  })();
 
   return (
     <>
@@ -146,53 +184,69 @@ function Sessions({
           <Link to={`/admin/staff/${principalId}`}>Back to profile</Link>
         </p>
       ) : null}
-      <PageHeader title="Sessions" description={`Open sessions of ${who}.`} />
-
-      {notice === undefined ? null : (
-        <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
-          <Alert variant="success">
-            <p>{notice}</p>
-          </Alert>
-        </div>
-      )}
-
-      {problem?.forbidden === 'insufficient-authority' ? (
-        <Alert variant="danger" title="A higher authority is needed" announce>
-          <p>{problem.message}</p>
-        </Alert>
-      ) : (
-        <ReadState<SessionRecordView[]>
-          query={sessions}
-          isEmpty={(data) => data.length === 0}
-          empty={
-            <EmptyState kind="none" heading="No open sessions">
-              {name ?? 'This person'} is not signed in anywhere.
-            </EmptyState>
-          }
-          loadingLabel="Loading the sessions…"
-          skeleton={<Skeleton lines={3} />}
-          permission="staff.read"
-          operation="listSessions"
-        >
-          {(data) => (
+      <QueueWorkspace<SessionRecordView>
+        header={{
+          title: 'Sessions',
+          description: `Open sessions of ${who}.`,
+          freshness: {
+            state: sessions.isFetching ? 'refreshing' : sessions.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: () => {
+              void sessions.refetch({ cancelRefetch: false });
+            },
+          },
+        }}
+        notice={
+          notice === undefined && canRevoke ? undefined : (
             <>
-              <Table
-                caption="Open sessions"
-                hideCaption
-                columns={columns}
-                rows={data}
-                rowKey={(row) => row.id}
-              />
+              {notice === undefined ? null : (
+                <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
+                  <Alert variant="success">
+                    <p>{notice}</p>
+                  </Alert>
+                </div>
+              )}
               {canRevoke ? null : (
-                <p className="staff-note">
-                  Ending a session needs the permission <code>staff.session.revoke</code>, which
-                  your session does not hold.
-                </p>
+                <p className="staff-note">{cannotText('staff.session.revoke')}</p>
               )}
             </>
-          )}
-        </ReadState>
-      )}
+          )
+        }
+        result={result}
+        empty={{ noun: 'sessions', none: `${name ?? 'This person'} is not signed in anywhere.` }}
+        emptyState={
+          <EmptyStateV2 variant="all-clear" title="No open sessions" headingLevel={3}>
+            {name ?? 'This person'} is not signed in anywhere.
+          </EmptyStateV2>
+        }
+        table={{
+          label: 'Open sessions',
+          columns,
+          rowId: (row) => row.id,
+          density: 'two-line',
+          // The session is the card's heading, by when it started, for heading navigation.
+          cardTitle: (row) => (
+            <>
+              Started <Time instant={row.issued_at} />
+            </>
+          ),
+          // A row of this table opens nothing, so its card may hold the act of the row (the table's rule: a card holds no control except where its row opens nothing).
+          card: (row) => (
+            <>
+              <CardFacts
+                {...(row.id === me.session.id
+                  ? { head: <span className="staff-session__mine">This is your session</span> }
+                  : {})}
+                facts={[
+                  { label: 'Last active', value: <Time instant={row.last_activity_at} /> },
+                  { label: 'Expires', value: <Time instant={row.expires_at} /> },
+                ]}
+              />
+              {canRevoke ? endButton(row) : null}
+            </>
+          ),
+        }}
+      />
 
       <ReasonConfirmationDialog<Ended>
         open={target !== undefined}
@@ -245,9 +299,10 @@ function Sessions({
 }
 
 /**
- * The live sessions of one person (surfaces/ops-portal.md section 7, `/admin/sessions`), and the means to end one. The person is named by the
+ * The live sessions of one person (surfaces/ops-portal.md section 7, `/admin/sessions`; redesign step R7b), and the means to end one. The person is named by the
  * address (`principal_type`, `principal_id`) because the list is only ever asked for one principal; the page is reached from a profile, and
- * asks for a person first when it is opened without one.
+ * asks for a person first when it is opened without one. It is drawn by the queue workspace template: the sessions are its rows, a table that is cards in a narrow room,
+ * and each session has its act where it is read. The list is not paged, filtered or counted, so the template shows no views, filters or pager.
  *
  * What the session may see and end is the server's decision by tier: a staff or vendor session is a Platform Admin's, a rider's a Senior
  * Ops user's at the rider's hub. A refusal of the tier is told plainly. Ending a session needs a reason; one that had already ended reads as

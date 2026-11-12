@@ -1,6 +1,6 @@
 /**
  * The shards of the run over the trusted HTTPS origin (`pnpm run test:e2e:https`, `https-run.ts`): which of its runs (its phases) one job
- * of CI makes. The run is long (three runs, one stack each, and the 15 staff journeys in every engine), so CI makes it as the jobs of a
+ * of CI makes. The run is long (four runs, one stack each, and the 15 staff journeys in every engine), so CI makes it as the jobs of a
  * matrix, each handed its shard in `MELARC_HTTPS_SHARD` as `current/total` counted from 1, as the browser tests are handed theirs in
  * `MELARC_BROWSER_SHARD` (the Product Owner's decision of 7 November 2026). Without the variable the whole run is made, which is what a
  * machine cleared for key material does.
@@ -8,9 +8,10 @@
  * **A run is the finest piece.** Its journeys are one story that begins from the two bootstrap administrators, whose one-time bundles the
  * first reading consumes (audit G01 of 26 October 2026), so a run is never cut. And **WebKit's refusal and WebKit's other proofs are in one
  * shard, in that order**: the refusal is a control only while the CA is not in the system store, and the proofs need it there, so "refused
- * before, trusted after" is made on one machine (the owner's decision of 12 October 2026). The first shard therefore holds the run that
- * has the refusal (Chromium's) and the run of WebKit's proofs; the second holds Firefox's. That is the best balance two shards allow: of
- * three runs of about 8, 10 and 9 minutes, one job takes two. (`https-run.test.ts` holds both rules to the phases.)
+ * before, trusted after" is made on one machine (the owner's decision of 12 October 2026). The refusal is a run of its own, in front of WebKit's
+ * proofs (task CI.2, 7 November 2026), so the third shard holds both, in that order, and the first holds Chromium's run and the second Firefox's:
+ * of runs of about 8 minutes (Chromium), 9 to 10 (Firefox), 1 to 2 (WebKit's refusal) and 10 (WebKit's proofs), plus 3 to 3.5 of set-up in each job,
+ * no job is estimated above 20 minutes (it was 21 of 30 with two shards). (`https-run.test.ts` holds both rules to the phases.)
  *
  * This file holds data and the reading of one value, and imports nothing, so that the CI rules (`scripts/https-shards.test.ts`) can read it:
  * the workflow's matrix must list exactly these shards, each with the browsers its runs need installed.
@@ -27,14 +28,19 @@ export interface HttpsShard {
 
 export const HTTPS_SHARDS: readonly HttpsShard[] = [
   {
-    name: 'Chromium, and WebKit with the CA in the system store',
-    phases: ['chromium', 'webkit'],
-    browsers: ['chromium', 'webkit'],
+    name: 'Chromium',
+    phases: ['chromium'],
+    browsers: ['chromium'],
   },
   {
     name: 'Firefox',
     phases: ['firefox'],
     browsers: ['firefox'],
+  },
+  {
+    name: 'WebKit, its refusal first and then its proofs with the CA in the system store',
+    phases: ['webkit-refusal', 'webkit'],
+    browsers: ['webkit'],
   },
 ];
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { ForbiddenPage } from '../../components/ui/forbidden-state/ForbiddenState';
+import { type CapabilityWords } from '../problem/capability-words';
 import { useSession } from './session-context';
 
 /**
@@ -17,10 +18,13 @@ import { useSession } from './session-context';
 export function RequirePermission({
   permission,
   decidedBy,
+  capability,
   children,
 }: {
   readonly permission: string;
   readonly decidedBy?: string;
+  /** What the page reads with the key, where it is not what the table says for it ("see pickup runs"): words of the table, never free text. */
+  readonly capability?: CapabilityWords;
   readonly children: ReactNode;
 }) {
   const state = useSession();
@@ -28,5 +32,11 @@ export function RequirePermission({
   if (state.session.permissions?.includes(permission) === true) return children;
   if (decidedBy !== undefined)
     return <ForbiddenPage kind="approval-required" permission={decidedBy} />;
-  return <ForbiddenPage kind="permission-missing" permission={permission} />;
+  return (
+    <ForbiddenPage
+      kind="permission-missing"
+      permission={permission}
+      {...(capability === undefined ? {} : { capability })}
+    />
+  );
 }

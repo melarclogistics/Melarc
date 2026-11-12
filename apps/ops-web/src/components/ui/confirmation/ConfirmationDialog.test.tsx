@@ -184,7 +184,9 @@ describe('ConfirmationDialog: a refusal', () => {
 
     await view.user.click(confirm());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('A different approver is required.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'A different approver decides this.',
+    );
     expect(screen.getByText(/req-t1/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     expect(screen.getByRole('alertdialog')).toBeVisible();
@@ -390,7 +392,7 @@ describeInterfaceStates('ConfirmationDialog', {
       await view.user.click(confirm());
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'Your session does not hold the permission this needs.',
+        'Your account can’t do this. Ask an administrator for access.',
       );
     },
   },
@@ -412,5 +414,43 @@ describe('ConfirmationDialog: accessibility', () => {
     await conflict.user.click(confirm());
     await screen.findByRole('button', { name: 'Reload the record' });
     expect(await wcagViolations(conflict.container)).toEqual([]);
+  });
+});
+
+describe('ConfirmationDialog: inside a form (task R5.2, M3)', () => {
+  // Break caught: the dialog's submit bubbling to a form that holds it: confirming the question sends the form too.
+  it('never submits a form that holds it', async () => {
+    const submitted = vi.fn();
+    const send = vi.fn<(command: unknown, key: string) => Promise<string>>(() =>
+      Promise.resolve('done'),
+    );
+    const view = renderWithProviders(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted();
+        }}
+      >
+        <ConfirmationDialog<string>
+          open
+          title="Approve this demo profile?"
+          consequence={<p>The demo person can then set a password and sign in.</p>}
+          confirmLabel="Approve profile"
+          version={'"v1"'}
+          send={send}
+          onDone={vi.fn()}
+          onCancel={vi.fn()}
+          onReload={vi.fn()}
+        />
+      </form>,
+      { signedIn: true },
+    );
+
+    await view.user.click(confirm());
+
+    await waitFor(() => {
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+    expect(submitted).not.toHaveBeenCalled();
   });
 });

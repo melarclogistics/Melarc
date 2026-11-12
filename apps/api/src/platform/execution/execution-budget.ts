@@ -31,6 +31,15 @@ import type { Clock } from '../auth/ports/clock.port.js';
  * be constructed under a closed parent (the constructor refuses, as `child()` does). That is not a claim about work that already started: an effect begun before `finish()` is not
  * cancelled by it (an outbound call cannot be), and when it settles after the deadline it is still recorded as late, so the
  * accounting stays true. A budget that ran out is `expired`, a different fact with a different error (`BudgetExpiredError`).
+ *
+ * **Finishing cancels nothing, so the holder of a budget below the request's can be told, and can end its own** (run 4, Stage 1, A4.2). A statement already
+ * running under a budget whose request has finished is not cancelled by the finish (above), and runs on to its own bound; a lookup whose client had left
+ * kept its session's slot for that long. `onClosed` tells a holder when its budget, or one above it, is finished, and `cancel` ends its own budget at
+ * once as an expiry, which is what everything wired to a budget (the database layer's cancel of the running statement) already understands. Neither
+ * changes what finishing means for work that nobody wired this way.
+ *
+ * **A budget that has stopped leaves its parent** (run 5, Stage 1.1). However it stopped (it expired, it was cancelled, its owner finished it) it detaches both relays it
+ * registered on its parent and forgets its own closure listeners, so a parent that lives as long as the process keeps nothing of the children that are over.
  */
 
 /** Raised when a budget ran out. `label` says which budget (`request`, `transaction`, ...). */
@@ -41,6 +50,23 @@ export class BudgetExpiredError extends Error {
   ) {
     super(`The ${label} budget of ${String(budgetMilliseconds)} ms ran out`);
     this.name = 'BudgetExpiredError';
+  }
+}
+
+/**
+ * Raised, as an expiry, when a budget was ended at once because the work it bounds is no longer wanted (`cancel`: the client that asked for it is gone). It is a
+ * `BudgetExpiredError`, so everything wired to a budget (the database layer's cancel of the running statement) and everything that reads an expiry (the platform's `503`)
+ * takes it as one, but it says why, and it is not a budget whose time ran out: an abandoned lookup is not told as one (run 5, Stage 1).
+ */
+export class BudgetCancelledError extends BudgetExpiredError {
+  constructor(
+    label: string,
+    budgetMilliseconds: number,
+    readonly reason: string,
+  ) {
+    super(label, budgetMilliseconds);
+    this.name = 'BudgetCancelledError';
+    this.message = `The ${label} budget was cancelled: ${reason}`;
   }
 }
 
@@ -81,10 +107,12 @@ export class ExecutionBudget {
   private readonly deadline: number;
   private readonly expiryListeners = new Set<(error: BudgetExpiredError) => void>();
   private readonly lateListeners = new Set<(effect: LateEffect) => void>();
+  private readonly closedListeners = new Set<() => void>();
   private state: State = 'running';
   private failure: BudgetExpiredError | undefined;
   private timer: NodeJS.Timeout | undefined;
   private detachFromParent: (() => void) | undefined;
+  private detachClosedRelay: (() => void) | undefined;
 
   /** Use `child()` to make a budget inside another. `parent` is for that method. */
   constructor(
@@ -114,6 +142,10 @@ export class ExecutionBudget {
       // A finished parent has nothing left to tell. A running one tells this budget when it expires.
       this.detachFromParent = parent.onExpiry((error) => {
         this.expire(error);
+      });
+      // And tells this budget's own listeners when the parent, or a budget above it, is finished: closure follows the ancestry.
+      this.detachClosedRelay = parent.onClosed(() => {
+        this.announceClosed();
       });
     }
     this.arm();
@@ -185,6 +217,39 @@ export class ExecutionBudget {
     };
   }
 
+  /**
+   * Runs `listener` once when the budget is closed: when it, or any budget above it, is finished (`finish()`); at once when it already is. Closed is not
+   * expired: a budget that runs out is not told here (`onExpiry` is for that), and a budget that has expired (or been cancelled) is told nothing more, because it left
+   * its parent's listeners when it stopped (run 5, Stage 1.1): its listeners are forgotten, and one added to it afterwards is not kept, unless a budget above it is already
+   * finished, when it is called at once. Finishing cancels nothing, so this is how a holder whose work may still be running when its request ends (a statement under the
+   * budget) learns of it and decides what to do (`cancel`). A listener of a budget that is finished by its own owner is told too, once. Returns a
+   * function that removes it.
+   */
+  onClosed(listener: () => void): () => void {
+    if (this.closedBy() !== undefined) {
+      this.callClosedListener(listener);
+      return () => undefined;
+    }
+    // A budget that has expired left its parent's listeners when it stopped and is told nothing more: a listener added to it could never be called, so it is not kept.
+    if (this.state !== 'running') return () => undefined;
+    this.closedListeners.add(listener);
+    return () => {
+      this.closedListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Ends the budget at once because the work it bounds is no longer wanted (the client that asked for it is gone): it expires as if its time had run out,
+   * with its own label and its own time, so that the signal aborts and every expiry listener runs (the database layer cancels the statement that is running,
+   * rolls back and gives the connection up). Only the owner of a budget ends it. A budget that has finished or expired is left as it is; one whose request
+   * has finished but which itself is still running can be ended, which is the case this is for. The error it ends with is a `BudgetCancelledError`, an expiry that
+   * carries `reason` (what the owner says, for example "abandoned by the client") so that a log line or a caller can tell it from a budget whose time ran out.
+   */
+  cancel(reason = 'cancelled'): void {
+    if (this.state !== 'running') return;
+    this.expire(new BudgetCancelledError(this.label, this.budgetMilliseconds, reason));
+  }
+
   /** Called with each late effect as it is recorded. Returns a function that removes the listener. */
   onLateEffect(listener: (effect: LateEffect) => void): () => void {
     this.lateListeners.add(listener);
@@ -227,8 +292,12 @@ export class ExecutionBudget {
    * (`effect`, `child` and `assertOpen` refuse), and so does every budget below it. A budget that already expired stays expired; finishing twice is harmless.
    */
   finish(): void {
-    if (this.state === 'running') this.state = 'finished';
+    const wasRunning = this.state === 'running';
+    if (wasRunning) this.state = 'finished';
     this.stop();
+    if (!wasRunning) return;
+    // Closed by its own owner, and no longer wired to the parent (`stop`): every listener of this budget (and, through them, of the budgets below it) is told.
+    this.announceClosed();
   }
 
   private arm(): void {
@@ -263,17 +332,26 @@ export class ExecutionBudget {
     this.state = 'expired';
     this.failure = error;
     this.stop();
+    // Nothing tells a budget that has expired that its line was closed (it left its parent's listeners in `stop`), so the holders who asked to be told are forgotten with it.
+    this.closedListeners.clear();
     const listeners = [...this.expiryListeners];
     this.expiryListeners.clear();
     this.controller.abort(error);
     for (const listener of listeners) this.callExpiryListener(listener, error);
   }
 
+  /**
+   * The budget has stopped, by expiry, by `cancel` or by `finish`: its timer goes, and so does everything that wired it to its parent, both relays (expiry and closure). A parent
+   * that lives as long as the process (the delivery worker's) makes a child for each task and job, so a child that is over and still held there is a leak without a bound
+   * (run 5, Stage 1.1: the closure relay was detached by `finish()` of a running child only, and a child that had expired never left).
+   */
   private stop(): void {
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
     this.detachFromParent?.();
     this.detachFromParent = undefined;
+    this.detachClosedRelay?.();
+    this.detachClosedRelay = undefined;
     if (this.state !== 'expired') this.expiryListeners.clear();
   }
 
@@ -283,6 +361,21 @@ export class ExecutionBudget {
   ): void {
     try {
       listener(error);
+    } catch (thrown) {
+      if (this.listenerFailures.length < LISTENER_FAILURE_LIMIT) this.listenerFailures.push(thrown);
+    }
+  }
+
+  /** Tells each closure listener once and forgets it: the budget was finished, or one above it was (the relay from the parent). */
+  private announceClosed(): void {
+    const listeners = [...this.closedListeners];
+    this.closedListeners.clear();
+    for (const listener of listeners) this.callClosedListener(listener);
+  }
+
+  private callClosedListener(listener: () => void): void {
+    try {
+      listener();
     } catch (thrown) {
       if (this.listenerFailures.length < LISTENER_FAILURE_LIMIT) this.listenerFailures.push(thrown);
     }

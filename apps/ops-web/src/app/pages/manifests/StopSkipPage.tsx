@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import { FormPage } from '../../../components/FormPage';
-import { PageHeader } from '../../../components/PageHeader';
 import { PageHeading } from '../../../components/PageHeading';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
@@ -11,14 +9,16 @@ import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader, type PageHeaderProps } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { skipPickupStop, type StopRecord } from '../../../platform/manifest/manifest-commands';
 import type { StopView } from '../../../platform/manifest/manifest-shape';
-import { useStop } from '../../../platform/manifest/use-manifest-queries';
+import { useManifest, useStop } from '../../../platform/manifest/use-manifest-queries';
 import type { AttributedReason } from '../../../platform/pickup/pickup-shape';
 import { usePickupReasons, usePickupRequest } from '../../../platform/pickup/use-pickup-queries';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
@@ -51,9 +51,9 @@ function BackToRun({ manifestId }: { readonly manifestId: string }) {
   return (
     <p className="pickup-back">
       {manifestId === '' ? (
-        <Link to="/manifests">Back to manifests</Link>
+        <Link to="/manifests">Back to pickup runs</Link>
       ) : (
-        <Link to={`/manifests/${manifestId}`}>Back to the manifest</Link>
+        <Link to={`/manifests/${manifestId}`}>Back to the pickup run</Link>
       )}
     </p>
   );
@@ -119,50 +119,65 @@ function Form({
 
   const label = `stop ${String(stop.sequence)}${code === undefined ? '' : `, ${code}`}`;
   return (
-    <FormPage>
-      <form ref={form} noValidate onSubmit={review}>
-        <Field
-          label="Reason"
-          required
-          {...(invalid.reason === undefined ? {} : { error: invalid.reason })}
-        >
-          <Select
-            name="reason"
-            value={reasonDone === undefined ? '' : values.reasonCode}
-            onChange={(event) => {
-              setValues((current) => ({ ...current, reasonCode: event.target.value }));
-              setInvalid((current) => ({ ...current, reason: undefined }));
-            }}
+    <>
+      <TaskForm
+        formRef={form}
+        onSubmit={review}
+        actions={
+          <>
+            <Button type="submit">Skip this stop</Button>
+            <Link to={`/manifests/${manifestId}`}>Cancel</Link>
+          </>
+        }
+      >
+        <TaskFormSection title="Why it is skipped">
+          <TaskFormWide>
+            <p className="pickup-form-note">
+              <strong>The vendor is always told</strong> that the stop was skipped, and why. This is
+              not the way to clear a failed pickup: that is decided in the pickup request.
+            </p>
+          </TaskFormWide>
+          <Field
+            label="Reason"
+            required
+            {...(invalid.reason === undefined ? {} : { error: invalid.reason })}
           >
-            <option value="">Choose a reason</option>
-            {reasons.map((reason) => (
-              <option key={reason.code} value={reason.code}>
-                {reason.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label="Note"
-          required={reasonDone?.requiresNote === true}
-          help="One line, kept with the skip and shown to staff only. Leave out phone numbers and email addresses."
-          {...(invalid.note === undefined ? {} : { error: invalid.note })}
-        >
-          <Input
-            name="note"
-            value={values.note}
-            autoComplete="off"
-            onChange={(event) => {
-              setValues((current) => ({ ...current, note: event.target.value }));
-              setInvalid((current) => ({ ...current, note: undefined }));
-            }}
-          />
-        </Field>
-        <div className="ui-form-page__actions">
-          <Button type="submit">Skip this stop</Button>
-          <Link to={`/manifests/${manifestId}`}>Cancel</Link>
-        </div>
-      </form>
+            <Select
+              name="reason"
+              value={reasonDone === undefined ? '' : values.reasonCode}
+              onChange={(event) => {
+                setValues((current) => ({ ...current, reasonCode: event.target.value }));
+                setInvalid((current) => ({ ...current, reason: undefined }));
+              }}
+            >
+              <option value="">Choose a reason</option>
+              {reasons.map((reason) => (
+                <option key={reason.code} value={reason.code}>
+                  {reason.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <TaskFormWide>
+            <Field
+              label="Note"
+              required={reasonDone?.requiresNote === true}
+              help="One line, kept with the skip and shown to staff only. Leave out phone numbers and email addresses."
+              {...(invalid.note === undefined ? {} : { error: invalid.note })}
+            >
+              <Input
+                name="note"
+                value={values.note}
+                autoComplete="off"
+                onChange={(event) => {
+                  setValues((current) => ({ ...current, note: event.target.value }));
+                  setInvalid((current) => ({ ...current, note: undefined }));
+                }}
+              />
+            </Field>
+          </TaskFormWide>
+        </TaskFormSection>
+      </TaskForm>
 
       <ActDialog<{ readonly fields: Fields; readonly version: string }, StopView>
         open={confirming}
@@ -214,7 +229,7 @@ function Form({
           if (problem.code === 'REASON_NOT_ACTIVE') void refetchReasons();
         }}
       />
-    </FormPage>
+    </>
   );
 }
 
@@ -226,6 +241,11 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
     stop !== undefined && stop.pickup_summary === undefined,
   );
   const reasons = usePickupReasons('PICKUP_STOP_SKIP', stop !== undefined && isToBeWorked(stop));
+  // The run is read for its code, which the way back names (a stop carries only the run's id). A run that cannot be read leaves the words: the page does not wait for it or depend on it.
+  const run = useManifest(
+    manifestId,
+    stop?.pickup_manifest_id.toLowerCase() === manifestId.toLowerCase(),
+  );
 
   if (stopQuery.status === 'error') {
     const problem = problemOf(stopQuery.error, { operation: 'getPickupStop' });
@@ -248,18 +268,24 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
   }
 
   const code = stop?.pickup_summary?.reference ?? request.data?.request.code;
+  const header: Pick<PageHeaderProps, 'title' | 'description' | 'breadcrumb'> = {
+    title: 'Skip a stop',
+    ...(stop === undefined
+      ? {}
+      : {
+          description: `Stop ${String(stop.sequence)}${code === undefined ? '' : `, ${code}`}.`,
+        }),
+    breadcrumb: [
+      { label: 'Pickup runs', to: '/manifests' },
+      { label: run.data?.manifest.code ?? 'The pickup run', to: `/manifests/${manifestId}` },
+    ],
+  };
   return (
     <>
       <title>Skip a stop · Melarc Ops Portal</title>
-      <BackToRun manifestId={manifestId} />
-      <PageHeader
-        title="Skip a stop"
-        {...(stop === undefined
-          ? {}
-          : {
-              description: `Stop ${String(stop.sequence)}${code === undefined ? '' : `, ${code}`}.`,
-            })}
-      />
+      {/* The page's one heading, drawn here for every state (loading, a failure, a stop that cannot be skipped, no reason configured, the form), so that it is the same element while the stop is read
+          and after, and the focus the frame put on it is not lost when the form arrives (run 7, Stage 4.3). */}
+      <PageHeader {...header} />
       <ReadState<StopRecord>
         query={stopQuery}
         isEmpty={() => false}
@@ -267,29 +293,18 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
         loadingLabel="Loading the stop…"
         skeleton={<Skeleton lines={4} />}
         permission="pickup.read"
+        capability="see pickup runs"
         operation="getPickupStop"
       >
         {(record) =>
           !isToBeWorked(record.stop) ? (
-            <>
-              <p className="pickup-status">
-                <StatusBadge status={stopStatusOf(record.stop)} map={STOP_STATUS_MAP} />{' '}
-                <span>This stop is not waiting to be worked, so it cannot be skipped.</span>
-              </p>
-              <BackToRun manifestId={manifestId} />
-            </>
+            // The page's header above has the breadcrumb of its parents, which is the way back: no link of its own beside it.
+            <p className="pickup-status">
+              <StatusBadge status={stopStatusOf(record.stop)} map={STOP_STATUS_MAP} />{' '}
+              <span>This stop is not waiting to be worked, so it cannot be skipped.</span>
+            </p>
           ) : (
             <>
-              <p className="pickup-form-note">
-                Ops skips a stop that cannot be worked, so that the run can close. A skip is
-                Melarc’s decision and not a failed collection: it uses up no pickup attempt, and the
-                request keeps the state it has. <strong>The vendor is always told</strong> that the
-                stop was skipped, and why.
-              </p>
-              <p className="pickup-form-note">
-                This is not the way to clear a failed pickup. A failed pickup is decided by a holder
-                of <code>pickup.failure.resolve</code>.
-              </p>
               <ReadState<readonly AttributedReason[]>
                 query={reasons}
                 operation="listReasonDefinitions"
@@ -301,8 +316,7 @@ function Skip({ manifestId, stopId }: { readonly manifestId: string; readonly st
                   <Alert variant="danger">
                     <p>
                       No reason for skipping a stop is configured yet, so a stop cannot be skipped
-                      here. The reasons are added to the reason catalogue by a holder of{' '}
-                      <code>settings.reason.manage</code>.
+                      here. An administrator adds the reasons to the reason catalogue.
                     </p>
                   </Alert>
                 }

@@ -1,28 +1,36 @@
 # The development gate. Every mandatory check runs here, in parallel jobs, and one job judges them all:
 #
+#   plan                    first, in a few seconds: is this run to run at all? (only the nightly run can stand down; see below)
 #   static                  formatting, lint, strict types, the migration history, the generated client is current
 #   unit                    unit, component and process tests of every workspace, and the repository's own tooling tests
 #   database                the PostgreSQL tests, against a real server (and, for the attested rider enrolment, the real verifier service it builds)
 #   integrated              build, the API against the contract, the browser-API-database journey over plain HTTP;
 #                           then the build is described and kept
-#   https                   the same journeys over the trusted HTTPS origin, in two shards: Chromium with WebKit, and Firefox
+#   https                   the same journeys over the trusted HTTPS origin, in three shards: Chromium, Firefox, and WebKit
 #   browser-chromium        the browser tests of the Ops shell and components in Chromium: a matrix with a job for each shard
 #   browser-firefox-webkit  the same tests in Firefox and in WebKit, shard by shard; NOT run on a pull request
 #   verifier                the private attestation verifier (a JVM service, S0.55): its vendored library against its checksums, the build and every test
 #   audit                   dependency vulnerabilities of high or critical severity
 #   ci                      "CI result": waits for all of the above and fails unless every one succeeded
 #
-# What runs when (the Product Owner's decision of 7 November 2026): a pull request runs every job but browser-firefox-webkit,
-# which would be 17 more jobs on every push to a pull request; a push to main, the nightly run and a manual run run all of them,
-# so Firefox and WebKit are tested on every commit that reaches main, and every night.
+# What runs when (the Product Owner's decisions of 7 November 2026): a pull request runs every job but browser-firefox-webkit,
+# which would be 17 more jobs on every push to a pull request, and leaves out of the database tests the files whose assertions are
+# wall-clock time and nothing else of the tests (apps/api/test/timing-sensitive-tests.ts: a loaded runner fails them for a reason that
+# is not the code's; they run in the nightly run and in a manual run, and a push to main leaves them out as a pull request does); a push to
+# main, the nightly run and a manual run run every other job, so Firefox and WebKit are tested on every commit that reaches main, and every
+# night. The nightly run is a weekday run, and it stands down when nothing changed: the plan job asks GitHub for the last successful
+# nightly run, and when that run tested the commit main is at now, every other job but the dependency audit is skipped (scripts/ci-plan.ts: an
+# advisory is published with no commit, so the audit runs every night whatever the plan says). A push, a pull
+# request and a manual run are never skipped, and the one nightly skip is the one "CI result" accepts below.
 #
 # Require the "CI result" check, and only that one, in the branch rule for main: it cannot pass while any
-# mandatory job failed, was cancelled or was skipped, with one exception that scripts/ci-aggregate.ts makes and
-# nothing else: browser-firefox-webkit is skipped on a pull request, and a skip of it there is a success; on
-# any other run a skip of it is a failure. scripts/ci-workflow.test.ts keeps this file to that design (no check
-# dropped, no failure absorbed, one verdict, every job on the commit under test, the one skip as decided) and
-# scripts/browser-shards.test.ts proves, from Playwright's own list of tests, that each kind of run runs every
-# test of the engines it must, once.
+# mandatory job failed, was cancelled or was skipped, with two exceptions that scripts/ci-aggregate.ts makes and
+# nothing else: browser-firefox-webkit is skipped on a pull request, and a skip of it there is a success; and every job but the audit
+# is skipped on a nightly run whose plan, a job that succeeded, said run=false, and that is a success. On any other run a
+# skip is a failure. scripts/ci-workflow.test.ts keeps this file to that design (no check dropped, no failure absorbed, one
+# verdict, every job on the commit under test, the two skips as decided, a timeout of its own on every test step (the job's limit less the measured set-up, at most 1.5 minutes in the hosted run of d600057, rounded up to 2, and a margin of 2: so a hung suite fails the step, with the diagnostics, before the job is cancelled), the
+# diagnostics kept on a failure and on a cancellation, the browsers cached) and scripts/browser-shards.test.ts proves, from
+# Playwright's own list of tests, that each kind of run runs every test of the engines it must, once.
 #
 # To see the verdict turn red without breaking anything, run this workflow by hand with "rehearse-failure"
 # ticked: the static job fails on purpose and "CI result" must fail with it.
@@ -34,10 +42,12 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Every night, 02:17 UTC: Ghana, where the team works, keeps UTC all year, so the results are there at the start of the day; and off
-    # the hour, because GitHub delays (and sometimes drops) scheduled runs that start on the hour, when most schedules fire. A scheduled
-    # run tests the head of the default branch (main), with a token that reads, as any other run.
-    - cron: '17 2 * * *'
+    # Every weekday night, 02:17 UTC, Monday to Friday (the Product Owner's decision of 7 November 2026; the fifth field of the cron, the
+    # day of the week, is 1-5): Ghana, where the team works, keeps UTC all year, so the results are there at the start of the day; and off the hour, because
+    # GitHub delays (and sometimes drops) scheduled runs that start on the hour, when most schedules fire. A scheduled run tests the head of
+    # the default branch (main), with a token that reads, as any other run, and stands down when the plan finds nothing changed since the
+    # last successful nightly run. A manual run (workflow_dispatch) is always there for the other days.
+    - cron: '17 2 * * 1-5'
   workflow_dispatch:
     inputs:
       rehearse-failure:
@@ -58,8 +68,43 @@ env:
   TURBO_TELEMETRY_DISABLED: '1'
 
 jobs:
+  # Whether this run is to run at all (task CI.2, scripts/ci-plan.ts). Every other job but the dependency audit needs this one and runs only when its answer is
+  # true, which it always is except on a nightly run that finds main where the last successful nightly run left it: that night nothing
+  # is tested again, every other job but the audit is skipped, and "CI result" accepts the skips on that answer and on no other (scripts/ci-aggregate.ts).
+  # The plan asks only on the schedule event, and every way the question can fail answers "run": a night's tests are never skipped on a
+  # guess. It is the one job with a permission beyond reading the code: it lists the workflow's runs, which `actions: read` allows.
+  plan:
+    name: Plan the run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - name: Check out the revision under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # The script has no dependencies, so this job needs Node.js and no install.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Decide whether the run is to run
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-plan.ts
+
   static:
     name: Static checks
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -68,6 +113,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          # The whole history, for the migration check below: it asks Git for the merge base of the revision and main.
+          fetch-depth: 0
 
       - name: Set up the toolchain
         uses: ./.github/actions/setup
@@ -84,6 +131,25 @@ jobs:
       - name: Check the migration history
         run: pnpm --filter @melarc/api run db:check
 
+      # A migration that main has is never changed, renamed or removed (apps/api/CLAUDE.md, "Migrations only go forward"). A push to main is held to the revision it
+      # came from; every other run to the merge base of the revision and main (scripts/migration-immutability.ts says how it behaves while main lacks the files).
+      # A push tests the commit main is now at, and a guard with no base compares that commit with itself and passes whatever was changed: so the step below names the base,
+      # BEFORE THE GUARD, and scripts/ci-workflow.ts holds the step and its place (MIGRATION_BASE_STEP). It writes the base only on a push, to the environment of the steps after
+      # it (the guard refuses a base that is named and empty, and an `env:` expression is empty on every run that is not a push: the workflow check refuses MELARC_MIGRATION_BASE
+      # in an `env:`). After a force push it fetches the revision the push replaced, by name, with the job's token, and fails in words that name the force push when it cannot be
+      # fetched, with git's error and no credential; it never falls back to origin/main, and a push that created main (all-zero previous revision) fails too (scripts/ci-migration-base.ts).
+      - name: Name the revision the migrations are held to on a push
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          FORCED: ${{ github.event.forced }}
+          # The one fetch of a replaced commit is made with the job's token (the checkout above keeps none): in a private repository an anonymous fetch always fails.
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-migration-base.ts
+
+      - name: Check that no migration main has was changed
+        run: node scripts/migration-immutability.ts
+
       - name: Check the generated API client is current
         run: pnpm run api-client:check
 
@@ -93,10 +159,16 @@ jobs:
           echo "::error title=Rehearsal::This failure is on purpose. The CI result job must now fail."
           exit 1
 
+  # The limit was 15 minutes, which the suites no longer fit: measured on the developer machine (7 November 2026) the root tests take 2 minutes, and
+  # then the packages run side by side: the API's unit tests 4.8 minutes and its process tests 5.3 one after the other (10), the Ops Portal's 8.7, so
+  # about 13 minutes with all the cores, and a hosted runner has fewer (not measured: 1.5 to 2 times as long is allowed for). The limit is the most a
+  # job may have (30), the test step's is 4 minutes below it, and the report of the task CI.2 gives the figures and the finding.
   unit:
     name: Unit, component and process tests
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out the revision under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -107,13 +179,40 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
 
+      # A step's own limit, below the job's: a hung suite fails the step, as a failure, and the job ends in order (see the rules of
+      # scripts/ci-workflow.ts); at the job's limit it would be cancelled with whatever it was to keep.
       - name: Test
+        timeout-minutes: 26
         run: pnpm run test
 
+  # The database tests, in 8 shards that are jobs (task CI.2). Measured on the developer machine (7 and 8 November 2026): the whole suite takes
+  # 43.5 minutes (194 files: 165 three at a time, 24.7 minutes, and 29 one at a time after those, 18.8 minutes), far beyond a job's 30. The job
+  # `i` of `N` runs the files that Vitest's `--shard` gives shard `i` (MELARC_DB_SHARD, which apps/api/vitest.config.ts hands it,
+  # test/database-shard.ts), across both database projects, so the `database-alone` files of a shard still run one at a time and after the parallel
+  # ones. Vitest cuts by file, in an order of its own, so the shards are equal in the number of files and not in time: from the measured time of
+  # each file, the longest of 8 is about 7.5 minutes here (the shortest about 4), against about 17 for the longest of 3; a hosted runner has fewer
+  # cores (not measured: 1.5 to 2 times as long is allowed for), and each job sets up for about 5 minutes. The report of the task CI.2 has the
+  # table. scripts/db-shards.test.ts proves, from Vitest's own list of the files, that the shards together hold every file of the two projects
+  # once, with and without the timing tests. To resize (the longest shard above about 20 minutes on a hosted runner): change the number in every entry.
   database:
-    name: Database tests
+    name: Database tests (${{ matrix.shard }}/${{ matrix.shards }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
+    strategy:
+      # Every shard runs to its end: one failure does not cancel the others, so one run shows every shard that failed.
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: 1, shards: 8 }
+          - { shard: 2, shards: 8 }
+          - { shard: 3, shards: 8 }
+          - { shard: 4, shards: 8 }
+          - { shard: 5, shards: 8 }
+          - { shard: 6, shards: 8 }
+          - { shard: 7, shards: 8 }
+          - { shard: 8, shards: 8 }
 
     # The PostgreSQL server lives for this job only, and the credentials below protect nothing else: they are
     # generated nowhere and are not used outside this job. The image tag matches infrastructure/postgres/
@@ -171,18 +270,19 @@ jobs:
             -c "alter system set jit = off" \
             -c "select pg_reload_conf()"
 
-      # Two test files at a time (MELARC_DB_WORKERS, default 3): the runner has four CPUs, which the server shares with the test processes. At three,
-      # a rare separate failure showed once in a test that waits on a lock; its cause was in that test, not in the number of workers (its poll read
-      # a pg_stat_activity snapshot, which PostgreSQL keeps for the whole transaction, and it now clears the snapshot before each read). Two passed
-      # three runs of three with JIT off. The price is time: with JIT off, two took 17 to 19 minutes and three about 13.5, so the job keeps a margin
-      # under its 25-minute cap (the longest run was 1,129 s of 1,500 s) and the margin is the reason, not a measured need for two.
+      # The files whose assertions are wall-clock time are left out of a pull request and of a push to main, and run in the nightly run and in a manual run (the
+      # variable is 1 on a pull request and on a push and empty otherwise: apps/api/test/timing-sensitive-tests.ts); the shard is this job's entry. The step's own limit is below the job's.
       - name: Database tests
+        timeout-minutes: 26
         env:
-          MELARC_DB_WORKERS: '2'
+          MELARC_SKIP_TIMING_TESTS: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '1' || '' }}
+          MELARC_DB_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
         run: pnpm run test:db
 
   integrated:
     name: Build, contract and journeys
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -224,10 +324,19 @@ jobs:
       - name: Check the API against the contract
         run: pnpm run contract:check
 
-      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it. This job's
-      # journeys run in Chromium over plain HTTP; the engines of the supported browsers (surfaces/ops-portal.md section 11) run the Ops
-      # shell and component tests (the browser-chromium and browser-firefox-webkit jobs) and the HTTPS journeys (the https job), each in
-      # jobs of their own.
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it, and what is downloaded
+      # is kept between runs (the key holds the lockfile, so a new Playwright version makes a new cache, which starts from the last one).
+      # This job's journeys run in Chromium over plain HTTP; the engines of the supported browsers (surfaces/ops-portal.md section 11) run
+      # the Ops shell and component tests (the browser-chromium and browser-firefox-webkit jobs) and the HTTPS journeys (the https job),
+      # each in jobs of their own.
+      - name: Cache the browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-chromium-
+
       - name: Install the browser
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps chromium
 
@@ -243,12 +352,13 @@ jobs:
             -c "select pg_reload_conf()"
 
       - name: Browser, API and database journey
+        timeout-minutes: 26
         run: pnpm run test:e2e
 
-      # Logs of every process, the outbound-connection record and traces of the failed run. The harness hides
-      # the passwords it describes; the job's own credentials are throwaway.
+      # Logs of every process, the outbound-connection record and traces of the failed run, kept when the job failed and when it was
+      # cancelled. The harness hides the passwords it describes; the job's own credentials are throwaway.
       - name: Keep the journey diagnostics
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-journey-diagnostics-${{ github.sha }}-${{ github.run_attempt }}
@@ -285,30 +395,34 @@ jobs:
           include-hidden-files: true
           retention-days: 14
 
-  # The journeys over the trusted HTTPS origin (S0.23), in two shards that are two jobs: they run the staff journeys in Chromium, Firefox
-  # and WebKit one engine after the other, three runs of one stack each (e2e/harness/https-run.ts), and in one job they took about 31
-  # minutes (not timed on a hosted runner: the 15 journeys take 6.2 minutes in Chromium over plain HTTP here, 1.2 and 1.4 times as long in
-  # WebKit and Firefox by the browser tests' ratios, plus a run's set-up and its other tests), more than a job may last. The job `i` of
-  # `N` makes the runs of shard `i` (MELARC_HTTPS_SHARD, which e2e/harness/https-shards.ts reads, and refuses when it is not one of its
-  # shards): shard 1 is Chromium, with WebKit's refusal, and WebKit's other proofs, which stay in ONE job, in that order, because the
-  # refusal is a control only while the CA is not in the system store and the proofs need it there (the owner's decision of 12 October
-  # 2026); shard 2 is Firefox. About 17 minutes of runs and 3.5 of set-up in shard 1 (about 21 of 30), about 10 and 3 in shard 2. The runs
-  # are indivisible (one stack, one story that begins from the bootstrap administrators), which is why the split is by run and not finer.
-  # The matrix says the browsers each shard's runs need; scripts/https-shards.test.ts holds that, and the number of shards, to the harness.
-  # To resize (if shard 1 proves longer than about 25 minutes on a hosted runner): a third shard needs WebKit's refusal in a run of its own
-  # in front of WebKit's proofs (a phase of https-run.ts, with the CA not yet in the system store), so that one job makes both; then the
-  # shard goes into e2e/harness/https-shards.ts and an entry (shard, shards and browsers, the same total in every entry) in this matrix.
+  # The journeys over the trusted HTTPS origin (S0.23), in three shards that are three jobs: they run the staff journeys in Chromium, Firefox
+  # and WebKit, four runs of one stack each (e2e/harness/https-run.ts: Chromium; Firefox; WebKit's refusal, a control that holds only while
+  # the CA is not in the system store; and WebKit's proofs, with it there), and in one job they took about 31 minutes (not timed on a hosted
+  # runner: the 15 journeys take 6.2 minutes in Chromium over plain HTTP here, 1.2 and 1.4 times as long in WebKit and Firefox by the browser
+  # tests' ratios, plus a run's set-up and its other tests), more than a job may last. In two shards, one of them held Chromium and WebKit
+  # and was estimated at about 21 minutes of 30. The job `i` of `N` makes the runs of shard `i` (MELARC_HTTPS_SHARD, which
+  # e2e/harness/https-shards.ts reads, and refuses when it is not one of its shards): shard 1 is Chromium, shard 2 Firefox, and shard 3 is
+  # WebKit, its refusal and then its proofs, which stay in ONE job, in that order, because the refusal is a control only while the CA is
+  # not in the system store and the proofs need it there (the owner's decision of 12 October 2026). About 8 minutes of runs and 3.5 of
+  # set-up in shard 1 (about 12), 10 and 3 in shard 2 (about 13), 11 and 3.5 in shard 3 (about 15): none above 20 minutes (the task CI.2).
+  # The runs are indivisible (one stack, one story that begins from the bootstrap administrators), which is why the split is by run and
+  # not finer. The matrix says the browsers each shard's runs need; scripts/https-shards.test.ts holds that, and the number of shards, to
+  # the harness. To resize (if a shard proves longer than about 25 minutes on a hosted runner): the shard goes into
+  # e2e/harness/https-shards.ts, and an entry (shard, shards and browsers, the same total in every entry) in this matrix.
   https:
     name: Journeys over the trusted HTTPS origin (${{ matrix.shard }}/${{ matrix.shards }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
-      # Both shards run to their end: one failure does not cancel the other, so one run shows every shard that failed.
+      # Every shard runs to its end: one failure does not cancel the others, so one run shows every shard that failed.
       fail-fast: false
       matrix:
         include:
-          - { shard: 1, shards: 2, browsers: 'chromium webkit' }
-          - { shard: 2, shards: 2, browsers: 'firefox' }
+          - { shard: 1, shards: 3, browsers: 'chromium' }
+          - { shard: 2, shards: 3, browsers: 'firefox' }
+          - { shard: 3, shards: 3, browsers: 'webkit' }
 
     # Same disposable server as the database job; the journeys create a database of their own on it.
     services:
@@ -342,18 +456,26 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
 
-      # The browsers come from the Playwright version the lockfile pins; the revisions they download follow from it. Only the browsers
-      # the runs of this shard make are downloaded. The command builds the API and the Ops Portal first (Turborepo runs the builds the
-      # task depends on).
+      # The browsers come from the Playwright version the lockfile pins; the revisions they download follow from it, and are kept between
+      # runs (the key holds the lockfile and the shard's browsers). Only the browsers the runs of this shard make are downloaded. The
+      # command builds the API and the Ops Portal first (Turborepo runs the builds the task depends on).
+      - name: Cache the browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.browsers }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ matrix.browsers }}-
+
       - name: Install the browsers
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.browsers }}
 
       # The disposable CA is made, Chromium and Firefox are each given a store of their own that trusts it, the proofs of the shard's
       # engines run, and the CA is removed, all by the one command, which is why it is a step on its own and not a script of several
       # (e2e/README.md). certutil is the NSS tool that makes the Chromium and Firefox stores. WebKit trusts only the system store, so on
-      # this GitHub-hosted runner (made for this job and discarded after it) shard 1 puts the CA there with sudo for WebKit's proofs and
-      # takes it out when they end (e2e/harness/system-trust.ts; the owner's decision of 12 October 2026); shard 2 touches no system
-      # store. Nothing else is installed into any trust store of the runner.
+      # this GitHub-hosted runner (made for this job and discarded after it) shard 3 first runs WebKit's refusal with the CA out of it, then
+      # puts the CA there with sudo for WebKit's proofs and takes it out when they end (e2e/harness/system-trust.ts; the owner's decision
+      # of 12 October 2026); shards 1 and 2 touch no system store. Nothing else is installed into any trust store of the runner.
       - name: Install the NSS tools
         run: sudo apt-get install --no-install-recommends --yes libnss3-tools
 
@@ -368,16 +490,17 @@ jobs:
             -c "select pg_reload_conf()"
 
       - name: Browser, API and database journey over the trusted HTTPS origin
+        timeout-minutes: 26
         env:
           MELARC_HTTPS_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
         run: pnpm run test:e2e:https
 
       # Logs of every process, the outbound-connection record and traces of the failed run, of each run of the shard
-      # (e2e/harness/https-run.ts gives each an output directory of its own below e2e/test-results). The harness hides the passwords it
-      # describes; the job's own credentials are throwaway. The name carries the shard: two shards that fail would otherwise upload
-      # under one name, and the second upload would be refused.
+      # (e2e/harness/https-run.ts gives each an output directory of its own below e2e/test-results), kept when the job failed and when it
+      # was cancelled. The harness hides the passwords it describes; the job's own credentials are throwaway. The name carries the shard:
+      # two shards that fail would otherwise upload under one name, and the second upload would be refused.
       - name: Keep the failure diagnostics
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-https-diagnostics-${{ github.sha }}-${{ matrix.shard }}-${{ github.run_attempt }}
@@ -403,6 +526,8 @@ jobs:
   # workspace sources (apps/ops-web/playwright.config.ts) and need no API and no database.
   browser-chromium:
     name: Browser tests (${{ matrix.engine }} ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -427,22 +552,32 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
 
-      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it. Only the engine of
-      # this job's entry is downloaded.
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it, and is kept between
+      # runs (the key holds the lockfile and the engine). Only the engine of this job's entry is downloaded.
+      - name: Cache the browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.engine }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ matrix.engine }}-
+
       - name: Install the browser
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.engine }}
 
       - name: Browser tests of the Ops shell and components
+        timeout-minutes: 26
         env:
           MELARC_BROWSERS: ${{ matrix.engine }}
           MELARC_BROWSER_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
         run: pnpm run test:browser
 
-      # Traces of the failed tests. They keep the requests and responses of pages that are the synthetic showcase or a stubbed shell:
-      # no real credential, token or seed is typed or received in them (apps/ops-web/playwright.config.ts). The name carries the
-      # engine and the shard: two shards that fail would otherwise upload under one name, and the second upload would be refused.
+      # Traces of the failed tests, kept when the job failed and when it was cancelled. They keep the requests and responses of pages
+      # that are the synthetic showcase or a stubbed shell: no real credential, token or seed is typed or received in them
+      # (apps/ops-web/playwright.config.ts). The name carries the engine and the shard: two shards that fail would otherwise upload
+      # under one name, and the second upload would be refused.
       - name: Keep the browser diagnostics
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-browser-diagnostics-${{ github.sha }}-${{ matrix.engine }}-${{ matrix.shard }}-${{ github.run_attempt }}
@@ -452,12 +587,13 @@ jobs:
           retention-days: 7
 
   # The shards of Firefox and WebKit: the same tests, run the same way, on a push to main, in the nightly run and in a manual run, and NOT
-  # on a pull request. This is the one job of the workflow with a condition, and the one skip that "CI result" accepts, on a pull request
-  # and nowhere else (scripts/ci-aggregate.ts). The condition is exactly the one below: scripts/ci-workflow.test.ts refuses any other, on
-  # this job or any other, and a job that holds Chromium shards cannot have it. A matrix of 17 jobs: 9 of Firefox and 8 of WebKit (see
-  # the sizing above).
+  # on a pull request. This is the one job of the workflow with a condition beyond the plan's, and the one skip of a job's own that "CI
+  # result" accepts, on a pull request and nowhere else (scripts/ci-aggregate.ts). The condition is exactly the one below: the plan's
+  # answer, and the event: scripts/ci-workflow.test.ts refuses any other, on this job or any other, and a job that holds Chromium shards
+  # cannot have it. A matrix of 17 jobs: 9 of Firefox and 8 of WebKit (see the sizing above).
   browser-firefox-webkit:
-    if: github.event_name != 'pull_request'
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && github.event_name != 'pull_request'
     # The name says Firefox and WebKit besides the matrix: a skipped matrix is listed on a pull request under its name as written, with the
     # expressions not filled in, and this way what it is stays clear.
     name: Browser tests, Firefox and WebKit (${{ matrix.engine }} ${{ matrix.shard }}/${{ matrix.shards }})
@@ -495,20 +631,30 @@ jobs:
       - name: Set up the toolchain
         uses: ./.github/actions/setup
 
-      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it. Only the engine of
-      # this job's entry is downloaded.
+      # The browser comes from the Playwright version the lockfile pins; the revision it downloads follows from it, and is kept between
+      # runs (the key holds the lockfile and the engine). Only the engine of this job's entry is downloaded.
+      - name: Cache the browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.engine }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ matrix.engine }}-
+
       - name: Install the browser
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.engine }}
 
       - name: Browser tests of the Ops shell and components
+        timeout-minutes: 26
         env:
           MELARC_BROWSERS: ${{ matrix.engine }}
           MELARC_BROWSER_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
         run: pnpm run test:browser
 
-      # Traces of the failed tests, as in the Chromium job; the name carries the engine and the shard.
+      # Traces of the failed tests, as in the Chromium job, kept when the job failed and when it was cancelled; the name carries the
+      # engine and the shard.
       - name: Keep the browser diagnostics
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melarc-browser-diagnostics-${{ github.sha }}-${{ matrix.engine }}-${{ matrix.shard }}-${{ github.run_attempt }}
@@ -519,6 +665,8 @@ jobs:
 
   verifier:
     name: Attestation verifier
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -540,8 +688,12 @@ jobs:
           java-version-file: .java-version
 
       - name: Test the attestation verifier
+        timeout-minutes: 16
         run: pnpm run verifier:test
 
+  # The one job the plan does not decide (run 4, Stage 1, item 4): no need and no condition, so it runs on every run, the nightly run that stands down
+  # included, and "CI result" never accepts a skip of it (--runs-always=audit). What it checks changes with no commit: an advisory is published overnight,
+  # and a night that audited only when the code had changed would not see it.
   audit:
     name: Dependency audit
     runs-on: ubuntu-24.04
@@ -566,6 +718,7 @@ jobs:
     if: always()
     needs:
       [
+        plan,
         static,
         unit,
         database,
@@ -592,11 +745,12 @@ jobs:
           node-version-file: .node-version
 
       # Fails unless every job above succeeded. A failed, cancelled or skipped job is not a success; a matrix is one job here though it
-      # is many, and its result is `success` only when every one of its jobs succeeded. The one skip that is accepted is the skip of
-      # browser-firefox-webkit on a pull request, which does not run it (the option below, and EVENT, which says it is a pull request):
-      # on a push to main, in the nightly run and in a manual run a skip of it is a failure like any other.
+      # is many, and its result is `success` only when every one of its jobs succeeded. Two skips are accepted: the skip of
+      # browser-firefox-webkit on a pull request, which does not run it (the second option below, and EVENT, which says it is a pull
+      # request); and the skip of every job but the audit on a nightly run whose plan (the first option, the job that decides) succeeded and said
+      # run=false, EVENT being the schedule: on a push to main, in a manual run and in the other nightly runs a skip is a failure like any other.
       - name: Require every mandatory job to have succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
           EVENT: ${{ github.event_name }}
-        run: node scripts/ci-aggregate.ts --skipped-on-pull-request=browser-firefox-webkit static unit database integrated https browser-chromium browser-firefox-webkit audit verifier
+        run: node scripts/ci-aggregate.ts --plan=plan --runs-always=audit --skipped-on-pull-request=browser-firefox-webkit plan static unit database integrated https browser-chromium browser-firefox-webkit audit verifier

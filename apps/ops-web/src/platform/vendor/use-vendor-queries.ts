@@ -24,6 +24,8 @@ const NOT_KEPT = {
 
 export interface VendorListParams {
   readonly status?: VendorAccountStatus;
+  /** Only the accounts of this hub: the one the person narrowed the screens to in the switcher of the top bar (none for All hubs). */
+  readonly hubId?: string;
   /** Matches the organisation name or the account identifier. Blank is no search. */
   readonly q?: string;
   readonly pageToken?: string;
@@ -33,10 +35,10 @@ export interface VendorListParams {
 /** `listVendorAccounts`: a page of the accounts the session's grant reaches, scoped by the server through each organisation's hub. */
 export function useVendorAccounts(params: VendorListParams): UseQueryResult<VendorAccountPageView> {
   const client = useApiClient();
-  const { status, q, pageToken, enabled = true } = params;
+  const { status, hubId, q, pageToken, enabled = true } = params;
   const search = q?.trim() ?? '';
   return useQuery({
-    queryKey: ['vendors', 'list', status ?? null, search, pageToken ?? null],
+    queryKey: ['vendors', 'list', status ?? null, hubId ?? null, search, pageToken ?? null],
     enabled,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -45,6 +47,7 @@ export function useVendorAccounts(params: VendorListParams): UseQueryResult<Vend
           params: {
             query: {
               ...(status === undefined ? {} : { status }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(search === '' ? {} : { q: search }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },

@@ -55,9 +55,9 @@ a.ui-button {
 }
 
 /*
- * Danger (COMPONENT_PATTERNS section 4.7; DESIGN_SYSTEM section 4.6, the outline recipe): the danger colour on white, a soft danger fill under the
- * pointer and the pressed grey when pressed. It is never a filled button, because a fill of that red would be almost the colour of Primary under
- * the pointer; the label names the consequence and the red is never alone.
+ * Danger (COMPONENT_PATTERNS section 4.7; DESIGN_SYSTEM section 4.6, the outline recipe): the danger colour on the surface, a soft danger fill under
+ * the pointer and the pressed fill when pressed. The recipe is the outline and no filled Danger button is part of the system; the label names the
+ * consequence and the vermilion is never alone.
  */
 .ui-button--danger {
   border-color: var(--color-status-danger-foreground);

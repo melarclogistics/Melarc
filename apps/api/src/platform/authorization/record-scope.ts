@@ -14,6 +14,7 @@ import { transactionOf } from '../database/transaction-handle.js';
 import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
 import type { RecordScope } from '../routes/access-declaration.js';
+import { scopeIncludesHub } from './effective-scope.js';
 import { requireTargetTier, type Tier, type TierRule, type TierRules } from './tier-policy.js';
 
 /**
@@ -141,9 +142,7 @@ const IDENTIFIER = /^[a-z][a-z0-9_]*$/;
  * ids. The context is the operation's own (the grant's scope intersected with the session's reach), not the session's alone.
  */
 function hubIsInScope(hub: string, context: SecurityContext): boolean {
-  if (context.hubScopeMode === 'ALL') return true;
-  const wanted = hub.toLowerCase();
-  return (context.authorizedHubIds ?? []).some((each) => each.toLowerCase() === wanted);
+  return scopeIncludesHub(context, hub);
 }
 
 /** The entities as the probe wants them: only the hub-scoped ones. */

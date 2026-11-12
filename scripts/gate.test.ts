@@ -30,6 +30,8 @@ import {
   DATABASE_CHECK,
   MEMORY_REFUSE_MB,
   PRECHECK_CACHE,
+  ROOT_GUARDS,
+  ROOT_GUARDS_COMMAND,
   affectedProblems,
   agentRefusal,
   baselineChanges,
@@ -93,6 +95,11 @@ before(() => {
   };
   write('pass.mjs', "console.log('hello from the stage');\n");
   write('fail.mjs', "console.log('the stage failed');\nprocess.exit(3);\n");
+  // A check that could not decide (the migration guard with no main): its words on stderr and exit 2, which the precheck shows as warned and the gate fails on.
+  write(
+    'undecided.mjs',
+    "console.error('Cannot tell whether a migration was changed: There is no main to compare the migrations with.');\nprocess.exit(2);\n",
+  );
   // Writes the time into a file every 40 ms until it is ended: a file that stops moving is a process that is gone.
   write(
     'slow.mjs',
@@ -402,7 +409,11 @@ describe('the precheck', () => {
         .map((candidate) => candidate.name),
       'audit',
     ];
-    const cached = precheckLanes(false).flat();
+    // (Run 6, Stage 5.3: the lane of the root guards is the precheck's own, and is compared with nothing of the gate's: the gate's unit stage runs every root test. It has its own
+    // tests below. What stays held here: every other lane is the gate's command, with the tools' own cache flags and nothing else.)
+    const cached = precheckLanes(false)
+      .flat()
+      .filter((candidate) => candidate.name !== 'guards');
     assert.deepEqual(cached.map((candidate) => candidate.name).toSorted(), cheap.toSorted());
     for (const candidate of cached) {
       const real = defined(gate.get(candidate.name), candidate.name);
@@ -413,10 +424,50 @@ describe('the precheck', () => {
     assert.deepEqual(
       precheckLanes(true)
         .flat()
+        .filter((candidate) => candidate.name !== 'guards')
         .map((candidate) => candidate.command)
         .toSorted(),
       cheap.map((name) => gate.get(name)).toSorted(),
     );
+  });
+
+  // Break caught (run 6, Stage 5.3): the root guards that read documents and styles (the design tokens, the lifecycle words, the links, the agent documents) left out of the precheck,
+  // so that a document or a stylesheet that breaks one is found only by the final run of a task (run 5 found two of them there); or put into the gate as a stage of its own, which
+  // the gate's unit stage already runs and the equivalence with CI's commands does not allow; or run in the same lane as another check (the precheck then costs their sum).
+  it('has a lane of the root guards that read only files, beside the others, cached or not, and the gate has no stage for it', () => {
+    for (const uncached of [false, true]) {
+      const lanes = precheckLanes(uncached);
+      const lane = lanes.find((candidate) => candidate.some((entry) => entry.name === 'guards'));
+      assert.deepEqual(lane, [{ name: 'guards', kind: 'static', command: ROOT_GUARDS_COMMAND }]);
+      assert.ok(lanes.length > 1, 'it runs beside the other lanes');
+    }
+    assert.ok(!gateStages('ci').some((stage) => stage.command === ROOT_GUARDS_COMMAND));
+    assert.ok(!gateStages('local').some((stage) => stage.command === ROOT_GUARDS_COMMAND));
+  });
+
+  // Break caught: a guard named that does not exist (the lane then fails, or Node's runner finds no test to run and passes), one `test:root` does not run (the gate's unit stage
+  // would never run it), a duplicate, or the lane that has lost one of the four guards the brief of run 6 names.
+  it('names root tests that exist, that `test:root` runs, each once, among them the guards of documents and styles', () => {
+    const manifestText = readFileSync(join(root, 'package.json'), 'utf8');
+    const testRoot = String(
+      (JSON.parse(manifestText) as { scripts: Record<string, string> }).scripts['test:root'],
+    );
+    assert.ok(ROOT_GUARDS.length >= 10, 'the lane holds the guards, not a token few');
+    assert.equal(new Set(ROOT_GUARDS).size, ROOT_GUARDS.length);
+    for (const guard of ROOT_GUARDS) {
+      assert.ok(existsSync(join(root, guard)), `${guard} exists`);
+      assert.ok(testRoot.split(/\s+/).includes(guard), `${guard} is run by test:root`);
+    }
+    for (const named of [
+      'design-tokens',
+      'design-lifecycle',
+      'markdown-links',
+      'agent-docs',
+      'lint-coverage',
+    ]) {
+      assert.ok(ROOT_GUARDS.includes(`scripts/${named}.test.ts`), `the lane holds ${named}`);
+    }
+    assert.equal(ROOT_GUARDS_COMMAND, `node --test ${ROOT_GUARDS.join(' ')}`);
   });
 
   // Break caught: the cache written into the tree (a file nobody meant to add, and one more path for the gate to hold still), or the checks
@@ -613,6 +664,27 @@ describe('a gate', () => {
       ['failed', 'skipped'],
     );
     assert.equal(state.verdict, 'FAILED');
+  });
+
+  // Break caught (run 5, Stage 1.4): the gate sharing the precheck's reading of a check that could not decide, and so passing a tree whose migrations it never held. The gate is the
+  // full run: the exit the precheck shows as warned is a failure here, with its exit code recorded, and no test starts.
+  it('fails a check that could not decide, whatever the precheck makes of that exit, and starts no test', async () => {
+    const directory = checkout();
+    const state = finished(
+      await runGate(
+        options(directory, {
+          stages: [
+            { ...stage('migrations', 'static', command('undecided.mjs')), warnOnExit: 2 },
+            stage('tests', 'test', command('pass.mjs')),
+          ],
+        }),
+      ),
+    );
+
+    assert.equal(state.verdict, 'FAILED');
+    assert.equal(statusOf(state, 'migrations'), 'failed');
+    assert.equal(state.stages[0]?.exitCode, 2);
+    assert.equal(statusOf(state, 'tests'), 'not-run');
   });
 
   // Break caught: a command that is not there reported as a pass, or taking the runner down with it.
@@ -1262,6 +1334,64 @@ describe('the precheck run', () => {
     assert.match(lines.join('\n'), /Every cheap check passed/);
   });
 
+  // Break caught (run 5, Stage 1.4): a check that could not decide shown as "passed" with its warning in a log nobody opens (the migration guard on a tree with no main),
+  // which let the precheck say it was all well. A check that marks an exit as "cannot tell" is shown as warned, with its words in the summary and the count, and the
+  // precheck still exits 0; a check that did not mark that exit, or any other exit, is a failure.
+  it('shows an exit a check marks as "cannot tell" as warned, with its message in the summary, and exits 0', async () => {
+    const lines: string[] = [];
+    const run = given(
+      [
+        [
+          { ...stage('migrations', 'static', command('undecided.mjs')), warnOnExit: 2 },
+          stage('other', 'static', command('pass.mjs')),
+        ],
+      ],
+      lines,
+    );
+
+    const exit = await runPrecheck(run);
+
+    assert.equal(exit, 0);
+    const text = lines.join('\n');
+    assert.match(text, /migrations\s+warned/);
+    assert.match(text, /other\s+passed/);
+    assert.match(text, /--- migrations: warned \(exit 2\)/);
+    assert.match(text, /Cannot tell whether a migration was changed: There is no main/);
+    assert.match(text, /1 warned/);
+    assert.doesNotMatch(text, /Every cheap check passed\./, 'a warning is not a pass');
+  });
+
+  // Break caught: the mark read as "any non-zero exit is a warning", so that a check that failed with 2 for its own reasons is let through.
+  it('fails a check that exits 2 without marking that exit, and one that exits something else', async () => {
+    const lines: string[] = [];
+    const unmarked = given([[stage('guard', 'static', command('undecided.mjs'))]], lines);
+    assert.equal(await runPrecheck(unmarked), 1);
+    assert.match(lines.join('\n'), /guard\s+failed/);
+
+    const other: string[] = [];
+    const marked = given(
+      [[{ ...stage('guard', 'static', command('fail.mjs')), warnOnExit: 2 }]],
+      other,
+    );
+    assert.equal(await runPrecheck(marked), 1, 'exit 3 is not the marked exit 2');
+    assert.match(other.join('\n'), /guard\s+failed/);
+  });
+
+  // Break caught: the migration guard marked in the gate's list but not in the precheck's, or the real check not marked at all, so that the precheck says "passed" again.
+  it('marks the migration check, and only it, as one whose exit 2 is a warning', () => {
+    const marked = precheckLanes(false)
+      .flat()
+      .filter((candidate) => candidate.warnOnExit !== undefined)
+      .map((candidate) => [candidate.name, candidate.warnOnExit]);
+
+    assert.deepEqual(marked, [['migrations', 2]]);
+    assert.deepEqual(
+      gateStages('local').filter((candidate) => candidate.warnOnExit !== undefined),
+      [],
+      'the gate marks none: for it every exit but 0 fails',
+    );
+  });
+
   // Break caught: a refusal that is only said (the checks run all the same, beside the gate they were refused for).
   it('exits 2 and runs nothing when it is refused', async () => {
     const lines: string[] = [];
@@ -1406,6 +1536,22 @@ describe('what the command line starts', () => {
     const env = gateEnvironment(base);
     assert.equal(env.MELARC_BROWSER_SHARD, undefined);
     assert.equal(env.MELARC_BROWSERS, 'chromium', 'only the shard is taken out');
+  });
+
+  // Break caught (task CI.2): a `MELARC_DB_SHARD` or a `MELARC_SKIP_TIMING_TESTS` left in the owner's shell (from reproducing a job of CI)
+  // reaching the database stage, which the API's configuration would then run as one shard of its files, or without the tests whose bounds
+  // are wall-clock time: a gate that is green for a part of the database tests.
+  it('passes no MELARC_DB_SHARD and no MELARC_SKIP_TIMING_TESTS, which would make the database stage run a part of its files', () => {
+    const base = {
+      PATH: '/bin',
+      MELARC_DB_SHARD: '2/8',
+      MELARC_SKIP_TIMING_TESTS: '1',
+      MELARC_DB_WORKERS: '3',
+    };
+    const env = gateEnvironment(base);
+    assert.equal(env.MELARC_DB_SHARD, undefined);
+    assert.equal(env.MELARC_SKIP_TIMING_TESTS, undefined);
+    assert.equal(env.MELARC_DB_WORKERS, '3', 'only the two variables of the CI jobs are taken out');
   });
 
   // Break caught: an agent starting the hour-long gate the owner did not ask for; or the owner's own terminal, which Claude Code does
@@ -1574,6 +1720,11 @@ describe('the agents are told', () => {
     assert.ok(loop.includes('`--asked`'));
     assert.ok(loop.includes('Never set `VITEST_MAX_WORKERS`'));
     assert.ok(!loop.includes('says when each run is due'));
+    // Run 6, Stage 5.3: the precheck's lane of root guards, and the affected root and journey targets to run after a screen, a stylesheet or a journey's page changes (the finding
+    // of run 5: five breakages the precheck cannot see were found only in the final run).
+    assert.ok(loop.includes('`guards` lane'));
+    assert.ok(loop.includes("After a screen, a stylesheet or a journey's page changes"));
+    assert.ok(loop.includes('`pnpm run test:affected --only root,e2e --with-e2e`'));
     const plan = read('delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md');
     const cadence =
       plan.split(/\r?\n/).find((line) => line.startsWith('**Testing cadence**')) ?? '';

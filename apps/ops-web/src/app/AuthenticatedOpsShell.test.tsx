@@ -6,7 +6,9 @@ import { installFakeApi, json, signedInApi, type FakeApi } from '../test-support
 import { renderApp } from '../test-support/render-app';
 import { sessionFixture } from '../test-support/session-fixture';
 import { wcagViolations } from '../test-support/wcag';
+import { dismissToast, showToast } from '../components/ui/toast/Toast';
 import { ANY_SIGNED_IN_SESSION, type SignedInRoute } from './navigation/route-registry';
+import { cannotText } from '../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -26,25 +28,41 @@ const page = (name: string) => (
 const REGISTRY: readonly SignedInRoute[] = [
   {
     path: '/',
-    element: page('Melarc Ops Portal'),
+    element: page('My work'),
     access: ANY_SIGNED_IN_SESSION,
-    menu: { label: 'Home', icon: 'overview', area: 'overview', order: 0 },
+    menu: { place: 'sidebar', group: 'today', label: 'Home', icon: 'my-work', order: 0 },
   },
   {
     path: '/admin/staff',
     element: page('Staff identities'),
     access: { permission: 'staff.read' },
-    menu: { label: 'Staff identities', icon: 'staff', area: 'administration', order: 10 },
+    menu: {
+      place: 'sidebar',
+      group: 'people',
+      label: 'Staff identities',
+      icon: 'staff',
+      order: 0,
+    },
   },
   {
     path: '/admin/vendors',
     element: page('Vendor accounts'),
     access: { permission: 'vendor.read' },
-    menu: { label: 'Vendor accounts', icon: 'sessions', area: 'administration', order: 20 },
+    menu: {
+      place: 'sidebar',
+      group: 'people',
+      label: 'Vendor accounts',
+      icon: 'sessions',
+      order: 1,
+    },
   },
 ];
 
 const signInStandIn = [{ path: 'sign-in', element: <h1 tabIndex={-1}>Sign-in stand-in</h1> }];
+
+/** The places toasts are drawn: Sonner's one region, named "Notifications". */
+const toasters = (): NodeListOf<Element> =>
+  document.querySelectorAll('section[aria-label^="Notifications"]');
 
 function open(permissions: readonly string[] | undefined, path = '/', routes = REGISTRY) {
   api = installFakeApi(
@@ -68,35 +86,82 @@ beforeEach(() => {
 });
 
 describe('the authenticated Ops shell: what it holds', () => {
-  // Break caught: a menu inside the main landmark, where the skip link would land on it, or after it, where a keyboard user finds it
-  // last. The skip link, then the menu, then the main content is the order of the page.
-  it('draws the side menu, with the navigation and the sign-out control, before the main content and outside it', async () => {
+  // Break caught: a sidebar inside the main landmark, where the skip link would land on it, or after it, where a keyboard user finds it last; a top
+  // bar that is not the banner, or is drawn after the page. The skip link, then the sidebar, then the top bar, then the main content is the order.
+  it('draws the sidebar and the top bar before the main content and outside it, in the order of the page', async () => {
     open(BUNDLE_KEY_SETS['Senior Ops']);
     await screen.findByRole('navigation', { name: 'Primary' });
 
-    const menu = screen.getByRole('complementary', { name: 'Main menu' });
+    const sidebar = screen.getByRole('complementary', { name: 'Main menu' });
+    const bar = screen.getByRole('banner');
     const main = screen.getByRole('main');
     const skip = screen.getByRole('link', { name: 'Skip to main content' });
     const follows = (a: Element, b: Element) =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(skip, menu)).toBe(true);
-    expect(follows(menu, main)).toBe(true);
-    expect(menu).toContainElement(navigation());
-    expect(menu).toContainElement(screen.getByRole('button', { name: 'Sign out' }));
-    expect(main).not.toContainElement(menu);
+    expect(follows(skip, sidebar)).toBe(true);
+    expect(follows(sidebar, bar)).toBe(true);
+    expect(follows(bar, main)).toBe(true);
+    expect(sidebar).toContainElement(navigation());
+    expect(main).not.toContainElement(sidebar);
+    expect(main).not.toContainElement(bar);
+    expect(bar).not.toContainElement(navigation());
+  });
+
+  // Break caught: no toaster in the frame, so that a toast a screen raises is never seen, or two of them, so that every toast is shown twice. The frame draws the one
+  // toaster of the application, at the bottom right, and it is still the one after the person has gone to another page of the shell.
+  it('draws the one toaster of the application, bottom right, and a toast that is raised is shown once', async () => {
+    const { router } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+    expect(toasters()).toHaveLength(1);
+    // It is drawn into the body, outside the main landmark: a sheet that hides the page from assistive technology would otherwise leave the whole of main exposed (a live region is
+    // never hidden, and neither is what holds it).
+    const region = screen.getByRole('region', { name: /^Notifications/ });
+    expect(region.parentElement).toBe(document.body);
+    expect(screen.getByRole('main')).not.toContainElement(region);
+
+    act(() => {
+      showToast({ tone: 'success', message: 'Request ACC-PR-7KQ2MZ booked.' });
+    });
+    expect(await screen.findAllByText('Request ACC-PR-7KQ2MZ booked.')).toHaveLength(1);
+    const list = document.querySelector('[data-sonner-toaster]');
+    expect(list).toHaveAttribute('data-y-position', 'bottom');
+    expect(list).toHaveAttribute('data-x-position', 'right');
+
+    await act(async () => {
+      await router.navigate('/admin/staff');
+    });
+    await screen.findByRole('heading', { name: 'Staff identities' });
+    expect(toasters()).toHaveLength(1);
+    expect(screen.getAllByText('Request ACC-PR-7KQ2MZ booked.')).toHaveLength(1);
+    act(() => {
+      dismissToast();
+    });
+  });
+
+  // Break caught: the sign-out control missing from a signed-in screen: it lives in the account menu of the top bar, which every screen carries.
+  it('carries the account menu on every signed-in screen, and in it the sign-out', async () => {
+    const { user } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    await user.click(
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Account menu' }),
+    );
+
+    expect(await screen.findByRole('menuitem', { name: 'Sign out' })).toBeVisible();
   });
 
   // Break caught: a signed-in screen that still draws the neutral frame's banner above the menu (the product named twice, the page a
   // website with a header), or the frame left in the sidebar layout when the shell has gone.
-  it('is drawn in the frame’s sidebar layout, with no banner, and the frame is neutral again when it leaves', async () => {
+  it('is drawn in the frame’s sidebar layout, with the top bar as its one banner, and the frame is neutral again when it leaves', async () => {
     const { container, router } = open(BUNDLE_KEY_SETS['Senior Ops']);
     await screen.findByRole('navigation', { name: 'Primary' });
 
     expect(container.querySelector('.app-frame')).toHaveClass('app-frame--sidebar');
-    // No frame banner above the menu. The one banner left is the menu's own slim bar, which the stylesheet shows on a narrow screen alone.
+    // No frame banner (the logo and the name): the one banner is the top bar.
     expect(container.querySelector('.app-header')).toBeNull();
     expect(screen.getAllByRole('banner')).toHaveLength(1);
-    expect(screen.getByRole('banner')).toHaveClass('ui-side-menu__bar');
+    expect(screen.getByRole('banner')).toHaveClass('ui-topbar');
     expect(screen.getByRole('main')).toHaveClass('app-main--sidebar');
 
     await act(async () => {
@@ -106,20 +171,8 @@ describe('the authenticated Ops shell: what it holds', () => {
     await screen.findByRole('heading', { name: 'Sign-in stand-in' });
     expect(container.querySelector('.app-frame')).toHaveClass('app-frame--neutral');
     expect(screen.getByRole('banner')).toHaveTextContent('Ops Portal');
-  });
-
-  // Break caught: the page behind a menu that slid in over it left reachable, so that Tab walks out of the menu into the page.
-  it('makes the page behind the sliding menu inert while it is open, and no longer', async () => {
-    const { user } = open(BUNDLE_KEY_SETS['Senior Ops']);
-    await screen.findByRole('navigation', { name: 'Primary' });
-    const main = screen.getByRole('main');
-    expect(main).not.toHaveAttribute('inert');
-
-    await user.click(screen.getByRole('button', { name: 'Open menu' }));
-    expect(main).toHaveAttribute('inert');
-
-    await user.keyboard('{Escape}');
-    expect(main).not.toHaveAttribute('inert');
+    expect(container.querySelector('.ui-topbar')).toBeNull();
+    expect(container.querySelector('.ui-sidebar')).toBeNull();
   });
 
   it('names the current page in the navigation for assistive technology', async () => {
@@ -132,9 +185,9 @@ describe('the authenticated Ops shell: what it holds', () => {
     );
   });
 
-  // Break caught: an account card that prints "null" for a person who has no display name, a hub nobody listed, or a role (the session
-  // names none, and a role is never read from it).
-  it('says in the account card who is signed in and where they act, and only what the session says', async () => {
+  // Break caught: a foot that prints "null" for a person who has no display name, a hub nobody listed, or a role (the session names none, and a
+  // role is never read from it).
+  it('says in the foot of the sidebar who is signed in and where they act, and only what the session says', async () => {
     api = installFakeApi(
       signedInApi(
         sessionFixture({
@@ -152,6 +205,7 @@ describe('the authenticated Ops shell: what it holds', () => {
     const card = screen.getByRole('group', { name: 'Your account' });
     expect(within(card).getByText('Ama Mensah')).toBeVisible();
     expect(within(card).getByText('Accra Hub')).toBeVisible();
+    expect(card.textContent).not.toMatch(/Platform Admin|Senior Ops|Ops Staff/);
   });
 
   it('says how many hubs when there are several, and only "Signed in" for a person with no name and no hub', async () => {
@@ -237,7 +291,7 @@ describe('the authenticated Ops shell: the entries come from the keys the sessio
     expect(
       await screen.findByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
     expect(entries()).toEqual(['Home', 'Vendor accounts']);
   });
 
@@ -258,27 +312,35 @@ describe('the authenticated Ops shell: the entries come from the keys the sessio
     expect(screen.getByRole('link', { name: 'Home' })).not.toHaveAttribute('aria-current');
   });
 
-  // The stylesheet shows the menu button only on a narrow screen and the collapse button only on a wide one, and jsdom applies no
-  // stylesheet, so the walk here sees all of them; the real order for each size is walked in a browser (shell.spec.ts).
-  it('is walked by Tab in the order of the page: skip link, the menu’s controls, entries, sign-out', async () => {
+  // The stylesheet decides nothing about the order here (jsdom applies none): the order of the document is the order of the keyboard. The real
+  // order, at each size, is walked in a browser (shell.spec.ts).
+  it('is walked by Tab in the order of the page: skip link, the sidebar, then the top bar', async () => {
     const { user } = open(['staff.read']);
     await screen.findByRole('navigation', { name: 'Primary' });
 
+    // A stop is named as an assistive technology names it: by its label, or by its text without what is hidden from it (a picture, a key hint).
+    const nameOf = (element: Element | null): string => {
+      if (element === null) return '';
+      const label = element.getAttribute('aria-label');
+      if (label !== null) return label;
+      const copy = element.cloneNode(true) as Element;
+      for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+      return copy.textContent.trim();
+    };
     const stops: string[] = [];
     for (let step = 0; step < 7; step += 1) {
       await user.tab();
-      const active = document.activeElement;
-      stops.push(active?.getAttribute('aria-label') ?? active?.textContent ?? '');
+      stops.push(nameOf(document.activeElement));
     }
 
     expect(stops).toEqual([
       'Skip to main content',
-      'Open menu',
       'Collapse menu',
-      'Close menu',
       'Home',
       'Staff identities',
-      'Sign out',
+      'Search a code, name or phone',
+      'Theme: System',
+      'Account menu',
     ]);
   });
 });
@@ -291,7 +353,7 @@ describe('the authenticated Ops shell: where it is not', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
   });
 
   it('is not around a page that sits outside the signed-in routes', async () => {
@@ -299,7 +361,42 @@ describe('the authenticated Ops shell: where it is not', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
+  });
+
+  // Break caught: a toaster drawn for a person who is not signed in (nothing there raises a toast), or a toaster that stays when the person leaves the shell and the
+  // next screen draws another.
+  it('has no toaster where it is not, and takes its toaster with it', async () => {
+    const { router } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+    expect(toasters()).toHaveLength(1);
+
+    await act(async () => {
+      await router.navigate('/sign-in');
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
+    expect(toasters()).toHaveLength(0);
+  });
+
+  // Break caught: the showcase, which mounts a toaster of its own, drawn inside the frame that has one, so that its toasts are shown twice. The showcase's routes are
+  // beside the shell and not under it, so exactly one toaster is drawn there; and a second one mounted anywhere draws nothing (Toast.test.tsx), so that this holds
+  // whoever is added to the route tree.
+  it('is not around the showcase, which has its own toaster: one toaster there, and a toast is shown once', async () => {
+    open(BUNDLE_KEY_SETS['Senior Ops'], '/__showcase/kit/menus');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Kit showcase' }, { timeout: 10_000 }),
+    ).toBeVisible();
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
+    expect(toasters()).toHaveLength(1);
+    act(() => {
+      showToast({ tone: 'info', message: 'Raised on the showcase.' });
+    });
+    expect(await screen.findAllByText('Raised on the showcase.')).toHaveLength(1);
+    act(() => {
+      dismissToast();
+    });
   });
 
   it('leaves with the person: going to a page outside it takes the navigation away', async () => {
@@ -312,6 +409,7 @@ describe('the authenticated Ops shell: where it is not', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
     expect(screen.queryByRole('navigation')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
   });
 
   // Break caught: a menu or a sign-out control shown to somebody the API has not yet said is signed in, even for a moment.
@@ -336,7 +434,7 @@ describe('the authenticated Ops shell: where it is not', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Checking your session…');
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
 
     await act(async () => {
       release();
@@ -344,32 +442,62 @@ describe('the authenticated Ops shell: where it is not', () => {
     });
     expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Account menu' })).toBeNull();
   });
 
-  it('is the real registry’s entries: the screens that are built, for the keys the session holds', async () => {
+  it('is the real registry’s entries: the screens that are built, in the groups of the hub’s day, for the keys the session holds', async () => {
     api = installFakeApi({
       ...signedInApi(sessionFixture({ permissions: [...BUNDLE_KEY_SETS['Platform Admin']] })),
-      // The landing of a person who works the approval queue reads it.
+      // The page of a person who works the approval queue reads it.
       'GET /staff-identities': () => json(200, { items: [], next_page_token: null }),
     });
     renderApp('/');
     await screen.findByRole('navigation', { name: 'Primary' });
 
-    expect(entries()).toEqual([
-      'Overview',
-      'Pickup requests',
-      'Book a pickup',
-      'Exceptions to approve',
-      'Messages',
-      'Manifests',
-      'Build a manifest',
-      'Staff',
-      'Add a staff profile',
-      'Sessions',
-      'Vendors',
-      'Riders',
-      'Trusted browsers',
+    const groups = within(navigation())
+      .getAllByRole('list')
+      .map((list) => [
+        list.getAttribute('aria-label') ??
+          document.getElementById(list.getAttribute('aria-labelledby') ?? '')?.textContent,
+        within(list)
+          .getAllByRole('link')
+          .map((link) => link.textContent),
+      ]);
+    expect(groups).toEqual([
+      ['Today', ['My work', 'Decisions']],
+      ['Pickups', ['Requests', 'Pickup runs']],
+      ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
+      ['System', ['Message log']],
     ]);
+  });
+});
+
+describe('the authenticated Ops shell: its toasts across sessions (task R5.2, H2)', () => {
+  // Break caught: a toast with an action (which has no end of its own) shown again by the next shell: Sonner keeps its toasts in one store for the page, and shows every
+  // active one to a toaster that mounts later, so what one person was told appears to the next. The shell's toaster takes the toasts with it when it goes.
+  it('does not show to the next person a toast raised for the last one', async () => {
+    const { router } = open(BUNDLE_KEY_SETS['Senior Ops']);
+    await screen.findByRole('navigation', { name: 'Primary' });
+    act(() => {
+      showToast({
+        tone: 'success',
+        message: 'Request ACC-PR-7KQ2MZ confirmed.',
+        action: { label: 'Open', onClick: () => undefined },
+      });
+    });
+    expect(await screen.findByText('Request ACC-PR-7KQ2MZ confirmed.')).toBeVisible();
+
+    // The person leaves the shell (the session ends); the next signs in and the shell is drawn again, with a toaster of its own.
+    await act(async () => {
+      await router.navigate('/sign-in');
+    });
+    expect(await screen.findByRole('heading', { name: 'Sign-in stand-in' })).toBeVisible();
+    await act(async () => {
+      await router.navigate('/');
+    });
+    await screen.findByRole('navigation', { name: 'Primary' });
+
+    expect(toasters()).toHaveLength(1);
+    expect(screen.queryByText('Request ACC-PR-7KQ2MZ confirmed.')).toBeNull();
   });
 });

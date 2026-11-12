@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { byHand } from '../../../test-support/by-hand';
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -21,8 +22,11 @@ import {
   runTextFixture,
   suppressedFixture,
 } from '../../../test-support/notification-fixture';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
+import { pagerRegion } from '../../../test-support/queue-pager';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/messages` (`listNotifications`; S1.12e). The message log: every message the platform raised about an act, newest first, and what became of
@@ -63,6 +67,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 function open(
@@ -80,6 +85,10 @@ function open(
   );
   return renderApp(path);
 }
+
+/** Whether a piece of text is on the quiet second line of its cell (the kit's CellLines draws it so). */
+const quiet = (element: HTMLElement): boolean =>
+  element.closest('.ui-data-table__support') !== null;
 
 const listRequests = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/notifications');
@@ -103,11 +112,37 @@ async function rowOf(entry: unknown, time = '29 Oct, 08:15'): Promise<HTMLElemen
 /** The log has been read and drawn, whatever it holds. */
 const settled = (): Promise<void> =>
   waitFor(() => {
-    expect(screen.queryByText('Loading the messages…')).toBeNull();
+    expect(screen.queryByText('Loading messages')).toBeNull();
   });
 
+/** The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited. */
+const logTable = async (): Promise<HTMLElement> => {
+  const table = await screen.findByRole('table', { name: /^Messages$/ });
+  await waitFor(() => {
+    expect(table).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return table;
+};
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+const viewTab = (name: string) => screen.getByRole('tab', { name });
+const removeChip = (label: string) =>
+  screen.getByRole('button', { name: `Remove filter: ${label}` });
+/** The status, the audience and the channel are chosen in the popover of the filter row, which opens with the Filter button. */
+async function openFilters(view: ReturnType<typeof open>): Promise<void> {
+  await view.user.click(screen.getByRole('button', { name: 'Filter' }));
+  await screen.findByRole('combobox', { name: 'Status' });
+}
+/** The messages the table draws: a message's row header is its time. The table's own message (nothing yet, a failure) sits in a cell and is not one. */
+const messageRows = () => screen.queryAllByRole('rowheader');
+
 describe('the log: what it shows', () => {
-  it('shows each message by when, what, for whom, over what, its status, what became of it, its number and its tries', async () => {
+  it('shows each message by when, what, to whom and over what, its status with what became of it, and its number', async () => {
     open();
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Messages' })).toBeVisible();
@@ -120,36 +155,125 @@ describe('the log: what it shows', () => {
     expect(within(text).getByText('Delivered')).toBeVisible();
     expect(within(text).getByText('The provider accepted it')).toBeVisible();
     expect(within(text).getByText(HINT)).toBeVisible();
-    expect(within(text).getByRole('cell', { name: '1' })).toBeVisible();
+    // One try says nothing of tries: "N tries" is for a message that was tried more than once (below).
+    expect(within(text).queryByText(/tries/)).toBeNull();
     const feed = await rowAt('29 Oct, 08:14');
     expect(within(feed).getByText('Vendor’s feed')).toBeVisible();
     expect(within(feed).getByText('In-app feed')).toBeVisible();
     // A feed entry is written and not sent: it is "in the feed", not "delivered".
     expect(within(feed).getByText('In the feed')).toBeVisible();
     expect(within(feed).queryByText('Delivered')).toBeNull();
-    expect(within(feed).getByRole('cell', { name: '0' })).toBeVisible();
+    expect(within(feed).queryByText(/tries/)).toBeNull();
   });
 
   it('names each column for what it holds, and the table for the log', async () => {
     open();
 
-    const table = await screen.findByRole('table', { name: 'Messages' });
+    const table = await logTable();
 
     expect(
       within(table)
         .getAllByRole('columnheader')
         .map((header) => header.textContent),
-    ).toEqual([
-      'When',
-      'Message',
-      'For',
-      'Channel',
-      'Status',
-      'What happened',
-      'Number',
-      'Tries',
-      'Record',
-    ]);
+    ).toEqual(['When', 'Message', 'To', 'Status', 'Number', 'Record']);
+  });
+
+  // Break caught (owner item a of the Product Owner, 9 November 2026): nine columns that do not fit at 1280 px with the menu open. The nine facts are in six, none dropped: the message over
+  // the version of its wording, the audience over the channel, the status over what became of it, the provider's word and the number of tries when more than one.
+  it('composes the nine facts into six columns, each lesser fact muted under the one it belongs to', async () => {
+    open(() =>
+      page([
+        notificationFixture({
+          state: 'FAILED',
+          outcome_class: 'REJECTED',
+          provider_outcome_class: 'REQUEST_INVALID',
+          attempt_count: 3,
+        }),
+      ]),
+    );
+    await logTable();
+
+    const cells = within(messageRows()[0]?.closest('tr') ?? document.body).getAllByRole('cell');
+    expect(cells).toHaveLength(5);
+    const [message, to, status, number, record] = cells;
+    expect(message).toHaveTextContent(/^Pickup request confirmedWording version 1$/);
+    // The lesser fact is the second line of its cell, which the kit's CellLines draws quiet; the first is not.
+    expect(quiet(within(message ?? document.body).getByText('Wording version 1'))).toBe(true);
+    expect(quiet(within(message ?? document.body).getByText('Pickup request confirmed'))).toBe(
+      false,
+    );
+    expect(to).toHaveTextContent(/^Ad-hoc senderText message$/);
+    expect(quiet(within(to ?? document.body).getByText('Text message'))).toBe(true);
+    expect(quiet(within(to ?? document.body).getByText('Ad-hoc sender'))).toBe(false);
+    expect(within(status ?? document.body).getByText('Failed')).toBeVisible();
+    expect(status).toHaveTextContent(
+      /The provider refused itProvider’s word: REQUEST_INVALID3 tries$/,
+    );
+    expect(quiet(within(status ?? document.body).getByText('3 tries'))).toBe(true);
+    expect(quiet(within(status ?? document.body).getByText('Failed'))).toBe(false);
+    expect(number).toHaveTextContent(HINT);
+    expect(
+      within(record ?? document.body).getByRole('link', { name: 'Pickup request' }),
+    ).toBeVisible();
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a log that does not say when it was read, or gives no way to read it again that a person can see (every other list says "Updated ... ·
+  // Refresh" under its title), or that reads it again without saying so.
+  it('says when it was updated, with the way to refresh it, in the words of every list, and reads the page again when asked', async () => {
+    const { user } = open();
+    await logTable();
+
+    expect(await screen.findByText(/^Updated /)).toBeVisible();
+    const before = listRequests().length;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(listRequests()).toHaveLength(before + 1);
+    });
+    await logTable();
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a header of two sentences, so that the title is followed by a paragraph before the person reaches the log: it is one sentence.
+  it('says what the log is in one sentence', async () => {
+    open();
+    await logTable();
+
+    const description = screen.getByText(/^What became of each message/);
+    expect(description.textContent.match(/\./g)).toHaveLength(1);
+    expect(description).toHaveTextContent(/never what it said\.$/);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026): a page after the first that holds nothing told as "no messages yet" (as if the platform had never said anything), or in words of its own, or
+  // with no way back to the first page: every list says it the same way, in the queue template's words.
+  it('tells an empty page after the first as that, in the words of every list, and goes back to the first page', async () => {
+    const { user } = open((request) =>
+      new URL(request.url).searchParams.get('page_token') === null
+        ? page([confirmed], 'next-1')
+        : page([]),
+    );
+    await logTable();
+
+    await user.click(await screen.findByRole('button', { name: 'Next page' }));
+
+    expect(await screen.findByRole('heading', { name: 'No messages on this page' })).toBeVisible();
+    expect(
+      screen.getByText('Page 2 has no messages now. Earlier pages may still have some.'),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'No messages yet' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Back to first page' }));
+
+    expect(await screen.findByRole('rowheader', { name: '29 Oct, 08:15' })).toBeVisible();
+    expect(queryOf().has('page_token')).toBe(false);
+  });
+
+  // Break caught (the Product Owner, 9 November 2026): the order told as "as the server lists them", which is not what a person asks: it is newest first, and that is all it says.
+  it('says the order in plain words: newest first', async () => {
+    open();
+    await logTable();
+
+    expect(screen.getByText('Newest first')).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/as the server lists/);
   });
 
   it('keeps the server’s order: newest first', async () => {
@@ -160,12 +284,42 @@ describe('the log: what it shows', () => {
       ]),
     );
 
-    await screen.findByRole('table', { name: 'Messages' });
+    await logTable();
 
     expect(screen.getAllByRole('rowheader').map((header) => header.textContent)).toEqual([
       '29 Oct, 09:00',
       '29 Oct, 08:00',
     ]);
+  });
+
+  it('draws a message as a card with the same facts, in a room too narrow for the columns', async () => {
+    narrowRoom();
+    open(() => page([confirmed, inFeed]));
+
+    const cards = within(await screen.findByRole('list', { name: 'Messages' })).getAllByRole(
+      'listitem',
+    );
+    expect(cards).toHaveLength(2);
+    const text = cards[0] ?? document.body;
+    const feed = cards[1] ?? document.body;
+    expect(
+      within(text).getByRole('heading', { level: 2, name: 'Pickup request confirmed' }),
+    ).toBeVisible();
+    expect(within(text).getByText('29 Oct, 08:15')).toBeVisible();
+    expect(within(text).getByText('Wording version 1')).toBeVisible();
+    expect(within(text).getByText('Ad-hoc sender')).toBeVisible();
+    expect(within(text).getByText('Text message')).toBeVisible();
+    expect(within(text).getByText('Delivered')).toBeVisible();
+    expect(within(text).getByText('The provider accepted it')).toBeVisible();
+    expect(within(text).getByText(HINT)).toBeVisible();
+    expect(within(text).getByRole('link', { name: 'Pickup request' })).toHaveAttribute(
+      'href',
+      `/pickup-requests/${NOTIFICATION_REQUEST_ID}`,
+    );
+    // A feed entry has no number and nothing to report of a sending: two dashes, each with what it stands for.
+    expect(within(feed).getAllByText('—')).toHaveLength(2);
+    expect(within(feed).getByText('No number')).toBeInTheDocument();
+    expect(within(feed).getByText('Nothing to report')).toBeInTheDocument();
   });
 
   describe('a message in each state', () => {
@@ -206,7 +360,7 @@ describe('the log: what it shows', () => {
         ),
       );
 
-      await screen.findByRole('table', { name: 'Messages' });
+      await logTable();
       const badges = document.querySelectorAll('.ui-status-badge');
 
       expect(badges).toHaveLength(7);
@@ -313,7 +467,7 @@ describe('the log: what it shows', () => {
     ] as const)('says who %s is', async (audience, words) => {
       const row = await rowOf(notificationFixture({ audience }));
 
-      expect(within(row).getByRole('cell', { name: words })).toBeVisible();
+      expect(within(row).getByText(words)).toBeVisible();
     });
   });
 
@@ -326,8 +480,9 @@ describe('the log: what it shows', () => {
 
       expect(within(text).getByText('+233******567')).toBeVisible();
       expect(within(text).queryByText('No number')).toBeNull();
-      // A feed entry has no number and nothing to report of a sending: two dashes, each with what it stands for.
-      expect(within(feed).getAllByText('—')).toHaveLength(2);
+      // A feed entry has no number: a dash with what it stands for. It has nothing to report of a sending too, which the status cell says in words to assistive technology and not as a
+      // second dash under a badge that already says the state.
+      expect(within(feed).getAllByText('—')).toHaveLength(1);
       expect(within(feed).getByText('No number')).toBeInTheDocument();
       expect(within(feed).getByText('Nothing to report')).toBeInTheDocument();
       expect(within(feed).getByRole('cell', { name: 'No number' })).toBeInTheDocument();
@@ -343,7 +498,7 @@ describe('the log: what it shows', () => {
         ]),
       );
 
-      await screen.findByRole('table', { name: 'Messages' });
+      await logTable();
       const everything = `${document.body.innerHTML}\n${document.body.textContent}`;
 
       for (const planted of [PLANTED_NUMBER, PLANTED_TEXT, PLANTED_CODE, 'a'.repeat(64)]) {
@@ -363,8 +518,8 @@ describe('the log: what it shows', () => {
     it('refuses a page whose hint is a number in clear, and draws none of it', async () => {
       open(() => page([confirmed, notificationFixture({ destination_hint: PLANTED_NUMBER })]));
 
-      expect(await screen.findByRole('alert')).toBeVisible();
-      expect(screen.queryByRole('table')).toBeNull();
+      await alertSaying('The messages could not be loaded.');
+      expect(messageRows()).toHaveLength(0);
       expect(document.body.innerHTML).not.toContain(PLANTED_NUMBER);
       expect(document.body.innerHTML).not.toContain('233209998877');
     });
@@ -372,7 +527,7 @@ describe('the log: what it shows', () => {
     // Break caught: a control that copies, dials or texts a number, or hands one on in a link.
     it('offers nothing to copy, to dial or to send to', async () => {
       open();
-      await screen.findByRole('table', { name: 'Messages' });
+      await logTable();
 
       expect(
         screen.queryByRole('button', { name: /copy|reveal|show (the )?number|full number/i }),
@@ -410,7 +565,7 @@ describe('the log: what it shows', () => {
           }),
         ]),
       );
-      await screen.findByRole('table', { name: 'Messages' });
+      await logTable();
 
       expect(
         screen
@@ -427,24 +582,24 @@ describe('the log: what it shows', () => {
   it('shows no log at all when one message in it is not a message', async () => {
     open(() => page([confirmed, { ...inFeed, state: 'SOMETHING_NEW' }]));
 
-    expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    await alertSaying('The messages could not be loaded.');
+    expect(messageRows()).toHaveLength(0);
   });
 
   it('shows no log at all when a held-back message does not say why', async () => {
     open(() => page([{ ...suppressedFixture('KILL_SWITCH'), suppression_reason: null }]));
 
-    expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    await alertSaying('The messages could not be loaded.');
+    expect(messageRows()).toHaveLength(0);
   });
 
   it('is in the menu, marked as the page the person is on', async () => {
     open();
-    await screen.findByRole('table', { name: 'Messages' });
+    await logTable();
 
     expect(
       within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', {
-        name: 'Messages',
+        name: 'Message log',
       }),
     ).toHaveAttribute('aria-current', 'page');
   });
@@ -452,17 +607,24 @@ describe('the log: what it shows', () => {
 
 describe('the log: filtering', () => {
   it('asks for every message by default, and offers each choice the contract has', async () => {
-    open();
-    await screen.findByRole('table', { name: 'Messages' });
+    const view = open();
+    await logTable();
 
     for (const name of ['state', 'audience', 'channel', 'subject_id']) {
       expect(queryOf(0).has(name), name).toBe(false);
     }
+    const views = screen.getByRole('tablist', { name: 'Views of the messages' });
+    expect(
+      within(views)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent),
+    ).toEqual(['Every message', 'The Ops feed']);
+    expect(viewTab('Every message')).toHaveAttribute('aria-selected', 'true');
+    await openFilters(view);
     const optionsOf = (name: string) =>
       within(screen.getByRole('combobox', { name }))
         .getAllByRole('option')
         .map((option) => option.textContent);
-    expect(optionsOf('Show')).toEqual(['Every message', 'The Ops feed']);
     expect(optionsOf('Status')).toEqual([
       'Every status',
       'Waiting to be sent',
@@ -491,8 +653,10 @@ describe('the log: filtering', () => {
     ['For', 'audience', 'RIDER'],
     ['Channel', 'channel', 'FEED'],
   ])('asks for the %s that is chosen, and puts it in the address', async (label, name, value) => {
-    const { user, router } = open();
-    await screen.findByRole('table', { name: 'Messages' });
+    const view = open();
+    const { user, router } = view;
+    await logTable();
+    await openFilters(view);
 
     await user.selectOptions(screen.getByRole('combobox', { name: label }), value);
 
@@ -503,7 +667,7 @@ describe('the log: filtering', () => {
   });
 
   it('reads every choice out of the address, so that a view can be linked', async () => {
-    open(
+    const view = open(
       () => page([]),
       READER,
       `/messages?state=SUPPRESSED&audience=AD_HOC_SENDER&channel=SMS&subject=${NOTIFICATION_REQUEST_ID}`,
@@ -514,6 +678,11 @@ describe('the log: filtering', () => {
     expect(queryOf(0).get('audience')).toBe('AD_HOC_SENDER');
     expect(queryOf(0).get('channel')).toBe('SMS');
     expect(queryOf(0).get('subject_id')).toBe(NOTIFICATION_REQUEST_ID);
+    // Each choice is a chip of its own, and a field in the popover of the filter row.
+    expect(removeChip('Status: Held back')).toBeVisible();
+    expect(removeChip('For: Ad-hoc sender')).toBeVisible();
+    expect(removeChip('Channel: Text message')).toBeVisible();
+    await openFilters(view);
     expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('SUPPRESSED');
     expect(screen.getByRole('combobox', { name: 'For' })).toHaveValue('AD_HOC_SENDER');
     expect(screen.getByRole('combobox', { name: 'Channel' })).toHaveValue('SMS');
@@ -536,7 +705,7 @@ describe('the log: filtering', () => {
   ])('takes %s for no filter', async (query) => {
     open(undefined, READER, `/messages?${query}`);
 
-    await screen.findByRole('table', { name: 'Messages' });
+    await logTable();
 
     for (const name of ['state', 'audience', 'channel', 'subject_id']) {
       expect(queryOf(0).has(name), name).toBe(false);
@@ -545,12 +714,14 @@ describe('the log: filtering', () => {
   });
 
   it('keeps what is chosen already when another choice is made', async () => {
-    const { user, router } = open(
+    const view = open(
       undefined,
       READER,
       `/messages?state=FAILED&subject=${NOTIFICATION_REQUEST_ID}`,
     );
+    const { user, router } = view;
     await screen.findByRole('heading', { name: 'No messages match' });
+    await openFilters(view);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'For' }), 'RIDER');
 
@@ -563,9 +734,31 @@ describe('the log: filtering', () => {
     expect(queryOf().get('subject_id')).toBe(NOTIFICATION_REQUEST_ID);
   });
 
+  // Break caught: a field of the popover that keeps the log as it was when the popover opened, so that the second choice made without closing it drops the first.
+  it('keeps the choice made a moment ago when the next is made in the same popover', async () => {
+    const view = open();
+    const { user, router } = view;
+    await logTable();
+    await openFilters(view);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'FAILED');
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?state=FAILED');
+    });
+    await user.selectOptions(screen.getByRole('combobox', { name: 'For' }), 'RIDER');
+
+    await waitFor(() => {
+      expect(queryOf().get('audience')).toBe('RIDER');
+    });
+    expect(queryOf().get('state')).toBe('FAILED');
+    expect(router.state.location.search).toBe('?state=FAILED&audience=RIDER');
+  });
+
   it('takes a choice off by choosing "every" again', async () => {
-    const { user, router } = open(undefined, READER, '/messages?state=FAILED');
+    const view = open(undefined, READER, '/messages?state=FAILED');
+    const { user, router } = view;
     await screen.findByRole('heading', { name: 'No messages match' });
+    await openFilters(view);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), '');
 
@@ -573,19 +766,33 @@ describe('the log: filtering', () => {
       expect(router.state.location.search).toBe('');
     });
     expect(queryOf().has('state')).toBe(false);
-    expect(await screen.findByRole('table', { name: 'Messages' })).toBeVisible();
+    expect(await logTable()).toBeVisible();
+  });
+
+  it('takes a choice off with its own chip, and keeps the others', async () => {
+    const { user, router } = open(undefined, READER, '/messages?state=FAILED&channel=SMS');
+    await screen.findByRole('heading', { name: 'No messages match' });
+
+    await user.click(removeChip('Status: Failed'));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?channel=SMS');
+    });
+    expect(queryOf().has('state')).toBe(false);
+    expect(queryOf().get('channel')).toBe('SMS');
   });
 
   describe('the Ops feed', () => {
     it('is the channel FEED and the audience OPS_FEED, and a status chosen before is not carried into it', async () => {
-      const { user, router } = open(
+      const view = open(
         () => page([]),
         READER,
         `/messages?state=FAILED&audience=RIDER&subject=${NOTIFICATION_REQUEST_ID}`,
       );
+      const { user, router } = view;
       await screen.findByRole('heading', { name: 'No messages match' });
 
-      await user.selectOptions(screen.getByRole('combobox', { name: 'Show' }), 'The Ops feed');
+      await user.click(viewTab('The Ops feed'));
 
       await waitFor(() => {
         expect(queryOf().get('channel')).toBe('FEED');
@@ -600,7 +807,10 @@ describe('the log: filtering', () => {
         'OPS_FEED',
         false,
       ]);
-      expect(screen.getByRole('combobox', { name: 'Show' })).toHaveValue('ops-feed');
+      expect(viewTab('The Ops feed')).toHaveAttribute('aria-selected', 'true');
+      // The view says what its channel and its audience are: no chip of their own, and no status chosen before.
+      expect(screen.queryByRole('button', { name: /^Remove filter: / })).toBeNull();
+      await openFilters(view);
       expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('');
     });
 
@@ -608,7 +818,7 @@ describe('the log: filtering', () => {
       open(undefined, READER, '/messages?channel=FEED&audience=OPS_FEED');
       await screen.findByRole('heading', { name: 'Nothing in the Ops feed yet' });
 
-      expect(screen.getByRole('combobox', { name: 'Show' })).toHaveValue('ops-feed');
+      expect(viewTab('The Ops feed')).toHaveAttribute('aria-selected', 'true');
     });
 
     it.each(['channel=FEED', 'audience=OPS_FEED', 'channel=SMS&audience=OPS_FEED'])(
@@ -617,7 +827,7 @@ describe('the log: filtering', () => {
         open(undefined, READER, `/messages?${query}`);
         await settled();
 
-        expect(screen.getByRole('combobox', { name: 'Show' })).toHaveValue('');
+        expect(viewTab('Every message')).toHaveAttribute('aria-selected', 'true');
       },
     );
 
@@ -629,7 +839,7 @@ describe('the log: filtering', () => {
       );
       await screen.findByRole('heading', { name: 'No messages match' });
 
-      await user.selectOptions(screen.getByRole('combobox', { name: 'Show' }), 'Every message');
+      await user.click(viewTab('Every message'));
 
       await waitFor(() => {
         expect(queryOf().has('channel')).toBe(false);
@@ -648,7 +858,7 @@ describe('the log: filtering', () => {
 
     it('is said once, as "messages about one request", and asked for by its identifier', async () => {
       open(undefined, READER, ABOUT);
-      await screen.findByRole('table', { name: 'Messages' });
+      await logTable();
 
       expect(screen.getByText('Messages about one request')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Show every message' })).toBeVisible();
@@ -696,7 +906,7 @@ describe('the log: filtering', () => {
           });
           open(() => gate, READER, addressOf(kind));
 
-          expect(await screen.findByText('Loading the messages…')).toBeInTheDocument();
+          expect(await screen.findByText('Loading messages')).toBeInTheDocument();
           expect(screen.getByText(kind.words)).toBeVisible();
           expect(screen.queryByText(kind.other)).toBeNull();
 
@@ -704,7 +914,7 @@ describe('the log: filtering', () => {
             release(page([kind.entry]));
             await gate;
           });
-          await screen.findByRole('table', { name: 'Messages' });
+          await logTable();
           expect(screen.getByText(kind.words)).toBeVisible();
           expect(screen.queryByText(kind.other)).toBeNull();
         });
@@ -720,14 +930,14 @@ describe('the log: filtering', () => {
         it('when the read fails', async () => {
           open(() => refusal(500, 'INTERNAL'), READER, addressOf(kind));
 
-          expect(await screen.findByRole('alert')).toBeVisible();
+          await alertSaying('The messages could not be loaded.');
           expect(screen.getByText(kind.words)).toBeVisible();
           expect(screen.queryByText(kind.other)).toBeNull();
         });
 
         it('when the log is loaded, asked for by the identifier alone', async () => {
           open(serverOf([runText, confirmed]), READER, addressOf(kind));
-          await screen.findByRole('table', { name: 'Messages' });
+          await logTable();
 
           expect(screen.getByText(kind.words)).toBeVisible();
           expect(screen.queryByText(kind.other)).toBeNull();
@@ -743,15 +953,17 @@ describe('the log: filtering', () => {
         it('whatever kind the first message returned says it is about', async () => {
           const contradicting = { ...kind.entry, subject: { type: kind.otherType, id: kind.id } };
           open(() => page([contradicting]), READER, addressOf(kind));
-          await screen.findByRole('table', { name: 'Messages' });
+          await logTable();
 
           expect(screen.getByText(kind.words)).toBeVisible();
           expect(screen.queryByText(kind.other)).toBeNull();
         });
 
         it('keeps the words and the kind in the address while the log is narrowed further', async () => {
-          const { user, router } = open(serverOf([runText, confirmed]), READER, addressOf(kind));
-          await screen.findByRole('table', { name: 'Messages' });
+          const view = open(serverOf([runText, confirmed]), READER, addressOf(kind));
+          const { user, router } = view;
+          await logTable();
+          await openFilters(view);
 
           await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'DELIVERED');
 
@@ -769,7 +981,7 @@ describe('the log: filtering', () => {
 
         it('is taken off, with its kind, by "show every message"', async () => {
           const { user, router } = open(() => page([kind.entry]), READER, addressOf(kind));
-          await screen.findByRole('table', { name: 'Messages' });
+          await logTable();
 
           await user.click(screen.getByRole('button', { name: 'Show every message' }));
 
@@ -785,7 +997,7 @@ describe('the log: filtering', () => {
       // with a record and no kind is a request's, as it always was, whatever the messages that come back are about.
       it('reads an address with a record and no kind as a request’s, whatever comes back', async () => {
         open(() => page([runText]), READER, `/messages?subject=${NOTIFICATION_RUN_ID}`);
-        await screen.findByRole('table', { name: 'Messages' });
+        await logTable();
 
         expect(screen.getByText(REQUEST_WORDS)).toBeVisible();
         expect(screen.queryByText(RUN_WORDS)).toBeNull();
@@ -800,7 +1012,7 @@ describe('the log: filtering', () => {
             READER,
             `/messages?subject=${NOTIFICATION_RUN_ID}&subject_type=${kind}`,
           );
-          await screen.findByRole('table', { name: 'Messages' });
+          await logTable();
 
           expect(screen.getByText(REQUEST_WORDS)).toBeVisible();
           expect(screen.queryByText(RUN_WORDS)).toBeNull();
@@ -811,8 +1023,9 @@ describe('the log: filtering', () => {
 
       // Break caught: a kind with no record narrowing the log or announcing a record that is not there.
       it('says nothing, and narrows nothing, for a kind with no record', async () => {
-        const { user, router } = open(undefined, READER, '/messages?subject_type=PICKUP_MANIFEST');
-        await screen.findByRole('table', { name: 'Messages' });
+        const view = open(undefined, READER, '/messages?subject_type=PICKUP_MANIFEST');
+        const { user, router } = view;
+        await logTable();
 
         expect(screen.queryByText(RUN_WORDS)).toBeNull();
         expect(screen.queryByText(REQUEST_WORDS)).toBeNull();
@@ -821,6 +1034,7 @@ describe('the log: filtering', () => {
         expect(queryOf(0).has('subject_id')).toBe(false);
 
         // And the first choice made drops it: the address holds what the log is narrowed to and nothing else.
+        await openFilters(view);
         await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'DELIVERED');
         await waitFor(() => {
           expect(queryOf().get('state')).toBe('DELIVERED');
@@ -854,7 +1068,7 @@ describe('the log: filtering', () => {
         READER,
         `${ABOUT}&state=DELIVERED&audience=AD_HOC_SENDER`,
       );
-      await screen.findByRole('table', { name: 'Messages' });
+      await logTable();
 
       await user.click(screen.getByRole('button', { name: 'Show every message' }));
 
@@ -894,7 +1108,7 @@ describe('the log: counting and paging', () => {
 
   it('goes to the next page with the token the server gave, and back', async () => {
     const { user } = open(() => page([confirmed], 'next-1'));
-    await screen.findByRole('table', { name: 'Messages' });
+    await logTable();
 
     await user.click(screen.getByRole('button', { name: 'Next page' }));
 
@@ -909,12 +1123,39 @@ describe('the log: counting and paging', () => {
     });
   });
 
+  // Break caught (the review of 499399c): a pager taken out of the page while the next page is read and made anew with its words, which most screen readers do not announce: the status
+  // region is the same element through the read, empty while the page is read.
+  it('keeps the pager’s status region while the next page is read', async () => {
+    const reads = byHand();
+    let calls = 0;
+    const { user } = open((request) => {
+      calls += 1;
+      return calls === 1 ? page([confirmed], 'next-1') : reads.handler(request);
+    });
+    await logTable();
+    const region = pagerRegion();
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => {
+      expect(region).toBeEmptyDOMElement();
+    });
+    expect(pagerRegion()).toBe(region);
+
+    await reads.answer(page([confirmed]));
+    await waitFor(() => {
+      expect(region).toHaveTextContent(/on page 2/);
+    });
+    expect(pagerRegion()).toBe(region);
+  });
+
   // Break caught: the next page of one filter asked for under another.
   it('starts again at the first page when a choice changes', async () => {
-    const { user } = open(() => page([confirmed], 'next-1'));
-    await screen.findByRole('table', { name: 'Messages' });
+    const view = open(() => page([confirmed], 'next-1'));
+    const { user } = view;
+    await logTable();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
+    await openFilters(view);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Channel' }), 'SMS');
 
@@ -930,7 +1171,7 @@ describe('the log: counting and paging', () => {
       READER,
       `/messages?subject=${NOTIFICATION_REQUEST_ID}`,
     );
-    await screen.findByRole('table', { name: 'Messages' });
+    await logTable();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
 
@@ -953,7 +1194,7 @@ describe('the log: nothing to show', () => {
         'Messages appear here when the platform tells someone about an act, for example a confirmed pickup request.',
       ),
     ).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(messageRows()).toHaveLength(0);
   });
 
   // Break caught (ops-portal.md section 7): "no messages" and "filtered to nothing" told as one, which sends Ops hunting for a bug.
@@ -967,8 +1208,9 @@ describe('the log: nothing to show', () => {
     await waitFor(() => {
       expect(router.state.location.search).toBe('');
     });
-    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: 'Channel' })).toHaveValue('');
+    // No choice is left: no chip of any, and the views are the first.
+    expect(screen.queryByRole('button', { name: /^Remove filter: / })).toBeNull();
+    expect(viewTab('Every message')).toHaveAttribute('aria-selected', 'true');
   });
 
   describe('the Ops feed with nothing in it', () => {
@@ -981,8 +1223,7 @@ describe('the log: nothing to show', () => {
       ).toBeVisible();
       expect(screen.queryByRole('heading', { name: 'No messages match' })).toBeNull();
       expect(screen.queryByRole('heading', { name: 'No messages yet' })).toBeNull();
-      expect(screen.queryByRole('table')).toBeNull();
-      expect(screen.queryAllByRole('row')).toHaveLength(0);
+      expect(messageRows()).toHaveLength(0);
     });
 
     it('offers the way back to every message', async () => {
@@ -1036,15 +1277,15 @@ describe('the log: when it cannot be had', () => {
   it('says so in approved words with a retry, and never the server’s text', async () => {
     open(() => refusal(500, 'INTERNAL_ERROR'));
 
-    expect(await screen.findByText('The messages could not be loaded.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await alertSaying('The messages could not be loaded.');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
   });
 
   it('names the key a session without it lacks, and no role', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    expect(await screen.findByText(/notification\.read/)).toBeVisible();
+    await alertSaying(cannotText('notification.read'));
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance/);
   });
 
@@ -1052,15 +1293,15 @@ describe('the log: when it cannot be had', () => {
   it('shows no log when the answer holds a message the filter should have left out', async () => {
     open(() => page([confirmed]), READER, '/messages?state=FAILED');
 
-    expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    await alertSaying('The messages could not be loaded.');
+    expect(messageRows()).toHaveLength(0);
   });
 
   it('shows no log when the answer holds a message about another request than the one asked for', async () => {
     open(() => page([confirmed]), READER, `/messages?subject=${OTHER_REQUEST_ID}`);
 
-    expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    await alertSaying('The messages could not be loaded.');
+    expect(messageRows()).toHaveLength(0);
   });
 });
 
@@ -1072,7 +1313,7 @@ describeInterfaceStates('The message log', {
         release = resolve;
       });
       open(() => gate);
-      expect(await screen.findByText('Loading the messages…')).toBeInTheDocument();
+      expect(await screen.findByText('Loading messages')).toBeInTheDocument();
       // A count is never shown while the log loads (ops-portal.md section 8).
       expect(screen.queryByText(/Showing/)).toBeNull();
       await act(async () => {
@@ -1098,17 +1339,15 @@ describeInterfaceStates('The message log', {
         READER,
         '/messages?state=FAILED',
       );
-      expect(
-        await screen.findByText(
-          'That choice of messages was not accepted. Choose from the lists to start again.',
-        ),
-      ).toBeVisible();
+      await alertSaying(
+        'That choice of messages was not accepted. Choose from the lists to start again.',
+      );
     },
   },
   error: {
     test: async () => {
       open(() => refusal(500, 'INTERNAL'));
-      expect(await screen.findByRole('alert')).toBeVisible();
+      await alertSaying('The messages could not be loaded.');
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     },
   },
@@ -1119,7 +1358,7 @@ describeInterfaceStates('The message log', {
         attempts += 1;
         return attempts === 1 ? refusal(503, 'SETTING_MISSING') : page([confirmed]);
       });
-      await view.user.click(await screen.findByRole('button', { name: /Try again/ }));
+      await view.user.click(await screen.findByRole('button', { name: 'Retry' }));
       expect(await screen.findByRole('rowheader', { name: '29 Oct, 08:15' })).toBeVisible();
     },
   },
@@ -1137,13 +1376,14 @@ describeInterfaceStates('The message log', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['pickup.read']);
-      expect(await screen.findByText(/notification\.read/)).toBeVisible();
+      // The route itself is shut to this session: no page is drawn, so there is no table and no alert of one.
+      expect(await screen.findByText(cannotText('notification.read'))).toBeVisible();
       expect(screen.queryByRole('table')).toBeNull();
       expect(listRequests()).toHaveLength(0);
       // No entry in the menu either, although hiding it is not what keeps the page shut.
       expect(
         within(screen.getByRole('navigation', { name: 'Primary' })).queryByRole('link', {
-          name: 'Messages',
+          name: 'Message log',
         }),
       ).toBeNull();
       expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin|Finance/);

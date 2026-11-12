@@ -278,7 +278,10 @@ export async function vendorBrowsersAndSessions({
   await expect(open.getByRole('row')).toHaveCount(2);
   await open.getByRole('button', { name: /^End session started/ }).click();
   await giveReasonAndConfirm(page, 'End session');
-  await expect(open.getByRole('row')).toHaveCount(0);
+  // The list holds no session any more: no act to end one is left, and the empty state says so. (Before redesign step R7b the table was replaced by the sentence; the data table keeps its
+  // header and draws the empty state in a row of its own, so the rows are not counted.)
+  await expect(page.getByRole('heading', { name: 'No open sessions' })).toBeVisible();
+  await expect(open.getByRole('button', { name: /^End session started/ })).toHaveCount(0);
   expect((await browser.session()).status).toBe(401);
   expect((await observe(stack.database.name, 'vendor-sessions', vendor.identifier)).at(-1)).toEqual(
     {

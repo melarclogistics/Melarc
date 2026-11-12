@@ -1,0 +1,88 @@
+/*
+ * PageHeader of the kit (design/COMPONENT_PATTERNS.md, *PageHeader, the kit's*): spacious density. The title is 24/30, weight 700, tightened by 0.02em (the
+ * redesign's page title, brief section 8); the count, the freshness line and the actions share the header and wrap below the title when there is no room, so
+ * nothing is hidden on a narrow screen. Every colour, size and time is a token.
+ */
+.ui-page-head {
+  margin-bottom: var(--space-6);
+}
+
+.ui-page-head__trail {
+  margin-bottom: var(--space-2);
+}
+
+.ui-page-head__trail ol {
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-page-head__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+
+.ui-page-head__text {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.ui-page-head__titleline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+}
+
+.ui-page-head .page-heading {
+  margin: 0;
+  font-size: var(--text-heading-lg-size);
+  font-weight: 700;
+  line-height: var(--text-page-title-line-height);
+  letter-spacing: -0.02em;
+}
+
+/* The count the server stated: a quiet figure after the title. A 0 that was read is quieter still, and is still drawn. */
+.ui-page-head__count {
+  color: var(--color-text-muted);
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-heading-sm-line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-page-head__count[data-quiet='true'] {
+  color: var(--color-text-disabled);
+}
+
+.ui-page-head__description {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+}
+
+.ui-page-head__freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* Refresh is a link-like button: it keeps the 24px target (WCAG 2.2) and does not make the line as tall as a control. */
+.ui-page-head__freshness .ui-page-head__refresh {
+  min-height: 1.5rem;
+  padding: 0 var(--space-1);
+  font-size: inherit;
+  font-weight: var(--text-label-md-weight);
+}
+
+.ui-page-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

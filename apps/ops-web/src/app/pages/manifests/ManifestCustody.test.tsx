@@ -15,6 +15,7 @@ import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { OTHER_RIDER_ID, RIDER_ID, riderFixture } from '../../../test-support/rider-fixture';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * The Ops side of a run's custody handover, on `/manifests/{id}` while the run is in progress (S1.25; the contract of S1.24). The custody
@@ -132,8 +133,7 @@ describe('custody: when the section is there', () => {
       KEYS.filter((key) => key !== 'fleet.custody.read'),
     );
 
-    expect(await screen.findByText(/needs the permission/)).toBeVisible();
-    expect(screen.getByText('fleet.custody.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('fleet.custody.read'))).toBeVisible();
     expect(api.requests.some((request) => request.url.includes('run-custody-handovers'))).toBe(
       false,
     );
@@ -191,6 +191,29 @@ describe('custody: opening a handover', () => {
     ).toBeVisible();
   });
 
+  // Break caught (the review of f6cf02b): the handover that was just opened read back (a list and then the handover) to be drawn. The answer is the handover that waits, with the version of its
+  // own acts; the run is read again, once.
+  it('draws the handover it opened from the answer, and reads neither the list nor the handover again', async () => {
+    const { user } = open({
+      [LIST]: none,
+      [INITIATE]: () => json(200, handoverFixture(), etag('h1')),
+    });
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole('radio', { name: /To the hub: Accra Central/ }));
+    await user.type(
+      within(dialog).getByRole('textbox', { name: /Why custody is being handed over/ }),
+      'Unsafe roadside',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Open the handover' }));
+
+    expect(await within(await section()).findByText('Waiting for the receiver')).toBeVisible();
+    expect(sent(LIST)).toHaveLength(1);
+    expect(sent(GET)).toHaveLength(0);
+    expect(sent(READ)).toHaveLength(2);
+    // Its acts carry the version of the answer.
+    expect(screen.getByRole('button', { name: 'Mark the handover as failed' })).toBeVisible();
+  });
+
   it('opens a handover to another rider chosen from the riders of the hub', async () => {
     const { user } = open({
       [LIST]: none,
@@ -240,8 +263,8 @@ describe('custody: opening a handover', () => {
 
   it.each([
     ['STATE_CONFLICT', 409, /A handover cannot be opened now/],
-    ['HUB_SCOPE_VIOLATION', 403, /hub your session does not act in/],
-    ['PERMISSION_DENIED', 403, /fleet\.custody\.initiate/],
+    ['HUB_SCOPE_VIOLATION', 403, /hub your account does not work in/],
+    ['PERMISSION_DENIED', 403, /can’t open a custody handover/],
   ])('tells %s in the officer’s words', async (code, status, words) => {
     const { user } = open({ [LIST]: none, [INITIATE]: () => refusal(status, code) });
     const dialog = await openDialog(user);
@@ -280,7 +303,9 @@ describe('custody: opening a handover', () => {
 
     await section();
     expect(screen.queryByRole('button', { name: 'Open a custody handover' })).toBeNull();
-    expect((await screen.findAllByText('fleet.custody.initiate')).length).toBeGreaterThan(0);
+    expect(
+      (await screen.findAllByText(cannotText('fleet.custody.initiate'))).length,
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -289,6 +314,21 @@ describe('custody: the handover that waits', () => {
     [LIST]: () => waiting(),
     [GET]: () => json(200, handoverFixture(), etag('h1')),
   };
+
+  // Break caught (the review of f6cf02b): the rider read again by every place that names them (the facts, the handover's origin and its destination), each with the devices, and not kept.
+  it('names each rider once, however many places name them', async () => {
+    open({
+      [LIST]: () => waiting({ to_hub_id: null, to_rider_id: OTHER_RIDER_ID }),
+      [GET]: () =>
+        json(200, handoverFixture({ to_hub_id: null, to_rider_id: OTHER_RIDER_ID }), etag('h1')),
+    });
+
+    const handover = await section();
+    expect(await within(handover).findByText('Esi Owusu')).toBeVisible();
+    expect(await within(handover).findByText('Kwame Mensah')).toBeVisible();
+    expect(sent(`GET /ops/riders/${RIDER_ID}`)).toHaveLength(1);
+    expect(sent(`GET /ops/riders/${OTHER_RIDER_ID}`)).toHaveLength(1);
+  });
 
   it('shows where custody is to go, who holds it, and that it stays until it is accepted', async () => {
     open(pending);
@@ -335,6 +375,32 @@ describe('custody: the handover that waits', () => {
     expect(
       await screen.findByText(/The handover is marked as failed\. Custody is where it was\./),
     ).toBeVisible();
+  });
+
+  // Break caught (the review of f6cf02b): the pending handover read again after every act (a list and then the handover: two requests), though the act answered what it is now. A handover that
+  // has failed is none that waits, and the answer says it. The run is read again, once: the same act may have completed it.
+  it('draws no handover from the answer of a failed one, and reads neither the list nor the handover again', async () => {
+    const { user } = open({
+      ...pending,
+      [FAIL]: () =>
+        json(
+          200,
+          handoverFixture({ state: 'FAILED', resolved_at: '2026-11-04T10:30:00Z' }),
+          etag('h2'),
+        ),
+    });
+    await user.click(await screen.findByRole('button', { name: 'Mark the handover as failed' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Mark this handover as failed?' });
+    await user.type(
+      within(dialog).getByRole('textbox', { name: /Why it did not happen/ }),
+      'Receiver never came',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Mark the handover as failed' }));
+
+    expect(await screen.findByText('No handover is waiting')).toBeVisible();
+    expect(sent(LIST)).toHaveLength(1);
+    expect(sent(GET)).toHaveLength(1);
+    expect(sent(READ)).toHaveLength(2);
   });
 
   // Break caught: a run the system completed in the same act left drawn as in progress, with a custody section that no longer applies.

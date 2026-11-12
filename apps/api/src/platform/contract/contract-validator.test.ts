@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
 import { parse } from 'yaml';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { FIXTURE_CONTRACT } from '../../test-support/contract-fixtures.js';
 import {
@@ -57,6 +58,63 @@ describe('the contract as a validator reads it', () => {
       expect(() => {
         real.prepare(id);
       }, id).not.toThrow();
+  });
+
+  // Break caught (run 5, Stage 1.6): a validator "without responses" that still compiles every response schema (the production start paid seconds for validators that nothing
+  // calls), or one that compiles less than the request side (a request that is no longer checked in production). The schemas compiled are counted at the compiler the validator
+  // uses: this contract has one query parameter and one request body, and two responses with a body each and a header with a schema.
+  it('compiles the request side alone when it is made without response validators, and refuses to judge a response', () => {
+    const contract = {
+      openapi: '3.1.0',
+      info: { title: 'Things', version: '1' },
+      components: { schemas: {} },
+      paths: {
+        '/things': {
+          post: {
+            operationId: 'makeThing',
+            parameters: [{ in: 'query', name: 'n', schema: { type: 'string' } }],
+            requestBody: {
+              required: true,
+              content: { 'application/json': { schema: { type: 'object' } } },
+            },
+            responses: {
+              '200': {
+                description: 'made',
+                headers: { 'X-Count': { schema: { type: 'integer' } } },
+                content: { 'application/json': { schema: { type: 'object' } } },
+              },
+              '400': {
+                description: 'refused',
+                content: { 'application/json': { schema: { type: 'object' } } },
+              },
+            },
+          },
+        },
+      },
+    } as unknown as JsonObject;
+    const { Ajv2020 } = createRequire(import.meta.url)('ajv/dist/2020.js') as {
+      Ajv2020: { prototype: { compile: (schema: object) => unknown } };
+    };
+    const compiled = (options?: { responses: boolean }): number => {
+      const spy = vi.spyOn(Ajv2020.prototype, 'compile');
+      try {
+        new ContractValidator(contract, options).prepare('makeThing');
+        return spy.mock.calls.length;
+      } finally {
+        spy.mockRestore();
+      }
+    };
+
+    expect(compiled()).toBe(5);
+    expect(compiled({ responses: true })).toBe(5);
+    expect(compiled({ responses: false })).toBe(2);
+
+    const without = new ContractValidator(contract, { responses: false });
+    // The request side is judged as it always was.
+    expect(without.validateRequest('makeThing', createRequest())).toEqual([]);
+    expect(() => without.validateResponse('makeThing', response())).toThrow(
+      /without response validators/,
+    );
   });
 
   it('knows which operations the contract has', () => {

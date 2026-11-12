@@ -1,4 +1,7 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
+
+import { databaseShardOption } from './test/database-shard.js';
+import { TIMING_SENSITIVE_TESTS, skipsTimingTests } from './test/timing-sensitive-tests.js';
 
 /**
  * Four projects, run in this order:
@@ -46,6 +49,9 @@ export default defineConfig({
     pool: 'threads',
     maxWorkers: TEST_WORKERS,
     passWithNoTests: false,
+    // The database job of CI runs one shard of the database tests (`MELARC_DB_SHARD=<shard>/<shards>`, test/database-shard.ts): the whole
+    // suite is longer than a job may last. Not set anywhere else, so every file runs in the gate and on a developer's machine.
+    ...databaseShardOption(process.env),
     testTimeout: 20_000,
     hookTimeout: 20_000,
     projects: [
@@ -93,6 +99,11 @@ export default defineConfig({
         test: {
           name: 'database-alone',
           include: ['test/database/alone/*.test.ts'],
+          // The files whose assertions are wall-clock time are left out of the run of a pull request and of a push to main (`MELARC_SKIP_TIMING_TESTS=1`, set by the
+          // job in .github/workflows/ci.yml) and run in the nightly run, in a manual run and in the gate: test/timing-sensitive-tests.ts says why.
+          exclude: skipsTimingTests(process.env)
+            ? [...configDefaults.exclude, ...TIMING_SENSITIVE_TESTS]
+            : configDefaults.exclude,
           globalSetup: ['test/database/support/global-setup.ts'],
           setupFiles: [
             'test/database/support/failure-evidence-setup.ts',

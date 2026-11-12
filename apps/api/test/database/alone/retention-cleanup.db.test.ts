@@ -1,4 +1,4 @@
-// Runs alone: it bounds a cleanup that must not wait behind a lock at 1.5 seconds of wall-clock time.
+// Runs alone: its cleanups work on the one queue table and its replay records, and one of them loads enough rows to read the index, which files beside it would disturb.
 import { randomUUID } from 'node:crypto';
 
 import { sql } from 'drizzle-orm';
@@ -270,11 +270,11 @@ describe('the retention cleanup of delivery jobs (S0.19)', () => {
         locked.id,
       ]);
 
-      const started = Date.now();
       const report = await cleanup(1).runOnce();
 
+      // It took the next job and did not queue behind the lock: a cleanup that waited would never return, because the holder lets go only after it has. How long it
+      // took is asserted by retention-cleanup.timing.db.test.ts.
       expect(report.jobsExpired).toBe(1);
-      expect(Date.now() - started).toBeLessThan(1_500);
       expect((await rowOf(other.id)).state).toBe('EXPIRED');
       expect((await rowOf(locked.id)).state).toBe('QUEUED');
       await holder.query('rollback');

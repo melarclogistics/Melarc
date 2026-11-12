@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { ApiException } from '../http/api-exception.js';
-import { effectiveScope } from './effective-scope.js';
+import { hubOutsideStaffGrant, type AuthorizedRequest } from './authorized-request.js';
+import { effectiveScope, scopeExcludesHub } from './effective-scope.js';
 import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
 import {
   meetsTier,
@@ -189,6 +190,59 @@ describe('the hub scope an operation runs under (SECURITY_DESIGN.md sections 14.
     expect(scope.authorizedHubIds).toEqual([HUB_A]);
     expect(Object.isFrozen(scope)).toBe(true);
     expect(Object.isFrozen(scope.authorizedHubIds)).toBe(true);
+  });
+});
+
+describe('a hub that a grant does not reach (task A1; AC-HUBF-05; GBT-GS14)', () => {
+  const HUB_A = '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e01';
+  const HUB_B = '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e0b';
+  const own = effectiveScope({ hubScope: 'own' }, [HUB_A]);
+  const everywhere = effectiveScope({ hubScope: 'all' }, []);
+  const nowhere = effectiveScope({ hubScope: 'none' }, [HUB_A]);
+
+  // Break caught: a hub inside the set taken for one outside it (a read of the officer's own hub answered empty), one outside it taken for inside
+  // (the statement runs and the time tells a caller the hub exists), or the comparison made on text that differs in case (a UUID in capitals is the
+  // same hub, and the context writes the set in lower case).
+  it('excludes a hub that is not in the set, in either case, and no hub that is', () => {
+    expect(scopeExcludesHub(own, HUB_B)).toBe(true);
+    expect(scopeExcludesHub(own, HUB_B.toUpperCase())).toBe(true);
+    expect(scopeExcludesHub(own, HUB_A)).toBe(false);
+    expect(scopeExcludesHub(own, HUB_A.toUpperCase())).toBe(false);
+    const upper = effectiveScope({ hubScope: 'own' }, [HUB_A.toUpperCase()]);
+    expect(scopeExcludesHub(upper, HUB_A)).toBe(false);
+  });
+
+  // Break caught: an empty set read as "all hubs" (GBT-B5) or an all-hub grant read as a set: the first would run a statement for a hub nothing
+  // can reach; the second would answer a Platform Admin empty for a hub it may read.
+  it('excludes every hub from a set that is empty and none from the all-hub mode', () => {
+    expect(scopeExcludesHub(effectiveScope({ hubScope: 'own' }, []), HUB_A)).toBe(true);
+    expect(scopeExcludesHub(nowhere, HUB_A)).toBe(true);
+    expect(scopeExcludesHub(everywhere, HUB_A)).toBe(false);
+    expect(scopeExcludesHub(everywhere, HUB_B)).toBe(false);
+  });
+
+  const asked = (principalType: 'STAFF' | 'VENDOR' | 'RIDER', scope = own): AuthorizedRequest =>
+    ({
+      session: { principalType, principalId: '11111111-1111-4111-8111-111111111111' },
+      scope,
+    }) as unknown as AuthorizedRequest;
+
+  // Break caught: the shortcut taken for a Vendor or a Rider, whose rows are scoped by what they own and not by a hub: their `scope` is the set of
+  // hubs of their grant (often empty), which says nothing about the rows they may read, so a read answered empty on it would hide their own
+  // requests and runs.
+  it('is true for a staff session alone: a vendor and a rider are scoped by what they own', () => {
+    expect(hubOutsideStaffGrant(asked('STAFF'), HUB_B)).toBe(true);
+    expect(hubOutsideStaffGrant(asked('VENDOR'), HUB_B)).toBe(false);
+    expect(hubOutsideStaffGrant(asked('RIDER'), HUB_B)).toBe(false);
+    expect(hubOutsideStaffGrant(asked('VENDOR', nowhere), HUB_B)).toBe(false);
+    expect(hubOutsideStaffGrant(asked('RIDER', nowhere), HUB_B)).toBe(false);
+  });
+
+  // Break caught: the grant of the wrong key (the session's widest, or its first) judged instead of the grant of the decision's own key.
+  it('judges the scope of the decision it is given, whatever else the session holds', () => {
+    expect(hubOutsideStaffGrant(asked('STAFF', own), HUB_B)).toBe(true);
+    expect(hubOutsideStaffGrant(asked('STAFF', everywhere), HUB_B)).toBe(false);
+    expect(hubOutsideStaffGrant(asked('STAFF', own), HUB_A)).toBe(false);
   });
 });
 

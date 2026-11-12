@@ -22,7 +22,7 @@ import type { AuditEventCode } from './audit-event-codes.js';
  *   and is recorded in the plan as such.
  */
 
-/** The events the catalogue makes enhanced, wherever they sit: 79 of the 200, read from the rows of `contracts/audit.md`. */
+/** The events the catalogue makes enhanced, wherever they sit: 80 of the 201, read from the rows of `contracts/audit.md`. */
 export const ENHANCED_CODES = [
   'pickup.cancellation_charge.waived',
   'pickup.handshake.fallback_override',
@@ -82,6 +82,8 @@ export const ENHANCED_CODES = [
   'staff.identity.suspended',
   'staff.identity.offboarded',
   'permission.bundle.assigned',
+  'permission.bundle.widened',
+  'permission.fixed_policy.widened',
   'vendor.organization.approved',
   'vendor.organization.rejected',
   'vendor.allowance.enabled',
@@ -319,6 +321,22 @@ export const EVENT_REQUIREMENTS: Readonly<Partial<Record<AuditEventCode, EventRe
   'staff.identity.approved': { relatedIdsAnyOf: [['created_by', 'approved_by']] },
   // 5.6: "A pending profile was refused, with reason".
   'staff.identity.rejected': { reason: true },
+  // 5.6: "written by the primitive ... by SYSTEM with no actor"; the facts it names, under the table: the bundle and the revision it was raised
+  // to in `related_ids` (with the floor), and the grants that changed as the `before_after` (required of an enhanced change of state by
+  // `diffRuleFor`). The bundle belongs to no hub, so no hub context is required.
+  'permission.bundle.widened': {
+    relatedIdsAnyOf: [['bundle_id', 'revision', 'reduction_floor']],
+    actorTypes: ['SYSTEM'],
+  },
+  // 5.6, the same treatment for the fixed policy of the Vendor and the Rider (task A3.4): written by `melarc.change_fixed_policy` when a release declares the
+  // audience's compiled rules wider, by SYSTEM; the audience, the revision it was raised to and the minimum, which a widening does not move, are in
+  // `related_ids`, and the revision before and after is the `before_after` (required of an enhanced change of state by `diffRuleFor`). The policy has no
+  // identifier (its key is the audience), so the object is named by its type alone.
+  'permission.fixed_policy.widened': {
+    relatedIdsAnyOf: [['principal_type', 'revision', 'minimum_revision']],
+    actorTypes: ['SYSTEM'],
+    objectMayBeAbsent: true,
+  },
   // 5.4: for an unknown principal the attempted identifier is "a hash and the identifier's kind", and there is no object to name.
   'auth.session.failed': { objectMayBeAbsent: true },
   // 5.4: "the principal only where a session identified one: a pre-session refusal has none and records none, so no principal that

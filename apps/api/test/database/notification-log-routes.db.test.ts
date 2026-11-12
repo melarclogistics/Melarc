@@ -179,22 +179,27 @@ describe('listNotifications: what a staff reader sees', () => {
   });
 
   // Break caught: a bundle the catalogue gives notification.read to (A S P) left without it.
-  it.each([
-    ['Senior Ops', BUNDLE_IDS.seniorOps],
-    ['Platform Admin with a primary hub', BUNDLE_IDS.platformAdmin],
-  ])('shows %s the same log at its hub', async (_who, bundle) => {
-    const reader = await routes.actor(bundle, HUB_A);
+  it('shows Senior Ops the same log at its hub', async () => {
+    const reader = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
     const answer = await reader.client.get(LIST);
     expect(answer.status).toBe(200);
     expect(idsOf(answer)).toHaveLength(8);
   });
 
-  // Break caught: a Platform Admin without a primary hub reading a hub through an own-hub grant (the bootstrap administrator reaches none).
-  it('shows a Platform Admin with no primary hub nothing, as its own-hub grant reaches no hub', async () => {
-    const admin = await routes.platformAdmin();
-    const answer = await admin.client.get(LIST);
-    expect(answer.status).toBe(200);
-    expect(idsOf(answer)).toEqual([]);
+  // Break caught (task P1, AC-SLICE-001-83): the Platform Admin's grant of the key left at its own hub, so that an administrator with no
+  // primary hub (the bootstrap one) reads no log, and one with a hub only that hub's. The key is a grant of all hubs.
+  it('shows a Platform Admin the messages of every hub, with a primary hub or none', async () => {
+    for (const admin of [
+      await routes.actor(BUNDLE_IDS.platformAdmin, HUB_A),
+      await routes.platformAdmin(),
+    ]) {
+      const answer = await admin.client.get(LIST);
+      expect(answer.status).toBe(200);
+      expect(idsOf(answer)).toHaveLength(10);
+      expect(idsOf(answer)).toEqual(
+        expect.arrayContaining([id('elsewhere'), id('elsewhereQueued')]),
+      );
+    }
   });
 });
 

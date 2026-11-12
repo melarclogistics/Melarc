@@ -172,8 +172,9 @@ export async function selfServiceStaffRecovery({
 
 /**
  * Rows 10a and 11 (vendor) and AC-SLICE-000-15, -17, -22, -23: the demonstration vendor is set up from the link a Senior Ops of its hub sends
- * from the Ops screens (a profile the two administrators make for the purpose, since the re-issue is a hub's act and neither of them has a
- * hub); the vendor recovers its secret itself, and then a Platform Admin starts its recovery from the account's page. Each completion
+ * from the Ops screens (a profile the two administrators make for the purpose: the officer of the vendor's hub is who sends the link, though
+ * a Platform Admin, who reaches every hub, could); the vendor recovers its secret itself, and then a Platform Admin starts its recovery from
+ * the account's page. Each completion
  * replaces the secret, ends every session and revokes every browser but the one completing it, which alone signs in with the new secret. The
  * account's browsers are the organisation's, never a person's; Senior Ops holds no key to recover a vendor.
  */
@@ -184,8 +185,8 @@ export async function vendorRecovery({ page, context, stack }: JourneyContext): 
   const api = stack.apiOrigin;
   await addVendorFixture(stack.database.name);
 
-  // The re-issue is a hub's act (vendor.organization.approve, own hub, for a Platform Admin too: permissions.md), and neither bootstrap
-  // administrator has a hub: a Senior Ops of the demonstration vendor's hub is made the way every profile is, and sends the link.
+  // The re-issue is a hub's act (vendor.organization.approve): a Senior Ops of the demonstration vendor's hub is made the way every profile is,
+  // and sends the link. A Platform Admin, who reaches every hub (task P1, 5 November 2026: permissions.md section 5), could as well.
   const ama = introduce(world, 'ama.accra', 'Ama Accra');
   await signInAs(page, ada);
   await createProfile(page, { ...ama.person, role: 'Senior Ops', hub: FIXTURE_HUB });
@@ -198,26 +199,17 @@ export async function vendorRecovery({ page, context, stack }: JourneyContext): 
   await enrolAuthenticator(page, ama);
   await clearBrowser(context);
 
-  // A Platform Admin with no hub is not the hub's officer: the server refuses the re-issue (the page cannot tell, as it lists keys only).
+  // A Platform Admin with no hub of its own reaches every hub (the grants it holds are of all hubs, task P1): it finds the demonstration
+  // vendor's account in the list and reads it. That it may also re-issue the setup link (which a hubless administrator was refused before
+  // P1) is proved in the API tests; here the officer of the hub does it, as the rest of the journey needs the link in that officer's hands.
   await signInAs(page, bola);
   const fixture = (await fromPage(page, 'GET', '/api/v1/ops/vendors')).body as {
     items: { id: string }[];
   };
   const fixtureId = fixture.items[0]?.id ?? '';
+  expect(fixtureId).not.toBe('');
   const read = await fromPage(page, 'GET', `/api/v1/ops/vendors/${fixtureId}`);
-  const notTheHubs = await fromPage(
-    page,
-    'POST',
-    `/api/v1/ops/vendors/${fixtureId}/credential/setup/reissue`,
-    {
-      body: { reason_code: await reasonCodeFor(page, 'reissueVendorCredentialSetup') },
-      headers: { 'if-match': read.etag ?? '' },
-    },
-  );
-  expect([notTheHubs.status, (notTheHubs.body as { code?: string }).code]).toEqual([
-    403,
-    'HUB_SCOPE_VIOLATION',
-  ]);
+  expect(read.status).toBe(200);
   await clearBrowser(context);
 
   // The officer finds the account and sends its first setup link: it has no secret, so a re-issue is offered and a recovery is not.

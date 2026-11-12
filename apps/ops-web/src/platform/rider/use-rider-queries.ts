@@ -61,6 +61,36 @@ export function useRiders(params: RiderListParams): UseQueryResult<RiderPageView
   });
 }
 
+/**
+ * A rider's name, for the pages and the dialogs that name the rider (a pickup run's rider, the one a custody handover is to or from): **read once and kept while a page that names the rider is
+ * mounted**. `useRider` is the rider's own screens' read, not kept (`gcTime: 0`) so that the version an act takes is the one just read, and every component that named the rider read it again,
+ * with its devices (the review of f6cf02b: sixteen reads in the minute of a journey). A name carries no version and no act takes it, so it is never stale while it is wanted
+ * (`staleTime: Infinity`) and every component that names the rider shares the one read; but it is let go of when the last of them goes (`gcTime: 0`), so that the next visit reads it again and a rider
+ * renamed since is named as they are (the Product Owner's review of 198e5be: it was kept for the session, on a key shared by every page).
+ */
+export function useRiderName(id: string, enabled = true): UseQueryResult<string> {
+  const client = useApiClient();
+  return useQuery({
+    queryKey: ['riders', 'name', id],
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    queryFn: async () => {
+      const answer = answerOf(
+        await client.GET('/ops/riders/{riderId}', { params: { path: { riderId: id } } }),
+      );
+      const detail = parseRiderDetail(answer.data);
+      if (detail?.rider.id.toLowerCase() !== id.toLowerCase()) {
+        throw unexpectedResponse(answer.status);
+      }
+      return detail.rider.full_name;
+    },
+  });
+}
+
 /** A rider, the devices the rider has held and the version the next act on the rider takes: the `ETag` of this read, exactly as sent. */
 export interface RiderRecord extends RiderDetailView {
   readonly etag: string;

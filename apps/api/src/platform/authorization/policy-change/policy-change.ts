@@ -5,6 +5,7 @@ import { GRANT_TIERS, HUB_SCOPES, OWNERSHIP_SCOPES } from '../../database/schema
  * database functions, `melarc.change_role_bundle` and `melarc.change_fixed_policy`, and they are the **only** way a bundle, its
  * grants or a fixed policy changes after the seed: the runtime logins hold `SELECT` on these tables and no more, and the functions
  * carry the lock, the diff, the writes, the ending of the sessions below a raised floor and their audit events as **one transaction**.
+ * A bundle's addition ends no session and writes its own event, `permission.bundle.widened` (migration 0078; audit.md section 5.6).
  *
  * This file does not decide anything the functions decide. It checks the shape of what it sends, sends it as parameters (nothing
  * of a caller's is part of a statement), sets the transaction's own deadlines, and gives the database's refusals names.

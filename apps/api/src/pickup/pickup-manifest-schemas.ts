@@ -94,7 +94,7 @@ export const PICKUP_STOP_SCHEMA = described(PICKUP_STOP);
 
 export const PICKUP_MANIFEST_SCHEMA = described({
   type: 'object',
-  required: ['id', 'code', 'state', 'service_date', 'responsible_hub_id'],
+  required: ['id', 'code', 'state', 'service_date', 'responsible_hub_id', 'created_at'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     code: { type: 'string' },
@@ -110,6 +110,7 @@ export const PICKUP_MANIFEST_SCHEMA = described({
     started_at: { type: ['string', 'null'], format: 'date-time' },
     stops: { type: 'array', items: PICKUP_STOP },
     completed_at: { type: ['string', 'null'], format: 'date-time' },
+    created_at: { type: 'string', format: 'date-time' },
   },
 });
 

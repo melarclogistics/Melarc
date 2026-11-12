@@ -17,6 +17,7 @@ import { RequiresPermission } from '../platform/routes/access-declaration.js';
 import { PICKUP_REQUEST_PAGE_SCHEMA, PICKUP_REQUEST_SCHEMA } from './pickup-request-schemas.js';
 import { ETAG_HEADERS } from '../platform/http/contract-headers.js';
 import { MAX_PAGE_SIZE } from '../platform/http/pagination.js';
+import { CUTOFF_EXCEPTION_STATES } from './pickup-request.schema.js';
 import { EXCEPTION_STATES } from './pickup-requests.service.js';
 import { PICKUP_REQUESTS_SERVICE } from './pickup-requests-providers.js';
 import type {
@@ -43,6 +44,8 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
   const serviceDate = take('service_date');
   const manifested = take('manifested');
   const exceptionState = take('one_package_exception_state');
+  const cutoffExceptionState = take('cutoff_exception_state');
+  const hubId = take('hub_id');
   const size = take('page_size');
   const pageToken = take('page_token');
   return {
@@ -50,6 +53,8 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
     ...(serviceDate === undefined ? {} : { serviceDate }),
     ...(manifested === undefined ? {} : { manifested }),
     ...(exceptionState === undefined ? {} : { exceptionState }),
+    ...(cutoffExceptionState === undefined ? {} : { cutoffExceptionState }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
   };
@@ -58,9 +63,10 @@ function filterOf(query: Record<string, unknown>): PickupListFilter {
 /**
  * `GET /pickup-requests` and `GET /pickup-requests/{id}` (S1.13): the reads of pickup requests, for the queue and for the ETag a
  * mutation takes. Both require `pickup.read` (Ops Staff, Senior Ops and Platform Admin at their hubs; a Vendor for its own organisation),
- * serve the Ops Portal and the Vendor app, and take a browser session with no synchronizer token (a safe read). A Rider also holds the
- * key, for its assigned stops, and is shown no request: the registry gives it none, so row-level security answers it an empty page and
- * a request it names as one that does not exist.
+ * serve the Ops Portal and the Vendor app, and take a browser session with no synchronizer token (a safe read). **They are not served to a
+ * Rider** (task A3.1 of the audit follow-up, the Product Owner's decision of 7 November 2026; surfaces/rider-android.md: "Not a rider act ...
+ * the rider reads the stop", and the registry gives a Rider no request): a Rider holds `pickup.read` for its assigned stops, but these routes
+ * name neither the Rider surface nor the Rider's bearer credential, so a Rider's bearer is `SESSION_INVALID` here, as it is on every staff read.
  *
  * The read of one names its record by the path: whether the caller can see it is decided before the request is validated,
  * `HUB_SCOPE_VIOLATION` by the scope probe for a staff caller on a request of another hub, and `NOT_FOUND` for everyone else, by one
@@ -85,16 +91,22 @@ export class PickupRequestsController {
     schema: { type: 'string', enum: [...EXCEPTION_STATES] },
   })
   @ApiQuery({
+    name: 'cutoff_exception_state',
+    required: false,
+    schema: { type: 'string', enum: [...CUTOFF_EXCEPTION_STATES] },
+  })
+  @ApiQuery({ name: 'hub_id', required: false, schema: { type: 'string', format: 'uuid' } })
+  @ApiQuery({
     name: 'page_size',
     required: false,
     schema: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE, default: 25 },
   })
   @ApiQuery({ name: 'page_token', required: false, schema: { type: 'string' } })
   @ApiResponse({ status: 200, schema: PICKUP_REQUEST_PAGE_SCHEMA })
-  @DescribeSecurity(['browserSession'], ['riderSession'])
+  @DescribeSecurity(['browserSession'])
   @DescribeErrors(ErrorCode.PermissionDenied, ErrorCode.SessionInvalid, ErrorCode.ValidationFailed)
   @RequiresPermission('pickup.read', {
-    surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+    surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
     activity: 'qualifying',
   })
   list(
@@ -114,7 +126,7 @@ export class PickupRequestsController {
   @ContractOperation('getPickupRequest')
   @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
   @ApiResponse({ status: 200, schema: PICKUP_REQUEST_SCHEMA, headers: ETAG_HEADERS })
-  @DescribeSecurity(['browserSession'], ['riderSession'])
+  @DescribeSecurity(['browserSession'])
   @DescribeErrors(
     ErrorCode.HubScopeViolation,
     ErrorCode.NotFound,
@@ -123,7 +135,7 @@ export class PickupRequestsController {
     ErrorCode.ValidationFailed,
   )
   @RequiresPermission('pickup.read', {
-    surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+    surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
     activity: 'qualifying',
     record: { entity: 'pickup_request', param: 'id' },
   })

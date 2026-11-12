@@ -19,7 +19,7 @@ import { SETUP_MFA_PATH, SIGN_IN_PATH } from '../../../platform/session/paths';
 import { GrantProblem } from './GrantProblem';
 import { NoReferrer } from './NoReferrer';
 import { FocusedRegion, FormNotice, noticeOf, refusesField, type Notice } from './notice';
-import { usePreSignInFlow } from './pre-sign-in-flow';
+import { ENROLLING_STATE, usePreSignInFlow } from './pre-sign-in-flow';
 
 const OPERATION = 'completeStaffCredentialSetup';
 
@@ -93,7 +93,7 @@ export function SetupCredentialPage() {
       if (!held) return 'failed';
       setLeaving(true);
       grant.clear();
-      void navigate(SETUP_MFA_PATH, { replace: true });
+      void navigate(SETUP_MFA_PATH, { replace: true, state: ENROLLING_STATE });
       return 'accepted';
     } catch (error) {
       // A failure of a flow that was called off is as little the screen's as its success (see above).

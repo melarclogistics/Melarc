@@ -7,7 +7,7 @@ import type { CopyRule } from './problem-copy';
  */
 const DELIVERY_FAILED =
   'Nothing was changed. This account has no channel a link can be sent to, or the message channel is not available yet. You can try again once it is.';
-const OTHER_HUB = 'This account belongs to a vendor of a hub your session does not act in.';
+const OTHER_HUB = 'This account belongs to a vendor of a hub your account does not work in.';
 
 export const VENDOR_COPY: readonly CopyRule[] = [
   // The reads.
@@ -25,7 +25,7 @@ export const VENDOR_COPY: readonly CopyRule[] = [
   {
     operation: 'reissueVendorCredentialSetup',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to send a vendor a setup link (vendor.organization.approve).',
+    text: 'Your account can’t send a vendor a setup link. Ask an administrator for access.',
   },
   { operation: 'reissueVendorCredentialSetup', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB },
   {
@@ -48,7 +48,7 @@ export const VENDOR_COPY: readonly CopyRule[] = [
   {
     operation: 'recoverVendorCredential',
     code: 'PERMISSION_DENIED',
-    text: 'Your session does not hold the permission to start a vendor’s recovery (vendor.credential.recover).',
+    text: 'Your account can’t start a vendor’s recovery. Ask an administrator for access.',
   },
   {
     operation: 'recoverVendorCredential',

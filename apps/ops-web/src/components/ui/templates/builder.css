@@ -1,0 +1,206 @@
+/*
+ * Builder (design/COMPONENT_PATTERNS.md, *Builder*; PRODUCT_DESIGN_DIRECTION section 6.4): the run's own fields above two panes, the pool and the run. Where the page's own room has 60rem (a container query, so that enlarged text is counted) the panes are side by
+ * side and the run (24rem) stays in view beside the pool; below that (the hub-floor tablet at 768px among it) they are one column, the pool first, with a button in the pool's header
+ * that goes to the run. A refusal and a stale flag are on the row they name, in words with an icon, never by colour alone. Every size is a token or a rem.
+ */
+.ui-builder {
+  container: builder / inline-size;
+  min-width: 0;
+}
+
+.ui-builder__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.ui-builder__setup {
+  max-width: 40rem;
+}
+
+.ui-builder__note {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.ui-builder__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@container builder (min-width: 60rem) {
+  .ui-builder__panes {
+    grid-template-columns: minmax(0, 1fr) 24rem;
+  }
+
+  /*
+   * The run stays in view beside the pool, **below the top bar** (`--sticky-top`, base.css), and is bounded to the room the window has there (`--sticky-room`): its card is a column
+   * whose body scrolls inside it (the rows chosen and the entries the run asks for beside them, such as a reason for each carried-over request), and its actions stay at the foot
+   * of the card, so that the one Create and the reasons are always in reach however long the run is.
+   */
+  .ui-builder__run {
+    position: sticky;
+    top: var(--sticky-top);
+    display: flex;
+    flex-direction: column;
+    max-height: var(--sticky-room);
+  }
+
+  .ui-builder__run > .ui-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .ui-builder__run .ui-panel__body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* The room around what scrolls is the ring's: a focus ring at the edge of a box that scrolls would be cut. */
+  .ui-builder__run-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: calc(-1 * var(--space-2));
+    padding: var(--space-2);
+    overflow-y: auto;
+  }
+
+  /* Beside the pool the run is in view: the way to jump to it is only for the one-column layout. */
+  .ui-builder__to-run {
+    display: none;
+  }
+}
+
+/* The way to the run, above the pool's rows. Its words are the page's and may be long: they wrap. */
+.ui-builder__to-run {
+  margin: 0 0 var(--space-3);
+}
+
+.ui-builder__to-run button {
+  height: auto;
+  min-height: var(--control-height-md);
+  text-align: start;
+  white-space: normal;
+}
+
+.ui-builder__pool,
+.ui-builder__run {
+  min-width: 0;
+}
+
+.ui-builder__rule {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-builder__toolbar {
+  margin-bottom: var(--space-3);
+}
+
+.ui-builder__run-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.ui-builder__summary {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+}
+
+.ui-builder__empty {
+  margin: var(--space-3) 0;
+  color: var(--color-text-secondary);
+}
+
+.ui-builder__run-list {
+  display: flex;
+  flex-direction: column;
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-builder__run-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--color-border-subtle);
+}
+
+.ui-builder__run-row:first-child {
+  border-block-start: 0;
+}
+
+.ui-builder__run-text {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ui-builder__run-detail {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-builder__run-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* The note names its row: an icon and the words (a refusal in the danger colour, a stale row in the warning one), and the row's rule is the same colour. */
+.ui-builder__run-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-builder__run-note[data-kind='refusal'] {
+  color: var(--color-status-danger-foreground);
+}
+
+.ui-builder__run-note[data-kind='stale'] {
+  color: var(--color-status-warning-foreground);
+}
+
+.ui-builder__run-row[data-refused='true'] {
+  border-inline-start: 2px solid var(--color-status-danger-border);
+  padding-inline-start: var(--space-3);
+}
+
+.ui-builder__run-row[data-stale='true']:not([data-refused='true']) {
+  border-inline-start: 2px solid var(--color-status-warning-border);
+  padding-inline-start: var(--space-3);
+}
+
+/* The run's own footer: the actions, set off from the rows by a rule. Where the pane scrolls inside (60rem and up) the rows' box scrolls and the footer stays. */
+.ui-builder__footer {
+  flex: none;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.ui-builder__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}

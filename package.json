@@ -12,7 +12,8 @@
     "build": "turbo run build",
     "typecheck": "pnpm run typecheck:root && turbo run typecheck",
     "typecheck:root": "tsc --project tsconfig.json",
-    "lint": "node --max-old-space-size=6144 ./node_modules/eslint/bin/eslint.js . --max-warnings 0",
+    "lint": "turbo run lint --concurrency=1 && pnpm run lint:root",
+    "lint:root": "node --max-old-space-size=2048 ./node_modules/eslint/bin/eslint.js scripts eslint.config.mjs apps/attestation-verifier/fixtures --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "api-client:generate": "pnpm --filter @melarc/api-client run generate",
@@ -40,7 +41,7 @@
     "test:db": "turbo run test:db",
     "test:e2e": "turbo run test:e2e",
     "test:e2e:https": "turbo run test:e2e:https",
-    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-revision.test.ts scripts/ci-workflow.test.ts scripts/browser-shards.test.ts scripts/https-shards.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/design-tokens.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts scripts/test-inventory.test.ts scripts/dependency-policy.test.ts scripts/gitignore.test.ts scripts/eslint-rules.test.ts scripts/markdown-links.test.ts scripts/repository-shape.test.ts scripts/shell-bundles.test.ts scripts/gate.test.ts scripts/affected.test.ts scripts/verifier.test.ts scripts/verifier-process.test.ts scripts/verifier-provenance.test.ts scripts/slice-000-citations.test.ts scripts/security-matrix-rows.test.ts"
+    "test:root": "node --test scripts/workspace-pins.test.ts scripts/turbo-config.test.ts scripts/ci-aggregate.test.ts scripts/ci-plan.test.ts scripts/ci-revision.test.ts scripts/ci-migration-base.test.ts scripts/ci-workflow.test.ts scripts/browser-shards.test.ts scripts/https-shards.test.ts scripts/db-shards.test.ts scripts/design-lifecycle.test.ts scripts/setup-env.test.ts scripts/infra-check.test.ts scripts/package-source.test.ts scripts/design-contrast.test.ts scripts/design-tokens.test.ts scripts/local-setup.test.ts scripts/agent-docs.test.ts scripts/test-inventory.test.ts scripts/dependency-policy.test.ts scripts/gitignore.test.ts scripts/eslint-rules.test.ts scripts/markdown-links.test.ts scripts/repository-shape.test.ts scripts/shell-bundles.test.ts scripts/gate.test.ts scripts/affected.test.ts scripts/verifier.test.ts scripts/verifier-process.test.ts scripts/verifier-provenance.test.ts scripts/slice-000-citations.test.ts scripts/security-matrix-rows.test.ts scripts/shadcn-wiring.test.ts scripts/migration-immutability.test.ts scripts/lint-coverage.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

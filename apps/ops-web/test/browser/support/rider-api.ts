@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the rider screens (S0.60) put in place of the API. A small, stateful stand-in for the operations the four screens
  * use: registering a first device makes a grant and nothing else (the rider's record changes only when the handset finishes, which a test says
@@ -436,6 +438,7 @@ export async function stubRiderApi(page: Page, initial: World = world()): Promis
     },
   };
   await page.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const headers = request.headers();

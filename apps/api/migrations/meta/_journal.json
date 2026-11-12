@@ -519,6 +519,48 @@
       "when": 1793840773748,
       "tag": "0073_review_closeout_handshake_ceiling_extension",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793906342549,
+      "tag": "0074_queue_count_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793933269661,
+      "tag": "0075_platform_admin_every_hub",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1793964177333,
+      "tag": "0076_pickup_request_phone_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793970247465,
+      "tag": "0077_platform_admin_device_replacement",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794036498097,
+      "tag": "0078_bundle_widening_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794093380850,
+      "tag": "0079_fixed_policy_widening_audit",
+      "breakpoints": true
     }
   ]
 }

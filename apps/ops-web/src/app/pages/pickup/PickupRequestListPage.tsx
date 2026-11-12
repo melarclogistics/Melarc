@@ -1,35 +1,52 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { PageHeader } from '../../../components/PageHeader';
-import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { Field } from '../../../components/ui/field/Field';
+import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
 import {
-  QueueFilters,
-  QueuePanel,
-  QueueTable,
-} from '../../../components/ui/queue-table/QueueTable';
+  QueueWorkspace,
+  type QueueEmptiness,
+  type QueueResult,
+  type QueueWorkspaceHandle,
+} from '../../../components/ui/templates/QueueWorkspace';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
-import { ReadState, type ReadQuery } from '../../../components/ui/read-state/ReadState';
-import { Select } from '../../../components/ui/select/Select';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { OperationFailure } from '../../../platform/api/api-response';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
+import type { ConfirmedPickup } from '../../../platform/pickup/pickup-commands';
 import {
   calendarDateOf,
   PICKUP_STATES,
-  type PickupRequestPageView,
+  type CutoffExceptionState,
   type PickupState,
 } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
-import { usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
+import {
+  pickupRequestKey,
+  usePickupRequest,
+  usePickupRequests,
+  type PickupRecord,
+} from '../../../platform/pickup/use-pickup-queries';
+import { refusalText } from '../../../platform/problem/capability-words';
+import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
+import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
+import { writeAnswer } from '../../../platform/query/write-answer';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
-import { PICKUP_STATE_MAP, PICKUP_STATE_ORDER } from './pickup-presentation';
-import { QUEUE_COLUMNS, QueueCard, queueFactsOf } from './pickup-queue-view';
-import { requestOfClick, restorePlace, searchOf } from './queue-return';
+import { PICKUP_STATE_MAP, PICKUP_STATE_ORDER, serviceDateText } from './pickup-presentation';
+import { PickupQueuePanel, useConfirmedNews } from './PickupQueuePanel';
+import {
+  openLabelOf,
+  QUEUE_COLUMNS,
+  QueueCard,
+  queueFactsOf,
+  type QueueFacts,
+} from './pickup-queue-view';
+import { isUnclaimed, requestOfClick, restoreQueuePlace, searchOf } from './queue-return';
 import './pickup-pages.css';
 
 /** A state from the address, or nothing: an address is the person's to edit, and a value that is not a state is no filter. */
@@ -37,61 +54,81 @@ const stateOf = (text: string | null): PickupState | undefined =>
   PICKUP_STATES.find((state) => state === text);
 
 /**
+ * The cut-off decision from the address (`?cutoff=PENDING_OPS_REVIEW`), or nothing. The landing sends the late bookings here with it (task C1.1,
+ * `AC-QSUM-11`); the one value the page offers is the one that is somebody's work, and any other is no filter, like any value the person edits in.
+ * **The late bookings are the confirmed requests whose decision is pending** (what the landing counts): the filter is a refinement of the
+ * Confirmed state and is no filter under another, because a request cancelled after it was raised keeps the decision it had and nothing is left
+ * to decide on it (the review of C1.1).
+ */
+const cutoffOf = (
+  text: string | null,
+  state: PickupState | undefined,
+): CutoffExceptionState | undefined =>
+  state === 'CONFIRMED' && text === 'PENDING_OPS_REVIEW' ? text : undefined;
+
+/**
  * Whether a date the date field gave is one a person has finished typing. The field gives each whole date on the way to the one meant (the year
  * 2, then 20, then 202, then 2026); a year of fewer than four figures is one still being typed, and is not asked of the server.
  */
 const isFinishedDate = (date: string): boolean => Number(date.slice(0, 4)) >= 1000;
 
+/** The words of the late-bookings filter, as its chip says them. */
+const LATE_BOOKINGS = 'Only late bookings waiting for a cut-off decision';
+
+/** The views of the queue: every request, and each state a request moves through, in the order it moves. */
+const ALL_VIEW = 'all';
+
+/** What the queue says when it could not be read again after an act and keeps the rows it had: they may be out of date. */
+const STALE_QUEUE =
+  'The pickup requests could not be read again, so these rows may be out of date.';
+
 /**
- * What the page says of its last check, in a line: that one is under way, when the last one that worked was, or that the last one failed and
- * when the one before it worked. Nothing before any read of this page has worked. The time is the moment this page's read was answered (the
- * browser's clock, as the portal shows time) and says nothing of the rest of the queue: a read of another filter or another page is another
- * query, whose time is nothing until it is answered.
+ * A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5). The server's own answer is the same for a session that may not read
+ * the queue and for one whose hub does not reach it; what the person can do about either is to ask whoever sets up their access.
  */
-function checkLine(check: {
-  readonly isFetching: boolean;
-  readonly isError: boolean;
-  readonly dataUpdatedAt: number;
-}): string {
-  if (check.isFetching) return 'Checking this page…';
-  const answered =
-    check.dataUpdatedAt > 0
-      ? formatInstant(new Date(check.dataUpdatedAt).toISOString())
-      : undefined;
-  if (answered === undefined) return '';
-  return check.isError
-    ? `Refresh failed. Last successful check: ${answered}`
-    : `Last checked ${answered}`;
+function refusalWords(problem: Problem): string {
+  return refusalText(problem.forbidden, 'pickup.read', { of: 'pickup requests' });
 }
 
 /**
- * Pickup requests (surfaces/ops-portal.md section 7, `/pickup-requests`; S1.19): the queue of the requests at the session's hubs, filtered by
- * state and service date. **Empty tells "no requests" from "filtered to nothing"**, because conflating them sends Ops hunting for a bug. Which
- * requests the session may see is the server's decision (vendor ownership and hub); the filters are in the address, and the page of results is
- * not. A request is named by its operational code, never by its id. How a request is drawn, as a row of six columns and as a card, is
- * `pickup-queue-view.tsx`; this page keeps the reading, the filters, the states and the paging.
+ * Pickup requests (surfaces/ops-portal.md section 7, `/pickup-requests`; S1.19; redesign step R6): the queue of the requests at the session's hubs, drawn by the queue workspace
+ * template. The views are the states a request moves through, the filter row holds the service date and the late bookings, and **a request opens in a panel beside the queue**
+ * (its summary, read as its own page reads it, and the one act the queue offers: confirming it), with "Open full page" for the rest. **Empty tells "no requests" from "nothing fits"
+ * from "nothing at this hub"**, because conflating them sends Ops hunting for a bug. Which requests the session may see is the server's decision (vendor ownership and hub);
+ * the filters are in the address, and the page of results is not. A request is named by its operational code, never by its id. How a request is drawn is
+ * \`pickup-queue-view.tsx\`; this page keeps the reading, the filters, the states and the paging.
  *
- * The page of results is **a place the officer can come back to**, for one visit to a request and no longer (COMPONENT_PATTERNS section 22f):
- * opening a request leaves where they were (the filters stay in the address; the cursors of the pages visited, the position and the request
- * stay in the application's memory, `platform/pickup/queue-continuity.ts`), and the browser's Back or the request's link back brings them to
- * that page, **read again** from the server, with focus on the request if it is still there. Any other way to the queue starts at its first page.
+ * The page of results is **a place the officer can come back to**, for one visit to a request and no longer (COMPONENT_PATTERNS section 22f): going to a request's own page from the
+ * panel leaves where they were (the filters stay in the address; the cursors of the pages visited, the position and the request stay in the application's memory,
+ * \`platform/pickup/queue-continuity.ts\`), and the browser's Back or the request's link back brings them to that page, **read again** from the server, with focus on the request if
+ * it is still there. Any other way to the queue starts at its first page. **There is no bulk act:** confirming takes the version of one request and the API has no bulk path.
  */
 export function PickupRequestListPage() {
   const me = useSignedInSession();
   const [params, setParams] = useSearchParams();
   const state = stateOf(params.get('state'));
+  const cutoff = cutoffOf(params.get('cutoff'), state);
   const serviceDate = calendarDateOf(params.get('date'));
-  const signature = `${state ?? ''}|${serviceDate ?? ''}`;
+  // The hub the switcher chose (task C3): one of the filters of the list, so part of the signature: a page token, a place left and a visit are each
+  // for one hub, and another hub starts again at the first page.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const signature = `${state ?? ''}|${cutoff ?? ''}|${serviceDate ?? ''}|${hubId ?? ''}`;
   // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
   const continuity = useQueueContinuity();
   const [arrival] = useState(() => continuity.returningTo(signature));
   const paging = useQueuePaging(signature, arrival?.tokens);
   const list = usePickupRequests({
     ...(state === undefined ? {} : { state }),
+    ...(cutoff === undefined ? {} : { cutoffExceptionState: cutoff }),
     ...(serviceDate === undefined ? {} : { serviceDate }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
+  // The counts beside the menu are read again with the page, when the person asks for it (task C1, `AC-QSUM-09`).
+  const refreshSummary = useRefreshQueueSummary();
+  const announceConfirmed = useConfirmedNews();
   // What the date field holds while a date is being typed, for the filter it was typed over: the field must keep what the person typed even
   // when it is not yet a date worth asking for.
   const [typed, setTyped] = useState<{ over: string | undefined; value: string | null }>({
@@ -100,9 +137,28 @@ export function PickupRequestListPage() {
   });
   const dateShown = typed.over === serviceDate ? typed.value : (serviceDate ?? null);
   const [interacted, setInteracted] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  /** The request open in the panel beside the queue. A confirmation is made in the panel, with the version of the read the panel shows, and nowhere else on this page. */
+  const [opened, setOpened] = useState<QueueFacts | undefined>();
+  /** How many times the row's own Confirm has asked for focus on the panel's (0: the panel was opened by the row's button that opens it, which asks for none). */
+  const [confirmAsk, setConfirmAsk] = useState(0);
+  /** The panel's own read of the request open beside the queue: its header and its body are drawn from it, and never from the list's row, which is older. */
+  const panelRead = usePickupRequest(opened?.id ?? '', opened !== undefined);
+  const queryClient = useQueryClient();
+  // What an act in the panel came to (the server's answer for the request it made) is written into that read, so that the panel shows it at once and draws from one place; and what the queue
+  // does about it: the rows stay while they are read again, the row that changed is marked, and focus returns to it once they are drawn (the review of 5edada2). The read goes with the panel, so
+  // a request opened again later is read again and never drawn as the answer it once had (the review of 499399c).
+  const [changed, setChanged] = useState<
+    { readonly visit: number; readonly ids: readonly string[] } | undefined
+  >();
+  const [afterAct, setAfterAct] = useState(false);
+  /** The page whose reading again after an act failed: its rows stay, under a line that says they may be out of date (the review of 499399c). */
+  const [staleAfterAct, setStaleAfterAct] = useState<string | undefined>();
+  const returnTo = useRef<string | undefined>(undefined);
+  const shown = panelRead.data?.request;
 
-  // Refresh page: the page now shown is read again, by the same query (its filters and its cursor). One read at a time: the button says it is
-  // busy and ignores a press, and a press that gets here while a read is under way (before the screen has drawn the busy button) is given that
+  // Refresh page: the page now shown is read again, by the same query (its filters and its cursor). One read at a time: the header's Refresh says it is
+  // busy and ignores a press, and a press that gets here while a read is under way (before the screen has drawn the busy line) is given that
   // read, not a second one: `cancelRefetch: false`, where the default cancels the read under way and starts again.
   //
   // The completion is said once, of the **visit** the refresh was asked in: the page the officer is looking at, counted anew each time the
@@ -110,7 +166,7 @@ export function PickupRequestListPage() {
   // filter they were on is a visit of its own and not the old one again. A visit's number is never used twice, so what was said of one visit
   // can be said of no other, and an answer that arrives in another visit (late, after the officer has been elsewhere and come back) is said
   // of nothing.
-  const pageKey = `${state ?? ''}|${serviceDate ?? ''}|${paging.pageToken ?? ''}`;
+  const pageKey = `${signature}|${paging.pageToken ?? ''}`;
   const [visit, setVisit] = useState({ key: pageKey, id: 0 });
   const [refreshedVisit, setRefreshedVisit] = useState<number | undefined>();
   if (visit.key !== pageKey) setVisit({ key: pageKey, id: visit.id + 1 });
@@ -118,17 +174,11 @@ export function PickupRequestListPage() {
   function refreshPage(): void {
     const askedIn = visit.id;
     setRefreshedVisit(undefined);
+    void refreshSummary();
     void list.refetch({ cancelRefetch: false }).then((result) => {
       if (result.isSuccess) setRefreshedVisit(askedIn);
     });
   }
-
-  // While a page that was read is read again, the rows of the earlier read are not drawn as if they answered it: the loading treatment takes
-  // their place (as for a first read), and a failure takes their place if the read fails (`ReadState` never draws data beside a failure).
-  const shown: ReadQuery<PickupRequestPageView> =
-    list.isFetching && list.status === 'success'
-      ? { status: 'pending', data: undefined, error: null, refetch: list.refetch, isFetching: true }
-      : list;
 
   // A place is for one arrival at the queue: whether this one used it or it was not for this one, it is let go of once the queue is on screen.
   const { discard } = continuity;
@@ -138,8 +188,55 @@ export function PickupRequestListPage() {
 
   // Once the page that was left has been read again and drawn, the officer gets their position back, and focus where nobody has put it (the
   // request they opened, else the results). Only if the page is still the one they came back to: not after a change of filter or of page.
-  const queue = useRef<HTMLDivElement>(null);
+  const workspace = useRef<QueueWorkspaceHandle>(null);
   const restored = useRef(arrival === undefined);
+
+  // Once the rows that were read again after an act are drawn, focus goes to the row that changed (the request's own button), else to the results: the officer is not left on nothing.
+  // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c).
+  // The panel that is open when the read lands may be another request's: the officer opened it while the queue was read again, and whatever has focus in it, a click on its text among it, is theirs.
+  const openedId = opened?.id;
+  useEffect(() => {
+    if (afterAct || returnTo.current === undefined) return;
+    const id = returnTo.current;
+    returnTo.current = undefined;
+    const panelIsAnotherRequests = openedId !== undefined && openedId !== id;
+    if (!isUnclaimed(document.activeElement, { panelIsAnotherRequests })) return;
+    if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
+  }, [afterAct, list.dataUpdatedAt, openedId]);
+
+  /**
+   * The queue is read again after an act, its rows kept. If that read fails the rows stay, with a line that says they may be out of date and the way to read them again; any other read that
+   * fails takes the rows' place, as it always did.
+   */
+  function readAgainAfterAct(): void {
+    setStaleAfterAct(undefined);
+    setAfterAct(true);
+    void list
+      .refetch()
+      .then((read) => {
+        if (read.isError) setStaleAfterAct(pageKey);
+      })
+      .finally(() => {
+        setAfterAct(false);
+      });
+  }
+
+  /** The act of the panel was answered: say so, show the answer in the panel at once, mark the row, and read the page again with its rows kept. */
+  function confirmedInPanel({ request, etag }: ConfirmedPickup): void {
+    announceConfirmed(request);
+    // The answer is kept with its own version, the one the request has now (the review of f6cf02b: it was kept with the version of the read before the act, so that "Open full page", which reads
+    // this same entry, could act on a version that was not the record's). An answer that carried no version leaves nothing to keep, and the entry is read again. The panel reads the request
+    // again when it is opened again.
+    const key = pickupRequestKey(request.id);
+    if (etag === undefined) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    } else {
+      void writeAnswer<PickupRecord>(queryClient, key, { request, etag });
+    }
+    setChanged({ visit: visit.id, ids: [request.id] });
+    returnTo.current = request.id;
+    readAgainAfterAct();
+  }
   const settled = !list.isFetching && (list.isSuccess || list.isError);
   const stillThere =
     signature === arrival?.signature &&
@@ -148,26 +245,31 @@ export function PickupRequestListPage() {
   useEffect(() => {
     if (arrival === undefined || restored.current || !settled) return;
     restored.current = true;
-    if (stillThere && queue.current !== null) restorePlace(queue.current, arrival);
+    if (stillThere && workspace.current !== null) restoreQueuePlace(workspace.current, arrival);
   }, [arrival, settled, stillThere]);
 
-  // A move to another page that has nothing to draw (no rows, or a failure) leaves the pager button it was made from gone, and the table that
-  // would take focus is not there: focus goes to the message, once, so that it does not wait for the next table and be taken from the officer then.
+  // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
+  // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once, so that it does not wait for the next table and be taken from the officer then.
   const { takeFocus } = paging;
-  const hasRows = list.isSuccess && list.data.items.length > 0;
   useEffect(() => {
-    if (!settled || hasRows || !takeFocus()) return;
-    queue.current?.querySelector<HTMLElement>('.ui-read-state')?.focus({ preventScroll: true });
-  }, [settled, hasRows, takeFocus]);
+    if (!settled || !takeFocus()) return;
+    workspace.current?.focusResults();
+  }, [settled, list.dataUpdatedAt, takeFocus]);
 
-  /** Opening a request leaves where the officer was, for the visit: a plain click on its link, which is a move in this tab. */
+  /** Going to the opened request's own page leaves where the officer was, for the visit: a plain click on the panel's "Open full page", which is a move in this tab. */
   function leavePlace(event: MouseEvent<HTMLDivElement>): void {
-    const requestId = requestOfClick(event);
+    if (opened === undefined) return;
+    const requestId = requestOfClick(event, {
+      selector: 'a[href]',
+      key: 'href',
+      idOf: (link) => (link.getAttribute('href') === opened.href ? opened.id : undefined),
+    });
     if (requestId === undefined) return;
     continuity.leave({
       signature,
       search: searchOf({
         ...(state === undefined ? {} : { state }),
+        ...(cutoff === undefined ? {} : { cutoff }),
         ...(serviceDate === undefined ? {} : { date: serviceDate }),
       }),
       tokens: paging.tokens,
@@ -193,110 +295,178 @@ export function PickupRequestListPage() {
         (violation.pointer === '/page_token' || violation.pointer === 'page_token'),
     );
 
-  if (me === undefined) return null;
+  const hubs = me?.session.authorized_hubs;
+  // The rows of the last page that was read, which a failed read again after an act keeps (the data of a query stays when a later read of it fails).
+  const rows = useMemo(
+    () =>
+      list.data !== undefined && hubs !== undefined
+        ? list.data.items.map((request) => queueFactsOf(request, hubs))
+        : [],
+    [list.data, hubs],
+  );
+
+  if (me === undefined || hubs === undefined) return null;
+  const canConfirm = me.holds('pickup.request.confirm');
 
   /** A change of filter, where `''` takes one off. */
-  function change(next: { state?: PickupState | ''; date?: string }): void {
+  function change(next: { state?: PickupState | ''; cutoff?: ''; date?: string }): void {
     continuity.discard();
     setInteracted(true);
     const nextState = next.state === undefined ? state : next.state === '' ? undefined : next.state;
+    // The late bookings are asked for by the link of the landing and taken off by their own chip, or by any state but Confirmed, which they
+    // are a refinement of: nothing else changes them.
+    const nextCutoff = next.cutoff === undefined && nextState === 'CONFIRMED' ? cutoff : undefined;
     const nextDate =
       next.date === undefined ? serviceDate : next.date === '' ? undefined : next.date;
     const out = new URLSearchParams();
     if (nextState !== undefined) out.set('state', nextState);
+    if (nextCutoff !== undefined) out.set('cutoff', nextCutoff);
     if (nextDate !== undefined) out.set('date', nextDate);
     setParams(out, { replace: true });
   }
 
   function clearEverything(): void {
     setTyped({ over: undefined, value: null });
-    change({ state: '', date: '' });
+    change({ state: '', cutoff: '', date: '' });
   }
 
-  const filtering = state !== undefined || serviceDate !== undefined;
-  // A page after the first can hold nothing without the queue being empty (requests move between reads): it says so, and does not go looking
-  // through the earlier pages on its own.
-  const empty =
-    paging.page > 1 ? (
-      <EmptyState
-        kind="filtered"
-        heading="No requests on this page"
-        announce
-        action={
-          <Button type="button" variant="secondary" onClick={firstPage}>
-            Back to first page
-          </Button>
-        }
-      >
-        Page {paging.page} has no requests now. Earlier pages may still have some.
-      </EmptyState>
-    ) : filtering ? (
-      <EmptyState
-        kind="filtered"
-        heading="No pickup requests match"
-        announce={interacted}
-        action={
-          <Button type="button" variant="secondary" onClick={clearEverything}>
-            Show every request
-          </Button>
-        }
-      >
-        Nothing fits this state and service date. Show every request to start again.
-      </EmptyState>
-    ) : (
-      <EmptyState kind="none" heading="No pickup requests yet" announce={interacted}>
-        Requests booked at your hubs appear here, from WhatsApp, a walk-in sender or a vendor’s own
-        booking.
-      </EmptyState>
-    );
+  const filtering = state !== undefined || cutoff !== undefined || serviceDate !== undefined;
+
+  const result: QueueResult<QueueFacts> = (() => {
+    if (list.status === 'pending') return { status: 'loading' };
+    if (list.isFetching && list.status === 'success') {
+      // After an act the rows stay: the officer keeps their place, their focus and the row that changed (the table says it is busy). Any other read again (a refresh asked for, a
+      // page, a filter) is not drawn as if the earlier rows answered it: the loading treatment takes their place, and a failure takes their place if the read fails.
+      return afterAct ? { status: 'ready', rows, refreshing: true } : { status: 'loading' };
+    }
+    // Read again after an act and failed (or being read once more): the rows the person was working on stay, under the line that says so.
+    if (
+      list.status === 'error' &&
+      list.data !== undefined &&
+      (afterAct || staleAfterAct === pageKey)
+    ) {
+      return {
+        status: 'ready',
+        rows,
+        refreshing: afterAct,
+        stale: { message: STALE_QUEUE, onRefresh: readAgainAfterAct },
+      };
+    }
+    if (list.status === 'error') {
+      const problem = problemOf(list.error, {
+        operation: 'listPickupRequests',
+        ...(cursorRefused ? { context: 'cursor' } : {}),
+      });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale') {
+        return { status: 'loading' };
+      }
+      const message =
+        problem.kind === 'forbidden'
+          ? refusalWords(problem)
+          : problem.reference === undefined
+            ? problem.message
+            : `${problem.message} Reference: ${problem.reference}`;
+      if (cursorRefused) {
+        return { status: 'error', message, onRetry: firstPage, retryLabel: 'Back to first page' };
+      }
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void list.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    return { status: 'ready', rows };
+  })();
+
+  const emptiness = {
+    noun: 'pickup requests',
+    none: 'Requests booked at your hubs appear here, from WhatsApp, a walk-in sender or a vendor’s own booking.',
+    announce: interacted,
+    // A page after the first can hold nothing without the queue being empty (requests move between reads): the template says so, as every list does, and does not go looking through the
+    // earlier pages on its own.
+    laterPage: { page: paging.page, onFirstPage: firstPage },
+    ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
+  };
+  const empty: QueueEmptiness = filtering
+    ? {
+        ...emptiness,
+        filtered: true,
+        onClearFilters: clearEverything,
+        clearLabel: 'Show every request',
+        filteredText: 'Nothing fits these filters. Show every request to start again.',
+      }
+    : emptiness;
+
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
 
   return (
     <>
       <title>Pickup requests · Melarc Ops Portal</title>
-      <PageHeader
-        title="Pickup requests"
-        description="Requests at your authorized hubs."
-        {...(me.holds('pickup.request.create')
-          ? { actions: <ButtonLink to="/pickup-requests/new">Book a pickup</ButtonLink> }
-          : {})}
-      />
-      <div className="pickup-queue" ref={queue} onClickCapture={leavePlace}>
-        <QueuePanel>
-          <QueueFilters
-            label="Filter the pickup requests"
-            aside={
-              <div className="pickup-freshness">
-                <p className="pickup-freshness__text">{checkLine(list)}</p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  loading={list.isFetching}
-                  onClick={refreshPage}
-                >
-                  Refresh page
-                </Button>
-                <p role="status" className="pickup-hidden">
-                  {refreshedVisit === visit.id ? 'Page refreshed.' : ''}
-                </p>
-              </div>
-            }
-          >
-            <Field label="State">
-              <Select
-                value={state ?? ''}
-                onChange={(event) => {
-                  change({ state: stateOf(event.target.value) ?? '' });
-                }}
-              >
-                <option value="">Every state</option>
-                {PICKUP_STATE_ORDER.map((key) => (
-                  <option key={key} value={key}>
-                    {PICKUP_STATE_MAP[key].label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="pickup-date-filter">
+      <div className="pickup-queue" onClickCapture={leavePlace}>
+        <QueueWorkspace<QueueFacts>
+          ref={workspace}
+          header={{
+            title: 'Pickup requests',
+            description: 'Requests at your authorized hubs.',
+            freshness: {
+              state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+              ...(updatedAt === undefined ? {} : { updatedAt }),
+              onRefresh: refreshPage,
+            },
+            ...(me.holds('pickup.request.create')
+              ? {
+                  // The panel's act is the one primary of the view; booking is one of the New menu's too.
+                  actions: (
+                    <ButtonLink to="/pickup-requests/new" variant="secondary">
+                      Book a pickup
+                    </ButtonLink>
+                  ),
+                }
+              : {}),
+          }}
+          views={{
+            label: 'Views of the pickup requests',
+            value: state ?? ALL_VIEW,
+            onValueChange: (id) => {
+              change({ state: stateOf(id) ?? '' });
+            },
+            tabs: [
+              { id: ALL_VIEW, label: 'All' },
+              ...PICKUP_STATE_ORDER.map((key) => ({ id: key, label: PICKUP_STATE_MAP[key].label })),
+            ],
+          }}
+          filters={{
+            label: 'Filter the pickup requests',
+            chips: [
+              ...(serviceDate === undefined
+                ? []
+                : [{ id: 'date', label: `Service date: ${serviceDateText(serviceDate)}` }]),
+              ...(cutoff === undefined ? [] : [{ id: 'cutoff', label: LATE_BOOKINGS }]),
+            ],
+            onRemove: (id) => {
+              if (id === 'date') {
+                setTyped({ over: undefined, value: null });
+                change({ date: '' });
+              } else {
+                change({ cutoff: '' });
+              }
+            },
+            onClearAll: () => {
+              setTyped({ over: undefined, value: null });
+              change({ cutoff: '', date: '' });
+            },
+            filterOpen,
+            onFilterOpenChange: setFilterOpen,
+            filterPanel: (
               <Field label="Service date" help="Day, month and year.">
                 <DatePicker
                   value={dateShown}
@@ -306,62 +476,96 @@ export function PickupRequestListPage() {
                       if (serviceDate !== undefined) change({ date: '' });
                     } else if (isFinishedDate(next)) {
                       change({ date: next });
+                      setFilterOpen(false);
                     }
                   }}
                 />
               </Field>
-              {serviceDate === undefined ? null : (
-                <div className="pickup-date-filter__clear">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setTyped({ over: undefined, value: null });
-                      change({ date: '' });
-                    }}
-                  >
-                    Every service date
-                  </Button>
-                </div>
-              )}
-            </div>
-          </QueueFilters>
-
-          <ReadState<PickupRequestPageView>
-            query={shown}
-            isEmpty={(data) => data.items.length === 0}
-            empty={empty}
-            loadingLabel="Loading the pickup requests…"
-            skeleton={<Skeleton lines={5} />}
-            permission="pickup.read"
-            operation="listPickupRequests"
-            {...(cursorRefused
+            ),
+          }}
+          notice={
+            <p role="status" className="pickup-hidden">
+              {refreshedVisit === visit.id ? 'Page refreshed.' : ''}
+            </p>
+          }
+          result={result}
+          empty={empty}
+          table={{
+            label: 'Pickup requests',
+            columns: QUEUE_COLUMNS,
+            rowId: (row) => row.id,
+            density: 'two-line',
+            onOpen: (row: QueueFacts) => {
+              setConfirmAsk(0);
+              setOpened(row);
+            },
+            openLabel: openLabelOf,
+            changedIds: changed?.visit === visit.id ? changed.ids : [],
+            card: (row) => <QueueCard facts={row} />,
+            // The code is the heading of each card, for heading navigation (outside the card's button, which is presentational).
+            cardTitle: (row) => <OperationalCode>{row.code}</OperationalCode>,
+            ...(canConfirm
               ? {
-                  context: 'cursor',
-                  recovery: (
-                    <Button type="button" variant="secondary" onClick={firstPage}>
-                      Back to first page
-                    </Button>
-                  ),
+                  rowAction: {
+                    label: 'Confirm',
+                    ariaLabel: (row: QueueFacts) => `Confirm ${row.code}`,
+                    isAvailable: (row: QueueFacts) => row.confirmable,
+                    // The row's Confirm opens the request in the panel with focus on the panel's own Confirm: the question is asked there, over the version the panel read.
+                    onRun: (row: QueueFacts) => {
+                      setConfirmAsk((count) => count + 1);
+                      setOpened(row);
+                    },
+                  },
                 }
-              : {})}
-          >
-            {(data) => (
-              <QueueTable
-                caption="Pickup requests"
-                columns={QUEUE_COLUMNS}
-                rows={data.items.map((request) =>
-                  queueFactsOf(request, me.session.authorized_hubs),
-                )}
-                rowKey={(row) => row.id}
+              : {}),
+            // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+            footer: (
+              <QueuePager
+                label="Pages of pickup requests"
                 noun={{ one: 'request', other: 'requests' }}
-                paging={paging}
-                nextPageToken={data.nextPageToken}
-                card={(row) => <QueueCard facts={row} />}
+                shown={
+                  result.status === 'ready' && list.data !== undefined ? rows.length : undefined
+                }
+                page={paging.page}
+                hasNext={list.data !== undefined && list.data.nextPageToken !== null}
+                onNext={() => {
+                  if (list.data !== undefined && list.data.nextPageToken !== null) {
+                    paging.toNextPage(list.data.nextPageToken);
+                  }
+                }}
+                onPrevious={paging.toPreviousPage}
               />
-            )}
-          </ReadState>
-        </QueuePanel>
+            ),
+          }}
+          panel={{
+            open: opened !== undefined,
+            onClose: () => {
+              setConfirmAsk(0);
+              setOpened(undefined);
+            },
+            code: opened?.code ?? '',
+            ...(opened === undefined
+              ? {}
+              : {
+                  // The state in the header is the panel's own read: until it has answered the header shows none, and never the list's row, which is older than the panel's answer.
+                  ...(shown === undefined
+                    ? {}
+                    : { status: <StatusBadge status={shown.state} map={PICKUP_STATE_MAP} /> }),
+                  fullPage: { to: opened.href },
+                }),
+            children:
+              opened === undefined ? null : (
+                <PickupQueuePanel
+                  key={opened.id}
+                  record={panelRead}
+                  hubs={hubs}
+                  canConfirm={canConfirm}
+                  confirmAsk={confirmAsk}
+                  onConfirmed={confirmedInPanel}
+                />
+              ),
+          }}
+        />
       </div>
     </>
   );

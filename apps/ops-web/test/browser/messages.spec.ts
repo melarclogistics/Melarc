@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import {
   hold,
@@ -11,6 +12,9 @@ import {
   type World,
 } from './support/messages-api';
 import { watchPage, wcagViolations } from './support/page';
+import { menuEntry } from './support/shell';
+import { expectWholeInTheWindow } from './support/whole';
+import { expectNoTableScrollsSideways } from './support/tables';
 
 /**
  * The message log (S1.12e) in a real browser: the list with its filters, the Ops feed, the narrowing to one request and the link to it from
@@ -56,6 +60,38 @@ const rowAt = (page: Page, time: string) =>
 
 const table = (page: Page) => page.getByRole('table', { name: 'Messages' });
 
+/** The status, the audience and the channel are chosen in the popover of the filter row, which opens with the Filter button. */
+const openFilters = (page: Page) =>
+  page.getByRole('button', { name: 'Filter', exact: true }).click();
+
+/**
+ * Goes to a control with the Tab key, as a person does, and fails if it is not reached within a few presses. A test of the keyboard reaches its controls this way and never by
+ * focusing them from the script (the review of 499399c).
+ */
+async function tabTo(page: Page, target: Locator, presses = 12): Promise<void> {
+  for (let step = 0; step < presses; step += 1) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused();
+}
+
+/**
+ * Chooses an option of the closed select that has focus by typing the start of its name, and waits for the choice to reach the address. Chromium, Firefox and Playwright's WebKit
+ * for Windows take the choice as the key is typed. An engine that opens its list on a key press instead (what Safari's was noted to do, which is why this test skipped WebKit)
+ * takes it when Enter confirms the highlighted option, so Enter is pressed only when the typing alone did not choose within a moment: in Chromium Enter would open the list of a
+ * closed select, and the choice made already must not be disturbed. The claim, that a choice made by typing is put in the address, is asserted in every engine.
+ */
+async function chooseByTyping(page: Page, text: string, address: RegExp): Promise<void> {
+  await page.keyboard.type(text);
+  try {
+    await expect(page).toHaveURL(address, { timeout: 1500 });
+  } catch {
+    await page.keyboard.press('Enter');
+  }
+  await expect(page).toHaveURL(address);
+}
+
 /** The requests the page made for the list. */
 const lists = (api: MessagesApi) =>
   api.calls.filter((call) => call.path === '/api/v1/notifications');
@@ -78,10 +114,7 @@ test.describe('moving through the screens', () => {
   // Break caught: a menu entry that goes nowhere, or a new page whose heading a screen reader never hears.
   test('the menu leads to the log, which lands on its heading', async ({ page }) => {
     const { api, watch } = await open(page, '/');
-    await page
-      .getByRole('navigation', { name: 'Primary' })
-      .getByRole('link', { name: 'Messages' })
-      .click();
+    await menuEntry(page, 'Message log').click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'Messages' })).toBeFocused();
     await expect(table(page)).toBeVisible();
@@ -90,13 +123,16 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a session without the key sees no entry, and the page names the key', async ({ page }) => {
+  test('a session without the key sees no entry, and the page says what it cannot do', async ({
+    page,
+  }) => {
     const { api } = await open(page, LOG, { permissions: ['pickup.read'] });
 
-    await expect(page.locator('code', { hasText: 'notification.read' }).first()).toBeVisible();
     await expect(
-      page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Messages' }),
-    ).toHaveCount(0);
+      page.getByText('Your account can’t see the message log. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('notification.read');
+    await expect(menuEntry(page, 'Message log')).toHaveCount(0);
     expect(lists(api)).toEqual([]);
   });
 
@@ -244,7 +280,7 @@ test.describe('the log', () => {
         'Messages appear here when the platform tells someone about an act, for example a confirmed pickup request.',
       ),
     ).toBeVisible();
-    await expect(table(page)).toHaveCount(0);
+    await expect(page.getByRole('rowheader')).toHaveCount(0);
   });
 
   // Break caught: a made-up value in the address sent to the server as a made-up filter (the stand-in refuses it as the server does).
@@ -263,44 +299,48 @@ test.describe('the log', () => {
 test.describe('the filters', () => {
   test('are reached in order by keyboard, chosen by typing, and put in the address', async ({
     page,
-    browserName,
   }) => {
-    test.skip(
-      browserName === 'webkit',
-      'Safari’s engine opens a list on a key press instead of changing a closed select.',
-    );
     const { api } = await open(page, LOG);
     await expect(table(page)).toBeVisible();
 
-    const show = page.getByRole('combobox', { name: 'Show' });
+    // The three choices are in the popover of the filter row. The keyboard goes to the Filter button from the start of the page with the Tab key, opens the popover (Enter) and
+    // goes in with the Tab key, and the choices are reached in order. Each is chosen by typing (`chooseByTyping`), in every engine: the test used to skip WebKit.
     const status = page.getByRole('combobox', { name: 'Status' });
     const audience = page.getByRole('combobox', { name: 'For' });
     const channel = page.getByRole('combobox', { name: 'Channel' });
 
-    await show.focus();
-    await page.keyboard.press('Tab');
-    await expect(status).toBeFocused();
-    await page.keyboard.type('Held');
-    await expect(page).toHaveURL(/[?&]state=SUPPRESSED(&|$)/);
+    await tabTo(page, page.getByRole('button', { name: 'Filter', exact: true }), 60);
+    await page.keyboard.press('Enter');
+    await tabTo(page, status);
+    await chooseByTyping(page, 'Held', /[?&]state=SUPPRESSED(&|$)/);
+    // The choice is drawn (its chip) before the next is made: the address changes before the page is drawn again, and a choice made in that moment is made over the log as it was.
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: Status: Held back' }),
+    ).toBeVisible();
     // The two messages that were held back.
     await expect(page.getByRole('rowheader')).toHaveCount(2);
     await expect(status).toBeFocused();
 
     await page.keyboard.press('Tab');
     await expect(audience).toBeFocused();
-    await page.keyboard.type('Ad');
-    await expect(page).toHaveURL(/audience=AD_HOC_SENDER/);
+    await chooseByTyping(page, 'Ad', /audience=AD_HOC_SENDER/);
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: For: Ad-hoc sender' }),
+    ).toBeVisible();
     await expect(page.getByRole('rowheader')).toHaveCount(2);
 
     await page.keyboard.press('Tab');
     await expect(channel).toBeFocused();
-    await page.keyboard.type('In');
-    await expect(page).toHaveURL(/channel=FEED/);
-    // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the next stop.
+    await chooseByTyping(page, 'In', /channel=FEED/);
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: Channel: In-app feed' }),
+    ).toBeVisible();
+    // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the empty state's action.
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
 
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Show every message' })).toBeFocused();
+    // Out of the popover and on to the way out of the empty state, by the Tab key.
+    await page.keyboard.press('Escape');
+    await tabTo(page, page.getByRole('button', { name: 'Show every message' }));
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
@@ -323,6 +363,7 @@ test.describe('the filters', () => {
     const { api } = await open(page, LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
 
+    await openFilters(page);
     await page.getByRole('combobox', { name: 'Status' }).selectOption('FAILED');
     await expect(page).toHaveURL('/messages?state=FAILED');
     await expect(page.getByRole('rowheader')).toHaveCount(1);
@@ -331,6 +372,7 @@ test.describe('the filters', () => {
     // Linked, a view is the same view.
     await page.goto('/messages?state=SUPPRESSED&audience=AD_HOC_SENDER&channel=SMS');
     await expect(page.getByRole('rowheader')).toHaveCount(2);
+    await openFilters(page);
     await expect(page.getByRole('combobox', { name: 'Status' })).toHaveValue('SUPPRESSED');
     await expect(page.getByRole('combobox', { name: 'For' })).toHaveValue('AD_HOC_SENDER');
     await expect(page.getByRole('combobox', { name: 'Channel' })).toHaveValue('SMS');
@@ -343,10 +385,13 @@ test.describe('the filters', () => {
     await open(page, LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
 
+    await openFilters(page);
     await page.getByRole('combobox', { name: 'Status' }).selectOption('FAILED');
     // The first filter is applied (it is in the address) before the second is chosen: two choices made before the page has taken the first are a race of the test's own, which
     // a loaded machine loses (the gate of 5 November 2026 lost it once, in one project of 1,058 tests, and it passed alone three times in three).
     await expect(page).toHaveURL('/messages?state=FAILED');
+    // ...and drawn: its chip is the sign that the page has taken it (the address changes before the page is drawn again).
+    await expect(page.getByRole('button', { name: 'Remove filter: Status: Failed' })).toBeVisible();
     await page.getByRole('combobox', { name: 'For' }).selectOption('RIDER');
 
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
@@ -355,8 +400,12 @@ test.describe('the filters', () => {
 
     await expect(page).toHaveURL(LOG);
     await expect(page.getByRole('rowheader')).toHaveCount(11);
-    await expect(page.getByRole('combobox', { name: 'Status' })).toHaveValue('');
-    await expect(page.getByRole('combobox', { name: 'For' })).toHaveValue('');
+    // No choice is left: no chip of any, and the first view is the one chosen.
+    await expect(page.getByRole('button', { name: /^Remove filter: / })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Every message' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   // Break caught (the brief): the Ops feed offered as a different list, a status carried into it, or an entry invented to fill it.
@@ -366,7 +415,7 @@ test.describe('the filters', () => {
     const { api } = await open(page, '/messages?state=FAILED');
     await expect(page.getByRole('rowheader')).toHaveCount(1);
 
-    await page.getByRole('combobox', { name: 'Show' }).selectOption({ label: 'The Ops feed' });
+    await page.getByRole('tab', { name: 'The Ops feed' }).click();
 
     await expect(page.getByRole('heading', { name: 'Nothing in the Ops feed yet' })).toBeVisible();
     const search = new URL(page.url()).searchParams;
@@ -385,8 +434,11 @@ test.describe('the filters', () => {
         );
       }),
     ).toBe(true);
-    await expect(table(page)).toHaveCount(0);
-    await expect(page.getByRole('combobox', { name: 'Show' })).toHaveValue('ops-feed');
+    await expect(page.getByRole('rowheader')).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'The Ops feed' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
 
     await page.getByRole('button', { name: 'Show every message' }).click();
     await expect(page).toHaveURL(LOG);
@@ -400,7 +452,7 @@ test.describe('the filters', () => {
 
     await page.getByRole('button', { name: 'Next page' }).click();
     await expect(page.getByText(/Showing 4 messages on page 2/)).toBeVisible();
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Messages' })).toBeFocused();
     expect(lists(api).some((call) => call.search === '?page_token=p4')).toBe(true);
 
     await page.getByRole('button', { name: 'Next page' }).click();
@@ -408,6 +460,7 @@ test.describe('the filters', () => {
     await expect(page.getByRole('button', { name: 'Next page' })).toHaveCount(0);
 
     // A new choice starts again at the first page: the next page of one view is never asked for under another.
+    await openFilters(page);
     await page.getByRole('combobox', { name: 'Channel' }).selectOption('SMS');
     await expect(page.getByText('Showing 4 messages. More follow on the next page.')).toBeVisible();
     expect(lists(api).at(-1)?.search).toBe('?channel=SMS');
@@ -422,17 +475,22 @@ test.describe('when the messages cannot be had', () => {
 
     await expect(page.getByRole('alert')).toContainText('The messages could not be loaded.');
     await expect(page.locator('body')).not.toContainText(DIAGNOSTIC);
-    await expect(table(page)).toHaveCount(0);
+    await expect(page.getByRole('rowheader')).toHaveCount(0);
 
     api.world.listFails = undefined;
-    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByRole('rowheader')).toHaveCount(11);
   });
 
-  test('names the key when the server refuses it, and no role', async ({ page }) => {
+  test('says what the account cannot do when the server refuses it, and names no key or role', async ({
+    page,
+  }) => {
     await open(page, LOG, { listFails: { status: 403, code: 'PERMISSION_DENIED' } });
 
-    await expect(page.locator('code', { hasText: 'notification.read' }).first()).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText(
+      'Your account can’t see the message log. Ask an administrator for access.',
+    );
+    await expect(page.locator('body')).not.toContainText('notification.read');
     await expect(page.locator('body')).not.toContainText(
       /Ops Staff|Senior Ops|Platform Admin|Finance/,
     );
@@ -451,7 +509,8 @@ const SCREENS: readonly Screen[] = [
     name: 'the log',
     reach: async (page) => {
       await open(page, LOG);
-      await expect(page.getByRole('rowheader')).toHaveCount(11);
+      // Rows or cards, by the room there is: the count the page states is the same.
+      await expect(page.getByText('Showing 11 messages.')).toBeVisible();
       return undefined;
     },
   },
@@ -460,7 +519,7 @@ const SCREENS: readonly Screen[] = [
     reach: async (page) => {
       await open(page, ABOUT);
       await expect(page.getByText('Messages about one request')).toBeVisible();
-      await expect(page.getByRole('rowheader')).toHaveCount(4);
+      await expect(page.getByText('Showing 4 messages.')).toBeVisible();
       return undefined;
     },
   },
@@ -503,7 +562,7 @@ const SCREENS: readonly Screen[] = [
     reach: async (page) => {
       const held: Hold = hold();
       await open(page, LOG, { hold: held });
-      await expect(page.getByText('Loading the messages…')).toBeVisible();
+      await expect(page.getByText('Loading messages')).toBeAttached();
       return held.release;
     },
   },
@@ -531,6 +590,7 @@ test.describe('every screen, at the verified widths', () => {
         try {
           expect(await wcagViolations(page)).toEqual([]);
           expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+          await expectNoTableScrollsSideways(page);
           await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
         } finally {
           release?.();
@@ -538,6 +598,98 @@ test.describe('every screen, at the verified widths', () => {
       });
     }
   }
+});
+
+test.describe('the log in six columns, and cards under 40rem (owner item a, 9 November 2026)', () => {
+  // Break caught: nine columns that did not fit the box at 1280 px with the menu open and scrolled sideways inside it, so that the number and the record were off to the right.
+  test('fits its six columns in the box at 1280 px with the menu open, with nothing to scroll to', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, LOG);
+
+    await expect(table(page)).toBeVisible();
+    await expect(table(page).getByRole('columnheader')).toHaveText([
+      'When',
+      'Message',
+      'To',
+      'Status',
+      'Number',
+      'Record',
+    ]);
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('.ui-data-table__scroller');
+        return box === null ? Number.NaN : box.scrollWidth - box.clientWidth;
+      }),
+    ).toBeLessThanOrEqual(1);
+    await expectWholeInTheWindow(page, table(page).getByRole('columnheader', { name: 'Record' }));
+  });
+
+  // Break caught: a card that drops a fact the table says: under 40rem each message is a card with the same nine facts, each under its own name.
+  test('is cards under 40rem, with every fact of a message', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, LOG);
+
+    const cards = page.getByRole('list', { name: 'Messages' });
+    await expect(cards).toBeVisible();
+    await expect(table(page)).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    for (const name of [
+      'When',
+      'Message',
+      'For',
+      'Channel',
+      'What happened',
+      'Number',
+      'Tries',
+      'Record',
+    ]) {
+      await expect(first.getByText(name, { exact: true })).toBeVisible();
+    }
+    // Each is a label and its value, as a list of terms and definitions (CardFacts).
+    await expect(first.getByRole('term')).toHaveText([
+      'When',
+      'Message',
+      'For',
+      'Channel',
+      'What happened',
+      'Number',
+      'Tries',
+      'Record',
+    ]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways; and 11 November 2026: a dropped fact must be somewhere): the six columns need 74px more than a box of 41rem (768px)
+  // has. A message opens nothing, so a column the table took away (the number first, then who it is for) would leave a fact on no screen, as the log of run 6 did at this width. Replaces "keeps the
+  // table at 768px without its number": the log is cards where its columns cannot fit, with every fact (the eight terms of its card), and its box never scrolls sideways.
+  test('draws cards with every fact at 768px, where the six columns cannot fit, and never a table with a column missing', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, LOG);
+
+    await expect(table(page)).toHaveCount(0);
+    const first = page.getByRole('list', { name: 'Messages' }).getByRole('listitem').first();
+    await expect(first.getByRole('term')).toHaveText([
+      'When',
+      'Message',
+      'For',
+      'Channel',
+      'What happened',
+      'Number',
+      'Tries',
+      'Record',
+    ]);
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('.ui-data-table__scroller');
+        return box === null ? Number.NaN : box.scrollWidth - box.clientWidth;
+      }),
+    ).toBeLessThanOrEqual(0);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
 });
 
 test.describe('enlarged text, forced colours and reduced motion', () => {
@@ -552,7 +704,7 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
       }) => {
         await page.setViewportSize({ width, height });
         await open(page, path);
-        await expect(page.getByRole('rowheader').first()).toBeVisible();
+        await expect(page.getByText(/^Showing \d+ messages/)).toBeVisible();
         await page.evaluate(() => {
           document.documentElement.style.fontSize = '200%';
         });
@@ -585,19 +737,22 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
     expect(await border('.messages-subject')).toEqual({ style: 'solid', width: 1 });
 
     // By keyboard, so that the focus is a keyboard user's, which shows its ring.
-    const show = page.getByRole('combobox', { name: 'Show' });
-    await show.focus();
+    await openFilters(page);
+    const status = page.getByRole('combobox', { name: 'Status' });
+    await status.focus();
     await page.keyboard.press('Tab');
     await page.keyboard.press('Shift+Tab');
-    await expect(show).toBeFocused();
-    expect(await show.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe('solid');
+    await expect(status).toBeFocused();
+    expect(await status.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe(
+      'solid',
+    );
   });
 
   test('with reduced motion nothing moves while the log loads', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const held = hold();
     await open(page, LOG, { hold: held });
-    await expect(page.getByText('Loading the messages…')).toBeVisible();
+    await expect(page.getByText('Loading messages')).toBeAttached();
 
     const running = await page.evaluate(
       () =>
@@ -614,7 +769,7 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     const held = hold();
     await open(page, LOG, { hold: held });
-    await expect(page.getByText('Loading the messages…')).toBeVisible();
+    await expect(page.getByText('Loading messages')).toBeAttached();
 
     const running = await page.evaluate(
       () =>

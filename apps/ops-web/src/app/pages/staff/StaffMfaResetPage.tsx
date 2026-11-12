@@ -1,5 +1,5 @@
 import type { UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useParams } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
@@ -7,7 +7,9 @@ import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { ForbiddenState } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
+import type { BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
+import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { resetStaffMfa } from '../../../platform/staff/staff-commands';
@@ -20,12 +22,15 @@ import './staff-pages.css';
 const NOT_ELIGIBLE =
   'An authenticator can be reset only for a profile that has one, or whose set-up was started and not finished.';
 
-function BackToProfile({ id }: { readonly id: string }) {
-  return (
-    <p className="staff-back">
-      <Link to={`/admin/staff/${id}`}>Back to profile</Link>
-    </p>
-  );
+/**
+ * The pages above the reset: the staff list, then the person, which is the way back to the profile and so the only way back this page draws. The person is named once the profile is read;
+ * until then the entry says "The profile" and goes to the same page.
+ */
+function wayUp(id: string, name: string | undefined): readonly BreadcrumbEntry[] {
+  return [
+    { label: 'Staff', to: '/admin/staff' },
+    { label: name ?? 'The profile', to: `/admin/staff/${id}` },
+  ];
 }
 
 function sessionsText(count: number): string {
@@ -55,13 +60,15 @@ function Done({
       : undefined;
   return (
     <div className="staff-created" ref={box} tabIndex={-1}>
-      <Alert variant="success">
-        <h2 className="staff-created__heading">Authenticator reset</h2>
-        <p>{sessionsText(outcome.sessionsTerminated)}</p>
-        {link === undefined ? null : (
-          <p>{`${link}${until === undefined ? '' : ` It works until ${until}.`}`}</p>
-        )}
-      </Alert>
+      <div className="staff-created__alert">
+        <Alert variant="success">
+          <h2 className="staff-created__heading">Authenticator reset</h2>
+          <p>{sessionsText(outcome.sessionsTerminated)}</p>
+          {link === undefined ? null : (
+            <p>{`${link}${until === undefined ? '' : ` It works until ${until}.`}`}</p>
+          )}
+        </Alert>
+      </div>
       <p className="staff-action__text">
         {identity.full_name} sets up the new authenticator themselves and then signs in as usual.
         You will not see the link.
@@ -87,86 +94,103 @@ function Reset({
   const client = useApiClient();
   const me = useSignedInSession();
   const [asking, setAsking] = useState(false);
+  // The heading is the wrapper's, in every state of the read and of the page: the same element while the profile is read and after (run 7, Stage 4.3).
   const { identity, etag } = record;
   const name = identity.full_name;
 
   if (me === undefined) return null;
   const branch = identity.mfa_reset_state;
   const mine = identity.id.toLowerCase() === me.session.principal_id?.toLowerCase();
+  if (outcome !== undefined) {
+    return <Done identity={identity} outcome={outcome} />;
+  }
+  if (branch === 'NOT_ELIGIBLE') {
+    return (
+      <>
+        <ForbiddenState kind="unavailable-here" />
+        <p className="staff-action__text">{NOT_ELIGIBLE}</p>
+      </>
+    );
+  }
+  if (mine) {
+    return (
+      <p className="staff-note">
+        You cannot reset your own authenticator. Another Platform Admin has to do it.
+      </p>
+    );
+  }
+
+  function ask(event: SubmitEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    setAsking(true);
+  }
 
   return (
     <>
-      {outcome !== undefined ? (
-        <Done identity={identity} outcome={outcome} />
-      ) : branch === 'NOT_ELIGIBLE' ? (
-        <>
-          <ForbiddenState kind="unavailable-here" />
-          <p className="staff-action__text">{NOT_ELIGIBLE}</p>
-        </>
-      ) : mine ? (
-        <p className="staff-note">
-          You cannot reset your own authenticator. Another Platform Admin has to do it.
-        </p>
-      ) : (
-        <>
-          <p className="staff-action__text">
-            {branch === 'FACTOR_ACTIVE'
-              ? `${name}’s authenticator stops working, every session of theirs ends, and a link to set up a new one is sent to ${identity.work_email}. You will not see the link: ${name} sets it up themselves.`
-              : `${name} started setting up an authenticator and did not finish. The unfinished set-up is cancelled, any session of theirs ends, and a new link is sent to ${identity.work_email}. You will not see the link.`}
-          </p>
-          <div className="staff-action__buttons">
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() => {
-                setAsking(true);
-              }}
-            >
+      <TaskForm
+        onSubmit={ask}
+        // The only thing entered on this page is in the question of the act (its reason and note, in its dialog): while the question is open, leaving asks first.
+        dirty={asking}
+        actions={
+          <>
+            <Button type="submit" variant="danger">
               Reset authenticator
             </Button>
-          </div>
+            <Link to={`/admin/staff/${identity.id}`}>Cancel</Link>
+          </>
+        }
+      >
+        <TaskFormSection title="What happens">
+          <TaskFormWide>
+            <p className="staff-action__text">
+              {branch === 'FACTOR_ACTIVE'
+                ? `${name}’s authenticator stops working, every session of theirs ends, and a link to set up a new one is sent to ${identity.work_email}. You will not see the link: ${name} sets it up themselves.`
+                : `${name} started setting up an authenticator and did not finish. The unfinished set-up is cancelled, any session of theirs ends, and a new link is sent to ${identity.work_email}. You will not see the link.`}
+            </p>
+          </TaskFormWide>
+        </TaskFormSection>
+      </TaskForm>
 
-          <ReasonConfirmationDialog<MfaResetOutcome>
-            open={asking}
-            title={`Reset the authenticator of ${name}?`}
-            consequence={
-              <p>
-                Every session of {name} ends. This cannot be undone. A link to set up a new
-                authenticator is sent to {identity.work_email}.
-              </p>
-            }
-            confirmLabel="Reset authenticator"
-            operation="resetStaffMfa"
-            branch={branch}
-            version={etag}
-            send={(command) =>
-              resetStaffMfa(client, identity.id, command.version ?? etag, {
-                reasonCode: command.reasonCode,
-                ...(command.note === undefined ? {} : { note: command.note }),
-              })
-            }
-            onDone={(result) => {
-              setAsking(false);
-              onDone(result);
-            }}
-            onCancel={() => {
-              setAsking(false);
-            }}
-            onReload={() => {
-              setAsking(false);
-              return query.refetch();
-            }}
-          />
-        </>
-      )}
+      <ReasonConfirmationDialog<MfaResetOutcome>
+        open={asking}
+        title={`Reset the authenticator of ${name}?`}
+        consequence={
+          <p>
+            Every session of {name} ends. This cannot be undone. A link to set up a new
+            authenticator is sent to {identity.work_email}.
+          </p>
+        }
+        confirmLabel="Reset authenticator"
+        operation="resetStaffMfa"
+        branch={branch}
+        version={etag}
+        send={(command) =>
+          resetStaffMfa(client, identity.id, command.version ?? etag, {
+            reasonCode: command.reasonCode,
+            ...(command.note === undefined ? {} : { note: command.note }),
+          })
+        }
+        onDone={(result) => {
+          setAsking(false);
+          onDone(result);
+        }}
+        onCancel={() => {
+          setAsking(false);
+        }}
+        onReload={() => {
+          setAsking(false);
+          return query.refetch();
+        }}
+      />
     </>
   );
 }
 
 /**
- * Reset a person's authenticator (surfaces/ops-portal.md section 7, `/admin/staff/{id}/mfa/reset`): the act of a Platform Admin when a person
- * has lost the app that proves them. The reason is mandatory and comes from the catalogue of the branch the record names
- * (`mfa_reset_state`, never `mfa_enrolled`); the action is not offered for a profile that cannot have one reset, or for one's own.
+ * Reset a person's authenticator (surfaces/ops-portal.md section 7, `/admin/staff/{id}/mfa/reset`; redesign step R7b): the act of a Platform Admin when a person
+ * has lost the app that proves them. It is drawn by the task form template (COMPONENT_PATTERNS, *TaskForm*): what happens in a section of its own, and the act, with
+ * a way out, as the form's actions; the reason is asked in the act's own dialog, which stands beside the form and not in it. The reason is mandatory and comes from the
+ * catalogue of the branch the record names (`mfa_reset_state`, never `mfa_enrolled`); the action is not offered for a profile that cannot have one reset, or for one's own.
  *
  * **The page has no field that could show the re-enrolment grant**, and nothing it reads carries one: the grant goes to the work email of
  * the person it is for, and the administrator who resets the factor must not be able to enrol one on another person's account. What the
@@ -181,10 +205,11 @@ export function StaffMfaResetPage() {
       heading={(identity) => ({
         title: 'Reset authenticator',
         documentTitle: 'Reset authenticator',
+        breadcrumb: wayUp(id, identity?.full_name),
         ...(identity === undefined ? {} : { description: identity.full_name }),
       })}
-      // Once it is done the page has its own way back, beside the news.
-      back={outcome === undefined ? <BackToProfile id={id} /> : null}
+      // The breadcrumb of the page's parents is its way back, in every state; there is no link of its own above it. Once the reset is done the news has its own button to the profile.
+      back={null}
     >
       {(record, query) => (
         <Reset record={record} query={query} outcome={outcome} onDone={setOutcome} />

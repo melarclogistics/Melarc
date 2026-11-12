@@ -155,6 +155,8 @@ describe('db-orphans (audit F07)', () => {
 describe('db-migrate', () => {
   const MIGRATOR =
     'postgres://melarc_migration_elevated:MIGRATION-SECRET-PW@127.0.0.1:1/melarc_dev';
+  /** A release carries the lock timeout the application runs with (run 7, Stage 3.2): every call below that gives a migration URL gives it too, unless it is about its absence. */
+  const RELEASE = { DATABASE_LOCK_TIMEOUT_MS: '2000' };
 
   // Break caught: migrations run as the runtime role, a superuser or the owner, which leaves objects owned
   // by the wrong role. The password in the URL must not be echoed.
@@ -163,7 +165,7 @@ describe('db-migrate', () => {
     ['the owner role', 'postgres://melarc_owner:RUNTIME-SECRET-PW@127.0.0.1:1/melarc_dev'],
     ['a superuser', 'postgres://postgres:ADMIN-SECRET-PW@127.0.0.1:1/melarc_dev'],
   ])('refuses a URL for %s without connecting', async (_role, url) => {
-    const result = await run(DB_MIGRATE, { DATABASE_MIGRATION_URL: url });
+    const result = await run(DB_MIGRATE, { ...RELEASE, DATABASE_MIGRATION_URL: url });
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('migrations run only as melarc_migration_elevated');
@@ -183,7 +185,7 @@ describe('db-migrate', () => {
     ['a TLS option', `${MIGRATOR}?sslmode=require`],
     ['a fragment', `${MIGRATOR}#section`],
   ])('refuses a URL with %s without connecting', async (_label, url) => {
-    const result = await run(DB_MIGRATE, { DATABASE_MIGRATION_URL: url });
+    const result = await run(DB_MIGRATE, { ...RELEASE, DATABASE_MIGRATION_URL: url });
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('DATABASE_MIGRATION_URL');
@@ -195,7 +197,10 @@ describe('db-migrate', () => {
 
   // Break caught: a value that is not a database URL being echoed back, which leaks whatever was pasted.
   it('refuses a value that is not a PostgreSQL URL, and does not echo it', async () => {
-    const result = await run(DB_MIGRATE, { DATABASE_MIGRATION_URL: 'MIGRATION-SECRET-PW' });
+    const result = await run(DB_MIGRATE, {
+      ...RELEASE,
+      DATABASE_MIGRATION_URL: 'MIGRATION-SECRET-PW',
+    });
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('DATABASE_MIGRATION_URL');
@@ -204,7 +209,7 @@ describe('db-migrate', () => {
 
   // Control: the migration identity is accepted, so the tool reaches the connection.
   it('does not refuse the migration identity', async () => {
-    const result = await run(DB_MIGRATE, { DATABASE_MIGRATION_URL: MIGRATOR });
+    const result = await run(DB_MIGRATE, { ...RELEASE, DATABASE_MIGRATION_URL: MIGRATOR });
 
     expect(result.code).toBe(1);
     expect(result.stderr).toMatch(CONNECTION_FAILURE);
@@ -212,11 +217,45 @@ describe('db-migrate', () => {
     expectNoSecrets(`${result.stdout}${result.stderr}`);
   });
 
+  // Break caught (run 7, Stage 3.2): a release step that lacks DATABASE_LOCK_TIMEOUT_MS running on a guess of 2000 ms, so that an API set lower than that finds every attempt of the run
+  // outlasting what queues behind it. The refusal comes before anything connects, names the setting, and does not repeat the URL.
+  it.each([
+    ['not set', {}],
+    ['empty', { DATABASE_LOCK_TIMEOUT_MS: '' }],
+  ])(
+    'refuses a release where DATABASE_LOCK_TIMEOUT_MS is %s, naming it, without connecting',
+    async (_label, environment) => {
+      const result = await run(DB_MIGRATE, { ...environment, DATABASE_MIGRATION_URL: MIGRATOR });
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('DATABASE_LOCK_TIMEOUT_MS');
+      expect(result.stderr).toContain('DATABASE_MIGRATION_URL');
+      expect(result.stderr).not.toMatch(CONNECTION_FAILURE);
+      expectNoSecrets(`${result.stdout}${result.stderr}`);
+    },
+  );
+
+  // Break caught: a run that does not say which lock timeout it works to. The line comes first, before the connection, so that it is in the log of a run that never connects too.
+  it('says the lock timeout it uses when it starts, before it connects', async () => {
+    const result = await run(DB_MIGRATE, {
+      DATABASE_LOCK_TIMEOUT_MS: '1500',
+      DATABASE_MIGRATION_URL: MIGRATOR,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("the application's lock timeout of 1500 ms");
+    expect(result.stdout).toContain('DATABASE_LOCK_TIMEOUT_MS');
+    expect(result.stderr).toMatch(CONNECTION_FAILURE);
+    expectNoSecrets(`${result.stdout}${result.stderr}`);
+  });
+
   // Control: with no URL given it builds the local one, as the migration identity, from the local settings.
-  it('falls back to the local development database when no URL is given', async () => {
+  it('falls back to the local development database when no URL is given, and to the lock timeout the application has by default', async () => {
     const result = await run(DB_MIGRATE, LOCAL);
 
     expect(result.code).toBe(1);
+    expect(result.stdout).toContain("the application's lock timeout of 2000 ms");
+    expect(result.stdout).toContain("the application's default");
     expect(result.stderr).toMatch(CONNECTION_FAILURE);
     expectNoSecrets(`${result.stdout}${result.stderr}`);
   });

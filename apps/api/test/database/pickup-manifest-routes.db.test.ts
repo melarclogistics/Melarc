@@ -124,6 +124,7 @@ interface Manifest {
   readonly dispatched_at: string | null;
   readonly started_at: string | null;
   readonly completed_at: string | null;
+  readonly created_at: string;
   readonly stops?: Stop[];
 }
 interface Page {
@@ -304,6 +305,13 @@ describe('createPickupManifest: a manifest from confirmed requests (AC-SLICE-001
       completed_at: null,
     });
     expect(manifest.code).toMatch(/^[A-Z]{3}-MF-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
+    // The moment the run was made is the table's own column, stated as an instant (contract 5.100.0).
+    const [made] = await routes.rows<{ created_at: Date }>(
+      `select created_at from pickup_manifest where id = $1`,
+      [manifest.id],
+    );
+    expect(made?.created_at).toBeInstanceOf(Date);
+    expect(manifest.created_at).toBe(made?.created_at.toISOString());
     expect(
       manifest.stops?.map((stop) => [stop.sequence, stop.pickup_request_id, stop.state]),
     ).toEqual(ids.map((id, position) => [position + 1, id, 'PENDING']));
@@ -1106,6 +1114,8 @@ describe('listPickupManifests and getPickupManifest: what a staff reader sees', 
     for (const item of pageOf(first).items) {
       expect(item).not.toHaveProperty('stops');
       expect(item.responsible_hub_id).toBe(HUB_A);
+      // Every item states the moment the run was made, as an instant (contract 5.100.0).
+      expect(item.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     }
     expect(first.header('etag')).toBeNull();
 
@@ -1116,6 +1126,13 @@ describe('listPickupManifests and getPickupManifest: what a staff reader sees', 
         .filter((item) => [named('a1').id, named('a2').id, named('a3').id].includes(item.id))
         .map((item) => item.id),
     ).toEqual([named('a1').id, named('a2').id, named('a3').id]);
+    // The list states the moment each run was made as the read of it does, and the order of the list is the order of those moments.
+    const moments = ['a1', 'a2', 'a3'].map((name) => {
+      const item = listed.items.find((candidate) => candidate.id === named(name).id);
+      expect(item?.created_at).toBe(named(name).created_at);
+      return Date.parse(named(name).created_at);
+    });
+    expect(moments).toEqual(moments.toSorted((a, b) => a - b));
     expect(listed.items.map((item) => item.id)).not.toContain(named('b1').id);
     expect(listed.items.every((item) => item.responsible_hub_id === HUB_A)).toBe(true);
 

@@ -209,6 +209,8 @@ function OpenReasonConfirmation<Result>({
         aria-busy={command.phase === 'sending' ? true : undefined}
         onSubmit={(event) => {
           event.preventDefault();
+          // Its submit stays inside it: a form that holds the dialog must not be sent by it (task R5.2, M3).
+          event.stopPropagation();
           if (command.locked || !loaded) return;
           const found = validate();
           setInvalid(found);

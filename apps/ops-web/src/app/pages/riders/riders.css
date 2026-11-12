@@ -2,32 +2,58 @@
  * The rider screens (S0.60). Layout only: every colour, size and space comes from tokens.css. The components do the rest.
  */
 
-/* The enrolment code and what is said around it: a column of readable width, with the picture set apart from the prose. */
+/* The facts of a rider, in the groups of their meaning (the record template's main column): one list under another. */
+.rider-facts-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* A short line of the page's own, muted: what the account cannot do about a rider's devices, or what happens to the old handset. */
+.rider-note {
+  margin: 0;
+  max-width: 40rem;
+  color: var(--color-text-secondary);
+}
+
+/* The device of a rider in a line: the status as a badge and what the rider's devices come to. */
+.rider-status-line {
+  margin: 0;
+}
+
+/* The one line under the actions of the form, on a row of its own. */
+.rider-actions-note {
+  flex: 1 0 100%;
+  max-width: none;
+}
+
+/* The way back to the roster, above the heading of the rider's page: the same element in every state of the page. */
+.rider-back {
+  margin: 0 0 var(--space-4);
+}
+
+/* The controls of a code and of a lapsed code: side by side where there is room, and wrapping where there is not (nothing is clipped at 320 px or at enlarged text). */
+.rider-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* The news that takes focus when it replaces what the person was looking at (the earlier code, taken off the screen). The global focus rule draws the ring for a keyboard and not for a mouse. */
+.rider-notice {
+  margin-bottom: var(--space-4);
+}
+
+/* The controls of a form whose button changes with the outcome: they take part in the form's own row of actions, and the element is only the place to find them. */
+.rider-actions {
+  display: contents;
+}
+
+/* The enrolment code and what is said around it: a column of readable width, with the picture set apart from the prose (the section of the task form around it gives the space above). */
 .rider-code {
   max-width: 40rem;
-  margin-top: var(--space-6);
 }
 
 .rider-code__picture {
   margin: var(--space-4) 0;
-}
-
-/* The steps of a binding, in the order the officer does them. */
-.rider-steps {
-  margin: 0 0 var(--space-4);
-  padding-inline-start: var(--space-6);
-  max-width: 40rem;
-}
-
-.rider-steps > li + li {
-  margin-top: var(--space-2);
-}
-
-/* A form on a rider's page: the fields in a column of readable width. */
-.rider-form {
-  max-width: 40rem;
-}
-
-.rider-form > * + * {
-  margin-top: var(--space-4);
 }

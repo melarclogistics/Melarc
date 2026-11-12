@@ -24,14 +24,15 @@ import {
  * 1. refuse unless it is allowed to make key material (below);
  * 2. make a directory of its own outside the checkout, and in it the disposable CA and leaf (`test-ca.ts`: the CA's key is deleted as
  *    soon as the leaf is signed, after `openssl verify` has shown that the CA refuses a name outside the loopback);
- * 3. run Playwright's HTTPS projects in **three runs** (`HTTPS_PHASES`), each with `MELARC_E2E_TLS_DIR` naming that directory (global setup
+ * 3. run Playwright's HTTPS projects in **four runs** (`HTTPS_PHASES`), each with `MELARC_E2E_TLS_DIR` naming that directory (global setup
  *    judges the material, makes the per-engine stores below it, and starts the HTTPS front) and **each with a stack of its own**: a run is
  *    one Playwright invocation, so one global setup, so one database, one set of one-time bootstrap bundles, one capture folder and one
  *    worker, and the journeys of an engine are never run against what another engine has used (audit G01):
- *    - the first, with the system store lacking the CA: Chromium, which trusts it by a store of its own, and **WebKit's refusal**, the
- *      control that shows WebKit does not trust the origin until the CA is trusted;
+ *    - the first, with the system store lacking the CA: Chromium, which trusts it by a store of its own;
  *    - the second, also with the system store lacking the CA: Firefox, which trusts it by a store of its own;
- *    - the third, on a GitHub-hosted runner, with the CA put in the system store (`system-trust.ts`) and taken out when the run ends:
+ *    - the third, also with the system store lacking the CA: **WebKit's refusal**, the control that shows WebKit does not trust the origin
+ *      until the CA is trusted;
+ *    - the fourth, on a GitHub-hosted runner, with the CA put in the system store (`system-trust.ts`) and taken out when the run ends:
  *      WebKit's other proofs. WebKit has no way to trust a CA for one process (the first hosted run showed `SSL_CERT_FILE` ignored), so
  *      the order is what makes its control honest: refused before, trusted after, and nothing else differs;
  * 4. remove the CA from the system store if it was put there, and the directory, whatever happened, and exit with the status of the
@@ -42,8 +43,8 @@ import {
  *
  * **In CI each job makes one shard of the runs** (`MELARC_HTTPS_SHARD=current/total`, `https-shards.ts`): the runs of the other shards are
  * said to be "not in this shard" and are made by the job of that shard, each on a runner of its own with a CA of its own. The runs keep
- * their numbers and their output directories. The shard that has WebKit's refusal also has WebKit's other proofs, the refusal first; a
- * shard without the system-store run never touches the system store. A value that is not a shard of this harness is refused before
+ * their numbers and their output directories. The shard that has WebKit's refusal also has WebKit's other proofs, the refusal first (the
+ * third shard: runs 3 and 4); a shard without the system-store run never touches the system store. A value that is not a shard of this harness is refused before
  * anything is made.
  *
  * **It makes a CA and a private key, so it does not run where it is not allowed to.** It runs on Linux only (Chromium, Chrome and Edge
@@ -77,13 +78,16 @@ export interface HttpsPhase {
  * stack: one database, one set of bootstrap bundles, one capture folder and one worker. The journeys of S0.46 are one story that starts
  * from the two bootstrap administrators, whose one-time bundles and setup grants a first reading consumes, so a second engine sent through
  * the same stack would meet a story that has already been told. Each engine therefore has a run, and a stack, of its own. The control of
- * WebKit's refusal runs no journey and has nothing to consume, so it shares the first run, which keeps it ahead of the system store.
+ * WebKit's refusal runs no journey and has nothing to consume, but it has a run of its own too (task CI.2 of the third run of the redesign, 7
+ * November 2026): in the first of the three shards it kept Chromium's job at about 21 minutes of 30, and in a run of its own, in front of WebKit's
+ * proofs and in the same shard, it keeps the order that makes it a control (refused before the CA is in the system store, trusted after) while each
+ * shard is estimated under 20 minutes.
  */
 export const HTTPS_PHASES: readonly HttpsPhase[] = [
   {
     id: 'chromium',
-    name: 'Chromium, which trusts the CA by a store of its own, and WebKit refusing it while the system store lacks it',
-    projects: ['https-chromium', 'https-chromium-secret', 'https-webkit-control'],
+    name: 'Chromium, which trusts the CA by a store of its own',
+    projects: ['https-chromium', 'https-chromium-secret'],
     systemTrust: false,
     output: 'test-results/https-1-chromium',
   },
@@ -95,11 +99,18 @@ export const HTTPS_PHASES: readonly HttpsPhase[] = [
     output: 'test-results/https-2-firefox',
   },
   {
+    id: 'webkit-refusal',
+    name: 'WebKit refusing the origin while the system store lacks the CA',
+    projects: ['https-webkit-control'],
+    systemTrust: false,
+    output: 'test-results/https-3-webkit-refusal',
+  },
+  {
     id: 'webkit',
     name: 'WebKit, with the CA in the system store',
     projects: ['https-webkit', 'https-webkit-secret'],
     systemTrust: true,
-    output: 'test-results/https-3-webkit-system-store',
+    output: 'test-results/https-4-webkit-system-store',
   },
 ];
 

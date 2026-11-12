@@ -1,5 +1,7 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
+import { answerQueueSummary } from './support/queue-summary';
 import { SIGNED_IN_SESSION } from './support/api';
 import { wcagViolations } from './support/page';
 import { errorAnswer, stubPreSignInApi } from './support/pre-sign-in-api';
@@ -134,6 +136,8 @@ async function signedInWith(
     posted: [] as { line: string; ifMatch: string | undefined; body: unknown }[],
   };
   await page.route('**/api/v1/**', async (route) => {
+    // The shell of every signed-in screen reads the queue summary for the menu (task C1): no queue, and not a request of the test.
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const line = `${request.method()} ${url.pathname}`;
@@ -178,6 +182,11 @@ const ACCOUNT_BODY = {
   recovery_email: PLANTED,
 };
 
+/** The columns of the vendor list's table, in order. */
+const VENDOR_COLUMNS = ['Account / organisation', 'Status', 'Secret', 'Active browsers', 'Hub'];
+const LONG_ORGANISATION =
+  'Kwabena Boateng and Sons Household Linen, Curtains and Upholstery Wholesale Trading Company Limited';
+
 test.describe('the vendor screens', () => {
   // Break caught: a credential or a recovery address drawn on the list, or the list wider than a phone.
   test('list the accounts the session reaches with nothing of a credential, at 320 px, passing axe', async ({
@@ -196,6 +205,291 @@ test.describe('the vendor screens', () => {
     expect(await wcagViolations(page)).toEqual([]);
     expect(seen.unexpected).toEqual([]);
   });
+
+  // The list is drawn by the queue workspace template: a table with every column where the table's own box has room for them (40rem, so at 1280 px with the menu open and at 768 px), and
+  // cards under that, each with every fact of the account, never both in the page. The long name of an organisation wraps in its cell and the page never scrolls sideways.
+  for (const size of [
+    { width: 1280, height: 800 },
+    { width: 768, height: 1024 },
+  ]) {
+    // Break caught: a table squeezed into a room it cannot be read in, a column dropped where nothing else shows it, or a long name that pushes the page sideways.
+    test(`draws a table of every column at ${String(size.width)} px, with a long name wrapped in its cell and no cards`, async ({
+      page,
+    }) => {
+      const seen = await signedInWith(page, ['vendor.read'], {
+        'GET /api/v1/ops/vendors': (route) =>
+          route.fulfill({
+            status: 200,
+            json: {
+              items: [{ ...ACCOUNT_BODY, legal_name: LONG_ORGANISATION }],
+              next_page_token: null,
+            },
+          }),
+      });
+      await page.setViewportSize(size);
+      await page.goto('/admin/vendors');
+
+      const table = page.getByRole('table', { name: 'Vendor accounts' });
+      await expect(table).toBeVisible();
+      await expect(table.getByRole('columnheader')).toHaveText(VENDOR_COLUMNS);
+      await expect(page.getByRole('list', { name: 'Vendor accounts' })).toHaveCount(0);
+      await expect(table.getByRole('link', { name: 'K7M2Q9X4' })).toBeVisible();
+      await expect(table.getByText(LONG_ORGANISATION)).toBeVisible();
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(PLANTED);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(seen.unexpected).toEqual([]);
+    });
+  }
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a list that marks no column lesser, so that where its cells ask for more than a box of 768 px has (a style that
+  // gives every cell 9.5rem on one line stands for a long organisation, a long status) its box scrolls sideways. It takes its lesser columns away instead, the hub first, and the account and the
+  // status stay.
+  test('takes its lesser columns away, the hub first, rather than scroll sideways at 768 px, when its cells cannot wrap', async ({
+    page,
+  }) => {
+    const seen = await signedInWith(page, ['vendor.read'], {
+      'GET /api/v1/ops/vendors': (route) =>
+        route.fulfill({
+          status: 200,
+          json: { items: [ACCOUNT_BODY], next_page_token: null },
+        }),
+    });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto('/admin/vendors');
+
+    const table = page.getByRole('table', { name: 'Vendor accounts' });
+    await expect(table).toBeVisible();
+    // Every cell asks for 9.5rem on one line: five columns ask for more than the box has. Nothing else is done to the page: the table grows wider than its box and measures again by itself (run 7,
+    // Stage 1.3; the window used to be resized two pixels and back to make it measure).
+    await page.addStyleTag({
+      content:
+        '.ui-data-table__table :is(td, th) { white-space: nowrap !important; min-width: 9.5rem !important; }',
+    });
+    // The lesser columns go, the most lesser first: the hub is the first to be taken away.
+    await expect(table.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page
+          .locator('.ui-data-table__scroller')
+          .evaluate((element) => element.scrollWidth - element.clientWidth),
+      )
+      .toBeLessThanOrEqual(0);
+    expect(
+      await page
+        .locator('.ui-data-table__scroller')
+        .evaluate((element) => element.scrollWidth - element.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    const headers = await table.getByRole('columnheader').allTextContents();
+    for (const kept of ['Account / organisation', 'Status']) expect(headers).toContain(kept);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(seen.unexpected).toEqual([]);
+  });
+
+  for (const size of [
+    { width: 390, height: 844 },
+    { width: 320, height: 640 },
+  ]) {
+    // Break caught: a fact the table shows and the card forgets, a card with no heading, or a table drawn where the room has none.
+    test(`draws a card for each account at ${String(size.width)} px, with every fact, a heading and the link, and no table`, async ({
+      page,
+    }) => {
+      const seen = await signedInWith(page, ['vendor.read'], {
+        'GET /api/v1/ops/vendors': (route) =>
+          route.fulfill({
+            status: 200,
+            json: {
+              items: [{ ...ACCOUNT_BODY, legal_name: LONG_ORGANISATION }],
+              next_page_token: null,
+            },
+          }),
+      });
+      await page.setViewportSize(size);
+      await page.goto('/admin/vendors');
+
+      const cards = page.getByRole('list', { name: 'Vendor accounts' });
+      await expect(cards).toBeVisible();
+      await expect(page.getByRole('table', { name: 'Vendor accounts' })).toHaveCount(0);
+      const card = cards.getByRole('listitem').first();
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText('K7M2Q9X4');
+      await expect(card.getByRole('link', { name: 'K7M2Q9X4' })).toHaveAttribute(
+        'href',
+        `/admin/vendors/${ACCOUNT}`,
+      );
+      for (const fact of [
+        'Active',
+        LONG_ORGANISATION,
+        'Set',
+        '1',
+        SIGNED_IN_SESSION.authorized_hubs[0].display_name,
+      ]) {
+        await expect(card).toContainText(fact);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(PLANTED);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(seen.unexpected).toEqual([]);
+    });
+  }
+
+  // Break caught: a search that cannot be reached by the keyboard from the filter row, that is not sent as `q`, or that is not in the address and shown as a filter.
+  test('searches from the filter row by the keyboard, sends the text as q, shows it as a filter and takes it off', async ({
+    page,
+  }) => {
+    const queries: string[] = [];
+    const seen = await signedInWith(page, ['vendor.read'], {
+      'GET /api/v1/ops/vendors': (route) => {
+        queries.push(new URL(route.request().url()).search);
+        return route.fulfill({
+          status: 200,
+          json: { items: [ACCOUNT_BODY], next_page_token: null },
+        });
+      },
+    });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/admin/vendors');
+    await expect(page.getByRole('link', { name: 'K7M2Q9X4' })).toBeVisible();
+
+    // The search is a field in the bar, always there: nothing is opened to find it.
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toHaveCount(0);
+    const field = page.getByRole('searchbox', { name: 'Search by organisation or account' });
+    await field.focus();
+    await page.keyboard.type('synthetic');
+    await page.keyboard.press('Enter');
+
+    await expect(page).toHaveURL('/admin/vendors?q=synthetic');
+    await expect(
+      page.getByRole('button', { name: 'Remove filter: Search: synthetic' }),
+    ).toBeVisible();
+    // The field stays where it is, with what was typed, and has focus still.
+    await expect(field).toHaveValue('synthetic');
+    await expect(field).toBeFocused();
+    await expect.poll(() => queries.at(-1)).toBe('?q=synthetic');
+
+    await page.getByRole('button', { name: 'Remove filter: Search: synthetic' }).click();
+    await expect(page).toHaveURL('/admin/vendors');
+    await expect(page.getByRole('button', { name: /^Remove filter/ })).toHaveCount(0);
+    await expect.poll(() => queries.at(-1)).toBe('');
+    expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(PLANTED);
+    expect(seen.unexpected).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): the search field of the bar kept at 12rem when it shares a row with its button at 390px, so that its placeholder, which is
+  // its name ("Search by organisation or account"), was cut off ("Search by organisation or accc"). The field is never narrower than its placeholder: the button goes under it where the two cannot
+  // share the row, as the bar's rule says.
+  for (const width of [390, 320]) {
+    test(`shows the whole of the search field's placeholder at ${String(width)}px, the button under it where they cannot share the row`, async ({
+      page,
+    }) => {
+      const seen = await signedInWith(page, ['vendor.read'], {
+        'GET /api/v1/ops/vendors': (route) =>
+          route.fulfill({ status: 200, json: { items: [ACCOUNT_BODY], next_page_token: null } }),
+      });
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto('/admin/vendors');
+      const field = page.getByRole('searchbox', { name: 'Search by organisation or account' });
+      await expect(field).toBeVisible();
+
+      const measured = await field.evaluate((input: HTMLInputElement) => {
+        const style = getComputedStyle(input);
+        const context = document.createElement('canvas').getContext('2d');
+        if (context === null) throw new Error('no canvas');
+        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        // The room is the box less its borders and its padding, read from the box itself and not from `clientWidth`: Firefox's `clientWidth` of a text input already leaves the padding out,
+        // so subtracting it again halved the room (204 where Chromium, WebKit and Firefox's own box all give 228; the hosted run of 12 November 2026, measured in the three engines).
+        const sides = [
+          'borderLeftWidth',
+          'borderRightWidth',
+          'paddingLeft',
+          'paddingRight',
+        ] as const;
+        return {
+          text: context.measureText(input.placeholder).width,
+          room: sides.reduce(
+            (room, side) => room - parseFloat(style[side]),
+            input.getBoundingClientRect().width,
+          ),
+        };
+      });
+      expect(measured.text).toBeGreaterThan(0);
+      expect(measured.text).toBeLessThanOrEqual(measured.room);
+      // The button is under the field when they cannot share the row, and the page does not scroll sideways.
+      const button = page.getByRole('button', { name: 'Search', exact: true });
+      const [fieldBox, buttonBox] = [await field.boundingBox(), await button.boundingBox()];
+      expect(fieldBox).not.toBeNull();
+      expect(buttonBox).not.toBeNull();
+      if (fieldBox !== null && buttonBox !== null) {
+        expect(buttonBox.y).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(seen.unexpected).toEqual([]);
+    });
+  }
+
+  // The account is drawn by the record template: its identifier is the heading, its status and one sentence sit beside it, its facts are under their names, and its browsers are a table
+  // where the table's own box has room (40rem) and cards under that, never both. Nothing of a credential reaches the page, and it never scrolls sideways.
+  for (const [shown, size] of [
+    ['a table', { width: 1280, height: 800 }],
+    ['a table or cards, one of them', { width: 768, height: 1024 }],
+    ['cards', { width: 390, height: 844 }],
+    ['cards', { width: 320, height: 640 }],
+  ] as const) {
+    // Break caught: a fact the record forgets, browsers drawn twice or not at all, a credential drawn from the answer, or a page wider than a phone.
+    test(`draws the account as a record, with its browsers as ${shown}, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      const seen = await signedInWith(page, ['vendor.read'], {
+        [`GET /api/v1/ops/vendors/${ACCOUNT}`]: (route) =>
+          route.fulfill({
+            status: 200,
+            headers: { etag: '"v7"' },
+            json: {
+              account: { ...ACCOUNT_BODY, legal_name: LONG_ORGANISATION },
+              devices: [
+                {
+                  id: '9e0f1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b',
+                  principal_type: 'VENDOR',
+                  principal_id: ACCOUNT,
+                  device_kind: 'VENDOR_BROWSER_CREDENTIAL',
+                  status: 'ACTIVE',
+                  registered_at: '2026-10-20T09:00:00Z',
+                  registered_by: null,
+                  device_credential_hash: PLANTED,
+                },
+              ],
+            },
+          }),
+      });
+      await page.setViewportSize(size);
+      await page.goto(`/admin/vendors/${ACCOUNT}`);
+
+      await expect(page.getByRole('heading', { level: 1, name: 'K7M2Q9X4' })).toBeVisible();
+      await expect(page.getByText('This account can sign in.')).toBeVisible();
+      for (const [term, value] of [
+        ['Organisation', LONG_ORGANISATION],
+        ['Shared secret', 'Set'],
+        ['Where links go', 'Its registered email'],
+        ['Active browsers', '1'],
+      ] as const) {
+        await expect(page.locator(`dt:text-is("${term}") + dd`)).toHaveText(value);
+      }
+      const table = page.getByRole('table', { name: 'Browsers of the account' });
+      const cards = page.getByRole('list', { name: 'Browsers of the account' });
+      if (shown === 'a table') {
+        await expect(table).toBeVisible();
+        await expect(cards).toHaveCount(0);
+      } else if (shown === 'cards') {
+        await expect(cards).toBeVisible();
+        await expect(table).toHaveCount(0);
+      } else {
+        expect((await table.count()) + (await cards.count())).toBe(1);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(PLANTED);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(seen.unexpected).toEqual([]);
+    });
+  }
 
   // Break caught (AC-SLICE-000-105, -23): a recovery sent without the version or a reason, or its outcome showing a link the answer planted.
   test('start a recovery with the version read and a reason, by the keyboard, and show no link', async ({

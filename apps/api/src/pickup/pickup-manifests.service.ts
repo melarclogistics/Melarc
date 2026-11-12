@@ -1,13 +1,18 @@
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
-import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import {
+  hubOutsideStaffGrant,
+  type AuthorizedRequest,
+} from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
+import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { pickupManifestEtagOf } from './pickup-manifest-etag.js';
+import { pickupManifestCriteria } from './pickup-manifest-criteria.js';
 import {
   MANIFEST_COLUMNS,
   STOP_COLUMNS,
@@ -39,6 +44,8 @@ export interface PickupManifestListFilter {
   readonly state?: string;
   /** Only the manifests worked on this day (OB-S1-25): `YYYY-MM-DD`, a day that exists. */
   readonly serviceDate?: string;
+  /** Only the manifests of this hub (task C3, `AC-HUBF-02`): a filter that narrows what the caller may read and never widens it. */
+  readonly hubId?: string;
 }
 
 export interface PickupManifestsServiceOptions {
@@ -53,6 +60,21 @@ function invalid(name: string, rule: string): ApiException {
   return new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
     violations: [{ in: 'query', pointer: `/${name}`, rule }],
   });
+}
+
+/**
+ * What a Rider owns, **named in the statement** (task A1): `assigned_rider_id = melarc.current_rider_id()`, the test its row-level-security policy
+ * applies (beside `dispatched_at IS NOT NULL`, which stays the policy's). The policy is one `CASE` expression, which the planner cannot use as an index
+ * condition, so a statement that names a hub reads the hub's runs through `pickup_manifest_hub_idx` and lets the policy discard every one that is not
+ * the Rider's: 50 milliseconds for a hub of 20,000 runs, and a Rider that asks for a hub where it has no run can tell from the time that the hub
+ * exists and how much it holds. With the Rider named in the statement, the planner starts from `pickup_manifest_rider_idx` (the Rider's own runs, and
+ * the hub is a filter on them): 0.06 milliseconds at that scale, whatever the hub holds. It only restates the policy, which still decides; it can
+ * narrow and never widen. A staff session adds nothing (`true` is dropped by the planner).
+ */
+function ownedByCaller(authorized: AuthorizedRequest): SQL {
+  return authorized.session.principalType === 'RIDER'
+    ? sql`assigned_rider_id = melarc.current_rider_id()`
+    : sql`true`;
 }
 
 /**
@@ -73,6 +95,10 @@ function invalid(name: string, rule: string): ApiException {
  *   of dispatch (OB-S1-21), and no manifest is visible to a rider before it is dispatched.
  * - **The list is ordered by the moment of creation, then the id**, so that a page does not move under a reader who is paging, and is paged
  *   by the opaque position of the pickup request's list.
+ * - **A hub outside a staff session's set of hubs is answered with no transaction and no statement** (task A1, `AC-HUBF-05`): the database would
+ *   walk that hub's index before row-level security discarded every row, and the time that takes tells a caller whether the hub exists and how
+ *   much it holds. A hub inside the grant and an all-hub grant read as before. A rider's statement **names its own assignment**
+ *   (`ownedByCaller`), so that the database starts from the rider's index and not the hub's and a foreign hub costs what the rider's own runs cost.
  */
 export class PickupManifestsService {
   readonly #options: PickupManifestsServiceOptions;
@@ -186,8 +212,23 @@ export class PickupManifestsService {
     if (filter.serviceDate !== undefined && !isCalendarDay(filter.serviceDate)) {
       throw invalid('service_date', 'format');
     }
-    const state = filter.state ?? null;
-    const serviceDate = filter.serviceDate ?? null;
+    // The hub is a filter, as the others are: judged as it was sent, and added to the one statement. It is never put in the security context, so a
+    // hub outside the reader's grant (or none at all) is an empty page and never `HUB_SCOPE_VIOLATION` (task C3, `AC-HUBF-02`, `-06`).
+    if (filter.hubId !== undefined && !isUuid(filter.hubId)) throw invalid('hub_id', 'format');
+    // A hub the staff session's grant does not reach is an empty page and **no transaction, no statement** (task A1, `AC-HUBF-05`): the database
+    // would walk that hub's index and discard every row, and how long that takes says whether the hub exists and how much it holds. The answer is
+    // the one row-level security gives, since `authorized.scope` is the very set the transaction would run under; a hub that does not exist takes
+    // the same path, and so the same time. A rider's runs are scoped by assignment, not by a hub, and are read as they were.
+    if (filter.hubId !== undefined && hubOutsideStaffGrant(authorized, filter.hubId)) {
+      return { items: [], next_page_token: null };
+    }
+    // What the list contains is written once, in `pickupManifestCriteria`, which the count of the runs in progress calls as well (task C1).
+    const criteria = pickupManifestCriteria({
+      state: filter.state ?? null,
+      serviceDate: filter.serviceDate ?? null,
+      hubId: filter.hubId ?? null,
+    });
+    const owned = ownedByCaller(authorized);
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -196,8 +237,8 @@ export class PickupManifestsService {
       async (handle) => {
         const result = await transactionOf(handle).execute(sql`
           select ${MANIFEST_COLUMNS} from pickup_manifest
-           where (${state}::text is null or state = ${state}::text)
-             and (${serviceDate}::date is null or service_date = ${serviceDate}::date)
+           where ${criteria}
+             and ${owned}
              and (${afterMoment}::timestamptz is null or (created_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
            order by created_at, id
            limit ${size + 1}`);

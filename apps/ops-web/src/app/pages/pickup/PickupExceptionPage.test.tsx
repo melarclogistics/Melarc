@@ -65,17 +65,21 @@ async function fill(user: ReturnType<typeof renderApp>['user']) {
 }
 
 describe('the exception: asking for it', () => {
-  it('names the request and the key that decides, and no role', async () => {
+  it('names the request and says an approver decides it, with no key and no role', async () => {
     open();
 
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Request a one-package exception' }),
     ).toBeVisible();
     expect(await screen.findByText('For ACC-PR-7KQ2MZ.')).toBeVisible();
-    expect(screen.getByText('pickup.exception.approve')).toBeVisible();
+    expect(screen.getByText(/an approver decides it\./)).toBeVisible();
+    expect(screen.getByRole('main').textContent).not.toContain('pickup.exception.approve');
     expect(screen.getByRole('main').textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
-    // The maker-checker rule is said in plain words, and decided by the server.
-    expect(screen.getByText(/Whoever asks for an exception cannot also approve it/)).toBeVisible();
+    // A task form keeps at most two short sentences under its title (the Product Owner, 9 November 2026), in plain words: no tier and no word of what the server does. The maker-checker
+    // rule is told where it matters: in the question of the approval, and in the refusal of a self-approval.
+    const note = screen.getByText(/an approver decides it\./);
+    expect(note.textContent.split(/(?<=\.)\s+/).length).toBeLessThanOrEqual(2);
+    expect(note.textContent).not.toMatch(/highest tier|the server|cannot also approve/);
   });
 
   // §21.1: the recipient's name, phone and delivery address become mandatory, and travel with the exception.
@@ -143,6 +147,66 @@ describe('the exception: asking for it', () => {
   });
 });
 
+describe('the exception: the way back to the request, in every state of the page', () => {
+  // The trail of the page's parents is the way back, and the only one (Stage 4.5): its entry for the request names it by its code once it is read, and "The request" until then. No link of its
+  // own sits above the page beside it.
+  const wayBack = async (name: string) =>
+    within(await screen.findByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+      name,
+    });
+  const noOtherWay = () => {
+    expect(screen.queryByRole('link', { name: 'Back to the request' })).toBeNull();
+  };
+
+  // Break caught (the review of 499399c): a page with no way back to its request while the request is read, and after a read that failed.
+  it('is there while the request is being read', async () => {
+    open(() => new Promise<Response>(() => undefined));
+
+    expect(await wayBack('The request')).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Request a one-package exception' }),
+    ).toBeVisible();
+    noOtherWay();
+  });
+
+  it('is there after a read that failed', async () => {
+    open(() => refusal(500, 'INTERNAL_ERROR'));
+
+    expect(await wayBack('The request')).toHaveAttribute('href', `/pickup-requests/${REQUEST_ID}`);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    noOtherWay();
+  });
+
+  it('is there beside the form', async () => {
+    open();
+
+    expect(await screen.findByRole('button', { name: 'Request the exception' })).toBeVisible();
+    expect(await wayBack('ACC-PR-7KQ2MZ')).toHaveAttribute(
+      'href',
+      `/pickup-requests/${REQUEST_ID}`,
+    );
+    noOtherWay();
+  });
+
+  it('is there when the exception cannot be asked for', async () => {
+    open(() => json(200, { ...single, state: 'CONFIRMED' }, etag('v1')));
+
+    expect(await screen.findByText(/waits for confirmation/)).toBeVisible();
+    expect(await wayBack('ACC-PR-7KQ2MZ')).toHaveAttribute(
+      'href',
+      `/pickup-requests/${REQUEST_ID}`,
+    );
+    noOtherWay();
+  });
+
+  it('names the queue above the request', async () => {
+    open();
+
+    await screen.findByRole('button', { name: 'Request the exception' });
+    expect(await wayBack('Pickup requests')).toHaveAttribute('href', '/pickup-requests');
+  });
+});
+
 describe('the exception: when it does not apply', () => {
   it.each([
     ['a confirmed request', { state: 'CONFIRMED' as const }, /waits for confirmation/],
@@ -152,17 +216,19 @@ describe('the exception: when it does not apply', () => {
       { one_package_exception_id: '6a7b8c9d-0e1f-4a2b-9c3d-4e5f6a7b8c9d' },
       /already approved/,
     ],
-    // The read now shows an exception that was asked for: it is not asked for twice.
+    // The read now shows an exception that was asked for: it is not asked for twice. It waits for an approver, in those words: the key that decides it is on no screen.
     [
       'a request whose exception waits for approval',
       { one_package_exception: exceptionFixture() },
-      /requested on 29 Oct, 08:20, and waits for a holder of pickup\.exception\.approve/,
+      /requested on 29 Oct, 08:20, and waits for an approver to decide it\./,
     ],
   ])('says why for %s, and offers no form', async (_label, change, words) => {
     open(() => json(200, { ...single, ...change }, etag('v1')));
 
     expect(await screen.findByText(words)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Request the exception' })).toBeNull();
+    // Break caught: the reason that names the permission that decides it (the finding of the review of 499399c: a key on a screen).
+    expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.exception\.approve/);
   });
 
   // A refused exception does not block a new one (requestOnePackageException).
@@ -193,6 +259,37 @@ describe('the exception: when it does not apply', () => {
       expect(screen.getByRole('button', { name: 'Check the request' })).toHaveFocus();
     });
     expect(screen.queryByRole('button', { name: 'Request the exception' })).toBeNull();
+  });
+});
+
+describe('The one-package exception: its heading', () => {
+  // Break caught (run 7, Stage 4.3): a page that owns its heading, so that the wrapper's is replaced by the form's when the request is read: the focus the frame put on it is lost, and what
+  // held the first heading holds a node that is no longer in the document. It is the same element while the request is read and after.
+  it('keeps one heading element, with its focus, while the request is read and after', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    open(() => gate);
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Request a one-package exception',
+    });
+    await screen.findByText('Loading the pickup request…');
+    act(() => {
+      heading.focus();
+    });
+    expect(heading).toHaveFocus();
+
+    await act(async () => {
+      release(json(200, single, etag('v1')));
+      await gate;
+    });
+    await screen.findByRole('button', { name: 'Request the exception' });
+
+    expect(screen.getByRole('heading', { level: 1 })).toBe(heading);
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveFocus();
   });
 });
 
@@ -285,13 +382,14 @@ describeInterfaceStates('The one-package exception', {
     },
   },
   'permission-restricted': {
-    // ops-portal.md section 7: the refusal reads as who decides, by the key (pickup.exception.approve), and not as "you lack access".
+    // ops-portal.md section 7, PRODUCT_DESIGN_DIRECTION section 6.5: the refusal reads as who decides, in plain words and with no key, and not as "you lack access".
     test: async () => {
       open(undefined, ['pickup.read']);
       expect(
         await screen.findByRole('heading', { level: 1, name: 'Approval is needed' }),
       ).toBeVisible();
-      expect(screen.getByText('pickup.exception.approve')).toBeVisible();
+      expect(screen.getByText('A different approver decides this.')).toBeVisible();
+      expect(screen.getByRole('main').textContent).not.toContain('pickup.exception.approve');
       expect(screen.getByRole('main').textContent).not.toMatch(
         /do not have access|Ops Staff|Senior Ops|Platform Admin/,
       );

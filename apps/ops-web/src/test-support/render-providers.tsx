@@ -5,10 +5,14 @@ import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import { ApiClientProvider } from '../platform/api/api-client';
+import { HubChoiceScope } from '../platform/hub/active-hub';
 import { createQueryClient, endSession } from '../platform/query/query-client';
+import { holdOf } from '../platform/query/read-hold';
+import { queueSummaryObserver } from '../platform/queue-summary/queue-summary-refresh';
 import { SessionBoundary } from '../platform/session/session-boundary';
 import { SessionProvider } from '../platform/session/SessionProvider';
 import { SessionStore, type SessionView } from '../platform/session/session-store';
+import { failWhenAPermissionKeyIsDrawn } from './permission-keys';
 import { sessionFixture } from './session-fixture';
 
 export interface ProvidersOptions {
@@ -22,9 +26,10 @@ export interface ProvidersOptions {
  * A component inside the real providers (query client, session store and boundary, scoped API client) and a router, without the
  * application's frame or routes, and with the store and the query client in hand so a test can end a session or read the cache. Only the
  * network is replaced (`installFakeApi`). What `AppProviders` does when a session ends is done the same way here, apart from the
- * navigation.
+ * navigation. The test fails if a permission key of the catalogue is drawn, as text or in an attribute, at any moment of it (`permission-keys.ts`).
  */
 export function renderWithProviders(ui: ReactElement, options: ProvidersOptions = {}) {
+  failWhenAPermissionKeyIsDrawn();
   const store = new SessionStore();
   if (options.signedIn !== undefined && options.signedIn !== false) {
     store.signedIn(options.signedIn === true ? sessionFixture() : options.signedIn);
@@ -38,13 +43,20 @@ export function renderWithProviders(ui: ReactElement, options: ProvidersOptions 
       endSession(queryClient);
       store.end();
     },
+    onRateLimited: (askedSeconds) => {
+      holdOf(queryClient).hold(askedSeconds);
+    },
   });
+  // The same reaction to an act that the application has (`AppProviders`): the queue summary is read again after an act that can change a queue.
+  const onAct = queueSummaryObserver(queryClient);
   const user = userEvent.setup();
   const wrap = (element: ReactElement) => (
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider boundary={boundary}>
+      <ApiClientProvider boundary={boundary} onAct={onAct}>
         <SessionProvider store={store}>
-          <MemoryRouter initialEntries={[options.path ?? '/']}>{element}</MemoryRouter>
+          <HubChoiceScope>
+            <MemoryRouter initialEntries={[options.path ?? '/']}>{element}</MemoryRouter>
+          </HubChoiceScope>
         </SessionProvider>
       </ApiClientProvider>
     </QueryClientProvider>

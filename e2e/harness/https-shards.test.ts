@@ -31,38 +31,47 @@ describe('the variable that carries the shard', () => {
     }
   });
 
-  // Break caught: a malformed value accepted as some shard, or as none: each is refused and says what to use.
+  // Break caught: a malformed value accepted as some shard, or as none: each is refused and says what to use. The values are written for the total of the table, so that
+  // adding a shard changes none of them.
   it.each([
-    '0/2',
-    '3/2',
+    '0/N',
+    'M/N',
     '2',
     'a/b',
     '1/0',
-    '1/2/3',
-    '-1/2',
-    '1.5/2',
-    '01/2',
+    '1/N/9',
+    '-1/N',
+    '1.5/N',
+    '01/N',
     '1/',
-    '/2',
-    '1 / 2',
-    '1/2x',
-  ])('refuses %j as not a shard', (value) => {
+    '/N',
+    '1 / N',
+    '1/Nx',
+  ])('refuses %j as not a shard', (template) => {
+    const total = String(HTTPS_SHARDS.length);
+    const value = template.replaceAll('N', total).replaceAll('M', String(HTTPS_SHARDS.length + 1));
     const choice = chooseHttpsShard(value);
     expect(choice.kind).toBe('refused');
     expect('why' in choice ? choice.why : '').toMatch(
-      /^MELARC_HTTPS_SHARD is ".*", which is not a shard\. Use current\/total counted from 1, for example 1\/2\.$/,
+      new RegExp(
+        `^MELARC_HTTPS_SHARD is ".*", which is not a shard\\. Use current/total counted from 1, for example 1/${total}\\.$`,
+      ),
     );
   });
 
   // Break caught: a total that is not the shards this harness has, so that a workflow with another number of jobs leaves a run to no job
   // or makes a job that makes nothing: refused, and the harness's number said.
-  it.each(['1/1', '1/3', '2/3', '3/3', '1/20'])(
-    'refuses %j as not the shards of this harness',
-    (value) => {
-      const choice = chooseHttpsShard(value);
+  it.each([-2, -1, 1, 2, 17])(
+    'refuses a total that differs from the shards of this harness by %j',
+    (difference) => {
+      const total = HTTPS_SHARDS.length + difference;
+      if (total < 1) return;
+      const choice = chooseHttpsShard(`1/${String(total)}`);
       expect(choice.kind).toBe('refused');
       expect('why' in choice ? choice.why : '').toMatch(
-        /but this harness cuts the run into 2 shards \(e2e\/harness\/https-shards\.ts\): the workflow and the harness disagree\.$/,
+        new RegExp(
+          `but this harness cuts the run into ${String(HTTPS_SHARDS.length)} shards \\(e2e/harness/https-shards\\.ts\\): the workflow and the harness disagree\\.$`,
+        ),
       );
     },
   );

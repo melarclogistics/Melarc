@@ -3,6 +3,7 @@ import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swag
 
 import { API_PREFIX } from '../http/routes.constants.js';
 import { applyOperationStatements } from './operation-statements.js';
+import { applyRateLimitStatement } from './rate-limit-statement.js';
 
 /**
  * The OpenAPI description of what the running application actually registers, built from its
@@ -32,5 +33,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
   const document = SwaggerModule.createDocument(app, options, { ignoreGlobalPrefix: true });
   // What a decorated class cannot say: the schemes and the default posture, each operation's credentials, response cookies and servers.
   applyOperationStatements(document, app);
+  // What the platform does to every operation that needs a session, whatever its controller says: the authenticated limiter's 429.
+  applyRateLimitStatement(document, app);
   return document;
 }

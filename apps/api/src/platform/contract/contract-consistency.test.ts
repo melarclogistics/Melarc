@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { IMPLEMENTED_OPERATIONS } from '../../tools/contract/implemented-scope.js';
 import { JsonEditor } from '../../test-support/json-edit.js';
+import { takesSession } from '../../test-support/takes-session.js';
 import { isJsonObject, type Json, type JsonObject } from './json.js';
 import { locateContract } from './locate-contract.js';
 
@@ -422,14 +423,45 @@ function operationCountProblems(
 // decision of 6 October 2026). `VALIDATION_FAILED` is always a 400, and a business rule is a 422, so no operation
 // may carry the first through the second's response. `CSRF_VALIDATION_FAILED` is a 403 and every operation that
 // lists it has a 403 that carries it. `IDEMPOTENCY_KEY_CONFLICT` is a 409 and is declared, with its 409, on every
-// operation that takes an `Idempotency-Key`. A shared response is only ever filed under its own status.
+// operation that takes an `Idempotency-Key`. `RATE_LIMITED` is a 429 (A2 of the audit, 7 November 2026; `AC-SLICE-000-131`): every
+// operation that takes a session is covered by the authenticated limiter and answers it with the one shared response that carries
+// `Retry-After` (`RateLimited`), and an operation reached before a session exists answers it, if it does, with the one that carries
+// none (`RateLimitedAnonymous`). A shared response is only ever filed under its own status.
 
 const SHARED_RESPONSE_STATUS: Readonly<Record<string, string>> = {
   ValidationFailed: '400',
   Forbidden: '403',
   Conflict: '409',
   RuleViolation: '422',
+  RateLimited: '429',
+  RateLimitedAnonymous: '429',
 };
+
+const RATE_LIMITED_REFERENCE = '#/components/responses/RateLimited';
+const RATE_LIMITED_ANONYMOUS_REFERENCE = '#/components/responses/RateLimitedAnonymous';
+
+/** The two shared 429 responses: the first declares `Retry-After` through the shared header and the second declares no header. */
+function rateLimitResponseProblems(contract: JsonObject): string[] {
+  const responses =
+    isJsonObject(contract.components) && isJsonObject(contract.components.responses)
+      ? contract.components.responses
+      : {};
+  const problems: string[] = [];
+  const shared = responses.RateLimited;
+  const anonymous = responses.RateLimitedAnonymous;
+  if (!isJsonObject(shared)) return ['The contract has no shared RateLimited response'];
+  if (!isJsonObject(anonymous)) return ['The contract has no shared RateLimitedAnonymous response'];
+  const wait = isJsonObject(shared.headers) ? shared.headers['Retry-After'] : undefined;
+  if (!isJsonObject(wait) || wait.$ref !== '#/components/headers/RetryAfter') {
+    problems.push('RateLimited does not declare Retry-After through the shared RetryAfter header');
+  }
+  if (anonymous.headers !== undefined) {
+    problems.push(
+      'RateLimitedAnonymous declares a header, and a 429 before a session carries none',
+    );
+  }
+  return problems;
+}
 
 /** What an operation declares for a status, with a reference followed, or undefined. */
 function answerOf(
@@ -468,7 +500,7 @@ function takesIdempotencyKey(contract: JsonObject, path: string, operation: Json
 }
 
 function statusProblems(contract: JsonObject): string[] {
-  const problems: string[] = [];
+  const problems: string[] = rateLimitResponseProblems(contract);
   const description = (answer: JsonObject | undefined): string =>
     typeof answer?.description === 'string' ? answer.description : '';
 
@@ -478,6 +510,29 @@ function statusProblems(contract: JsonObject): string[] {
     const responses = isJsonObject(operation.operation.responses)
       ? operation.operation.responses
       : {};
+
+    const raw429 = responses['429'];
+    const reference429 =
+      isJsonObject(raw429) && typeof raw429.$ref === 'string' ? raw429.$ref : undefined;
+    if (takesSession(operation.operation)) {
+      if (reference429 !== RATE_LIMITED_REFERENCE) {
+        problems.push(
+          `${where} takes a session and does not answer 429 with the shared RateLimited response`,
+        );
+      }
+      if (!codes.includes('RATE_LIMITED')) {
+        problems.push(`${where} takes a session and does not declare RATE_LIMITED`);
+      }
+    } else {
+      if (reference429 !== undefined && reference429 !== RATE_LIMITED_ANONYMOUS_REFERENCE) {
+        problems.push(
+          `${where} is reached before a session exists and answers 429 with a response that carries a wait`,
+        );
+      }
+      if (codes.includes('RATE_LIMITED') && reference429 === undefined) {
+        problems.push(`${where} declares RATE_LIMITED and answers no 429`);
+      }
+    }
 
     if (takesIdempotencyKey(contract, operation.path, operation.operation)) {
       if (!codes.includes('IDEMPOTENCY_KEY_CONFLICT')) {
@@ -1101,7 +1156,8 @@ describe('(g) statuses: each way to break it is found', () => {
     const onThePath = changed((copy) => {
       copy.set(['paths', '/ghosts'], {
         parameters: [{ name: 'idempotency-key', in: 'header', schema: { type: 'string' } }],
-        post: { operationId: 'makeGhost', 'x-error-codes': [], responses: {} },
+        // Reached before a session exists (`security: []`), so that the only rules this operation meets are the Idempotency-Key's.
+        post: { operationId: 'makeGhost', security: [], 'x-error-codes': [], responses: {} },
       });
     });
 
@@ -1159,6 +1215,61 @@ describe('(g) statuses: each way to break it is found', () => {
     const quiet = statusProblems(silent);
     expect(quiet.length).toBeGreaterThan(50);
     expect(quiet.every((problem) => problem.endsWith('and its 403 does not carry it'))).toBe(true);
+  });
+
+  // Break caught (A2 of the audit; AC-SLICE-000-131): an operation that takes a session and leaves out the 429 of the authenticated limiter, its code,
+  // or the shared response that carries the wait; an operation reached before a session exists that answers with the response that carries one; and
+  // a shared response that lost its header, or that gained one it must not have.
+  it('finds an operation that takes a session without the 429 of the authenticated limiter', () => {
+    const noAnswer = changed((copy) => {
+      copy.remove([...answers('listPickupRequests'), 'responses', '429']);
+    });
+    const noCode = changed((copy) => {
+      copy.update<string[]>([...answers('listPickupRequests'), 'x-error-codes'], (codes) =>
+        codes.filter((code) => code !== 'RATE_LIMITED'),
+      );
+    });
+    const withoutWait = changed((copy) => {
+      copy.set([...answers('listPickupRequests'), 'responses', '429'], {
+        $ref: '#/components/responses/RateLimitedAnonymous',
+      });
+    });
+
+    expect(statusProblems(noAnswer)).toEqual([
+      'GET /pickup-requests takes a session and does not answer 429 with the shared RateLimited response',
+    ]);
+    expect(statusProblems(noCode)).toEqual([
+      'GET /pickup-requests takes a session and does not declare RATE_LIMITED',
+    ]);
+    expect(statusProblems(withoutWait)).toEqual([
+      'GET /pickup-requests takes a session and does not answer 429 with the shared RateLimited response',
+    ]);
+  });
+
+  it('finds an operation reached before a session exists that is given a wait, and a shared response that has the wrong header', () => {
+    const withWait = changed((copy) => {
+      copy.set([...answers('staffSignIn'), 'responses', '429'], {
+        $ref: '#/components/responses/RateLimited',
+      });
+    });
+    const lostHeader = changed((copy) => {
+      copy.remove(['components', 'responses', 'RateLimited', 'headers']);
+    });
+    const gainedHeader = changed((copy) => {
+      copy.set(['components', 'responses', 'RateLimitedAnonymous', 'headers'], {
+        'Retry-After': { $ref: '#/components/headers/RetryAfter' },
+      });
+    });
+
+    expect(statusProblems(withWait)).toEqual([
+      'POST /auth/staff/sign-in is reached before a session exists and answers 429 with a response that carries a wait',
+    ]);
+    expect(statusProblems(lostHeader)).toEqual([
+      'RateLimited does not declare Retry-After through the shared RetryAfter header',
+    ]);
+    expect(statusProblems(gainedHeader)).toEqual([
+      'RateLimitedAnonymous declares a header, and a 429 before a session carries none',
+    ]);
   });
 
   it('keeps the shared 422 from naming VALIDATION_FAILED, except to say it is not one', () => {

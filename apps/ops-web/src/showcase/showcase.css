@@ -10,10 +10,20 @@
   line-height: var(--text-heading-md-line-height);
 }
 
-/* A frame to look at the side menu in: it is full height in the application, so here it has a height of its own. */
-.showcase-side-menu {
+/* Frames to look at the sidebar and the top bar in: the sidebar is full height in the application, so here it has a height of its own. */
+.showcase-sidebars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.showcase-sidebar {
   display: flex;
   height: 28rem;
+}
+
+.showcase-topbar {
+  border: 1px solid var(--color-border-subtle);
 }
 
 .showcase-icons {
@@ -82,4 +92,82 @@
 
 .showcase-secondary {
   color: var(--color-text-secondary);
+}
+
+/* The primitives page (src/showcase/PrimitivesShowcase.tsx): a grid of labelled fields, a row for a checkbox and its label, and a few frames. */
+.showcase-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.showcase-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.showcase-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.showcase-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--color-status-danger-foreground);
+}
+
+.showcase-top {
+  align-items: flex-start;
+}
+
+.showcase-divider {
+  height: var(--space-6);
+}
+
+.showcase-panel {
+  padding: 0 var(--space-6);
+}
+
+.showcase-command {
+  max-width: 24rem;
+  border: 1px solid var(--color-border-default);
+}
+
+.showcase-scroll {
+  width: min(16rem, 100%);
+  height: 9rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+.showcase-scroll__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  list-style: none;
+}
+
+/* The sidebar's ground, for the things that are drawn on it (a count badge): the same Ink and text as the sidebar. */
+.showcase-ink {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-inverse);
+  color: var(--shell-text);
+}
+
+.showcase-ink__entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }

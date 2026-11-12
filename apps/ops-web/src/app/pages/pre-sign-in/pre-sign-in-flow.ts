@@ -33,6 +33,22 @@ export function usePreSignInFlow(): PreSignInFlow {
  */
 export const ENROLLED_STATE = { enrolled: true } as const;
 
+/**
+ * The history state `/setup/mfa` is left in once the material of an authenticator has been shown there (run 7, Stage 2.4). It marks that this tab was taken through the set-up: a person who comes
+ * back to the page after the code has gone (a Back, a reload, the time up) is told what happened and what to do, and not that the link cannot be used. It is not a credential and says nothing
+ * of anybody: a person who writes it into a history entry by hand sees the same words as everyone who has no code, which is true of them.
+ */
+export const ENROLLING_STATE = { enrolling: true } as const;
+
+/** Whether the history state says this tab was taken through the set-up of an authenticator. */
+export function wasEnrolling(state: unknown): boolean {
+  return (
+    typeof state === 'object' &&
+    state !== null &&
+    (state as { enrolling?: unknown }).enrolling === true
+  );
+}
+
 /** Whether the history state says this tab has just proved a code. */
 export function justEnrolled(state: unknown): boolean {
   return (

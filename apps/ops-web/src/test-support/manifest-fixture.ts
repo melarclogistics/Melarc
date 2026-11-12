@@ -66,6 +66,7 @@ export function manifestFixture(overrides: Partial<ManifestBody> = {}): Manifest
     dispatched_at: null,
     started_at: null,
     completed_at: null,
+    created_at: '2026-11-02T09:00:00Z',
     stops: [
       stopFixture(),
       stopFixture({ id: STOP_TWO_ID, pickup_request_id: REQUEST_TWO_ID, sequence: 2 }),

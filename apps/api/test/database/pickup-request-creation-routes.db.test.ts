@@ -366,6 +366,74 @@ describe('the same booking by Ops and by the vendor is one record (AC-SLICE-001-
   });
 });
 
+describe('an officer is told one thing of an organisation of a hub outside their grant (AC-SLICE-001-82; the audit of 7 November 2026, A2)', () => {
+  /** What a client is told, without the request's own identifier. */
+  const toldOf = (response: TestResponse): { status: number; body: Record<string, unknown> } => {
+    const body = { ...(response.json() as Record<string, unknown>) };
+    delete body.request_id;
+    return { status: response.status, body };
+  };
+
+  // Break caught: the status of the organisation (SENDER_SUSPENDED, or a validation failure for one that is not active) or the hub the body names (a
+  // validation failure of /hub_id) judged before the scope, which tells an officer of the second hub whether another hub's organisation is suspended or
+  // not active and whether it is in the hub they named; or the scope answered in other words for some organisations. Nothing is written for any.
+  it('is HUB_SCOPE_VIOLATION, in the same words, whether the organisation is active, suspended or not active and whatever hub is named, and nothing is written', async () => {
+    const suspended = await routes.vendor({ organizationStatus: 'SUSPENDED' });
+    const inactive = await routes.vendor({ organizationStatus: 'REJECTED' });
+    const review = await routes.vendor({ organizationStatus: 'PENDING_SENIOR_OPS_REVIEW' });
+    const bookings: readonly (readonly [string, Record<string, unknown>])[] = [
+      ['an active organisation', own()],
+      ['a suspended organisation', own({ vendor_organization_id: suspended.row.organizationId })],
+      ['a rejected organisation', own({ vendor_organization_id: inactive.row.organizationId })],
+      ['one still under review', own({ vendor_organization_id: review.row.organizationId })],
+      ['an active organisation, with the officer’s own hub named', own({ hub_id: HUB_B })],
+      [
+        'a suspended organisation, with the officer’s own hub named',
+        own({ vendor_organization_id: suspended.row.organizationId, hub_id: HUB_B }),
+      ],
+      [
+        'a suspended organisation, for a collection',
+        collect({ vendor_organization_id: suspended.row.organizationId }),
+      ],
+    ];
+    const before = await count();
+
+    const told = [];
+    for (const [what, body] of bookings) {
+      told.push([what, toldOf(await book(opsB.client, body))] as const);
+    }
+
+    const first = told[0]?.[1];
+    expect(first).toMatchObject({ status: 403, body: { code: 'HUB_SCOPE_VIOLATION' } });
+    for (const [what, answer] of told) expect(answer, what).toEqual(first);
+    expect(await count()).toBe(before);
+  });
+
+  // Break caught: the scope put in front of the facts for callers it does not concern (an officer of the organisation's hub, a session of every hub, the
+  // vendor itself), so that none of them is told the status or the hub as before.
+  it('is told the status and the hub it named as before when the grant reaches the organisation’s hub', async () => {
+    const suspended = await routes.vendor({ organizationStatus: 'SUSPENDED' });
+    const inactive = await routes.vendor({ organizationStatus: 'REJECTED' });
+    const everyHub = await routes.platformAdmin();
+
+    for (const asker of [ops, everyHub]) {
+      const wasSuspended = await book(
+        asker.client,
+        own({ vendor_organization_id: suspended.row.organizationId }),
+      );
+      expect([wasSuspended.status, codeOf(wasSuspended)]).toEqual([422, 'SENDER_SUSPENDED']);
+      const wasInactive = await book(
+        asker.client,
+        own({ vendor_organization_id: inactive.row.organizationId }),
+      );
+      expect([wasInactive.status, codeOf(wasInactive)]).toEqual([400, 'VALIDATION_FAILED']);
+      const elsewhere = await book(asker.client, own({ hub_id: HUB_B }));
+      expect([elsewhere.status, codeOf(elsewhere)]).toEqual([400, 'VALIDATION_FAILED']);
+      expect(JSON.stringify(elsewhere.json())).toContain('/hub_id');
+    }
+  });
+});
+
 describe('a one-package request waits for its exception (pickup-request.md 5.2)', () => {
   // Break caught: Ops barred from a one-package request, or an estimate invented for a destination nobody has named.
   it('is created by Ops as PENDING with no estimate until a destination is named', async () => {

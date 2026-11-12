@@ -18,6 +18,8 @@ import { wcagViolations } from '../../../test-support/wcag';
 import { EmptyState } from '../empty-state/EmptyState';
 import { Skeleton } from '../skeleton/Skeleton';
 import { ReadState, type ReadQuery } from './ReadState';
+import { UNCLAIMED_FOCUS_SELECTOR } from './unclaimed-focus';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -178,7 +180,7 @@ describeInterfaceStates('ReadState', {
       api.on(`GET ${LIST}`, () => errorResponse(403, 'PERMISSION_DENIED'));
       renderWithProviders(<Reasons />);
 
-      expect(await screen.findByText('settings.reason.read')).toBeVisible();
+      expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
       expect(screen.queryByRole('list')).toBeNull();
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
@@ -297,6 +299,21 @@ describe('ReadState: the other refusals', () => {
     expect(container.contains(document.activeElement)).toBe(true);
   });
 
+  // Break caught (run 7, Stage 2.1): a page that must tell focus nobody chose from focus an officer did choose reads this mark and nothing else, so a heading of the panel that is
+  // also tabindex -1 is no longer taken for nobody's. The mark is on the wrapper, in every state, and on nothing inside it.
+  it('marks its wrapper as a place focus lands on by a script or by a press inside it, and nothing it holds', async () => {
+    api.on(`GET ${LIST}`, () => json(200, reasons('Demo reason one')));
+    const { container } = renderWithProviders(<Reasons />);
+    const wrapper = container.querySelector('.ui-read-state');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(true);
+
+    const list = await screen.findByRole('list', { name: 'Reasons' });
+    expect(wrapper?.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(true);
+    expect(container.querySelectorAll(UNCLAIMED_FOCUS_SELECTOR)).toHaveLength(1);
+    expect(list.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(false);
+  });
+
   it('shows the error and not the data of an earlier answer when a refresh fails', () => {
     const query: ReadQuery<string[]> = {
       status: 'error',
@@ -324,7 +341,7 @@ describe('ReadState: the other refusals', () => {
 
     api.on(`GET ${LIST}`, () => errorResponse(403, 'PERMISSION_DENIED'));
     const refused = renderWithProviders(<Reasons />);
-    await screen.findByText('settings.reason.read');
+    await screen.findByText(cannotText('settings.reason.read'));
     expect(await wcagViolations(refused.container)).toEqual([]);
     refused.unmount();
 
@@ -419,7 +436,7 @@ describe('ReadState: a way out that a retry is not', () => {
       ),
     );
 
-    expect(screen.getByText(/pickup\.read/)).toBeVisible();
+    expect(screen.getByText(cannotText('pickup.read'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Back to the start' })).toBeNull();
   });
 

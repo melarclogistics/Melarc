@@ -49,7 +49,7 @@ const SENIOR_ONLY_KEYS_001 = [
 ] as const;
 
 /**
- * The key of the Ops message log (S1.12e; `NOTIFICATION_READ_GRANTS` of the seed, "A S P · own hub"): the three staff bundles hold it, and
+ * The key of the Ops message log (S1.12e; `NOTIFICATION_READ_GRANTS` of the seed, "A S P · own hub, P at all hubs"): the three staff bundles hold it, and
  * Finance, a vendor and a rider do not.
  */
 const NOTIFICATION_KEYS = ['notification.read'] as const;

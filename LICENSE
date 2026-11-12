@@ -4,6 +4,6 @@ This repository and everything in it (source code, specifications, designs and d
 licence is granted: no part of it may be used, copied, modified, merged, published, distributed, sublicensed or sold
 without the prior written permission of Melarc Logistics.
 
-Third-party components keep their own licences. The Inter typeface shipped by the Ops Portal is licensed under the
-SIL Open Font License 1.1 (apps/ops-web/public/licenses/Inter-OFL.txt), and the packages installed from npm keep the
-licences they declare.
+Third-party components keep their own licences. The Inter and JetBrains Mono typefaces shipped by the Ops Portal are
+licensed under the SIL Open Font License 1.1 (apps/ops-web/public/licenses/Inter-OFL.txt and
+apps/ops-web/public/licenses/JetBrainsMono-OFL.txt), and the packages installed from npm keep the licences they declare.

@@ -106,6 +106,14 @@ A rider stands at a door with a parcel. This feature is the successful outcome a
 - **Never let a rider or an Ops screen declare a payment received.** Provider truth is verified server-to-server; Merchant MoMo is confirmed by a Senior Ops or Finance actor who is not the rider.
 - **Never refuse or discard a short payment.** It is money received that settles nothing yet.
 
+### 5.6 What the provider callback must do when it is built — *requirements, recorded 7 November 2026*
+
+`receiveHubtelPaymentCallback` ([contracts/openapi.yaml](../../contracts/openapi.yaml)) is specified and not built, and it states no rate limit, because none of the six buckets covers it ([`PRE_SESSION_WITHOUT_A_LIMITER`](../../apps/api/src/tools/contract/check-rate-limit-declarations.ts) names it, with the reason). **The Product Owner decided on 7 November 2026 to change nothing now.** The task that builds it, which waits for `OQ-109` (the live Hubtel merchant contract), must meet these three requirements, and each gets its acceptance criteria in that task:
+
+1. **The signature is verified before any work.** Before a transaction is opened, a record is read or written, or the body is acted on, the provider's signature is checked, and a callback that fails the check is refused with no effect. Where the live product gives no verifiable signature, the rule of the contract stands: the attempt reaches `SUCCEEDED` only after an independent server-to-server status verification.
+2. **It is idempotent on the provider's reference.** A callback is identified by the provider's own transaction reference, never by its arrival, its body or its time: the same reference delivered again (a retry, a duplicate, a replay, out of order) produces the one effect it produced the first time (one receipt, one allocation) and is answered as the first was.
+3. **A generous per-source ceiling limits floods.** The callback is reached before any session, so it needs a bucket of its own, counted per source and set well above anything the provider really sends, so that a burst of genuine retries is never refused and an unauthenticated flood cannot exhaust the API. When it is added, the operation leaves the list named above and declares the pre-session 429 (`RateLimitedAnonymous`, see [errors-and-enums.md](../../contracts/errors-and-enums.md)); the value is set then, with a measurement of the provider's real rate, not guessed here.
+
 ## 6. Entities — *pointer*
 
 [domain-model.md](../../contracts/domain-model.md) §6.10 `DeliveryStop`, §6.7 `Order`, §6.11 `RiderCashCustody`.

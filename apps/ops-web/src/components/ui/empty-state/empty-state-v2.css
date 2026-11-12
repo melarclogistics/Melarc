@@ -1,0 +1,55 @@
+/*
+ * EmptyState v2 (design/COMPONENT_PATTERNS.md, EmptyState v2): a place on the page with no frame, in the portal's own mark. The motif is a 10px square of the brand crimson (the
+ * crimson is for the mark, the stage and "New", and this is the mark); the title is the heading size of a card; the line is the secondary text (6.38:1 on the page); an `all-clear`
+ * title takes the success foreground, because a queue worked to nothing is good news, and the words say it either way. Colours, sizes and spaces come from tokens.css.
+ */
+.ui-empty-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-text-primary);
+}
+
+.ui-empty-v2__motif {
+  display: block;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-bottom: var(--space-1);
+  background: var(--color-brand-default);
+}
+
+.ui-empty-v2__title {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.ui-empty-v2--all-clear .ui-empty-v2__title {
+  color: var(--color-status-success-foreground);
+}
+
+.ui-empty-v2__line {
+  max-width: 40rem;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-empty-v2__action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Forced colours drop the fill of the mark: it keeps a border of the text colour, so that it is still the same mark. */
+@media (forced-colors: active) {
+  .ui-empty-v2__motif {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}

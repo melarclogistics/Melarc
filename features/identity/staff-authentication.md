@@ -146,6 +146,10 @@ Rejection is the second outcome of `approveStaffIdentity` (`approved: false`) �
 
 **What it must never do.** Skip the password; survive a reset of the authenticator or a new password; be renewed by use; be created by a session that did not prove a code; be offered to or read for an Ops Staff sign-in; be visible in a body, a log, an audit event or a query cache after the response that set it; or let a lock, a rate limit or a refusal of the password behave differently because the cookie is present.
 
+### 5.9 A Platform Admin who works the floor
+
+**Product Owner, 6 November 2026.** A Platform Admin who works the floor of a hub **should be given that hub as its primary hub**, so that its reads there are its own hub's and are not recorded as hub crossings (the rule is [audit.md](../../contracts/audit.md) §5.4's, `AC-SLICE-000-128`, and is unchanged). This is data and not code: the profile form's *Primary hub* (`primary_hub_id` of `createStaffIdentity`) carries it, a profile is made and approved as any profile is ([permissions.md](../../contracts/permissions.md) section 6), and nothing in the system chooses it. The seeded bootstrap Platform Admin keeps no primary hub, so that every read it makes stays under test as a read of a foreign hub.
+
 ## 6. Entities — *pointer*
 
 | Entity| Where|

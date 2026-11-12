@@ -1,5 +1,6 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
+import { openerOf } from '../opener/opener';
 import './dialog.css';
 import { DialogContainer } from './dialog-container';
 
@@ -33,8 +34,9 @@ const INITIAL_FOCUS = '[data-initial-focus]';
  *   state and the page's cannot drift (a `close` the browser made on its own is brought back in line, see below).
  * - **Initial focus** goes to the control marked `data-initial-focus` when there is one (an alert dialog marks its safe action) and
  *   otherwise to the first focusable one.
- * - **Return of focus**: the element that had focus when the dialog opened gets it back when the dialog closes, whether the page closed
- *   it, Escape did, or the page it was on went away. If that element is gone, focus stays where the browser leaves it.
+ * - **Return of focus**: the control that opened it gets focus back when the dialog closes, whether the page closed it, Escape did, or
+ *   the page it was on went away. That control is the one that was pressed, and else the one that had focus (`openerOf`: Safari's engine
+ *   gives a pressed button no focus, so the focused element alone would be the body). If it is gone, focus stays where the browser leaves it.
  * - **Escape** is the `cancel` event: the browser's closing is prevented and the page is asked, so React's state is the one truth.
  * - **The backdrop** never closes it. What a person typed would be lost to a stray click, and a state they must see could be hidden.
  *
@@ -69,7 +71,7 @@ export function Dialog({
   useLayoutEffect(() => {
     const dialog = element.current;
     if (dialog === null || !open) return;
-    const opener = document.activeElement;
+    const opener = openerOf();
     // A dialog that is already open is left as it is: `showModal()` throws for one.
     if (!dialog.open) dialog.showModal();
     dialog.querySelector<HTMLElement>(INITIAL_FOCUS)?.focus();
@@ -78,7 +80,7 @@ export function Dialog({
         ownCloses.current += 1;
         dialog.close();
       }
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      if (opener?.isConnected === true) opener.focus();
     };
   }, [open]);
 

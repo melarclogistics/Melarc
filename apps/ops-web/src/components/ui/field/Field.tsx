@@ -63,13 +63,11 @@ export function Field({ label, help, error, required = false, children }: FieldP
         className="ui-field__label"
         htmlFor={id}
         onClick={() => {
-          // A control made of parts (a date) is no one element for the label's `for`. A click on the label leads to its first part, as it
-          // leads to an input; an element that has the id is left to the browser.
+          // A control that is not one labelable element (a group of choices) is no element for the label's `for`. A click on the label leads
+          // to its first control, as it leads to an input; an element that has the id is left to the browser.
           if (document.getElementById(id) !== null) return;
           root.current
-            ?.querySelector<HTMLElement>(
-              '[role="spinbutton"]:not([aria-disabled="true"]), input:not([disabled]), button:not([disabled])',
-            )
+            ?.querySelector<HTMLElement>('input:not([disabled]), button:not([disabled])')
             ?.focus();
         }}
       >

@@ -6,6 +6,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { renderApp } from '../../../test-support/render-app';
 import { sessionWith, staffApi } from '../../../test-support/staff-api';
 import { trustedBrowserFixture } from '../../../test-support/staff-fixture';
@@ -16,6 +17,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 const PATH = '/account/trusted-browsers';
@@ -52,6 +54,25 @@ function open(
 
 const heading = (name: string) => screen.findByRole('heading', { level: 1, name });
 const deletes = () => api.requests.filter((request) => request.method === 'DELETE');
+/** The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited. */
+const table = async (): Promise<HTMLElement> => {
+  const found = await screen.findByRole('table', { name: 'Your trusted browsers' });
+  await waitFor(() => {
+    expect(found).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return found;
+};
+/** In a room under 40rem the rows are cards (`narrowRoom`). */
+const cards = () => screen.findByRole('list', { name: 'Your trusted browsers' });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string | RegExp): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+/** A browser's row header is what it is called. The table's own message (none remembered, a failure) sits in a cell and is not one. */
+const browserRows = () => screen.queryAllByRole('rowheader');
 
 async function remove(view: ReturnType<typeof open>, name: RegExp | string) {
   await view.user.click(await screen.findByRole('button', { name }));
@@ -65,28 +86,94 @@ describe('the trusted browsers: what the page shows (AC-SLICE-000-136, -138)', (
 
     expect(await heading('Trusted browsers')).toBeVisible();
     expect(document.title).toBe('Trusted browsers · Melarc Ops Portal');
-    expect(await screen.findByRole('table', { name: 'Your trusted browsers' })).toBeVisible();
+    expect(await table()).toBeVisible();
+  });
+
+  // Break caught: a refresh that reads nothing; the list says when it was last checked.
+  it('says when the browsers were last checked, and Refresh reads the person’s own browsers again', async () => {
+    const view = open();
+    await table();
+    expect(screen.getByText(/^Updated /)).toBeVisible();
+    const lists = () =>
+      api.requests.filter(
+        (request) =>
+          request.method === 'GET' && request.url.endsWith('/auth/staff/trusted-browsers'),
+      );
+    const before = lists().length;
+
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(lists()).toHaveLength(before + 1);
+    });
+    await table();
+    expect(deletes()).toHaveLength(0);
   });
 
   // Break caught: dates that are not words, a browser that is not told from the one in use, or a column that hides when a browser was last used.
   it('shows what each browser is called, when it was added, last used and ends, and which one this is', async () => {
     open();
 
-    const table = await screen.findByRole('table', { name: 'Your trusted browsers' });
-    const rows = within(table).getAllByRole('row');
+    const found = await table();
+    const rows = within(found).getAllByRole('row');
     expect(rows).toHaveLength(3);
-    expect(within(rows[1] ?? table).getByRole('rowheader')).toHaveTextContent(
+    expect(within(rows[1] ?? found).getByRole('rowheader')).toHaveTextContent(
       'Chrome on WindowsThis browser',
     );
-    expect(within(rows[1] ?? table).getAllByRole('cell')[1]).toHaveTextContent('24 Oct, 07:30');
-    expect(within(rows[2] ?? table).getByRole('rowheader')).toHaveTextContent('Safari on macOS');
+    expect(within(rows[1] ?? found).getAllByRole('cell')[1]).toHaveTextContent('24 Oct, 07:30');
+    expect(within(rows[2] ?? found).getByRole('rowheader')).toHaveTextContent('Safari on macOS');
     expect(rows[2]).toHaveTextContent('Not used yet');
     expect(rows[2]).not.toHaveTextContent('This browser');
     expect(
-      within(table)
+      within(found)
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent),
     ).toEqual(['Browser', 'Added', 'Last used', 'Ends', 'Action']);
+  });
+
+  it('draws a browser as a card with the same facts and its act, in a room too narrow for the columns', async () => {
+    narrowRoom();
+    open();
+
+    const found = within(await cards());
+    const first = found.getByRole('heading', { name: 'Chrome on Windows' }).closest('li');
+    expect(first).not.toBeNull();
+    expect(within(first as HTMLElement).getByText('This browser')).toBeVisible();
+    expect(within(first as HTMLElement).getByText('24 Oct, 07:30')).toBeVisible();
+    expect(
+      within(first as HTMLElement).getByRole('button', {
+        name: 'Remove Chrome on Windows (this browser)',
+      }),
+    ).toBeVisible();
+    const second = found.getByRole('heading', { name: 'Safari on macOS' }).closest('li');
+    expect(within(second as HTMLElement).getByText('Not used yet')).toBeVisible();
+    expect(within(second as HTMLElement).queryByText('This browser')).toBeNull();
+    expect(
+      within(second as HTMLElement).getByRole('button', { name: 'Remove Safari on macOS' }),
+    ).toBeVisible();
+    // Each fact beyond the mark and the act is a label and its value (CardFacts), the labels the columns have.
+    expect(
+      within(first as HTMLElement)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Added', 'Last used', 'Ends']);
+  });
+
+  // Break caught (run 7, Stage 1.2; replaces "marks when it was added and when it ends as the lesser columns", which the Product Owner reversed on 11 November 2026): a browser's row opens
+  // nothing, so a column the table took away would leave a day on no screen. No column is lesser; the three times are of the date kind (one line each), and where the box cannot hold them the
+  // list is cards, with every fact.
+  it('marks no column lesser, for a list whose rows open nothing never loses a time', async () => {
+    open();
+
+    const found = await table();
+    const headers = within(found).getAllByRole('columnheader');
+    expect(headers.map((cell) => cell.getAttribute('data-priority'))).toEqual(
+      headers.map(() => null),
+    );
+    const kinds = Object.fromEntries(
+      headers.map((cell) => [cell.textContent, cell.getAttribute('data-kind')]),
+    );
+    expect(kinds).toMatchObject({ Added: 'date', 'Last used': 'date', Ends: 'date' });
   });
 
   it('says plainly that the password is still asked, and shows nothing that could sign anyone in', async () => {
@@ -106,8 +193,35 @@ describe('the trusted browsers: what the page shows (AC-SLICE-000-136, -138)', (
     });
 
     expect(await screen.findByText(/Your password is still asked every time/)).toBeVisible();
-    await screen.findByRole('table', { name: 'Your trusted browsers' });
+    await table();
     expect(view.container.textContent).not.toContain('SENTINEL');
+  });
+});
+
+// Break caught (the security review of run 5, Stage 5.1): a credential drawn in the cards, or in an attribute, which a check of the table's text cannot see. The whole markup of the
+// page is read in both drawings.
+describe('the trusted browsers: nothing that could sign anyone in, in either drawing', () => {
+  it.each([
+    ['the table', false],
+    ['the cards', true],
+  ] as const)('draws no credential in %s, in any text or attribute', async (_name, narrow) => {
+    if (narrow) narrowRoom();
+    const view = open({
+      [LIST]: () =>
+        json(200, {
+          items: [
+            {
+              ...chrome,
+              token: 'SENTINEL-CREDENTIAL-VALUE',
+              token_hash: 'SENTINEL-HASH',
+              factor_id: 'SENTINEL-FACTOR',
+            },
+          ],
+        }),
+    });
+    await (narrow ? cards() : table());
+
+    expect(view.container.innerHTML).not.toContain('SENTINEL');
   });
 });
 
@@ -183,6 +297,41 @@ describe('the trusted browsers: removing one', () => {
     expect(answers).toBe(2);
   });
 
+  // Break caught: the rows replaced by a loading treatment for the read that follows the removal, so that the person loses their place.
+  it('keeps the rows where they are while the list is read again, and says it is busy', async () => {
+    let answers = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const view = open({
+      [LIST]: async () => {
+        answers += 1;
+        if (answers === 1) return json(200, { items: [chrome, safari] });
+        await held;
+        return json(200, { items: [chrome] });
+      },
+      [REMOVE(SECOND)]: () => new Response(null, { status: 204 }),
+    });
+
+    await remove(view, 'Remove Safari on macOS');
+
+    expect(
+      await screen.findByText(
+        'The browser is removed. It will ask for a code at its next sign-in.',
+      ),
+    ).toBeVisible();
+    expect(browserRows()).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Your trusted browsers' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    release();
+    await waitFor(() => {
+      expect(browserRows()).toHaveLength(1);
+    });
+  });
+
   // Break caught: a failed removal worded with the server's diagnostic, or shown as if it had worked.
   it('words a refusal in its own words, never the server’s', async () => {
     const view = open({ [REMOVE(SECOND)]: () => errorResponse(422, 'UNEXPECTED_REFUSAL') });
@@ -202,8 +351,8 @@ describeInterfaceStates('The trusted browsers of a person', {
     test: async () => {
       open({ [LIST]: () => new Promise<Response>(() => undefined) });
 
-      expect(await screen.findByText('Loading your trusted browsers…')).toBeVisible();
-      expect(screen.queryByRole('table')).toBeNull();
+      expect(await screen.findByText('Loading trusted browsers')).toBeVisible();
+      expect(browserRows()).toHaveLength(0);
     },
   },
   empty: {
@@ -224,9 +373,7 @@ describeInterfaceStates('The trusted browsers of a person', {
     test: async () => {
       open({ [LIST]: () => errorResponse(500, 'INTERNAL_ERROR') });
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        'Your trusted browsers could not be loaded.',
-      );
+      await alertSaying('Your trusted browsers could not be loaded.');
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     },
   },
@@ -242,9 +389,9 @@ describeInterfaceStates('The trusted browsers of a person', {
         },
       });
 
-      await view.user.click(await screen.findByRole('button', { name: 'Try again' }));
+      await view.user.click(await screen.findByRole('button', { name: 'Retry' }));
 
-      expect(await screen.findByRole('table', { name: 'Your trusted browsers' })).toBeVisible();
+      expect(await table()).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
@@ -279,7 +426,7 @@ describeInterfaceStates('The trusted browsers of a person', {
 describe('the trusted browsers: accessibility', () => {
   it('has no WCAG violations that can be checked without a layout engine, in its states', async () => {
     const view = open();
-    await screen.findByRole('table', { name: 'Your trusted browsers' });
+    await table();
     expect(await wcagViolations(view.container)).toEqual([]);
     await view.user.click(screen.getByRole('button', { name: 'Remove Safari on macOS' }));
     expect(await wcagViolations(view.container)).toEqual([]);

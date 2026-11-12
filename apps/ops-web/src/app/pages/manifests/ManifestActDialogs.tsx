@@ -182,9 +182,9 @@ function OpenAssign<Result>({
       title="Assign this rider?"
       consequence={
         <p>
-          Assigning a rider closes the vendor’s own cancellation of every request on this manifest:
-          from then on only the office can cancel them, and it records a decision on the
-          cancellation charge when it does. The manifest stays a draft, and the rider sees nothing
+          Assigning a rider closes the vendor’s own cancellation of every request on this pickup
+          run: from then on only the office can cancel them, and it records a decision on the
+          cancellation charge when it does. The pickup run stays a draft, and the rider sees nothing
           until you dispatch it.
         </p>
       }
@@ -227,7 +227,7 @@ function OpenAssign<Result>({
 
 export interface DispatchDialogProps<Result> {
   readonly open: boolean;
-  /** Who the stops are shown to: the assigned rider, by name when it is known. */
+  /** Who the stops are shown to: the run's rider, by name when it is known. */
   readonly riderName: string | undefined;
   readonly version: string;
   readonly send: (version: string) => Promise<Result>;
@@ -255,16 +255,16 @@ export function DispatchDialog<Result>({
   return (
     <ActDialog<Versioned, Result>
       open={open}
-      title="Dispatch this manifest?"
+      title="Dispatch this pickup run?"
       consequence={
         <p>
-          The manifest becomes dispatched and its stops are shown to{' '}
-          {riderName ?? 'the assigned rider'}, and to no other rider. A text message for the rider
-          is queued with it. Dispatching does not start the run: the rider starts it on the run’s
-          day. A cancelled pickup is never sent.
+          A pickup run needs a rider, and a stop still to be worked, to be dispatched. The pickup
+          run becomes dispatched and its stops are shown to {riderName ?? 'its rider'}, and to no
+          other rider. A text message for the rider is queued with it. Dispatching does not start
+          the run: the rider starts it on the run’s day. A cancelled pickup is never sent.
         </p>
       }
-      confirmLabel="Dispatch the manifest"
+      confirmLabel="Dispatch the pickup run"
       operation="dispatchManifest"
       retryable={false}
       build={() => ({ version })}

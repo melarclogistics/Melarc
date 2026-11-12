@@ -4,6 +4,12 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { API_RUNTIME_ROLE } from '../../src/platform/config/load-config.js';
+import { buildAuditRecord } from '../../src/platform/audit/audit-record.js';
+import type {
+  AuditEventInput,
+  AuditJsonObject,
+  AuditScalar,
+} from '../../src/platform/auth/ports/audit-writer.port.js';
 import { endForAuthority } from '../../src/platform/auth/sessions/session-authority.js';
 import { AUTHENTICATION_PRINCIPAL_ID } from '../../src/platform/auth/sessions/session-parameters.js';
 import {
@@ -624,7 +630,8 @@ describe('what a reduction ends and records, and what an addition leaves alone (
   });
 
   // Break caught (obligation 4): an addition ending a session, or raising the floor, so that granting a permission signs people out.
-  it('raises the revision and ends no session for an addition, and writes no event', async () => {
+  // (An addition ends no session, so it has no revocation to write; the event it does write is its own, below.)
+  it('raises the revision and ends no session for an addition, and writes no revocation', async () => {
     const bundle = await newBundle([grant(READ_STAFF)]);
     const live = await sessionAt(bundle, 1);
 
@@ -669,6 +676,333 @@ describe('what a reduction ends and records, and what an addition leaves alone (
     const result = await change(bundle, { grants: [] });
 
     expect(result).toMatchObject({ kind: 'REDUCTION', revision: 2, floor: 2, endedSessionIds: [] });
+  });
+});
+
+/**
+ * Audit finding A3 (7 November 2026; AC-SLICE-001-85; audit.md section 5.6, "Facts of permission.bundle.widened"; migration 0078): an
+ * addition is on record. The primitive audited only a reduction, by the sessions it ends, so the widening of a bundle left nothing.
+ */
+describe('an addition to a bundle is on record (AC-SLICE-001-85; audit.md section 5.6)', () => {
+  interface Widening {
+    readonly id: string;
+    readonly event_code: string;
+    readonly occurred_at: Date;
+    readonly actor_type: string;
+    readonly actor_id: string | null;
+    readonly actor_bundle: string | null;
+    readonly surface_context: string;
+    readonly device_context: unknown;
+    readonly vendor_organization_id: string | null;
+    readonly responsible_hub_id: string | null;
+    readonly object_type: string;
+    readonly object_id: string;
+    readonly correlation_id: string;
+    readonly previous_state: string | null;
+    readonly resulting_state: string | null;
+    readonly reason_code: string | null;
+    readonly reason_label: string | null;
+    readonly note: string | null;
+    readonly approval_id: string | null;
+    readonly before_after: unknown;
+    readonly related_ids: unknown;
+    readonly detail: unknown;
+    readonly outcome: string;
+    readonly enhanced: boolean;
+    readonly serialisation_version: number;
+  }
+  const widenings = (bundleId: string) =>
+    observer.rows<Widening>(
+      `select * from audit_event where event_code = 'permission.bundle.widened' and object_id = $1 order by id`,
+      [bundleId],
+    );
+  /** A grant as the event writes it: permission_key|hub_scope|ownership_scope|tier, a dash for no tier. */
+  const text = (each: Grant): string =>
+    [each.permissionKey, each.hubScope, each.ownershipScope, each.tier ?? '-'].join('|');
+
+  // Break caught: an addition that writes nothing (the defect), writes it as a person's act or an ordinary event, loses the correlation
+  // label of the release step, or records the grants that did not change, the wrong side of the change, or in no order. Each kind of
+  // widening the primitive reads as an addition: a grant added, and each attribute widened.
+  it.each([
+    [
+      'a grant is added',
+      [grant(READ_STAFF)],
+      [grant(READ_STAFF), grant(READ_VENDOR)],
+      [],
+      [grant(READ_VENDOR)],
+      1,
+      0,
+    ],
+    ['a grant is added to an empty bundle', [], [grant(READ_STAFF)], [], [grant(READ_STAFF)], 1, 0],
+    [
+      'the hub scope is widened from none to own',
+      [grant(READ_STAFF, 'none')],
+      [grant(READ_STAFF, 'own')],
+      [grant(READ_STAFF, 'none')],
+      [grant(READ_STAFF, 'own')],
+      0,
+      1,
+    ],
+    [
+      'the hub scope is widened from own to all',
+      [grant(READ_STAFF, 'own', 'any', 'P')],
+      [grant(READ_STAFF, 'all', 'any', 'P')],
+      [grant(READ_STAFF, 'own', 'any', 'P')],
+      [grant(READ_STAFF, 'all', 'any', 'P')],
+      0,
+      1,
+    ],
+    [
+      'the ownership scope is widened from own to any',
+      [grant(READ_STAFF, 'own', 'own')],
+      [grant(READ_STAFF, 'own', 'any')],
+      [grant(READ_STAFF, 'own', 'own')],
+      [grant(READ_STAFF, 'own', 'any')],
+      0,
+      1,
+    ],
+    [
+      'a tier is given to a grant that had none',
+      [grant(READ_STAFF, 'own', 'any', null)],
+      [grant(READ_STAFF, 'own', 'any', 'A')],
+      [grant(READ_STAFF, 'own', 'any', null)],
+      [grant(READ_STAFF, 'own', 'any', 'A')],
+      0,
+      1,
+    ],
+    [
+      'one grant is widened, another is added and a third is left as it is',
+      [grant(READ_STAFF, 'own', 'any', 'S'), grant(READ_DISPATCH, 'all', 'any', 'A')],
+      [
+        grant(READ_VENDOR, 'own', 'any', 'A'),
+        grant(READ_STAFF, 'all', 'any', 'S'),
+        grant(READ_DISPATCH, 'all', 'any', 'A'),
+      ],
+      [grant(READ_STAFF, 'own', 'any', 'S')],
+      // ordered by permission key, whatever order the change was given in: staff.read, vendor.read
+      [grant(READ_STAFF, 'all', 'any', 'S'), grant(READ_VENDOR, 'own', 'any', 'A')],
+      1,
+      1,
+    ],
+  ] as const)(
+    'writes one enhanced permission.bundle.widened when %s',
+    async (_label, from, to, expectedBefore, expectedAfter, added, widened) => {
+      const bundle = await newBundle(from);
+      const live = await sessionAt(bundle, 1);
+      const correlation = `release-test#${randomUUID()}`;
+
+      const result = await change(bundle, { grants: to }, correlation);
+
+      expect(result).toMatchObject({
+        kind: 'ADDITION',
+        revision: 2,
+        floor: 1,
+        endedSessionIds: [],
+      });
+      expect((await sessionState(live))?.terminated_at).toBeNull();
+      expect(await revocationsOf([live])).toEqual([]);
+      const events = await widenings(bundle);
+      expect(events).toHaveLength(1);
+      const [event] = events;
+      expect(event).toMatchObject({
+        event_code: 'permission.bundle.widened',
+        enhanced: true,
+        outcome: 'SUCCEEDED',
+        actor_type: 'SYSTEM',
+        actor_id: null,
+        actor_bundle: null,
+        surface_context: 'SYSTEM',
+        object_type: 'RoleBundle',
+        object_id: bundle,
+        correlation_id: correlation,
+        responsible_hub_id: null,
+        vendor_organization_id: null,
+        device_context: null,
+        previous_state: null,
+        resulting_state: null,
+        reason_code: null,
+        reason_label: null,
+        note: null,
+        approval_id: null,
+        serialisation_version: 1,
+      });
+      expect(event?.occurred_at).toBeInstanceOf(Date);
+      expect(event?.id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(event?.related_ids).toEqual({ bundle_id: bundle, revision: 2, reduction_floor: 1 });
+      expect(event?.before_after).toEqual({
+        grants: { before: expectedBefore.map(text), after: expectedAfter.map(text) },
+      });
+      expect(event?.detail).toEqual({ bundle_name: `Test bundle ${bundle}`, added, widened });
+    },
+  );
+
+  // Break caught: the lists of an addition in the order the diff happened to run in, so that the same change records different text on
+  // another plan or another run, and an auditor cannot compare two events.
+  it('lists the grants it added or widened by permission key, whatever order the change gave them in', async () => {
+    const bundle = await newBundle([]);
+
+    await change(bundle, {
+      grants: [grant(READ_VENDOR), grant(READ_STAFF), grant(READ_DISPATCH)],
+    });
+
+    const [event] = await widenings(bundle);
+    expect(event?.before_after).toEqual({
+      grants: {
+        before: [],
+        after: [grant(READ_DISPATCH), grant(READ_STAFF), grant(READ_VENDOR)].map(text),
+      },
+    });
+  });
+
+  // Break caught: a reduction recorded as a widening as well, or its revocations lost, or an event for a change that is not one.
+  // The revision and the floor, the sessions ended and their events are the reduction's own, as they were (obligation 4).
+  it.each([
+    ['removes a grant', [grant(READ_STAFF), grant(READ_VENDOR)], [grant(READ_STAFF)]],
+    ['narrows the hub scope', [grant(READ_STAFF, 'all')], [grant(READ_STAFF, 'own')]],
+    [
+      'widens one grant and narrows another',
+      [grant(READ_STAFF, 'own'), grant(READ_VENDOR, 'all')],
+      [grant(READ_STAFF, 'all'), grant(READ_VENDOR, 'own')],
+    ],
+    ['adds a grant and removes another', [grant(READ_STAFF)], [grant(READ_VENDOR)]],
+    [
+      'moves a grant between the ownership scopes own and assigned',
+      [grant(READ_STAFF, 'own', 'own')],
+      [grant(READ_STAFF, 'own', 'assigned')],
+    ],
+  ] as const)(
+    'writes no permission.bundle.widened for a change that %s, and ends its sessions as before',
+    async (_label, from, to) => {
+      const bundle = await newBundle(from);
+      const live = await sessionAt(bundle, 1);
+
+      const result = await change(bundle, { grants: to }, 'release-test#reduction');
+
+      expect(result).toMatchObject({
+        kind: 'REDUCTION',
+        revision: 2,
+        floor: 2,
+        endedSessionIds: [live],
+      });
+      expect(await widenings(bundle)).toEqual([]);
+      expect(await revocationsOf([live])).toHaveLength(1);
+    },
+  );
+
+  // Break caught: a change that changes no authority writing an event all the same (a rename of a bundle, a repeated release step),
+  // which would fill the ledger with records of nothing and hide the ones that matter.
+  it('writes nothing for a change of the name alone, for the grants the bundle already holds, or for an empty set set empty', async () => {
+    const bundle = await newBundle([grant(READ_STAFF)]);
+    const empty = await newBundle([]);
+
+    const renamed = await change(bundle, { name: `Renamed for the event ${bundle}` });
+    const same = await change(bundle, { grants: [grant(READ_STAFF)] });
+    const nothing = await change(empty, { grants: [] });
+
+    expect([renamed.kind, same.kind, nothing.kind]).toEqual(['NAME_ONLY', 'NONE', 'NONE']);
+    expect(await widenings(bundle)).toEqual([]);
+    expect(await widenings(empty)).toEqual([]);
+  });
+
+  // Break caught: the name read from the bundle before the change, so that a bundle renamed and widened in one change is recorded under
+  // the name it no longer has (a timeline does not read today's name, audit.md section 5.6).
+  it('records the name the change leaves the bundle with', async () => {
+    const bundle = await newBundle([grant(READ_STAFF)]);
+
+    await change(bundle, {
+      name: `Widened and renamed ${bundle}`,
+      grants: [grant(READ_STAFF), grant(READ_VENDOR)],
+    });
+
+    const [event] = await widenings(bundle);
+    expect(event?.detail).toEqual({
+      bundle_name: `Widened and renamed ${bundle}`,
+      added: 1,
+      widened: 0,
+    });
+  });
+
+  // Break caught: the event committed by a statement of its own, so that a rolled-back change leaves a record of something that did not
+  // happen, or a committed change leaves none. The change, the revision and the event are one transaction.
+  it('leaves no event when the caller’s transaction is rolled back, and one when it commits', async () => {
+    const bundle = await newBundle([grant(READ_STAFF)]);
+    const payload = JSON.stringify([
+      { permission_key: READ_STAFF, hub_scope: 'own', ownership_scope: 'any', tier: 'A' },
+      { permission_key: READ_VENDOR, hub_scope: 'own', ownership_scope: 'any', tier: 'A' },
+    ]);
+
+    await migration.query('begin');
+    await migration.query(
+      `select melarc.change_role_bundle($1::uuid, null, $2::jsonb, 'rolled-back')`,
+      [bundle, payload],
+    );
+    await migration.query('rollback');
+    expect(await widenings(bundle)).toEqual([]);
+    expect(await bundleRow(bundle)).toMatchObject({ revision: 1, reduction_floor: 1 });
+
+    await migration.query('begin');
+    await migration.query(
+      `select melarc.change_role_bundle($1::uuid, null, $2::jsonb, 'committed')`,
+      [bundle, payload],
+    );
+    await migration.query('commit');
+    expect(await widenings(bundle)).toHaveLength(1);
+    expect(await bundleRow(bundle)).toMatchObject({ revision: 2, reduction_floor: 1 });
+  });
+
+  // Break caught: a second implementation of the event that drifts from the writer's own rules (a code, a tier, an object type, a fact
+  // the writer would refuse), so that the ledger holds a shape the writer cannot produce and nothing else can read with confidence.
+  // The event the database wrote is read back as the input of the audit writer and must be accepted, with the same facts.
+  it('is an event the audit writer accepts, with the facts the database wrote', async () => {
+    const bundle = await newBundle([grant(READ_STAFF, 'none', 'any', 'S')]);
+    await change(
+      bundle,
+      { grants: [grant(READ_STAFF, 'all', 'any', 'S'), grant(READ_VENDOR)] },
+      'release-test#conformance',
+    );
+    const [event] = await widenings(bundle);
+    if (event === undefined) throw new Error('the addition wrote no event');
+
+    const input: AuditEventInput = {
+      code: 'permission.bundle.widened',
+      enhanced: event.enhanced,
+      outcome: 'SUCCEEDED',
+      object: { type: event.object_type, id: event.object_id },
+      relatedIds: event.related_ids as AuditJsonObject,
+      beforeAfter: event.before_after as AuditJsonObject,
+      detail: event.detail as Readonly<Record<string, AuditScalar>>,
+    };
+    const record = buildAuditRecord(
+      input,
+      {
+        principalType: 'SYSTEM',
+        principalId: AUTHENTICATION_PRINCIPAL_ID,
+        surface: 'SYSTEM',
+        taskCapability: 'authentication',
+        correlationId: event.correlation_id,
+      },
+      event.occurred_at,
+      event.id,
+    );
+
+    expect(record).toMatchObject({
+      eventCode: event.event_code,
+      actorType: event.actor_type,
+      actorId: event.actor_id,
+      surfaceContext: event.surface_context,
+      objectType: event.object_type,
+      objectId: event.object_id,
+      correlationId: event.correlation_id,
+      outcome: event.outcome,
+      enhanced: event.enhanced,
+      serialisationVersion: event.serialisation_version,
+      responsibleHubId: event.responsible_hub_id,
+    });
+    expect(record.beforeAfter).toEqual(event.before_after);
+    expect(record.relatedIds).toEqual(event.related_ids);
+    expect(record.detail).toEqual(event.detail);
   });
 });
 

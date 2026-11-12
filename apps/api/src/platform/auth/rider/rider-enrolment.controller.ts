@@ -3,7 +3,7 @@ import { ApiBody, ApiResponse } from '@nestjs/swagger';
 
 import { ContractOperation } from '../../contract/contract-operation.js';
 import { ErrorCode } from '../../http/error-codes.js';
-import { DescribeErrors } from '../../openapi/described-errors.js';
+import { DescribeErrors, RETRY_AFTER_HEADERS } from '../../openapi/described-errors.js';
 import { DescribeServers, RIDER_SERVERS } from '../../openapi/operation-statements.js';
 import { Anonymous } from '../../routes/access-declaration.js';
 import { StaffSetupUnavailableError } from '../staff/staff-setup-errors.js';
@@ -12,7 +12,7 @@ import { REGISTERED_DEVICE_SCHEMA } from '../vendor/vendor-setup-schemas.js';
 import type { RiderDeviceRecord } from './rider-device-store.js';
 import { RIDER_ENROLMENT_SERVICE } from './rider-enrolment-providers.js';
 import { RIDER_NATIVE_CLIENT } from './rider-sign-in-limit.js';
-import { RETRY_AFTER_HEADERS, RIDER_ENROLMENT_BODY } from './rider-enrolment-schemas.js';
+import { RIDER_ENROLMENT_BODY } from './rider-enrolment-schemas.js';
 import type { RiderEnrolmentService } from './rider-enrolment.service.js';
 
 interface RiderEnrolmentBody {
@@ -45,7 +45,7 @@ export class RiderEnrolmentController {
   @ContractOperation('completeRiderDeviceEnrolment')
   @ApiBody({ schema: RIDER_ENROLMENT_BODY })
   @ApiResponse({ status: 200, schema: REGISTERED_DEVICE_SCHEMA })
-  // The one error response with a header of its own: the wait before the handset tries again (the grant is still good).
+  // The error response with a header of its own here: the wait before the handset tries again (the grant is still good).
   @ApiResponse({ status: 503, headers: RETRY_AFTER_HEADERS })
   @DescribeErrors(
     ErrorCode.DeviceIntegrityFailed,

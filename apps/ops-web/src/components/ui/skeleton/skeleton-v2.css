@@ -1,0 +1,52 @@
+/*
+ * Skeleton v2 (design/COMPONENT_PATTERNS.md, Skeleton v2, LoadingRow): bars in the border colour (visible on a card in both themes, which the selected surface is not), the shape of a
+ * DataTable row and of a Card. The pulse is the only motion and it plays only where motion is welcome; forced colours, which drop the fill, keep a border so that the shape is still seen.
+ */
+.ui-skeleton-bar {
+  display: block;
+  height: 0.875rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-border-default);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-skeleton-bar {
+    animation: ui-skeleton-bar-pulse var(--motion-pulse) ease-in-out infinite;
+  }
+}
+
+@keyframes ui-skeleton-bar-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.ui-loading-row {
+  pointer-events: none;
+}
+
+/* A card that is loading: the Panel's own radius and border, its padding, and bars where its title and lines go. */
+.ui-skeleton-card {
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-default);
+}
+
+.ui-skeleton-card__header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ui-skeleton-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+@media (forced-colors: active) {
+  .ui-skeleton-bar {
+    border: 1px solid CanvasText;
+  }
+}

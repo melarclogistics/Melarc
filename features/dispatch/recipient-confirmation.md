@@ -143,10 +143,10 @@ An implementation that skips the call for prepaid parcels has optimised away the
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `dispatch.recipient_confirmation.work`| A S P, **Rider**| own hub · **Rider: assigned parcels**. Escalation and the location-change decision are Ops-only acts under it| [permissions.md](../../contracts/permissions.md) §7|
+| `dispatch.recipient_confirmation.work`| A S P, **Rider**| own hub (Platform Admin: all hubs) · **Rider: assigned parcels**. Escalation and the location-change decision are Ops-only acts under it| [permissions.md](../../contracts/permissions.md) §7|
 | `vendor.contact_assistance.submit`| Vendor| own order — an input, never a mutation| §7|
-| `delivery.commitment.revise`| A S P| own hub — the reschedule Ops applies with `CUSTOMER` attribution| §7|
-| `dispatch.read`| A S P, Rider| own hub · assigned| §7|
+| `delivery.commitment.revise`| A S P| own hub (Platform Admin: all hubs) — the reschedule Ops applies with `CUSTOMER` attribution| §7|
+| `dispatch.read`| A S P, Rider| own hub (P: all hubs) · assigned| §7|
 
 ## 9. Settings — *pointer*
 

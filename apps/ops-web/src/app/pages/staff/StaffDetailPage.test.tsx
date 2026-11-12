@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
+
 import { installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -26,12 +28,14 @@ import {
   trustedBrowserFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 const RECORD = `GET /staff-identities/${STAFF_ID}`;
@@ -86,6 +90,14 @@ function open(
     ),
   );
   return renderApp(path);
+}
+
+/** What the row of acts in the record's header holds, in the order they are drawn: the names of its buttons and links. `undefined` when no row is drawn. */
+function headerActs(): string[] | undefined {
+  const row = document.querySelector('.ui-record-header__actions');
+  return row === null
+    ? undefined
+    : Array.from(row.querySelectorAll('a, button'), (each) => each.textContent);
 }
 
 const posts = () => api.requests.filter((request) => request.method === 'POST');
@@ -263,7 +275,7 @@ describe('the profile: when it cannot be had', () => {
     open(KEYS.approver, { [RECORD]: () => refusal(403, 'PERMISSION_DENIED') });
 
     expect(await heading('You do not have access to this page')).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
   });
 
   // Break caught: an address that is not an id sent to the server.
@@ -295,8 +307,9 @@ describe('the profile: when it cannot be had', () => {
 
 describe('the profile: where focus is', () => {
   // Break caught (found in a real browser): the heading replaced when the profile arrives, so that the focus the frame put on it falls to the
-  // top of the document and a screen reader says nothing about the page that has just appeared.
-  it('stays on the same heading from loading to loaded', async () => {
+  // top of the document and a screen reader says nothing about the page that has just appeared. The record page template draws the person's name as its own heading (the
+  // one that stood while the profile was read is gone), so the claim is that focus is on the heading that replaces it.
+  it('puts focus on the heading that replaces the loading one when the profile arrives', async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -315,7 +328,6 @@ describe('the profile: where focus is', () => {
     release();
 
     const named = await heading('Kofi Boateng');
-    expect(named).toBe(loading);
     expect(named).toHaveFocus();
   });
 
@@ -370,11 +382,12 @@ describe('the profile: who may decide', () => {
   it('offers the maker the acts on their own profile, and says that only a Platform Admin may use them', async () => {
     open(KEYS.approver, {}, undefined, MAKER_ID);
 
+    // One short muted line under the acts, in the header (the Product Owner, 9 November 2026), and not a paragraph above the content.
     expect(
       await screen.findByText(
         'You created this profile. A Platform Admin can approve or reject a profile they made; anyone else needs a different person to.',
       ),
-    ).toBeVisible();
+    ).toHaveClass('ui-record-header__note');
     expect(screen.getByRole('button', { name: 'Approve profile' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reject profile' })).toBeVisible();
   });
@@ -390,7 +403,9 @@ describe('the profile: who may decide', () => {
     open(KEYS.reader);
     await heading('Kofi Boateng');
 
-    expect(screen.getByText('staff.identity.approve')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.identity.approve'))).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(screen.queryByRole('button', { name: 'Approve profile' })).toBeNull();
   });
 
@@ -400,7 +415,33 @@ describe('the profile: who may decide', () => {
         json(200, staffIdentityFixture({ role_bundle_id: PRIVILEGED_BUNDLE_ID }), etag('v1')),
     });
 
-    expect(await screen.findByText('This role needs a Platform Admin to decide.')).toBeVisible();
+    expect(await screen.findByText('This role needs a Platform Admin to decide.')).toHaveClass(
+      'ui-record-header__note',
+    );
+  });
+
+  // Break caught (the Product Owner, 9 November 2026): two lines for one place, so that a person meets a paragraph of rules where one short line was asked for. A maker of a profile that
+  // needs a Platform Admin is told both things in the one line.
+  it('says both in one line when the person made a profile whose role needs a Platform Admin', async () => {
+    open(
+      KEYS.approver,
+      {
+        [RECORD]: () =>
+          json(
+            200,
+            staffIdentityFixture({ role_bundle_id: PRIVILEGED_BUNDLE_ID, created_by: MAKER_ID }),
+            etag('v1'),
+          ),
+      },
+      undefined,
+      MAKER_ID,
+    );
+
+    // The role says whether it needs a Platform Admin once the roles are read: the line has both sentences when they are.
+    const line = await screen.findByText(/This role needs a Platform Admin to decide./);
+    expect(line).toHaveClass('ui-record-header__note');
+    expect(line).toHaveTextContent('You created this profile.');
+    expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(1);
   });
 
   it('offers no decision on a profile that has been decided', async () => {
@@ -489,7 +530,7 @@ describe('the profile: approving', () => {
     [
       'PERMISSION_DENIED',
       403,
-      'Your session does not hold the permission to approve or reject profiles (staff.identity.approve).',
+      'Your account can’t approve or reject profiles. Ask an administrator for access.',
     ],
     [
       'CREDENTIAL_DELIVERY_FAILED',
@@ -1023,6 +1064,8 @@ describe('the profile: starting a password recovery (AC-SLICE-000-105)', () => {
 });
 
 describe('the profile: the other things to do with it', () => {
+  // Every key of the identity screens, and the one that starts a password recovery.
+  const RECOVERER = [...KEYS.everything, 'staff.credential.recover'];
   const withFactor = staffIdentityFixture({
     status: 'ACTIVE',
     mfa_enrolled: true,
@@ -1073,6 +1116,23 @@ describe('the profile: the other things to do with it', () => {
     );
   });
 
+  // Break caught (Stage 4.4): the sessions as a panel of their own that holds one button-link, or as an act in the header. They are a page beside this one, so they are a plain link in the panel of what is related.
+  it('puts the link to the sessions in the panel of what is related, as a link and not as a button', async () => {
+    open(KEYS.approver, { [RECORD]: () => json(200, active, etag('v2')) });
+    await heading('Kofi Boateng');
+
+    const page = within(screen.getByRole('main'));
+    const related = page
+      .getByRole('heading', { level: 2, name: 'Related' })
+      .closest('[data-slot="card"]');
+    expect(related).not.toBeNull();
+    const link = within(related as HTMLElement).getByRole('link', { name: 'See sessions' });
+    expect(link).toHaveClass('ui-link');
+    expect(link).not.toHaveClass('ui-button');
+    // No panel of its own, named for the sessions.
+    expect(page.queryByRole('heading', { name: 'Sessions' })).toBeNull();
+  });
+
   it('does not offer the sessions of a profile that waits, or to a person who cannot end them', async () => {
     const waiting = open(KEYS.approver);
     await heading('Kofi Boateng');
@@ -1085,13 +1145,100 @@ describe('the profile: the other things to do with it', () => {
     expect(screen.queryByRole('link', { name: 'See sessions' })).toBeNull();
   });
 
-  it('has no section of actions for a profile there is nothing to do with', async () => {
+  // Break caught: a row of acts or a panel drawn empty for a profile there is nothing to do with.
+  it('draws no act, and no panel of what is related, for a profile there is nothing to do with', async () => {
     open(KEYS.everything, {
       [RECORD]: () => json(200, staffIdentityFixture({ status: 'REJECTED' }), etag('v2')),
     });
     await heading('Kofi Boateng');
 
-    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
+    // The page, not the menu beside it (which has a Sessions entry of its own).
+    const page = within(screen.getByRole('main'));
+    expect(page.queryByRole('heading', { name: 'Related' })).toBeNull();
+    expect(page.queryByRole('heading', { name: 'Trusted browsers' })).toBeNull();
+    expect(
+      page.queryByRole('button', { name: /link|recovery|authenticator|browsers|approve|reject/i }),
+    ).toBeNull();
+    expect(page.queryByRole('link', { name: /sessions|authenticator/i })).toBeNull();
+    // No row of acts at all: an empty one would leave a gap under the name.
+    expect(headerActs()).toBeUndefined();
+    // It could fail: the same page for an active profile of a person with an authenticator has each of them (the next tests).
+    expect(page.getAllByRole('heading', { level: 2 }).map((each) => each.textContent)).toEqual([
+      'Profile',
+    ]);
+  });
+
+  // Break caught (Stage 4.4): the acts on the credentials in a panel that holds nothing but their buttons. Every act of the record is in its header, beside the name.
+  it('puts the acts on the credentials in the header, beside the name, and keeps them out of the panels', async () => {
+    open(RECOVERER, {
+      [RECORD]: () =>
+        json(
+          200,
+          staffIdentityFixture({
+            status: 'ACTIVE',
+            mfa_enrolled: true,
+            mfa_reset_state: 'FACTOR_ACTIVE',
+          }),
+          etag('v2'),
+        ),
+    });
+    await heading('Kofi Boateng');
+
+    expect(headerActs()).toEqual(['Start password recovery', 'Reset authenticator']);
+
+    // The panels hold what the person reads: the facts, the browsers they chose to be remembered at, and what is related. None is a panel of acts.
+    const page = within(screen.getByRole('main'));
+    expect(page.getAllByRole('heading', { level: 2 }).map((each) => each.textContent)).toEqual([
+      'Profile',
+      'Trusted browsers',
+      'Related',
+    ]);
+    expect(page.queryByRole('heading', { name: 'Credentials' })).toBeNull();
+    expect(page.getByRole('region', { name: 'Trusted browsers' })).toBeVisible();
+  });
+
+  it('puts the decision and the other acts of a profile that waits, and the acts of one that has no password, in the header too', async () => {
+    const waiting = open(KEYS.everything);
+    await heading('Kofi Boateng');
+    expect(headerActs()).toEqual(['Approve profile', 'Reject profile']);
+    waiting.unmount();
+    api.restore();
+
+    open(RECOVERER, { [RECORD]: () => json(200, active, etag('v2')) });
+    await heading('Kofi Boateng');
+    expect(headerActs()).toEqual(['Send a new setup link', 'Start password recovery']);
+  });
+});
+
+describe('the profile: the record page', () => {
+  // Break caught: a person's name drawn as an operational code, in the code face, which cannot wrap and reads as a code.
+  it('draws the name as a name, with the status as a badge and what it means in a sentence under it', async () => {
+    open(KEYS.reader);
+
+    const name = await heading('Kofi Boateng');
+    expect(name.querySelector('.ui-code')).toBeNull();
+    expect(
+      screen.getByText('Waiting for approval', { selector: '.ui-status-badge' }),
+    ).toBeVisible();
+    expect(screen.getByText(/cannot sign in until this profile is approved/)).toBeVisible();
+  });
+
+  it('keeps the facts of the profile in a panel of their own', async () => {
+    open(KEYS.reader);
+    await heading('Kofi Boateng');
+
+    const facts = screen
+      .getByRole('heading', { level: 2, name: 'Profile' })
+      .closest('[data-slot="card"]');
+    expect(facts).not.toBeNull();
+    expect(within(facts as HTMLElement).getByText('Work email')).toBeVisible();
+  });
+
+  it('draws one level-one heading, the name', async () => {
+    open(KEYS.everything);
+    await heading('Kofi Boateng');
+
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 });
 
@@ -1240,6 +1387,30 @@ describe('the profile: the trusted browsers of the person (staff-authentication.
     expect(table).toHaveTextContent('24 Oct, 07:30');
     expect(table).not.toHaveTextContent('This browser');
     expect(view.container.textContent).not.toContain('SENTINEL');
+  });
+
+  // Break caught (the security review of run 5, Stage 5.1): the same panel drawn as cards in a narrow room, where no check looked for a credential. The whole markup is read.
+  it('draws no credential in the cards of a narrow room, in any text or attribute', async () => {
+    narrowRoom();
+    const view = open(KEYS.approver, {
+      [RECORD]: () => json(200, enrolled, etag('v2')),
+      [BROWSERS]: () =>
+        json(200, {
+          items: [
+            {
+              ...chrome,
+              token: 'SENTINEL-CREDENTIAL',
+              token_hash: 'SENTINEL-HASH',
+              factor_id: 'SENTINEL-FACTOR',
+            },
+            safari,
+          ],
+        }),
+    });
+
+    const list = await screen.findByRole('list', { name: 'Trusted browsers of Kofi Boateng' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+    expect(view.container.innerHTML).not.toContain('SENTINEL');
   });
 
   it('says so when there is none, and offers no removal', async () => {

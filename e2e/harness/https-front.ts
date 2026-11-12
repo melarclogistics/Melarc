@@ -31,13 +31,14 @@ import type { TlsMaterial } from './tls-material.ts';
 
 /**
  * The policy of the shell's compatibility baseline (`apps/ops-web/test/browser/support/strict-policy.ts`, `STRICT_POLICY`; a test of
- * this folder holds the two equal): nothing inline,
- * no eval, nothing from another origin, no framing. The shell is held to work under it, so the front can send it for real.
+ * this folder holds the two equal): no inline script,
+ * no eval, nothing from another origin, no framing; inline style alone is allowed (style-src), by the decision of the Product Owner of
+ * 5 November 2026 recorded in architecture/SECURITY_DESIGN.md. The shell is held to work under it, so the front can send it for real.
  */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
   "script-src 'self'",
-  "style-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
   "img-src 'self'",
   "font-src 'self'",
   "connect-src 'self'",

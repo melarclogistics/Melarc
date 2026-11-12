@@ -17,6 +17,8 @@ body {
   font-size: var(--text-body-md-size);
   font-weight: var(--text-body-md-weight);
   line-height: var(--text-body-md-line-height);
+  /* Numbers are set in tabular figures everywhere (design system section 5.2), so that a column of counts, times and amounts lines up. */
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
@@ -35,22 +37,22 @@ p {
 }
 
 /*
- * The one rule React Aria Components would insert into the page as a <style> of its own, which a policy without inline styles refuses. The
- * library skips the insertion when an element with the id `react-aria-pressable-style` exists (index.html has one), so the rule is here
- * instead, in the same unnamed layer. It keeps a pressable thing from waiting for a double tap on a touch screen.
- * src/components/ui/aria-wiring.test.tsx holds this rule to the one the installed library inserts, so an upgrade that changes it fails there.
+ * The one named exception to the ring (`FOCUS_EXCEPTIONS` in scripts/design-tokens.ts, held by scripts/design-tokens.test.ts): a heading given `tabindex="-1"` so that focus can land
+ * on what is new (the title of a page after a move, the code of a record, the heading of a panel) is not a control. Nothing is pressed on it, so it draws no ring; anything else that
+ * takes focus, a control or a region that scrolls, keeps the ring above.
  */
-@layer {
-  [data-react-aria-pressable] {
-    touch-action: pan-x pan-y pinch-zoom;
-  }
+:is(h1, h2, h3, h4, h5, h6)[tabindex='-1']:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .skip-link {
   position: absolute;
   top: -4rem;
   left: var(--space-2);
-  z-index: 10;
+  /* Above the sticky top bar of the sidebar layout (15, below), so that the link is not painted under it once it has focus (WCAG 2.4.7: on a phone it
+     lies wholly inside the bar); below the layers of the menus, the sheet and the dialogs of the primitives (50), which hold focus when they are open. */
+  z-index: 20;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
@@ -108,7 +110,9 @@ p {
   line-height: var(--text-heading-xl-line-height);
 }
 
-@media (max-width: 48rem) {
+/* A narrow screen is under 48rem (the limit of the sidebar's sheet and of the top bar's padding below, and of `useViewport`): at exactly 768px the
+   page is padded as the top bar is, 24px, and one pixel less 16px. */
+@media (max-width: 47.9375rem) {
   .app-header,
   .app-main {
     padding-right: var(--space-4);
@@ -130,16 +134,19 @@ p {
 
 /*
  * The three layouts of the frame (AppFrame, `FrameLayout`; DESIGN_SYSTEM section 13.1). The neutral one is the banner above the main content and
- * needs no rule. The place beside the main content (`.app-chrome`) is empty outside the authenticated shell, which draws its side menu there.
+ * needs no rule. The place beside the main content (`.app-chrome`) is empty outside the authenticated shell, which draws its sidebar there.
  */
 .app-frame--sidebar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   min-height: 100vh;
 }
 
-/* The menu stays where it is while the page scrolls, full height: its width is the menu's own, which collapses. */
+/* The sidebar stays where it is while the page scrolls, full height, down both rows: its width is its own, which becomes the rail's. */
 .app-frame--sidebar > .app-chrome {
+  grid-column: 1;
+  grid-row: 1 / span 2;
   position: sticky;
   top: 0;
   align-self: start;
@@ -147,9 +154,68 @@ p {
   height: 100dvh;
 }
 
-/* Beside the menu the page is not centred in the whole window but in what is left of it. */
+/* The place of the top bar is in the page in every layout and has something in it in the sidebar one only. */
+.app-topbar {
+  display: none;
+}
+
+/* The top bar stays at the top while the page scrolls, over what scrolls under it, and under the menus that open from it. */
+.app-frame--sidebar > .app-topbar {
+  display: block;
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+}
+
+/*
+ * The sticky top bar covers the top of the window while the page scrolls, so what the browser scrolls into view (the heading the frame focuses after a
+ * navigation, a control reached by Tab, an in-page link) must come in below it and not under it: the root, which is the window's scroller, keeps the bar's
+ * height and a little more (room for the focus ring) clear (WCAG 2.4.11; DESIGN_SYSTEM section 14: a sticky region sets scroll padding). Only the sidebar
+ * layout has a sticky bar; the other layouts have nothing to keep clear.
+ *
+ * **The height is the one the bar has now** (audit B2, 7 November 2026): the bar wraps into a second row when its controls do not fit in one (text at 200%
+ * on a phone), and a padding of one row left a control reached by Shift+Tab up a long page under the second. `useTopBarClearance` (app/top-bar-clearance.ts)
+ * measures the bar and keeps the custom property below in step; the token is the height of one row, for the moments before the first measure.
+ */
+html:has(.app-frame--sidebar) {
+  scroll-padding-top: calc(var(--topbar-measured-height, var(--topbar-height)) + var(--space-2));
+}
+
+/*
+ * Where a part of a page that sticks to the top of the window stops (the panel beside a queue, the run of a builder, the summary of a form): under the top bar, as it is
+ * measured above, and a space below it, so that it never slides under the bar (the review of 5edada2, M2). `--sticky-room` is the height such a part may have: the window
+ * below that offset, less a space at the foot. A part taller than its room scrolls inside itself and is never cut at the bottom of the window. These are derived from the tokens
+ * and give no new value, which is why they are here and not in the token file.
+ */
+:root {
+  --sticky-top: calc(var(--topbar-measured-height, var(--topbar-height)) + var(--space-4));
+  --sticky-room: calc(100dvh - var(--sticky-top) - var(--space-4));
+}
+
+/*
+ * Beside the sidebar the page fills what is left of the window, under the top bar and 24px from the sidebar's edge (the specification: "content with 24px padding"), so
+ * that its left edge lines up with the controls of the top bar. The neutral frame's 72rem column, centred, is for a page with nothing beside it; a page that
+ * wants a narrower measure (a form) sets its own, as the forms do.
+ */
 .app-main--sidebar {
+  grid-column: 2;
+  grid-row: 2;
   width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/*
+ * The title of a signed-in page: 24px on a 30px line, weight 700, drawn 0.02em tighter (redesign step R4; Product Owner, 6 November 2026). It is the
+ * shell's page frame and touches only the pages inside the shell: the title of a pre-sign-in or a not-found page is the frame's own, above.
+ */
+.app-main--sidebar .page-heading {
+  font-size: var(--text-heading-lg-size);
+  font-weight: 700;
+  line-height: var(--text-page-title-line-height);
+  letter-spacing: -0.02em;
 }
 
 /*
@@ -202,14 +268,18 @@ p {
   }
 }
 
-/* A narrow screen: no column for the menu. Its bar sticks to the top and its panel slides in over the page. */
+/* A narrow screen: no column for the sidebar, which is a sheet there and is drawn into no place of the page. The top bar and the page share the one column. */
 @media (max-width: 47.9375rem) {
   .app-frame--sidebar {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .app-frame--sidebar > .app-chrome {
-    z-index: 20;
-    height: auto;
+    display: none;
+  }
+
+  .app-frame--sidebar > .app-topbar,
+  .app-main--sidebar {
+    grid-column: 1;
   }
 }

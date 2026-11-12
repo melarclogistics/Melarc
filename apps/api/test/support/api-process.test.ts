@@ -159,6 +159,50 @@ describe('the process helpers', () => {
     expect(elapsed).toBeLessThan(1_500 + DEADLINES.request + 1_500);
   });
 
+  // Break caught (run 5, Stage 1.6): a failure of "not ready within 20000 ms" that does not say which of the two things that can be slow was: a process that is still starting
+  // (it is CPU-bound until it listens, and a loaded machine is slow at it) or one that listens and whose /readyz is not 200 (its database, its seed). The bound is the same
+  // 20 seconds for both, counted from the spawn; what changes is what the failure says: when it was first listening, and the last answer of /readyz, status and body.
+  it('say, when a process listens and /readyz is not 200, when it was listening and what /readyz last said', async () => {
+    const port = await freePort();
+    const server = createHttpServer((request, response) => {
+      response.statusCode = request.url === '/readyz' ? 503 : 200;
+      response.end(
+        request.url === '/readyz'
+          ? '{"status":"unavailable","reason":"reference_data_missing"}'
+          : '{}',
+      );
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+    const running = start(script(FOREVER), {});
+
+    const failure = await running
+      .waitUntilReady(`http://127.0.0.1:${String(port)}`, 700)
+      .catch((error: unknown) => error as Error);
+
+    const message = (failure as Error).message;
+    expect(message).toContain('was not ready within 700 ms');
+    expect(message).toMatch(/it was listening after \d+ ms/);
+    expect(message).toContain('the last answer of /readyz was 503');
+    expect(message).toContain('reference_data_missing');
+  });
+
+  // Break caught: a process that never listens (it is still compiling its contract, or its port is wrong) reported as one whose readiness failed, which sends the
+  // investigation to the database.
+  it('say that a process was not listening when nothing answered on its port', async () => {
+    const port = await freePort();
+    const running = start(script(FOREVER), {});
+
+    const failure = await running
+      .waitUntilReady(`http://127.0.0.1:${String(port)}`, 700)
+      .catch((error: unknown) => error as Error);
+
+    const message = (failure as Error).message;
+    expect(message).toContain('was not ready within 700 ms');
+    expect(message).toContain('it was not listening: nothing answered on the port');
+    expect(message).not.toContain('the last answer of /readyz');
+  });
+
   // Break caught: a process that exits before it is ready being reported as a readiness timeout, which
   // would hide the output that explains the crash.
   it('report a process that exits before it is ready, with what it wrote', async () => {

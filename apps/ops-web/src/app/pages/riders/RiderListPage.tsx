@@ -1,26 +1,29 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { PageHeader } from '../../../components/PageHeader';
-import { Button } from '../../../components/ui/button/Button';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
-import { Field } from '../../../components/ui/field/Field';
-import { Icon } from '../../../components/ui/icon/Icon';
-import { Input } from '../../../components/ui/input/Input';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import { RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
 import { Link } from '../../../components/ui/link/Link';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
-import { Select } from '../../../components/ui/select/Select';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
+import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import { Table, type TableColumn } from '../../../components/ui/table/Table';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
+import {
+  QueueWorkspace,
+  type QueueEmptiness,
+  type QueueResult,
+  type QueueWorkspaceHandle,
+} from '../../../components/ui/templates/QueueWorkspace';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
+import { refusalText } from '../../../platform/problem/capability-words';
+import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import {
   RIDER_STATUSES,
-  type RiderPageView,
   type RiderStatus,
   type RiderView,
 } from '../../../platform/rider/rider-shape';
 import { useRiders } from '../../../platform/rider/use-rider-queries';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
+import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf } from '../staff/staff-presentation';
 import {
   deviceSentence,
@@ -28,20 +31,103 @@ import {
   RIDER_STATUS_MAP,
   RIDER_STATUS_ORDER,
 } from './rider-presentation';
-import '../staff/staff-pages.css';
+import './riders.css';
 
 /** The longest search the server accepts (`listRiders`, `q`). */
 const SEARCH_LIMIT = 128;
+
+/** The view that shows every status. */
+const ALL_VIEW = 'all';
 
 /** A status from the address, or nothing: an address is the person's to edit, and a value that is not a status is no filter. */
 const statusOf = (text: string | null): RiderStatus | undefined =>
   RIDER_STATUSES.find((status) => status === text);
 
 /**
- * Riders (surfaces/ops-portal.md section 7, `/admin/riders`; S0.60a): the roster an officer finds a rider on, to register a device for the
- * rider, replace a handset or report one lost. It shows **identity and readiness only**: the name, the phone, the status, the hub, whether a PIN
- * is set and whether a device is active. Never a PIN, a hash or a key: the screen has nowhere to show any. Which riders the session may see is the
- * server's decision (each rider's primary hub); the search and the status are in the address, the page of results is not.
+ * What the roster tells of a rider, made once from the record so that the row and the card cannot tell different things. **Identity and readiness only**: the answer carries no PIN, no
+ * hash and no key, `rider-shape.ts` reads none, and this has nowhere to hold one. Whether a PIN is set and whether a device is active are said, as facts, apart from the status.
+ */
+interface RiderFacts {
+  readonly id: string;
+  readonly name: string;
+  readonly phone: string;
+  readonly href: string;
+  readonly status: RiderStatus;
+  readonly pinSaid: string;
+  readonly deviceSaid: string;
+  readonly hub: string;
+}
+
+function factsOf(
+  rider: RiderView,
+  hubs: readonly { readonly id: string; readonly display_name: string }[],
+): RiderFacts {
+  return {
+    id: rider.id,
+    name: rider.full_name,
+    phone: rider.phone,
+    href: `/admin/riders/${rider.id}`,
+    status: rider.status,
+    pinSaid: pinSentence(rider),
+    deviceSaid: deviceSentence(rider),
+    hub: hubNameOf(rider.primary_hub_id, hubs),
+  };
+}
+
+/** The status as a badge, on one line ("Temporarily unavailable"): the column takes its width. */
+function State({ status }: { readonly status: RiderStatus }) {
+  return <StatusBadge status={status} map={RIDER_STATUS_MAP} />;
+}
+
+/**
+ * The five facts of a rider in five columns: the name over the phone (the name is the row's header, and **a link to the rider's own page**: a row opens a page and not a panel, so there is
+ * no button over the row, and a keyboard, a middle click and a new tab all use the link), where the rider stands (administratively), then whether a PIN is set and whether a device is
+ * active (readiness, told as facts and apart from the status), and the hub. The name, the status and the device are what an officer acts on (a device is registered, replaced or reported lost);
+ * the PIN is a readiness fact beside it (marked lesser, 2) and the hub the last (3), the first to go where the box is short: the table takes the lesser columns away only as far as it takes for
+ * it not to scroll sideways, and a card shows every fact.
+ */
+const COLUMNS: readonly DataColumn<RiderFacts>[] = [
+  {
+    id: 'rider',
+    header: 'Rider / phone',
+    rowHeader: true,
+    cell: (row) => <RowTitle title={row.name} name={row.phone} to={row.href} />,
+  },
+  { id: 'status', header: 'Status', cell: (row) => <State status={row.status} /> },
+  { id: 'pin', header: 'PIN', priority: 2, cell: (row) => row.pinSaid },
+  { id: 'device', header: 'Device', cell: (row) => row.deviceSaid },
+  { id: 'hub', header: 'Hub', priority: 3, cell: (row) => row.hub },
+];
+
+/**
+ * A rider as a card, for a room too narrow for the columns: the status, the phone under it, then the facts in the order a person reads them, each a label and its value (`CardFacts`). It
+ * holds **no control**: the name is the card's heading, outside the card, and the link to the rider.
+ */
+function RiderCard({ facts }: { readonly facts: RiderFacts }) {
+  return (
+    <CardFacts
+      head={<State status={facts.status} />}
+      lead={facts.phone}
+      facts={[
+        { label: 'PIN', value: facts.pinSaid },
+        { label: 'Device', value: facts.deviceSaid },
+        { label: 'Hub', value: facts.hub },
+      ]}
+    />
+  );
+}
+
+/** A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that. */
+function refusalWords(problem: Problem): string {
+  return refusalText(problem.forbidden, 'dispatch.read', { of: 'riders' });
+}
+
+/**
+ * Riders (surfaces/ops-portal.md section 7, `/admin/riders`; S0.60a; redesign step R7b): the roster an officer finds a rider on, to register a device for the rider, replace a handset or
+ * report one lost, drawn by the queue workspace template (the reference pattern: the pickup run list, `/manifests`). It shows **identity and readiness only**: the name, the phone, the
+ * status, the hub, whether a PIN is set and whether a device is active. Never a PIN, a hash or a key: the screen has nowhere to show any. Which riders the session may see is the
+ * server's decision (each rider's primary hub); **the server filters** (the status, the views of the page, and the search, a field in the filter row, always there, that shows as a chip,
+ * both in the address) **and pages** (by token, for the filters it was made with): the screen draws what comes back, whole.
  */
 export function RiderListPage() {
   const me = useSignedInSession();
@@ -49,34 +135,46 @@ export function RiderListPage() {
   const q = (params.get('q') ?? '').trim();
   const status = statusOf(params.get('status'));
 
-  // The tokens of the pages visited, for the list they were given for: a token is only good for the filter that produced it.
-  const signature = `${status ?? ''}|${q}`;
-  const [paging, setPaging] = useState<{ signature: string; tokens: readonly string[] }>({
-    signature,
-    tokens: [],
-  });
-  const tokens = paging.signature === signature ? paging.tokens : [];
-  const pageToken = tokens.at(-1);
+  // The hub the person narrowed the screens to in the top bar, if they did: a filter of the list like the status, so a change of hub is a new list.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+
+  // A page token belongs to the filters it was made with: a change of any of them starts again at the first page.
+  const signature = `${status ?? ''}|${q}|${hubId ?? ''}`;
+  const paging = useQueuePaging(signature);
   const list = useRiders({
     q,
     ...(status === undefined ? {} : { status }),
-    ...(pageToken === undefined ? {} : { pageToken }),
+    ...(hubId === undefined ? {} : { hubId }),
+    ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
-  const [typing, setTyping] = useState({ over: q, text: q });
-  const draft = typing.over === q ? typing.text : q;
+  const workspace = useRef<QueueWorkspaceHandle>(null);
   const [interacted, setInteracted] = useState(false);
-  const results = useRef<HTMLDivElement>(null);
-  const focusResults = useRef(false);
+
+  // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
+  // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once.
+  const settled = !list.isFetching && (list.isSuccess || list.isError);
+  const { takeFocus } = paging;
   useEffect(() => {
-    if (focusResults.current && list.status === 'success') {
-      focusResults.current = false;
-      results.current?.focus();
-    }
-  }, [list.status, list.data]);
+    if (!settled || !takeFocus()) return;
+    workspace.current?.focusResults();
+  }, [settled, list.dataUpdatedAt, takeFocus]);
 
-  if (me === undefined) return null;
+  const hubs = me?.session.authorized_hubs;
+  const rows = useMemo(
+    () =>
+      list.isSuccess && hubs !== undefined
+        ? list.data.items.map((rider) => factsOf(rider, hubs))
+        : [],
+    [list.isSuccess, list.data, hubs],
+  );
 
+  if (me === undefined || hubs === undefined) return null;
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
+
+  /** A change of filter, where `''` takes one off. The address is the filters' home, and the page starts again. */
   function change(next: { status?: RiderStatus | ''; q?: string }): void {
     setInteracted(true);
     const nextStatus =
@@ -88,171 +186,134 @@ export function RiderListPage() {
     setParams(out, { replace: true });
   }
 
-  function search(event: SubmitEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    change({ q: draft.trim() });
-  }
-
-  const columns: TableColumn<RiderView>[] = [
-    {
-      key: 'name',
-      header: 'Rider',
-      rowHeader: true,
-      cell: (row) => (
-        <span className="staff-nowrap">
-          <Link to={`/admin/riders/${row.id}`}>{row.full_name}</Link>
-        </span>
-      ),
-    },
-    {
-      key: 'phone',
-      header: 'Phone',
-      cell: (row) => <span className="staff-nowrap">{row.phone}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      cell: (row) => <StatusBadge status={row.status} map={RIDER_STATUS_MAP} />,
-    },
-    { key: 'pin', header: 'PIN', cell: (row) => pinSentence(row) },
-    { key: 'device', header: 'Device', cell: (row) => deviceSentence(row) },
-    {
-      key: 'hub',
-      header: 'Hub',
-      cell: (row) => hubNameOf(row.primary_hub_id, me.session.authorized_hubs),
-    },
-  ];
+  const result: QueueResult<RiderFacts> = (() => {
+    // Any read of the page, a refresh asked for, a page or a filter, is not drawn as if the earlier rows answered it: the loading treatment takes their place, and a failure takes their place if it fails.
+    if (list.status === 'pending' || (list.isFetching && list.status === 'success')) {
+      return { status: 'loading' };
+    }
+    if (list.status === 'error') {
+      const problem = problemOf(list.error, { operation: 'listRiders' });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale') {
+        return { status: 'loading' };
+      }
+      const message =
+        problem.kind === 'forbidden'
+          ? refusalWords(problem)
+          : problem.reference === undefined
+            ? problem.message
+            : `${problem.message} Reference: ${problem.reference}`;
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void list.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    return { status: 'ready', rows };
+  })();
 
   const filtering = q !== '' || status !== undefined;
-  const empty = filtering ? (
-    <EmptyState
-      kind="filtered"
-      heading="No riders match"
-      announce={interacted}
-      action={
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            change({ status: '', q: '' });
-          }}
-        >
-          Show every rider
-        </Button>
+  const emptiness = {
+    noun: 'riders',
+    none: 'The riders of your hubs appear here once they are on the roster.',
+    announce: interacted,
+    // A page after the first that holds nothing is told as that, in the words of every list (the Product Owner, 10 November 2026), and not as the roster being empty.
+    laterPage: { page: paging.page, onFirstPage: paging.toFirstPage },
+    // A chosen hub is a filter too (audit B1): the roster is empty at this hub, which says nothing of the others.
+    ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
+  };
+  const empty: QueueEmptiness = filtering
+    ? {
+        ...emptiness,
+        filtered: true,
+        onClearFilters: () => {
+          change({ status: '', q: '' });
+        },
+        clearLabel: 'Show every rider',
+        filteredText: 'Nothing fits this view and search. Show every rider to start again.',
       }
-    >
-      Nothing fits this view and search. Show every rider to start again.
-    </EmptyState>
-  ) : (
-    <EmptyState kind="none" heading="No riders yet" announce={interacted}>
-      The riders of your hubs appear here once they are on the roster.
-    </EmptyState>
-  );
+    : emptiness;
 
   return (
     <>
       <title>Riders · Melarc Ops Portal</title>
-      <PageHeader
-        title="Riders"
-        description="The riders at your hubs, and whether each is ready to sign in."
-      />
-      <form className="staff-filters" role="search" noValidate onSubmit={search}>
-        <Field label="Status">
-          <Select
-            value={status ?? ''}
-            onChange={(event) => {
-              change({ status: statusOf(event.target.value) ?? '' });
-            }}
-          >
-            <option value="">Every status</option>
-            {RIDER_STATUS_ORDER.map((key) => (
-              <option key={key} value={key}>
-                {RIDER_STATUS_MAP[key].label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <div className="staff-filters__search">
-          <Field label="Search by name or phone">
-            <Input
-              type="search"
-              name="q"
-              value={draft}
-              maxLength={SEARCH_LIMIT}
-              autoComplete="off"
-              onChange={(event) => {
-                setTyping({ over: q, text: event.target.value });
-              }}
-            />
-          </Field>
-        </div>
-        <div className="staff-filters__submit">
-          <Button type="submit" variant="secondary">
-            Search
-          </Button>
-        </div>
-      </form>
-
-      <ReadState<RiderPageView>
-        query={list}
-        isEmpty={(data) => data.items.length === 0}
-        empty={empty}
-        loadingLabel="Loading riders…"
-        skeleton={<Skeleton lines={4} />}
-        permission="dispatch.read"
-        operation="listRiders"
-      >
-        {(data) => {
-          const nextToken = data.nextPageToken;
-          const shown = data.items.length;
-          return (
-            <>
-              <p className="staff-count" role="status">
-                {`Showing ${String(shown)} ${shown === 1 ? 'rider' : 'riders'}${tokens.length > 0 ? ` on page ${String(tokens.length + 1)}` : ''}.${nextToken === null ? '' : ' More follow on the next page.'}`}
-              </p>
-              <div className="staff-results" ref={results} tabIndex={-1}>
-                <Table
-                  caption="Riders"
-                  hideCaption
-                  columns={columns}
-                  rows={data.items}
-                  rowKey={(row) => row.id}
-                />
-              </div>
-              {tokens.length > 0 || nextToken !== null ? (
-                <nav className="staff-pager" aria-label="Pages">
-                  {tokens.length > 0 ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        focusResults.current = true;
-                        setPaging({ signature, tokens: tokens.slice(0, -1) });
-                      }}
-                    >
-                      <Icon name="previous" size="sm" />
-                      Previous page
-                    </Button>
-                  ) : null}
-                  {nextToken === null ? null : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        focusResults.current = true;
-                        setPaging({ signature, tokens: [...tokens, nextToken] });
-                      }}
-                    >
-                      Next page
-                      <Icon name="next" size="sm" />
-                    </Button>
-                  )}
-                </nav>
-              ) : null}
-            </>
-          );
+      <QueueWorkspace<RiderFacts>
+        ref={workspace}
+        header={{
+          title: 'Riders',
+          description: 'The riders at your hubs, and whether each is ready to sign in.',
+          freshness: {
+            state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+            ...(updatedAt === undefined ? {} : { updatedAt }),
+            onRefresh: () => {
+              void list.refetch({ cancelRefetch: false });
+            },
+          },
         }}
-      </ReadState>
+        views={{
+          label: 'Views of the riders',
+          value: status ?? ALL_VIEW,
+          onValueChange: (id) => {
+            change({ status: statusOf(id) ?? '' });
+          },
+          tabs: [
+            { id: ALL_VIEW, label: 'All' },
+            ...RIDER_STATUS_ORDER.map((key) => ({ id: key, label: RIDER_STATUS_MAP[key].label })),
+          ],
+        }}
+        filters={{
+          label: 'Filter the riders',
+          // The search is a field in the bar, always there (the Product Owner, 10 November 2026), and not behind the Filter button: the views are the roster's other choice.
+          search: {
+            label: 'Search by name or phone',
+            value: q,
+            onSearch: (text) => {
+              change({ q: text });
+            },
+            maxLength: SEARCH_LIMIT,
+          },
+          chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
+          onRemove: () => {
+            change({ q: '' });
+          },
+        }}
+        result={result}
+        empty={empty}
+        table={{
+          label: 'Riders',
+          columns: COLUMNS,
+          rowId: (row) => row.id,
+          density: 'two-line',
+          card: (row) => <RiderCard facts={row} />,
+          // The rows open a page of their own (the link of the first line), so the lesser columns may go: their facts are in the record.
+          opens: 'record',
+          // The name is the heading of each card, for heading navigation, and the link to the rider.
+          cardTitle: (row) => <Link to={row.href}>{row.name}</Link>,
+          // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+          footer: (
+            <QueuePager
+              label="Pages of riders"
+              noun={{ one: 'rider', other: 'riders' }}
+              shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+              page={paging.page}
+              hasNext={list.isSuccess && list.data.nextPageToken !== null}
+              onNext={() => {
+                if (list.isSuccess && list.data.nextPageToken !== null) {
+                  paging.toNextPage(list.data.nextPageToken);
+                }
+              }}
+              onPrevious={paging.toPreviousPage}
+            />
+          ),
+        }}
+      />
     </>
   );
 }

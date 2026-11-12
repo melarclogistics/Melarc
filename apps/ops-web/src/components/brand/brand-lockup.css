@@ -1,6 +1,7 @@
 /*
  * The mark and the name of the product on Ink (design/COMPONENT_PATTERNS.md section 12.6). The tile is white because the symbol is black and
- * red and black is Ink; the name is shell.text (16.27:1) and the application's name under it shell.text.subtle (6.32:1).
+ * red and black is Ink; it is the fixed colour white (DESIGN_SYSTEM section 4.2) and not the surface, because the dark theme's surface is
+ * dark and the symbol would not be seen on it. The name is shell.text (18.22:1) and the application's name under it shell.text.subtle (5.97:1).
  */
 /* The name goes under the mark when it does not fit beside it (enlarged text), instead of being crushed into a column of single letters. */
 .ui-brand-lockup {
@@ -19,8 +20,8 @@
   justify-content: center;
   width: var(--space-10);
   height: var(--space-10);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-default);
+  border-radius: var(--radius-md);
+  background: var(--white);
 }
 
 .ui-brand-lockup__mark img {

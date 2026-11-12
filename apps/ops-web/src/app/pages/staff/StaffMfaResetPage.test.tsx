@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
@@ -11,6 +11,7 @@ import { renderApp } from '../../../test-support/render-app';
 import { etag, KEYS, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { HUB_ID, STAFF_ID, staffIdentityFixture } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -87,16 +88,74 @@ async function reset(view: ReturnType<typeof open>) {
 }
 
 describe('the reset of an authenticator: what it shows', () => {
-  it('names the page and the person, and links back to the profile', async () => {
+  it('names the page and the person, and its one way back to the profile is the trail of its parents', async () => {
     open();
 
     expect(await heading('Reset authenticator')).toBeVisible();
-    expect(await screen.findByText('Kofi Boateng')).toBeVisible();
+    // The person is the description of the heading (the breadcrumb names them too, as a link).
+    expect(await screen.findByText('Kofi Boateng', { selector: 'p' })).toBeVisible();
     expect(document.title).toBe('Reset authenticator · Melarc Ops Portal');
-    expect(screen.getByRole('link', { name: 'Back to profile' })).toHaveAttribute(
+    // The trail is the way back (Stage 4.5): a task has the breadcrumb of its parents and no link of its own beside it that says the same.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Kofi Boateng',
+      }),
+    ).toHaveAttribute('href', `/admin/staff/${STAFF_ID}`);
+    expect(screen.queryByRole('link', { name: 'Back to profile' })).toBeNull();
+  });
+
+  it('names the way up, the staff list and the profile, once the profile is read', async () => {
+    open();
+    await screen.findByText('Kofi Boateng', { selector: 'p' });
+
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Staff' })).toHaveAttribute('href', '/admin/staff');
+    expect(trail.getByRole('link', { name: 'Kofi Boateng' })).toHaveAttribute(
       'href',
       `/admin/staff/${STAFF_ID}`,
     );
+  });
+
+  it('is a task form: what happens in a section of its own, and the act with a way out as the form’s actions', async () => {
+    open();
+
+    const section = await screen.findByRole('region', { name: 'What happens' });
+    expect(within(section).getByText(/authenticator stops working/)).toBeVisible();
+    expect(within(section).queryByRole('button')).toBeNull();
+    const act = screen.getByRole('button', { name: 'Reset authenticator' });
+    expect(act).toHaveClass('ui-button--danger');
+    expect(act.closest('form')).not.toBeNull();
+    expect(screen.getByRole('link', { name: 'Cancel' })).toHaveAttribute(
+      'href',
+      `/admin/staff/${STAFF_ID}`,
+    );
+  });
+
+  // Break caught (found in a real browser on the profile page, kept here): the heading replaced when the profile arrives, so that the focus the frame put on it falls to the top
+  // of the document. Run 7, Stage 4.3: and not replaced at all: it is the same element, which a heading that took the focus the old one had lost is not.
+  it('keeps focus on the heading when the profile arrives and the form replaces the page that waited for it', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    open(KEYS.everything, {
+      [RECORD]: async () => {
+        await held;
+        return json(200, withFactor, etag('v1'));
+      },
+    });
+    const loading = await heading('Reset authenticator');
+    // The frame puts focus on a page's heading when the address changes; here the page is the first one, so the test does the same.
+    loading.focus();
+    expect(loading).toHaveFocus();
+
+    release();
+
+    await screen.findByRole('button', { name: 'Reset authenticator' });
+    const arrived = screen.getByRole('heading', { level: 1, name: 'Reset authenticator' });
+    expect(arrived).toBe(loading);
+    expect(loading).toBeInTheDocument();
+    expect(arrived).toHaveFocus();
   });
 
   it('says plainly what a reset does, and that the person sets up the new one themselves', async () => {
@@ -319,7 +378,7 @@ describe('the reset of an authenticator: a refusal', () => {
     [
       'PERMISSION_DENIED',
       403,
-      'Your session does not hold the permission to reset authenticators (staff.mfa.reset).',
+      'Your account can’t reset authenticators. Ask an administrator for access.',
     ],
     [
       'CREDENTIAL_DELIVERY_FAILED',
@@ -389,7 +448,7 @@ describe('the reset of an authenticator: when it cannot be had', () => {
     open(KEYS.approver);
 
     expect(await heading('You do not have access to this page')).toBeVisible();
-    expect(screen.getByText('staff.mfa.reset')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.mfa.reset'))).toBeVisible();
     expect(api.requests.filter((request) => request.url.includes('staff-identities'))).toHaveLength(
       0,
     );
@@ -446,6 +505,96 @@ describe('the reset of an authenticator: the session', () => {
   });
 });
 
+describe('the reset of an authenticator: leaving it while its question is open (Stage 4.9)', () => {
+  const leaveQuestion = () => screen.findByRole('alertdialog', { name: 'Leave this page?' });
+  const resetQuestion = () =>
+    screen.findByRole('alertdialog', { name: 'Reset the authenticator of Kofi Boateng?' });
+  const leaving = async (view: ReturnType<typeof open>) => {
+    await act(async () => {
+      await view.router.navigate('/');
+    });
+  };
+  /** Opens the question of the act, in its own dialog, and chooses the reason. */
+  async function ask(view: ReturnType<typeof open>) {
+    await view.user.click(await screen.findByRole('button', { name: 'Reset authenticator' }));
+    const dialog = await resetQuestion();
+    await view.user.selectOptions(
+      await within(dialog).findByRole('combobox', { name: 'Reason (required)' }),
+      'PHONE_LOST',
+    );
+    return dialog;
+  }
+
+  // Break caught: the reason an officer has chosen for an act that ends a person's sessions lost to a link or the browser's Back, without a word.
+  it('asks before the application leaves the page while the question is open, and staying keeps the question and its reason', async () => {
+    const view = open();
+    await ask(view);
+
+    await leaving(view);
+
+    const question = await leaveQuestion();
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(view.router.state.location.pathname).toBe(PATH);
+    await view.user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    const dialog = await resetQuestion();
+    expect(within(dialog).getByRole('combobox', { name: 'Reason (required)' })).toHaveValue(
+      'PHONE_LOST',
+    );
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('goes where the person was going when they choose to leave', async () => {
+    const view = open();
+    await ask(view);
+
+    await leaving(view);
+    await view.user.click(
+      within(await leaveQuestion()).getByRole('button', { name: 'Leave the page' }),
+    );
+
+    await waitFor(() => {
+      expect(view.router.state.location.pathname).toBe('/');
+    });
+  });
+
+  // Break caught: a page that asks about what it does not hold: nothing is entered before the question is opened.
+  it('asks nothing before the question is opened', async () => {
+    const view = open();
+    await screen.findByRole('button', { name: 'Reset authenticator' });
+
+    await leaving(view);
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(view.router.state.location.pathname).toBe('/');
+  });
+
+  // Break caught: the guard left on after the question was closed again, or once the act is done.
+  it('asks nothing once the question is closed again, nor once the reset is done', async () => {
+    const closed = open();
+    const dialog = await ask(closed);
+    await closed.user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('alertdialog', { name: 'Reset the authenticator of Kofi Boateng?' }),
+      ).toBeNull();
+    });
+    await leaving(closed);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(closed.router.state.location.pathname).toBe('/');
+    closed.unmount();
+    api.restore();
+
+    const done = open(KEYS.everything, {
+      [RESET]: () => json(200, { sessions_terminated: 1, reenrolment_grant_issued: true }),
+    });
+    await reset(done);
+    await screen.findByRole('heading', { name: 'Authenticator reset' });
+    await leaving(done);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(done.router.state.location.pathname).toBe('/');
+  });
+});
+
 describeInterfaceStates('The reset of an authenticator', {
   loading: {
     test: async () => {
@@ -454,6 +603,14 @@ describeInterfaceStates('The reset of an authenticator', {
       expect(await heading('Reset authenticator')).toBeVisible();
       expect(await screen.findByText('Loading the profile…')).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Reset authenticator' })).toBeNull();
+      // The way back is there while the profile is read: the trail names the person "The profile" until it is, and goes to the same page; no link of its own beside it.
+      const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+      expect(trail.getByRole('link', { name: 'Staff' })).toHaveAttribute('href', '/admin/staff');
+      expect(trail.getByRole('link', { name: 'The profile' })).toHaveAttribute(
+        'href',
+        `/admin/staff/${STAFF_ID}`,
+      );
+      expect(screen.queryByRole('link', { name: 'Back to profile' })).toBeNull();
     },
   },
   empty: {

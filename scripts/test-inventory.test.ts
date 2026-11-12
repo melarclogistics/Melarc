@@ -207,6 +207,39 @@ describe('the Vitest configuration', () => {
   it('says when it has an exclude, which it does not model', () => {
     assert.equal(readVitestConfig("test: { include: ['a'], exclude: ['b'] }").unreadable.length, 1);
   });
+
+  // The one exclude it reads (task CI.2): the timing tests, left out only where the switch says so, and run by every other kind of run.
+  const TIMING =
+    'exclude: skipsTimingTests(process.env)\n            ? [...configDefaults.exclude, ...TIMING_SENSITIVE_TESTS]\n            : configDefaults.exclude,';
+
+  it('reads the conditional exclusion of the timing tests as taking nothing out', () => {
+    const facts = readVitestConfig(`test: { name: 'x', include: ['a'], ${TIMING} }`);
+    assert.deepEqual(facts.unreadable, []);
+    assert.deepEqual(facts.includes, ['a']);
+  });
+
+  // Break caught: the allowance read loosely, so that an exclude of other files, an unconditional one, or another condition passes as the
+  // timing tests' and a test file is left out of every run with nothing saying so.
+  for (const [label, text] of [
+    ['an unconditional list', 'exclude: [...configDefaults.exclude, ...TIMING_SENSITIVE_TESTS],'],
+    [
+      'a list of other files',
+      "exclude: skipsTimingTests(process.env) ? [...configDefaults.exclude, 'src/x.test.ts'] : configDefaults.exclude,",
+    ],
+    [
+      'another condition',
+      'exclude: process.env.CI ? [...configDefaults.exclude, ...TIMING_SENSITIVE_TESTS] : configDefaults.exclude,',
+    ],
+    [
+      'the exclusion in the other branch',
+      'exclude: skipsTimingTests(process.env) ? configDefaults.exclude : [...configDefaults.exclude, ...TIMING_SENSITIVE_TESTS],',
+    ],
+    ['the timing exclusion beside another exclude', `${TIMING} exclude: ['b'],`],
+  ] as const) {
+    it(`still refuses ${label}`, () => {
+      assert.equal(readVitestConfig(`test: { include: ['a'], ${text} }`).unreadable.length, 1);
+    });
+  }
 });
 
 describe('the Playwright configuration', () => {

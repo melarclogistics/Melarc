@@ -55,7 +55,7 @@ describe('the words of the reads', () => {
       'getRider',
       'HUB_SCOPE_VIOLATION',
       403,
-      'This rider belongs to a hub your session does not act in.',
+      'This rider belongs to a hub your account does not work in.',
     ],
   ])('%s %s %s says %j', (operation, code, status, message) => {
     expect(problemOf(refused(code, status), { operation }).message).toBe(message);
@@ -69,18 +69,24 @@ describe('the words of the acts on a rider’s device', () => {
     ['registerRiderDevice', 'staff.device.register'],
     ['reregisterRiderDevice', 'staff.device.reregister'],
     ['revokeRiderDevice', 'staff.device.revoke'],
-  ])('tells a refusal of %s as the lack of %s', (operation, key) => {
-    const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
+  ])(
+    'tells a refusal of %s as what the account cannot do, without the key %s',
+    (operation, key) => {
+      const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
 
-    expect(problem.message).toContain(`(${key})`);
-    expect(problem.message).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
-  });
+      expect(problem.message).toMatch(
+        /^Your account can’t .+\. Ask an administrator for access\.$/,
+      );
+      expect(problem.message).not.toContain(key);
+      expect(problem.message).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
+    },
+  );
 
   it.each(OPERATIONS.slice(2))('tells a rider in another hub as that, for %s', (operation) => {
     const problem = problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation });
 
     expect(problem).toMatchObject({ kind: 'forbidden', forbidden: 'outside-hubs' });
-    expect(problem.message).toMatch(/hub your session does not act in|own hub/);
+    expect(problem.message).toMatch(/hub your account does not work in|own hub/);
   });
 
   it.each(OPERATIONS.slice(2))('tells a rider that is not there as that, for %s', (operation) => {

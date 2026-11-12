@@ -4,7 +4,12 @@ import type { BundleGrantSnapshot, StoredSession } from '../auth/ports/session-s
 import { contextOfSession } from '../auth/sessions/session-context.js';
 import type { SecurityContext } from '../database/transaction-context.js';
 import type { ActivityPolicy } from '../routes/access-declaration.js';
-import type { EffectiveScope } from './effective-scope.js';
+import {
+  effectiveScope,
+  scopeExcludesHub,
+  scopeIncludesHub,
+  type EffectiveScope,
+} from './effective-scope.js';
 
 /**
  * What the authorization step decided for one request, kept beside the request (S0.26): the session that acts, the grant that
@@ -32,6 +37,82 @@ export interface AuthorizedRequest {
    * that acts can judge the rule again on the record as it then is (`OperationRunner.requireTargetTier`).
    */
   readonly target?: { readonly entity: string; readonly id: string; readonly tierRule?: string };
+}
+
+/**
+ * The session's snapshot of the grant of one permission key, or `undefined` where the bundle it was issued with held none: step 5 of the
+ * refusal order reads it here, and so does everything that asks "may this session do what that key allows". It is read from the snapshot
+ * taken at issue, never from the live bundle.
+ */
+export function grantOfSession(
+  session: Pick<StoredSession, 'authority'>,
+  permission: string,
+): BundleGrantSnapshot | undefined {
+  return session.authority.snapshot.grants.find((candidate) => candidate.permission === permission);
+}
+
+/**
+ * The decision the authorization step would have taken for **the same request** on an operation that requires `permission`: the same
+ * session, the same credential and judgement, the grant of that key from the session's snapshot, and the scope of that grant
+ * (`effectiveScope`, the one function the guard calls, with the hubs the session reaches). `undefined` where the session holds no grant of
+ * the key, which is the answer "this session may not do that".
+ *
+ * It exists for an operation that answers about **several** keys at once (`getQueueSummary` counts what a queue's own list would return,
+ * and `lookupRecords` finds what each kind's own read would show; a list or a read is under the context of its own key): each key's work
+ * is then run in the context of that key's grant, and **never in a wider one**. A grant of all hubs that the session holds for another key does not widen this one (`GBT-GS1`), because the scope is read
+ * from the grant of the key asked for and from nothing else. Nothing is taken from the request; the activity policy stays the route's.
+ */
+export function authorizationForKey(
+  authorized: AuthorizedRequest,
+  permission: string,
+): AuthorizedRequest | undefined {
+  const grant = grantOfSession(authorized.session, permission);
+  if (grant === undefined) return undefined;
+  return {
+    ...authorized,
+    permission,
+    grant,
+    scope: effectiveScope(grant, authorized.session.authority.authorizedHubIds),
+  };
+}
+
+/**
+ * Whether a **staff** read that names `hubId` in a filter names a hub its grant (the grant of this decision's key, as `authorizationForKey`
+ * made it) does not reach, so that its answer is empty before any statement is asked (task A1, `AC-HUBF-05`; `scopeExcludesHub`): a hub outside
+ * the grant and a hub that does not exist take the same, short time, because neither opens a transaction. `false` for a Vendor or a Rider, whose
+ * rows are scoped by what they own and not by a hub, for an all-hub grant and for a hub inside the grant: those read as they always did.
+ * `hubId` is already judged to be a UUID by the caller.
+ */
+export function hubOutsideStaffGrant(authorized: AuthorizedRequest, hubId: string): boolean {
+  return authorized.session.principalType === 'STAFF' && scopeExcludesHub(authorized.scope, hubId);
+}
+
+/**
+ * The primary hub of a session, as far as the session itself can say: **the one hub it holds**. A staff member's session is issued with its primary
+ * membership alone (`postgres.staff-identity-directory.adapter.ts`), which is all there is until an effective assignment (`HubAssignment`, domain-model.md
+ * section 5.8) adds hubs, and the list of hubs is then in ascending order and no longer says which of them is the profile's own. A session that holds
+ * several has no primary hub **here**, and a session with none has none: `undefined` for both (run 4, Stage 1, item 8; the day an assignment is built, the
+ * primary hub has to be carried on the session: it is owed with the assignment, `OB-S1-37` of the SLICE-001 plan, and until then a session with several hubs fails
+ * closed). It reads nothing from the database.
+ */
+export function primaryHubOfSession(authorized: AuthorizedRequest): string | undefined {
+  const hubs = authorized.session.authority.authorizedHubIds;
+  return hubs.length === 1 ? hubs[0] : undefined;
+}
+
+/**
+ * Whether `hubId` is **the primary hub** of the session itself, whatever the grant of this operation reaches (`primaryHubOfSession`). It reads nothing from the
+ * database. It exists for the one staff list whose table shows a row to its holder whatever the grant (`listStaffIdentities`: a profile's own row, which is in
+ * the profile's primary hub and in no other), so that a `hub_id` that names the caller's own hub is not answered empty by `hubOutsideStaffGrant` and the filter
+ * only ever narrows what the same session sees without it (task A3.5, `AC-HUBF-14`). It compares with the primary hub alone and not with every hub the session
+ * holds (run 4, Stage 1, item 8): a hub an effective assignment adds is not the profile's own hub, and a session that cannot say which of its hubs is primary
+ * answers none. Every other hub is still answered without a statement, so a hub that exists and a hub that does not take the same short time. "Is this hub in
+ * the grant" stays `scopeIncludesHub`'s one answer (task A3.6).
+ */
+export function hubOfTheSession(authorized: AuthorizedRequest, hubId: string): boolean {
+  const primary = primaryHubOfSession(authorized);
+  if (primary === undefined) return false;
+  return scopeIncludesHub({ hubScopeMode: 'SET', authorizedHubIds: [primary] }, hubId);
 }
 
 const held = new WeakMap<object, AuthorizedRequest>();

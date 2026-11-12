@@ -19,6 +19,38 @@ const AUDIT_MD = readFileSync(
   'utf8',
 ).replaceAll('\r', '');
 
+type TierName = 'enhanced' | 'conditional' | 'standard';
+
+/**
+ * Every place a document states how many codes a tier holds, in any wording (run 6, Stage 1.7): a number, then markup and a few filler words (`are`, `codes`, `events`...), then
+ * the name of the tier. `**81 are Enhanced**`, `**81** are **Enhanced**`, `81 Enhanced codes`, `81 *Enhanced* events` and `116 are ordinary` are all statements; "was 201 until
+ * `x` (**Enhanced**) was added" (a count of all the codes, in a history) and "§5 makes enhanced audit mandatory" are not, because a word that is neither filler nor markup stands
+ * between the number and the tier. The run-5 patterns read three wordings of one shape ("N are enhanced") and missed all the others.
+ */
+function statedCounts(
+  document: string,
+): readonly { readonly tier: TierName; readonly count: number }[] {
+  const filler = '(?:codes?|events?|are|is|were|them|of)';
+  const markup = '[\\s*_`]*';
+  const pattern = new RegExp(
+    // The end of the tier's word is "not followed by a letter or a digit" and not `\b`, which an underscore (`_enhanced_`) would defeat.
+    `\\b(\\d+)\\b${markup}(?:${filler}\\b${markup}){0,3}(enhanced or standard(?: by the act)?|enhanced|depend on the act|conditional|standard|ordinary)(?![a-z0-9])`,
+    'gi',
+  );
+  return [...document.matchAll(pattern)].map((match) => {
+    const named = (match[2] ?? '').toLowerCase();
+    const tier: TierName =
+      named.startsWith('enhanced or standard') ||
+      named === 'depend on the act' ||
+      named === 'conditional'
+        ? 'conditional'
+        : named === 'enhanced'
+          ? 'enhanced'
+          : 'standard';
+    return { tier, count: Number(match[1]) };
+  });
+}
+
 const ID = '019a0000-0000-7000-8000-000000000001';
 const NOW = new Date('2026-10-11T09:00:00.000Z');
 const STAFF_ID = '11111111-1111-4111-8111-111111111111';
@@ -91,18 +123,90 @@ describe('the tier of each event is the catalogue’s, read from the document (G
     expect(disagreements).toEqual([]);
   });
 
-  // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong
-  // three times. They are derived here, and the document is checked against them.
-  it('counts the tiers: 79 enhanced, 5 that depend on the act, 116 ordinary, of 200', () => {
-    expect(ENHANCED_CODES).toHaveLength(79);
-    expect(Object.keys(CONDITIONAL_CODES)).toHaveLength(5);
-    expect(AUDIT_EVENT_CODES).toHaveLength(200);
+  // Break caught: the counts of the tiers stated nowhere and so wrong silently, which is how the document's own counts went wrong three times, and then written
+  // into this test as numbers, which is the same drift one place over. They are derived here from the lists the writer honours, the three tiers are held to be
+  // the whole catalogue (no code counted twice, none left out), and the document's own statement of them is checked against what is derived.
+  it('derives the counts of the tiers from the writer’s lists, and the document states them', () => {
     const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
-    expect(tiers.filter((tier) => tier === 'STANDARD')).toHaveLength(116);
+    const enhanced = tiers.filter((tier) => tier === 'ENHANCED').length;
+    const conditional = tiers.filter((tier) => tier === 'CONDITIONAL').length;
+    const standard = tiers.filter((tier) => tier === 'STANDARD').length;
+
+    expect(enhanced).toBe(ENHANCED_CODES.length);
+    expect(conditional).toBe(Object.keys(CONDITIONAL_CODES).length);
+    expect(enhanced + conditional + standard).toBe(AUDIT_EVENT_CODES.length);
     expect(new Set(ENHANCED_CODES).size).toBe(ENHANCED_CODES.length);
     for (const code of Object.keys(CONDITIONAL_CODES)) {
       expect(ENHANCED_CODES as readonly string[]).not.toContain(code);
     }
+
+    const stated = (pattern: RegExp): number => Number(pattern.exec(AUDIT_MD)?.[1]);
+    expect(stated(/\*\*(\d+) codes\*\*/)).toBe(AUDIT_EVENT_CODES.length);
+    expect(stated(/\*\*(\d+) are Enhanced\*\*/)).toBe(enhanced);
+    expect(stated(/\*\*(\d+) are Enhanced or Standard by the act\*\*/)).toBe(conditional);
+    expect(stated(/\*\*(\d+) are Standard\*\*/)).toBe(standard);
+  });
+
+  // Break caught (run 5, Stage 1.5): an old statement of a count surviving beside the new one, because the patterns above read one wording in one case. Line 523 once said
+  // "81 are Enhanced" and, a few words on, "80 are enhanced ... 116 are ordinary", and the test read only the first. Every place the document says a number of the
+  // tiers, in any case and in either of the words it has used for them, must say the derived number.
+  it('has no statement of a count of the tiers, in any wording or case, that is not the derived count', () => {
+    const tiers = AUDIT_EVENT_CODES.map((code) => tierOf(code));
+    const derived = {
+      enhanced: tiers.filter((tier) => tier === 'ENHANCED').length,
+      conditional: tiers.filter((tier) => tier === 'CONDITIONAL').length,
+      standard: tiers.filter((tier) => tier === 'STANDARD').length,
+    };
+    const stated = statedCounts(AUDIT_MD);
+    for (const tier of ['enhanced', 'conditional', 'standard'] as const) {
+      const found = stated.filter((statement) => statement.tier === tier);
+      // A check over nothing passes: the document states each of the three.
+      expect(found.length, `the document states a count of the ${tier} codes`).toBeGreaterThan(0);
+      expect(
+        found.map((statement) => statement.count).filter((number) => number !== derived[tier]),
+        `statements of the ${tier} count other than ${String(derived[tier])}`,
+      ).toEqual([]);
+    }
+  });
+
+  // Break caught (run 6, Stage 1.7): a stale count in a wording the run-5 patterns did not read: markup between the number and the tier (`**80** Enhanced codes`), the tier before
+  // the word codes, another word for it. Each is read as a statement of its tier, and the look-alikes that are not statements are not.
+  it('reads a count of a tier in any wording: markup between the number and the tier, the tier before the word codes', () => {
+    const read = (text: string) =>
+      statedCounts(text).map(({ tier, count }) => `${tier} ${String(count)}`);
+
+    expect(read('**81 are Enhanced**')).toEqual(['enhanced 81']);
+    expect(read('**81** are **Enhanced**')).toEqual(['enhanced 81']);
+    expect(read('81 Enhanced codes')).toEqual(['enhanced 81']);
+    expect(read('81 *Enhanced* events')).toEqual(['enhanced 81']);
+    expect(read('80 codes are _enhanced_')).toEqual(['enhanced 80']);
+    expect(read('**5 are Enhanced or Standard by the act**')).toEqual(['conditional 5']);
+    expect(read('5 **Enhanced or Standard** codes')).toEqual(['conditional 5']);
+    expect(read('5 depend on the act')).toEqual(['conditional 5']);
+    expect(read('**116 are Standard**')).toEqual(['standard 116']);
+    expect(read('116 Standard codes')).toEqual(['standard 116']);
+    expect(read('116 are ordinary')).toEqual(['standard 116']);
+    // Not statements: a count of all the codes in a history, a section number, a word between the number and the tier.
+    expect(
+      read('The count was 201 until `permission.fixed_policy.widened` (**Enhanced**) was added'),
+    ).toEqual([]);
+    expect(read('§5 makes enhanced audit mandatory')).toEqual([]);
+    expect(read('202 codes, of which the Enhanced ones are listed')).toEqual([]);
+  });
+
+  // Break caught: the document check taking the scanner's word for it when a stale statement is planted in the document in the wordings above.
+  it('finds a stale count planted in the document in a wording of its own', () => {
+    const enhanced = AUDIT_EVENT_CODES.map((code) => tierOf(code)).filter(
+      (tier) => tier === 'ENHANCED',
+    ).length;
+    const planted = `${AUDIT_MD}\nOf these **${String(enhanced - 1)}** are **Enhanced**.\n${String(enhanced - 2)} Enhanced codes.\n`;
+
+    const stale = statedCounts(planted)
+      .filter((statement) => statement.tier === 'enhanced')
+      .map((statement) => statement.count)
+      .filter((number) => number !== enhanced);
+
+    expect(stale).toEqual([enhanced - 1, enhanced - 2]);
   });
 
   // Break caught: the document's count of its own codes going stale again (it read 188 when there were 190).
@@ -225,6 +329,96 @@ describe('the writer holds an event to its tier (G2-06)', () => {
     expect(build({ ...suspended, beforeAfter: { status: 'ACTIVE_TO_SUSPENDED' } }).enhanced).toBe(
       true,
     );
+  });
+
+  // Break caught (audit finding A3, AC-SLICE-001-85): the widening of a bundle recorded as an ordinary event, with no grants that
+  // changed, with no bundle and revision, or as the act of a person (the primitive writes it as the system). The complete event, in the
+  // shape the primitive writes (migration 0078), is accepted, so the ledger holds one shape of it.
+  it('holds permission.bundle.widened to its tier and to the facts the catalogue names for it', () => {
+    const widened: AuditEventInput = {
+      code: 'permission.bundle.widened',
+      enhanced: true,
+      outcome: 'SUCCEEDED',
+      object: { type: 'RoleBundle', id: OBJECT_ID },
+      relatedIds: { bundle_id: OBJECT_ID, revision: 4, reduction_floor: 1 },
+      beforeAfter: {
+        grants: { before: ['dispatch.read|own|any|P'], after: ['dispatch.read|all|any|P'] },
+      },
+      detail: { bundle_name: 'Platform Admin', added: 0, widened: 1 },
+    };
+    expect(tierOf('permission.bundle.widened')).toBe('ENHANCED');
+    expect(build(widened, AUTHENTICATION).relatedIds).toEqual({
+      bundle_id: OBJECT_ID,
+      revision: 4,
+      reduction_floor: 1,
+    });
+    expect(refusalOf(() => build({ ...widened, enhanced: false }, AUTHENTICATION)).field).toBe(
+      'enhanced',
+    );
+    expect(
+      refusalOf(() => build({ ...widened, beforeAfter: undefined }, AUTHENTICATION)).field,
+    ).toBe('beforeAfter');
+    expect(refusalOf(() => build({ ...widened, relatedIds: {} }, AUTHENTICATION)).field).toBe(
+      'relatedIds',
+    );
+    expect(
+      refusalOf(() =>
+        build({ ...widened, relatedIds: { bundle_id: OBJECT_ID, revision: 4 } }, AUTHENTICATION),
+      ).field,
+    ).toBe('relatedIds');
+    // a person's act, never the system's
+    expect(refusalOf(() => build(widened, STAFF)).field).toBe('actor');
+    // the object is a bundle, an object type of the closed set
+    expect(
+      refusalOf(() =>
+        build({ ...widened, object: { type: 'Bundle', id: OBJECT_ID } }, AUTHENTICATION),
+      ).field,
+    ).toBe('object.type');
+  });
+
+  // Break caught (task A3.4 of the audit follow-up): the widening of the Vendor's or the Rider's fixed policy recorded as an ordinary event, with no audience
+  // or revision, with no before and after of the revision, or as the act of a person (the primitive writes it as the system); or a policy given an
+  // identifier it does not have. The complete event, in the shape `melarc.change_fixed_policy` writes (migration 0079), is accepted.
+  it('holds permission.fixed_policy.widened to its tier and to the facts the catalogue names for it', () => {
+    const widened: AuditEventInput = {
+      code: 'permission.fixed_policy.widened',
+      enhanced: true,
+      outcome: 'SUCCEEDED',
+      object: { type: 'FixedPermissionPolicy', id: null },
+      relatedIds: { principal_type: 'VENDOR', revision: 3, minimum_revision: 1 },
+      beforeAfter: { revision: { before: 2, after: 3 } },
+    };
+    expect(tierOf('permission.fixed_policy.widened')).toBe('ENHANCED');
+    expect(build(widened, AUTHENTICATION).relatedIds).toEqual({
+      principal_type: 'VENDOR',
+      revision: 3,
+      minimum_revision: 1,
+    });
+    expect(refusalOf(() => build({ ...widened, enhanced: false }, AUTHENTICATION)).field).toBe(
+      'enhanced',
+    );
+    expect(
+      refusalOf(() => build({ ...widened, beforeAfter: undefined }, AUTHENTICATION)).field,
+    ).toBe('beforeAfter');
+    expect(refusalOf(() => build({ ...widened, relatedIds: {} }, AUTHENTICATION)).field).toBe(
+      'relatedIds',
+    );
+    expect(
+      refusalOf(() =>
+        build(
+          { ...widened, relatedIds: { principal_type: 'VENDOR', revision: 3 } },
+          AUTHENTICATION,
+        ),
+      ).field,
+    ).toBe('relatedIds');
+    // a person's act, never the system's
+    expect(refusalOf(() => build(widened, STAFF)).field).toBe('actor');
+    // the object is the policy, an object type of the closed set
+    expect(
+      refusalOf(() =>
+        build({ ...widened, object: { type: 'FixedPolicy', id: null } }, AUTHENTICATION),
+      ).field,
+    ).toBe('object.type');
   });
 
   // Break caught: a read forced to fabricate a before and after (the placeholder the document's own wording invited), or a read

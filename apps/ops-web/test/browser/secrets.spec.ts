@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { stubApi } from './support/api';
 import { decodePainted } from './support/painted';
@@ -173,6 +174,26 @@ test.describe('the one-time secret and the QR code in a browser', () => {
     );
     await page.emulateMedia({ forcedColors: 'active' });
     await openShowcase(page);
+    const region = await showDemoSecret(page);
+    const code = region.getByRole('img', { name: 'Demo QR code' });
+
+    const fills = await code.evaluate((svg) => ({
+      modules: getComputedStyle(svg.querySelector('.ui-qr__modules') ?? svg).fill,
+      background: getComputedStyle(svg.querySelector('.ui-qr__background') ?? svg).fill,
+    }));
+    expect(fills).toEqual({ modules: 'rgb(0, 0, 0)', background: 'rgb(255, 255, 255)' });
+    expect(await decodePainted(page, code)).toBe(DEMO_URI);
+  });
+
+  // Break caught: the code following the theme and becoming light on dark in the dark theme. `white` and `black` are the two colours that are
+  // the same in every theme for this reason (DESIGN_SYSTEM section 4.2): many scanners read dark on light only.
+  test('stays black on white in the dark theme, and still decodes', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await openShowcase(page);
+    expect(
+      await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+      'the dark theme is in force',
+    ).toBe('dark');
     const region = await showDemoSecret(page);
     const code = region.getByRole('img', { name: 'Demo QR code' });
 

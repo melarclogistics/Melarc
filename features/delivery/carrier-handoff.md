@@ -61,10 +61,10 @@ terminal), `MSC-DEC-392` (the routing class — an operation for an already-sign
 | Melarc Rider| Rider| Capture the handoff — who took it, in which identity mode, the photograph, and for a registered courier or station the waybill — for a parcel on their own outbound run| `delivery.handoff.perform`, owned outbound run|
 | Melarc Rider| Rider| Fail an outbound stop at the counter, with a `HANDOFF_FAILURE` reason| `delivery.stop.close`, assigned stop|
 | Melarc Rider| Rider| Read the handoff record for an assigned stop, and the register's `ACTIVE` entries| `delivery.read`, assigned · `courier.read`, active entries|
-| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Clear a paid outbound order for dispatch, or re-dispatch one| `dispatch.outbound.clear`, own hub|
-| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Read the hub's handoff records, and record a covered-mode outcome| `delivery.read` · `delivery.handoff.outcome`, own hub|
+| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Clear a paid outbound order for dispatch, or re-dispatch one| `dispatch.outbound.clear`, own hub (Platform Admin: all hubs)|
+| Melarc Ops| Ops Staff, Senior Ops, Platform Admin| Read the hub's handoff records, and record a covered-mode outcome| `delivery.read` · `delivery.handoff.outcome`, own hub (Platform Admin: all hubs)|
 | Melarc Ops| Senior Ops, Platform Admin| Register, deactivate and reactivate couriers and stations| `courier.registry.manage`, all hubs|
-| Melarc Ops| Senior Ops, Platform Admin| Approve an informal agent, or withdraw approval| `courier.agent.approve`, own hub|
+| Melarc Ops| Senior Ops, Platform Admin| Approve an informal agent, or withdraw approval| `courier.agent.approve`, own hub (Platform Admin: all hubs)|
 | Melarc Vendor| Vendor account| Read their own order's handoff| `delivery.read`, own record|
 | Recipient channel| —| **N/A.** A recipient has no account and no portal (§49)|  —|
 
@@ -189,7 +189,7 @@ parcel, the stop still fails with a `HANDOFF_FAILURE` reason and the parcel come
 
 §24.7.2 keeps Melarc responsible *"until final delivery, failure, or return is recorded"*, and **Ops
 records it** with `recordHandoffOutcome` under `delivery.handoff.outcome` — Ops Staff, Senior Ops and
-Platform Admin at own hub (`MSC-DEC-417`, closing `OQ-135`). **The worklist is
+Platform Admin, each at the scope [permissions.md](../../contracts/permissions.md) gives it (`MSC-DEC-417`, closing `OQ-135`). **The worklist is
 `listCarrierHandoffs`**, filtered to the covered mode and the three states still in a third party's
 hands, so an outcome is never recorded only for the orders someone happened to remember.
 
@@ -271,12 +271,12 @@ existed.
 |---|---|---|---|
 | `delivery.handoff.perform`| **Rider only**| owned outbound run| [permissions.md](../../contracts/permissions.md) §7 — existing|
 | `delivery.stop.close`| **Rider only**| assigned stop| permissions.md §7 — existing; also the counter failure|
-| `dispatch.outbound.clear`| Ops Staff, Senior Ops, Platform Admin| own hub| permissions.md §7 — **new**, `MSC-DEC-417`|
-| `delivery.handoff.outcome`| Ops Staff, Senior Ops, Platform Admin| own hub| permissions.md §7 — **new**, `MSC-DEC-417`|
+| `dispatch.outbound.clear`| Ops Staff, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| permissions.md §7 — **new**, `MSC-DEC-417`|
+| `delivery.handoff.outcome`| Ops Staff, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| permissions.md §7 — **new**, `MSC-DEC-417`|
 | `courier.registry.manage`| Senior Ops, Platform Admin| **all hubs**| permissions.md §7 — existing; scope widened at `MSC-DEC-417`|
-| `courier.agent.approve`| Senior Ops, Platform Admin| own hub| permissions.md §7 — **new**, `MSC-DEC-417`|
-| `courier.read`| Ops Staff, Senior Ops, Platform Admin, **Rider**| own hub · active entries| permissions.md §7 — existing; the Rider joins for `ACTIVE` entries at `MSC-DEC-417`|
-| `delivery.read`| Ops Staff, Senior Ops, Platform Admin, Rider, Vendor| own hub · assigned · own record| permissions.md §7 — existing|
+| `courier.agent.approve`| Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| permissions.md §7 — **new**, `MSC-DEC-417`|
+| `courier.read`| Ops Staff, Senior Ops, Platform Admin, **Rider**| own hub (Platform Admin: all hubs) · active entries| permissions.md §7 — existing; the Rider joins for `ACTIVE` entries at `MSC-DEC-417`|
+| `delivery.read`| Ops Staff, Senior Ops, Platform Admin, Rider, Vendor| own hub (Platform Admin: all hubs) · assigned · own record| permissions.md §7 — existing|
 
 **Three keys are added at `MSC-DEC-417`**, each for an act that had an actor and no authority:
 clearance, the covered outcome and agent approval.

@@ -30,24 +30,15 @@
   overflow-wrap: normal;
 }
 
-/* Two facts in one cell (a message over the version of its wording, an outcome over the provider's word), each on its own line. */
-.messages-lines {
+/* The quiet lines under a status (what became of the message, the provider's word, the tries), each on a line of its own. */
+.messages-stack {
   display: grid;
   gap: var(--space-1);
-  overflow-wrap: normal;
 }
 
 /* The provider's closed word is the one thing here that can be long (up to 48 characters, with no space in it), so it may break anywhere. */
-.messages-support {
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-body-sm-line-height);
+.messages-provider {
   overflow-wrap: anywhere;
-}
-
-/* A time, a number's hint: a short line in a table that scrolls sideways rather than breaks in the middle. */
-.messages-nowrap {
-  white-space: nowrap;
 }
 
 /*

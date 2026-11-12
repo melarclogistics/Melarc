@@ -6,6 +6,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { reasonFixture } from '../../../test-support/reason-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, KEYS, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
@@ -16,12 +17,14 @@ import {
   staffIdentityFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText, refusalText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 const PATH = `/admin/sessions?principal_type=STAFF&principal_id=${STAFF_ID}`;
@@ -79,6 +82,25 @@ const lists = () =>
     (request) => request.url.includes('/auth/sessions') && request.method === 'GET',
   );
 const heading = (name: string) => screen.findByRole('heading', { level: 1, name });
+/** The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited. */
+const table = async (): Promise<HTMLElement> => {
+  const found = await screen.findByRole('table', { name: 'Open sessions' });
+  await waitFor(() => {
+    expect(found).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return found;
+};
+/** In a room under 40rem the rows are cards (`narrowRoom`). */
+const cards = () => screen.findByRole('list', { name: 'Open sessions' });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string | RegExp): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+/** A session's row header is the time it started. The table's own message (nothing open, a failure) sits in a cell and is not one. */
+const sessionRows = () => screen.queryAllByRole('rowheader');
 
 async function end(view: ReturnType<typeof open>, index = 0) {
   const buttons = await screen.findAllByRole('button', { name: /^End session/ });
@@ -130,9 +152,27 @@ describe('the sessions: what it shows', () => {
 
   it('asks the server for the sessions of that principal and no other', async () => {
     open();
-    await screen.findByRole('table', { name: 'Open sessions' });
+    await table();
 
     const url = new URL(lists()[0]?.url ?? 'http://x');
+    expect(url.searchParams.get('principal_type')).toBe('STAFF');
+    expect(url.searchParams.get('principal_id')).toBe(STAFF_ID);
+  });
+
+  // Break caught: a refresh that reads nothing, or one that reads another person's sessions; the list says when it was last checked.
+  it('says when the sessions were last checked, and Refresh reads the same person’s sessions again', async () => {
+    const view = open();
+    await table();
+    expect(screen.getByText(/^Updated /)).toBeVisible();
+    const before = lists().length;
+
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => {
+      expect(lists()).toHaveLength(before + 1);
+    });
+    await table();
+    const url = new URL(lists().at(-1)?.url ?? 'http://x');
     expect(url.searchParams.get('principal_type')).toBe('STAFF');
     expect(url.searchParams.get('principal_id')).toBe(STAFF_ID);
   });
@@ -140,15 +180,59 @@ describe('the sessions: what it shows', () => {
   it('lists each session with when it started, when it was last used and when it ends, in Accra time', async () => {
     open();
 
-    const table = await screen.findByRole('table', { name: 'Open sessions' });
-    const rows = within(table).getAllByRole('row');
+    const found = await table();
+    const rows = within(found).getAllByRole('row');
 
     expect(rows).toHaveLength(3);
-    const one = within(rows[1] ?? table);
+    const one = within(rows[1] ?? found);
     expect(one.getByText('23 Oct, 08:00')).toBeVisible();
     expect(one.getByText('23 Oct, 09:15')).toBeVisible();
     expect(one.getByText('23 Oct, 16:00')).toBeVisible();
-    expect(within(rows[2] ?? table).getByText('22 Oct, 07:05')).toBeVisible();
+    expect(within(rows[2] ?? found).getByText('22 Oct, 07:05')).toBeVisible();
+  });
+
+  it('draws a session as a card with the same facts and its act, in a room too narrow for the columns', async () => {
+    narrowRoom();
+    open(KEYS.approver, {
+      [LIST]: () => json(200, { items: [sessionRecordFixture({ id: MY_SESSION }), second] }),
+    });
+
+    const found = within(await cards());
+    const mine = found.getByText('This is your session').closest('li');
+    expect(mine).not.toBeNull();
+    expect(within(mine as HTMLElement).getByText('23 Oct, 09:15')).toBeVisible();
+    expect(within(mine as HTMLElement).getByText('23 Oct, 16:00')).toBeVisible();
+    expect(
+      within(mine as HTMLElement).getByRole('button', {
+        name: 'End session started 23 Oct, 08:00',
+      }),
+    ).toBeVisible();
+    // The person's other session has no mark of being theirs, and its act names the session it ends.
+    expect(found.getAllByText('This is your session')).toHaveLength(1);
+    expect(found.getByRole('button', { name: 'End session started 22 Oct, 07:05' })).toBeVisible();
+    // Each fact beyond the mark and the act is a label and its value (CardFacts), the labels the columns have.
+    expect(
+      within(mine as HTMLElement)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Last active', 'Expires']);
+  });
+
+  // Break caught (run 7, Stage 1.2; replaces "marks when it was last active and when it expires as the lesser columns", which the Product Owner reversed on 11 November 2026): a session's row
+  // opens nothing, so a column the table took away would leave a time on no screen. No column is lesser; the three times are of the date kind (one line each), and where the box cannot hold them the
+  // list is cards, with every fact (the kit's rule and its tests are in DataTable.test.tsx).
+  it('marks no column lesser, for a list whose rows open nothing never loses a time', async () => {
+    open();
+
+    const found = await table();
+    const headers = within(found).getAllByRole('columnheader');
+    expect(headers.map((cell) => cell.getAttribute('data-priority'))).toEqual(
+      headers.map(() => null),
+    );
+    const kinds = Object.fromEntries(
+      headers.map((cell) => [cell.textContent, cell.getAttribute('data-kind')]),
+    );
+    expect(kinds).toMatchObject({ 'Last active': 'date', Expires: 'date' });
   });
 
   // Break caught: a credential, a token hash or a bundle on a session row.
@@ -157,26 +241,54 @@ describe('the sessions: what it shows', () => {
       [LIST]: () =>
         json(200, { items: [{ ...first, token_hash: 'SECRET-HASH', token: 'SECRET' }] }),
     });
-    await screen.findByRole('table', { name: 'Open sessions' });
+    await table();
 
     expect(document.body.textContent).not.toContain('SECRET');
   });
+
+  // Break caught (the security review of run 5, Stage 5.1): a credential drawn in the cards, or in an attribute, which a check of the table's text cannot see. A token or its hash
+  // that the server sent anyway has no place in either drawing, in any text or any attribute of the page (the whole markup is read).
+  it.each([
+    ['the table', false],
+    ['the cards', true],
+  ] as const)(
+    'draws nothing of a session’s credential in %s, in any text or attribute',
+    async (_name, narrow) => {
+      if (narrow) narrowRoom();
+      open(KEYS.approver, {
+        [LIST]: () =>
+          json(200, {
+            items: [
+              {
+                ...first,
+                token_hash: 'SECRET-HASH',
+                token: 'SECRET',
+                password_hash: 'SECRET-PASSWORD-HASH',
+              },
+            ],
+          }),
+      });
+      await (narrow ? cards() : table());
+
+      expect(document.body.innerHTML).not.toContain('SECRET');
+    },
+  );
 
   it('marks the session the person is using', async () => {
     open(KEYS.approver, {
       [LIST]: () => json(200, { items: [sessionRecordFixture({ id: MY_SESSION }), second] }),
     });
 
-    const table = await screen.findByRole('table', { name: 'Open sessions' });
+    const found = await table();
 
-    expect(within(table).getAllByText('This is your session')).toHaveLength(1);
+    expect(within(found).getAllByText('This is your session')).toHaveLength(1);
   });
 
   it('says whose sessions these are in general words when the person cannot be named', async () => {
     open(KEYS.approver, { [PERSON]: () => refusal(500, 'INTERNAL_ERROR') });
 
     expect(await screen.findByText('Open sessions of this staff member.')).toBeVisible();
-    expect(await screen.findByRole('table', { name: 'Open sessions' })).toBeVisible();
+    expect(await table()).toBeVisible();
   });
 
   it('does not look up a rider as a staff member', async () => {
@@ -204,7 +316,7 @@ describe('the sessions: what it shows', () => {
 
     expect(await screen.findByRole('heading', { name: 'No open sessions' })).toBeVisible();
     expect(screen.getByText('Kofi Boateng is not signed in anywhere.')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(sessionRows()).toHaveLength(0);
   });
 });
 
@@ -223,9 +335,9 @@ describe('the sessions: who may end one', () => {
   it('names the permission, and offers no button, to a person who cannot', async () => {
     open(KEYS.reader);
 
-    await screen.findByRole('table', { name: 'Open sessions' });
+    await table();
 
-    expect(screen.getByText('staff.session.revoke')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.session.revoke'))).toBeVisible();
     expect(screen.queryByRole('button', { name: /^End session/ })).toBeNull();
   });
 });
@@ -294,6 +406,37 @@ describe('the sessions: ending one', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
+  // Break caught: the rows replaced by a loading treatment for the read that follows the act, so that the person loses their place.
+  it('keeps the rows where they are while the list is read again, and says it is busy', async () => {
+    let count = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const view = open(KEYS.approver, {
+      [LIST]: async () => {
+        count += 1;
+        if (count === 1) return json(200, { items: [first, second] });
+        await held;
+        return json(200, { items: [second] });
+      },
+      [REVOKE(FIRST)]: () => json(200, { ...first, state: 'TERMINATED' }),
+    });
+
+    await end(view);
+
+    expect(await screen.findByText('The session has ended.')).toBeVisible();
+    expect(sessionRows()).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Open sessions' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    release();
+    await waitFor(() => {
+      expect(sessionRows()).toHaveLength(1);
+    });
+  });
+
   it('sends the note as it was typed', async () => {
     const view = open(KEYS.approver, {
       [REVOKE(FIRST)]: () => json(200, { ...first, state: 'TERMINATED' }),
@@ -336,7 +479,8 @@ describe('the sessions: ending one', () => {
     await end(view);
 
     expect(await screen.findByText('That session had already ended.')).toBeVisible();
-    expect(screen.queryByRole('alert')).toBeNull();
+    // The table keeps its region of failures in the page, empty until it has something to say: nothing was said.
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
@@ -392,31 +536,43 @@ describe('the sessions: when it cannot be had', () => {
   it('says plainly that the session cannot see the sessions of this kind of person', async () => {
     open(KEYS.approver, { [LIST]: () => refusal(403, 'INSUFFICIENT_AUTHORITY') });
 
-    expect(
-      await screen.findByText(
-        'Your session cannot see this person’s sessions. Staff and vendor sessions are seen by a Platform Admin.',
-      ),
-    ).toBeVisible();
-    expect(screen.getByText('A higher authority is needed')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    const alert = await alertSaying(
+      'Your session cannot see this person’s sessions. Staff and vendor sessions are seen by a Platform Admin.',
+    );
+    // Told as the refusal of a tier and never as a missing key (the page wrote "A higher authority is needed." itself; the words are the operation's now, and the table's for the other kinds).
+    expect(alert).not.toHaveTextContent(cannotText('staff.read'));
+    expect(alert).not.toHaveTextContent('Ask an administrator for access');
+    expect(sessionRows()).toHaveLength(0);
+  });
+
+  // Break caught (the review of f6cf02b): the hub of a person told in a sentence a page wrote; it is the table's.
+  it('says a person of another hub is at a hub the account does not work in', async () => {
+    open(KEYS.approver, { [LIST]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
+
+    const alert = await alertSaying(
+      refusalText('outside-hubs', 'staff.read', { of: 'this person' }),
+    );
+    expect(alert).toHaveTextContent('This person is at a hub your account does not work in.');
+    expect(sessionRows()).toHaveLength(0);
   });
 
   it('says a person who does not exist is not there', async () => {
     open(KEYS.approver, { [LIST]: () => refusal(404, 'NOT_FOUND') });
 
-    expect(await screen.findByText('That person could not be found.')).toBeVisible();
+    await alertSaying('That person could not be found.');
   });
 
-  it('names staff.read when the server refuses the key', async () => {
+  it('names what the account cannot do when the server refuses the key', async () => {
     open(KEYS.approver, { [LIST]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText('staff.read')).toBeVisible();
+    await alertSaying(cannotText('staff.read'));
+    expect(document.body.textContent).not.toMatch(/staff\.read/);
   });
 
   it('says a person in a hub the session does not act in is outside its hubs', async () => {
     open(KEYS.approver, { [LIST]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
 
-    expect(await screen.findByText('This is outside your hubs')).toBeVisible();
+    await alertSaying('This person is at a hub your account does not work in.');
   });
 
   it('says it could not load, with a retry', async () => {
@@ -428,17 +584,18 @@ describe('the sessions: when it cannot be had', () => {
       },
     });
 
-    expect(await screen.findByText('The sessions could not be loaded.')).toBeVisible();
+    await alertSaying('The sessions could not be loaded.');
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
-    await view.user.click(screen.getByRole('button', { name: 'Try again' }));
+    await view.user.click(screen.getByRole('button', { name: 'Retry' }));
 
-    expect(await screen.findByRole('table', { name: 'Open sessions' })).toBeVisible();
+    expect(await table()).toBeVisible();
+    expect(sessionRows()).toHaveLength(1);
   });
 
   it('treats an answer that is not a list of sessions as an answer that is not the API’s', async () => {
     open(KEYS.approver, { [LIST]: () => json(200, { items: [{ surprise: true }] }) });
 
-    expect(await screen.findByText('The sessions could not be loaded.')).toBeVisible();
+    await alertSaying('The sessions could not be loaded.');
     expect(screen.queryByRole('heading', { name: 'No open sessions' })).toBeNull();
   });
 
@@ -446,7 +603,7 @@ describe('the sessions: when it cannot be had', () => {
     open(KEYS.maker);
 
     expect(await heading('You do not have access to this page')).toBeVisible();
-    expect(screen.getByText('staff.read')).toBeVisible();
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
     expect(lists()).toHaveLength(0);
   });
 });
@@ -456,8 +613,8 @@ describeInterfaceStates('The sessions of a person', {
     test: async () => {
       open(KEYS.approver, { [LIST]: () => new Promise<Response>(() => undefined) });
 
-      expect(await screen.findByText('Loading the sessions…')).toBeVisible();
-      expect(screen.queryByRole('table')).toBeNull();
+      expect(await screen.findByText('Loading sessions')).toBeVisible();
+      expect(sessionRows()).toHaveLength(0);
     },
   },
   empty: {
@@ -488,9 +645,7 @@ describeInterfaceStates('The sessions of a person', {
     test: async () => {
       open(KEYS.approver, { [LIST]: () => refusal(500, 'INTERNAL_ERROR') });
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        'The sessions could not be loaded.',
-      );
+      await alertSaying('The sessions could not be loaded.');
     },
   },
   retry: {
@@ -503,9 +658,9 @@ describeInterfaceStates('The sessions of a person', {
         },
       });
 
-      await view.user.click(await screen.findByRole('button', { name: 'Try again' }));
+      await view.user.click(await screen.findByRole('button', { name: 'Retry' }));
 
-      expect(await screen.findByRole('table', { name: 'Open sessions' })).toBeVisible();
+      expect(await table()).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
@@ -541,7 +696,7 @@ describeInterfaceStates('The sessions of a person', {
 describe('the sessions: accessibility', () => {
   it('has no WCAG violations that can be checked without a layout engine, in its states', async () => {
     const view = open();
-    await screen.findByRole('table', { name: 'Open sessions' });
+    await table();
     expect(await wcagViolations(view.container)).toEqual([]);
     const [button] = screen.getAllByRole('button', { name: /^End session/ });
     await view.user.click(button ?? document.body);

@@ -49,6 +49,7 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/auth/staff/trusted-browsers' },
       { method: 'GET', path: '/api/v1/auth/vendor/devices' },
       { method: 'GET', path: '/api/v1/notifications' },
+      { method: 'GET', path: '/api/v1/ops/queue-summary' },
       { method: 'GET', path: '/api/v1/ops/riders' },
       { method: 'GET', path: '/api/v1/ops/riders/:riderId' },
       { method: 'GET', path: '/api/v1/ops/staff/:id/trusted-browsers' },
@@ -84,6 +85,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/auth/vendor/devices/:id/revoke' },
       { method: 'POST', path: '/api/v1/auth/vendor/setup/credential' },
       { method: 'POST', path: '/api/v1/auth/vendor/sign-in' },
+      { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/revoke' },
@@ -202,6 +204,15 @@ describe('the real application', () => {
         authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE']),
       },
+      // Task C1: the count of the work waiting in each queue the session may read. A `self` operation of the Ops Portal, `background` like the
+      // read of the session: the page asks for it on its own and it never extends the idle lifetime. Each entry is gated by the key of its list.
+      {
+        method: 'GET',
+        path: '/api/v1/ops/queue-summary',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'background' },
+        credentialModes: new Set(['COOKIE']),
+      },
       // S0.53a: the two reads of the rider roster, `dispatch.read` at the hubs of the grant, on the browser surface alone: the Rider bundle holds
       // the key as well, and a rider's bearer credential is not one these operations take.
       {
@@ -283,16 +294,18 @@ describe('the real application', () => {
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
+      // Task A3.1 of the audit follow-up: the two reads of pickup requests are not served to a Rider (surfaces/rider-android.md: "Not a rider act"), so they name the Ops
+      // Portal and the Vendor app, and take a browser session's cookie alone: a Rider's bearer is not a credential these routes read.
       {
         method: 'GET',
         path: '/api/v1/pickup-requests',
         access: 'permission',
         permission: 'pickup.read',
         authenticated: {
-          surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
           activity: 'qualifying',
         },
-        credentialModes: new Set(['COOKIE', 'BEARER']),
+        credentialModes: new Set(['COOKIE']),
       },
       {
         method: 'GET',
@@ -300,11 +313,11 @@ describe('the real application', () => {
         access: 'permission',
         permission: 'pickup.read',
         authenticated: {
-          surfaces: ['OPS_PORTAL', 'VENDOR_PWA', 'RIDER_ANDROID'],
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
           activity: 'qualifying',
           record: { entity: 'pickup_request', param: 'id' },
         },
-        credentialModes: new Set(['COOKIE', 'BEARER']),
+        credentialModes: new Set(['COOKIE']),
       },
       // S1.22: the read of one stop, the source of its `ETag`. Served like the manifest read, to staff by the hubs of the grant and to a rider by
       // assignment from dispatch, with the stop as the record the scope probe is asked about; a Vendor is not served (OB-S1-23).
@@ -523,8 +536,18 @@ describe('the real application', () => {
         bucket: 'rate_limit_vendor_signin',
         client: VENDOR_BROWSER,
       },
+      // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
+      // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
+      // changes nothing (the Product Owner, 6 November 2026), so that a number typed in full is in no URL: the CSRF guard judges it like any POST.
+      {
+        method: 'POST',
+        path: '/api/v1/ops/lookup',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
       // S0.53b, S0.53c: the in-person start of a rider's device binding. The first registration is `staff.device.register` (Senior Ops, or a
-      // Platform Admin whose grant reaches the rider's hub) and the replacement `staff.device.reregister` (the actor's own hub, for both tiers).
+      // Platform Admin whose grant reaches the rider's hub) and the replacement `staff.device.reregister` (the same: Senior Ops at their own hub, a Platform Admin at every hub).
       {
         method: 'POST',
         path: '/api/v1/ops/riders/:riderId/device/register',
@@ -1022,6 +1045,28 @@ describe('inspectRoutes', () => {
     ]);
     expect(inspection.outsideNest).toEqual([]);
     expect(inspection.missingFromRouter).toEqual([]);
+  });
+
+  // Break caught (task C1): a tier, or a named record, added to a list that a queue count follows. `getQueueSummary` counts in the context
+  // of the list's key and the grant's scope, and applies neither a tier nor a record scope; the count would then differ from the list. Whoever
+  // adds one here must add it to the count (and its test) in the same change, and this test is what tells them.
+  it('declares no tier and no record on the lists that a queue count follows', async () => {
+    const { app } = await start();
+    const followed = [
+      '/api/v1/pickup-requests',
+      '/api/v1/pickup-manifests',
+      '/api/v1/staff-identities',
+    ];
+
+    const lists = inspectRoutes(app).declared.filter(
+      (route) => route.method === 'GET' && followed.includes(route.path),
+    );
+
+    expect(lists.map((route) => route.path).toSorted()).toEqual([...followed].toSorted());
+    for (const route of lists) {
+      expect(route.authenticated?.tier, route.path).toBeUndefined();
+      expect(route.authenticated?.record, route.path).toBeUndefined();
+    }
   });
 
   // Break caught: a controller route with no access declaration going unnoticed until a request is refused.

@@ -22,6 +22,14 @@ type Engine = keyof typeof ENGINES;
 const isEngine = (name: string): name is Engine => Object.hasOwn(ENGINES, name);
 
 /**
+ * Where a showcase spec runs. Chromium runs it against the development server, whose unbundled load is what the showcase is built for; **Firefox and WebKit run the same spec against the production showcase build** (`vite build --mode showcase`,
+ * the build the -policy projects already use): the development server serves every module on its own, and under load it starved the specs of those two engines (the engines run of 10 November 2026, finding 17: five-second waits for the
+ * heading of a page that was still loading its modules). Nothing a spec asserts changes with the origin.
+ */
+const showcaseOrigin = (engine: Engine): string =>
+  engine === 'chromium' ? DEV_ORIGIN : SHOWCASE_ORIGIN;
+
+/**
  * The engines to run: MELARC_BROWSERS, a comma-separated list of chromium, firefox and webkit. CI runs Chromium on every pull request
  * and all three on a push to main, every night and by hand, each engine in jobs of its own (the supported browsers of
  * surfaces/ops-portal.md section 11, by their engines; DEVELOPMENT.md, "What CI runs when"). Without the variable only Chromium
@@ -66,14 +74,20 @@ function requestedShard(value: string | undefined): { current: number; total: nu
 /**
  * Browser tests of the application, in real browsers.
  *
- *   shell       the application shell, against the production build served the way a static host would serve it.
- *               It needs no API and no database: the shell calls neither.
+ *   shell       the application shell (the frame, the sidebar, the sheet of a narrow screen, sign-out), against the production build served
+ *               the way a static host would serve it. It needs no database, and its API is a stand-in that answers who is signed in.
  *   components  the real components in the development-only showcase, which the production build does not contain
- *               (test/build.test.ts proves that), so they run against the Vite development server. The secrets and dialogs specs
+ *               (test/build.test.ts proves that), so they run against the Vite development server on Chromium and, on Firefox and WebKit,
+ *               against the production showcase build (`showcaseOrigin`; the secrets, dialogs, date-picker, primitives and kit specs the same). The secrets and dialogs specs
  *               are the same showcase in files of their own.
  *   date-picker the date field of the showcase (COMPONENT_PATTERNS section 22a): the keyboard, reflow, enlarged text, forced colours and
  *               reduced motion, against the development server; and, in a project of its own, the same showcase built for production and
  *               served under the strict content-security policy (a build of its own, `--mode showcase`, that the shell build never holds).
+ *   primitives  the shadcn/ui primitives of the showcase (`/__showcase/primitives`): an automated WCAG 2.2 scan in both themes with each overlay open,
+ *               and every overlay by keyboard, against the development server; and, in a project of its own, the same page built for production
+ *               and served under the strict content-security policy.
+ *   logo        the logo in the banner of the sign-in screen (BRAND_FOUNDATION 4.7): the primary logo on a light ground and the all-white lockup on
+ *               a dark one, read back from the pixels, against the production build under the strict policy.
  *   pre-sign-in the five screens a person reaches with no session, against the production build and, in a project of its own,
  *               the development server (strict mode), with a stand-in for the API.
  *   staff       the six signed-in identity screens (S0.44), the same two ways, with a stateful stand-in for the API.
@@ -83,6 +97,19 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *               the contract and answered by the stand-in).
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
+ *   queue-summary the counts of the queues (task C1), the same two ways: the sidebar's counts, My work's cards, a failed read and the read again on
+ *               a change of page, with a stand-in for the API that answers the summary the test gives it.
+ *   top-bar     the top bar of the shell (redesign step R4), the same two ways: the hub switcher, the New menu, the account menu, the theme with its
+ *               pre-paint script, and the search button.
+ *   palette     the command palette (R4), the same two ways, with a stand-in for the search of records that plants wording, a link and a number
+ *               in clear in answers that never carry them.
+ *   my-work     My work, the landing (R4), the same two ways: its frame, its cards and each state of the read of the summary.
+ *   request-rate the requests of a heavy officer's session (audit follow-up of 7 November 2026, B13) against the production build: a session of three
+ *               minutes at a person's pace, counted by operation. It is skipped unless MELARC_MEASURE=1 (it takes about three and a half minutes).
+ *   kit         the Melarc component kit of the showcase (`/__showcase/kit/<group>`, redesign step R5): WCAG 2.2 in both themes, sizes and looks, the keyboard,
+ *               and what moves, against the development server; and, in a project of its own, the same pages built for production under the strict policy.
+ *   frame-toaster the application's one toaster in the signed-in frame (the follow-up of 7 November 2026, afternoon), against the development server: a toast is
+ *               raised through the module the application itself runs, which only the development server serves, so that no hook is put into the production build.
  *
  * The integrated browser, API and database harness is the e2e workspace.
  */
@@ -111,25 +138,25 @@ export default defineConfig({
     {
       name: `components-${engine}`,
       testMatch: 'components.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The form components, the one-time secret and the QR code of the showcase (S0.39): the same server, their own spec.
       name: `secrets-${engine}`,
       testMatch: 'secrets.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The dialogs and the reason and confirmation workflow of the showcase (S0.41): what only a real browser can show of a modal.
       name: `dialogs-${engine}`,
       testMatch: 'dialogs.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The date field of the showcase (COMPONENT_PATTERNS section 22a): what only a real browser can show of a calendar.
       name: `date-picker-${engine}`,
       testMatch: 'date-picker.spec.ts',
-      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
     },
     {
       // The showcase as a production build under the strict content-security policy: the library's popovers, focus handling and the one style
@@ -137,6 +164,27 @@ export default defineConfig({
       name: `date-picker-policy-${engine}`,
       testMatch: 'date-picker-policy.spec.ts',
       use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
+    },
+    {
+      // The shadcn/ui primitives of the showcase (DESIGN_SYSTEM section 29): WCAG 2.2 in both themes, and every overlay by keyboard, against the
+      // development server.
+      name: `primitives-${engine}`,
+      testMatch: 'primitives.spec.ts',
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
+    },
+    {
+      // The same page as a production build under the strict content-security policy: Radix UI and Sonner raise no violation in any engine, and the
+      // styles they insert at run time are the only thing the policy was relaxed for.
+      name: `primitives-policy-${engine}`,
+      testMatch: 'primitives-policy.spec.ts',
+      use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
+    },
+    {
+      // The logo in the banner of the sign-in screen: the primary logo on a light ground, the all-white lockup on a dark one (BRAND_FOUNDATION 4.7),
+      // against the production build under the strict policy.
+      name: `logo-${engine}`,
+      testMatch: 'logo.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
     },
     {
       // The five pre-sign-in screens (S0.43) against the production build, with a stand-in for the API.
@@ -225,6 +273,81 @@ export default defineConfig({
       // The same file against the development server (strict mode runs every effect twice).
       name: `messages-dev-${engine}`,
       testMatch: 'messages.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The counts of the queues (task C1) against the production build, with a stand-in for the API that answers the summary a test gives it.
+      name: `queue-summary-${engine}`,
+      testMatch: 'queue-summary.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the shell reads the summary from an effect).
+      name: `queue-summary-dev-${engine}`,
+      testMatch: 'queue-summary.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The requests of a heavy officer's session (B13) against the production build, with a stand-in for the API: three minutes at a person's pace,
+      // counted by operation, with the busiest 60 seconds. It is skipped unless MELARC_MEASURE=1 is set: it takes about three and a half minutes.
+      name: `request-rate-${engine}`,
+      testMatch: 'request-rate.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The top bar of the signed-in shell (redesign step R4) against the production build, where the pre-paint script of the theme is the one
+      // that ships.
+      name: `top-bar-${engine}`,
+      testMatch: 'top-bar.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the menus and the theme are effects of the shell).
+      name: `top-bar-dev-${engine}`,
+      testMatch: 'top-bar.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The command palette (R4) against the production build, with a stand-in for the search of records.
+      name: `palette-${engine}`,
+      testMatch: 'palette.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the search is made from an effect).
+      name: `palette-dev-${engine}`,
+      testMatch: 'palette.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // My work, the landing (R4), against the production build, with a stand-in for the summary of the queues.
+      name: `my-work-${engine}`,
+      testMatch: 'my-work.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, and the page reads the summary from an effect).
+      name: `my-work-dev-${engine}`,
+      testMatch: 'my-work.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The Melarc component kit of the showcase (redesign step R5): WCAG 2.2 in both themes, the sizes and looks only the stylesheet gives, the keyboard
+      // and what moves under Motion and under reduced motion, against the development server.
+      name: `kit-${engine}`,
+      testMatch: 'kit.spec.ts',
+      use: { ...ENGINES[engine], baseURL: showcaseOrigin(engine) },
+    },
+    {
+      // The same pages built for production under the strict content-security policy: Motion and the libraries raise no violation in any engine.
+      name: `kit-policy-${engine}`,
+      testMatch: 'kit-policy.spec.ts',
+      use: { ...ENGINES[engine], baseURL: SHOWCASE_ORIGIN },
+    },
+    {
+      // The application's one toaster in the signed-in frame, against the development server (a toast is raised through the module that the application itself runs).
+      name: `frame-toaster-${engine}`,
+      testMatch: 'frame-toaster.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
   ]),

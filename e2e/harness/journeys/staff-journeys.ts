@@ -54,6 +54,7 @@ import {
   vendorRecovery,
 } from './recovery-journeys.ts';
 import { manifestsAndCustody } from './manifest-journeys.ts';
+import { countingRequests } from './request-count.ts';
 import { riderHandsets, vendorBrowsersAndSessions } from './rider-journeys.ts';
 import { introduce, worldOf } from './world.ts';
 
@@ -249,9 +250,10 @@ async function opsStaffSetUpAndSignIn({ page, context, stack }: JourneyContext):
   const bola = world.person('bola');
   const kofi = introduce(world, 'kofi.ops', 'Kofi Ops');
 
-  // The maker: Ada signs in and adds a profile.
+  // The maker: Ada signs in and adds a profile, from the New menu of the top bar.
   await signInAs(page, ada);
-  await page.getByRole('link', { name: 'Add a staff profile' }).first().click();
+  await page.getByRole('button', { name: 'New' }).click();
+  await page.getByRole('menuitem', { name: 'Add a staff profile' }).click();
   await expectHeading(page, 'Add a staff profile');
 
   // AC-SLICE-000-115: the role field offers exactly the roles the operation returns, by name, and none of its own.
@@ -300,10 +302,13 @@ async function opsStaffSetUpAndSignIn({ page, context, stack }: JourneyContext):
   expect(await setPassword(page, kofi.password)).toBe('sign-in');
   await page.getByRole('link', { name: 'Go to sign-in' }).click();
   await signInAs(page, kofi);
-  // Ops Staff hold neither staff.read nor the approval: the menu has no entry for the staff pages, and the page names the permission.
+  // Ops Staff hold neither staff.read nor the approval: the menu has no entry for the staff pages, and the page says what the account cannot do, in plain words and not by the key.
   await expect(page.getByRole('link', { name: 'Staff', exact: true })).toHaveCount(0);
   await page.goto('/admin/staff');
-  await expect(page.getByText('staff.read').first()).toBeVisible();
+  await expect(
+    page.getByText('Your account can’t see staff profiles. Ask an administrator for access.'),
+  ).toBeVisible();
+  await expect(page.getByRole('main')).not.toContainText('staff.read');
   await signOut(page);
 }
 
@@ -644,7 +649,7 @@ async function endOfSessions({ page, context, stack }: JourneyContext): Promise<
   const sessionsOf = async () =>
     observe<{ live: boolean; reason: string | null }>(database, 'sessions', email);
 
-  // Sign out through the control every signed-in screen carries.
+  // Sign out through the control every signed-in screen carries: the account menu of the top bar.
   await signInAs(page, kofi);
   const saved = await context.cookies();
   const ending = page.waitForResponse(
@@ -652,7 +657,8 @@ async function endOfSessions({ page, context, stack }: JourneyContext): Promise<
       new URL(response.url()).pathname === '/api/v1/auth/session' &&
       response.request().method() === 'DELETE',
   );
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   const answer = await ending;
   expect(answer.status()).toBe(204);
   await expect(page).toHaveURL(/\/sign-in$/);
@@ -866,7 +872,10 @@ async function rememberThisBrowser({ page, context, stack }: JourneyContext): Pr
   await signInAs(page, bola);
   await openProfile(page, ada.person.fullName);
   const section = page.getByRole('region', { name: 'Trusted browsers' });
-  await expect(section.getByRole('table')).toBeVisible();
+  // A table where the main column of the record has room for one (40rem of its box), and cards, a list of the same name, under that (the profile has a side column): the browsers are listed in either.
+  await expect(
+    section.getByRole('table').or(section.getByRole('list', { name: /^Trusted browsers of / })),
+  ).toBeVisible();
   expect(
     (await page.locator('body').innerText()).includes(adaBrowser[0]?.value ?? 'unreachable'),
     "the profile shows no credential of the person's",
@@ -886,7 +895,7 @@ async function rememberThisBrowser({ page, context, stack }: JourneyContext): Pr
   await clearBrowser(context);
 }
 
-export const STAFF_JOURNEYS: readonly Journey[] = [
+const JOURNEYS: readonly Journey[] = [
   {
     title:
       'row 4 and 5: the first bootstrap administrator sets a password and an authenticator from the secret in their bundle, and has no session before the code is proven',
@@ -963,3 +972,8 @@ export const STAFF_JOURNEYS: readonly Journey[] = [
     run: manifestsAndCustody,
   },
 ];
+
+/** The journeys, each counted (see `countingRequests`): what both specs register, so that the plain HTTP run and the HTTPS runs hold the same limit. */
+export const STAFF_JOURNEYS: readonly Journey[] = JOURNEYS.map((journey) =>
+  countingRequests(journey),
+);

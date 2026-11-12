@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 import '../pickup/pickup-pages.css';
 
 /**
- * One act a manifest page offers: a heading, what it does, and its control, or the permission it needs when the session does not hold it. What
+ * One act a manifest page offers: a heading, what it does, and its control, or what the account cannot do when the session does not hold the permission. What
  * is offered follows the record and the keys the session lists, and decides nothing: the server checks the key, the hub and the state.
  */
 export function ActBlock({
@@ -28,9 +29,7 @@ export function ActBlock({
           <div className="pickup-act__buttons">{control}</div>
         </>
       ) : (
-        <p className="pickup-act__text">
-          This needs the permission <code>{permission}</code>, which your session does not hold.
-        </p>
+        <p className="pickup-act__text">{cannotText(permission)}</p>
       )}
     </div>
   );

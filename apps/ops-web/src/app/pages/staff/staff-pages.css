@@ -40,38 +40,6 @@
   color: var(--color-text-secondary);
 }
 
-/*
- * A record's facts as a term and its value. Stacked, a term sits close to its value and the pairs are set apart; side by side, where there is
- * room, the terms share a column.
- */
-.staff-facts {
-  margin: 0 0 var(--space-6);
-}
-
-.staff-facts dt {
-  margin-top: var(--space-3);
-  color: var(--color-text-secondary);
-  font-weight: var(--text-label-md-weight);
-}
-
-.staff-facts dd {
-  margin: var(--space-1) 0 0;
-  overflow-wrap: anywhere;
-}
-
-@media (min-width: 40rem) {
-  .staff-facts {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: var(--space-3) var(--space-6);
-  }
-
-  .staff-facts dt,
-  .staff-facts dd {
-    margin: 0;
-  }
-}
-
 /* What a person can do with a record: a heading, then one block for each thing, each a sentence about it and the controls that do it. */
 .staff-actions {
   margin-top: var(--space-6);
@@ -117,7 +85,8 @@
   font-weight: var(--text-heading-sm-weight);
 }
 
-.staff-created .ui-alert {
+/* The page's own wrapper of the alert: the page spaces what it draws, and does not style the kit's markup. */
+.staff-created__alert {
   margin-bottom: var(--space-4);
 }
 

@@ -1,0 +1,139 @@
+/*
+ * My work (surfaces/ops-portal.md section 7): a greeting, and a card for each queue that has something in it. Every colour and size is a token; the
+ * count is the only large figure of the page, in tabular figures (base.css sets them for the whole page). A card has the radius of a page card (16px).
+ */
+.my-work__who {
+  margin: 0 0 var(--space-6);
+  color: var(--color-text-secondary);
+}
+
+.my-work__who strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.my-work__heading {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-section-label-size);
+  font-weight: 600;
+  line-height: var(--text-section-label-line-height);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.my-work__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.my-work-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-default);
+}
+
+/* A card that is a link is tinted under the pointer. */
+.my-work-card:has(.my-work-card__link):hover {
+  border-color: var(--color-border-default);
+  background: var(--color-surface-subtle);
+}
+
+/*
+ * The name of the queue is its link, in the label size and weight, with a chevron at the end. It is stretched over the whole card (its pseudo-element), so the card is one
+ * target: a press anywhere on it goes to the queue. It is not underlined, because it carries the chevron (a whole-card link may drop the underline that the kit's Link always
+ * has, COMPONENT_PATTERNS section 5); its colour is the primary text, since the card, not the words, is the link.
+ */
+.my-work-card__link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--text-body-md-size);
+  font-weight: 600;
+  line-height: var(--text-label-md-line-height);
+  text-decoration: none;
+}
+
+.my-work-card__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.my-work-card__link svg {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+/*
+ * The ring is the card's, not the words': the same ring as everywhere (base.css), drawn round the whole card that the link is, on the layer that covers it. The link's own
+ * ring is a transparent outline (never `none`: forced colours show a transparent outline, and no outline of the application is removed, scripts/design-tokens.test.ts).
+ */
+.my-work-card__link:focus-visible {
+  outline: var(--focus-width) solid transparent;
+}
+
+.my-work-card__link:focus-visible::after {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+  box-shadow: 0 0 0 var(--focus-offset-width) var(--focus-offset);
+}
+
+.my-work-card__figure {
+  /* The containing block of the phrase that is read and not drawn, so that it takes no room and scrolls nothing. */
+  position: relative;
+  margin: 0;
+  font-size: var(--text-display-sm-size);
+  font-weight: 700;
+  line-height: var(--text-display-sm-line-height);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the number counts is read with it, and is not drawn: the name of the queue above it says it. */
+.my-work-card__meaning {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.my-work-card__since {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The queues that are clear: one quiet line, and no card for nothing. */
+.my-work__clear {
+  margin: var(--space-4) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm-size);
+}
+
+/* The shapes of the cards while the summary is read: no figure, and nothing that reads as a count. */
+.my-work__cards--loading {
+  margin-top: var(--space-4);
+}
+
+/* A card of the loading state is the shape of a card and has no text to read, so it needs no more than the height its lines give it. */
+.my-work__cards--loading .my-work-card {
+  min-height: 7rem;
+}

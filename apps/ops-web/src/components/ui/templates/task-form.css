@@ -1,0 +1,156 @@
+/*
+ * TaskForm (design/COMPONENT_PATTERNS.md, *TaskForm*; PRODUCT_DESIGN_DIRECTION section 6.3): the sections in one column, each a grid of two columns where the page has 56rem and one
+ * below that (the tablet at 768px has 41rem), the summary rail beside them where the page has 60rem (it is sticky there; below that it follows the sections and **comes before the actions**), and the form's actions at the foot,
+ * wrapping so that nothing is clipped at 320px or at 200% text. **The room is the container's, not the window's**: a query on the window's width does not see text enlarged by the
+ * root's size (the rem of a media query is the browser's own), so a form beside a 22rem rail would be crushed at 200% text; a container query reads the room the form is in, in
+ * the rem the page is drawn in. Every size is a token or a rem.
+ */
+.ui-task-form {
+  container: task-form / inline-size;
+  min-width: 0;
+}
+
+.ui-task-form__layout {
+  min-width: 0;
+}
+
+/*
+ * The form holds, in this order: what is entered (the sections, or the review), the summary rail and the actions. **The rail comes before the actions** on a narrow page, so that what the
+ * booking comes to is read before the button that sends it (the review of 5edada2); where the page has 60rem it stands beside them, in a column of its own, and sticks below the top bar,
+ * and the actions stay under what is entered. The order of the page is the same in both.
+ */
+.ui-task-form__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* What is entered, as wide as a form should be. */
+.ui-task-form__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  max-width: 52rem;
+}
+
+.ui-task-form__rail,
+.ui-task-form__actions {
+  max-width: 52rem;
+}
+
+@container task-form (min-width: 60rem) {
+  .ui-task-form[data-rail] .ui-task-form__form {
+    display: grid;
+    grid-template-columns: minmax(0, 52rem) 22rem;
+    grid-template-areas:
+      'main rail'
+      'actions rail';
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    column-gap: var(--space-6);
+  }
+
+  .ui-task-form[data-rail] .ui-task-form__main {
+    grid-area: main;
+  }
+
+  .ui-task-form[data-rail] .ui-task-form__rail {
+    grid-area: rail;
+    max-width: none;
+  }
+
+  .ui-task-form[data-rail] .ui-task-form__actions {
+    grid-area: actions;
+  }
+}
+
+.ui-task-form__sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.ui-task-form__sections[hidden] {
+  display: none;
+}
+
+.ui-task-form__section,
+.ui-task-form__review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ui-task-form__section-title {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+/* The one-line rule that changes a choice, beside the choice. */
+.ui-task-form__section-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/*
+ * The field grid: two columns where the page has room for them, which is the page's own room (the container of the whole form: 56rem, a laptop window, with or without the rail beside the
+ * sections) and not the column the sections are in, and one column below that: **one column at 768px and below**, where the page has 41rem, and at 200% text. Each field is as wide as its content needs; a wide field takes the row.
+ */
+.ui-task-form__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4) var(--space-5);
+}
+
+/* What the section holds takes the whole row (a group of choices, a picker, a note), and a field takes half of it, beside the next, unless the page wraps it in `TaskFormWide`. */
+.ui-task-form__grid > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+@container task-form (min-width: 56rem) {
+  .ui-task-form__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ui-task-form__grid > .ui-field {
+    grid-column: auto;
+  }
+}
+
+.ui-task-form__wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.ui-task-form__review-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ui-task-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+/* The rail stays in view while the sections scroll beside it, below the top bar (where the page has 60rem; below that it follows them, before the actions). */
+.ui-task-form__rail {
+  min-width: 0;
+}
+
+@container task-form (min-width: 60rem) {
+  .ui-task-form__rail {
+    position: sticky;
+    top: var(--sticky-top);
+  }
+}

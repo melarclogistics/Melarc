@@ -1,10 +1,10 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useLayoutEffect, type ReactNode } from 'react';
 
-import { PageHeader } from '../../../components/PageHeader';
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
@@ -24,11 +24,12 @@ export function BackToStaff() {
 
 /**
  * Moves focus to the page's heading when one page replaces another in the same place (a profile that turns out not to be there, in the place
- * of the page that was loading it). The frame moves focus to a heading when the address changes; when what is drawn changes and the address
+ * of the page that was loading it; the heading of a record or of a form, which the template draws, in the place of the one that stood while the
+ * profile was read). The frame moves focus to a heading when the address changes; when what is drawn changes and the address
  * does not, the heading that had focus is gone, and focus would fall to the top of the document. It is moved only if it has fallen, so that a
  * person who has already gone elsewhere is not taken back.
  */
-function useFocusFallenToHeading(): void {
+export function useFocusFallenToHeading(): void {
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (active === null || active === document.body) {
@@ -64,6 +65,11 @@ function NoAccess() {
 export interface ProfileHeading {
   readonly title: string;
   readonly description?: string;
+  /**
+   * The pages above, for a task on the profile (the reset of an authenticator): the trail the wrapper draws while the profile is read and after a failure that the page does not draw itself, as the
+   * page's task form draws it once it is read. Such a page passes `back={null}`: the trail is its way back, and no link beside it says it again.
+   */
+  readonly breadcrumb?: readonly BreadcrumbEntry[];
   /** The title of the document (the tab), without the product's name. */
   readonly documentTitle: string;
 }
@@ -71,15 +77,20 @@ export interface ProfileHeading {
 export interface WithProfileProps {
   /** The profile asked for. An address that is not an id is a profile that is not there, and nothing is asked of the server. */
   readonly id: string;
-  /** The page's heading. It is the same heading while the profile is on its way and after, so that focus on it is not lost when the profile arrives. */
+  /** The page's heading. It is the same heading while the profile is on its way and after, unless the page draws its own (`ownsHeading`). */
   readonly heading: (identity: StaffIdentityView | undefined) => ProfileHeading;
   /** The way back, above the heading. */
   readonly back?: ReactNode;
+  /**
+   * The page draws its own heading once the profile is read (a record page: its header is the person's name, the page's one level-one heading; a task form: its header). Until then, and
+   * for a failure, this wrapper's heading stands, so that the page has one.
+   */
+  readonly ownsHeading?: boolean;
   /** The body of the page, drawn once the profile has been read. It gets the read itself and does not ask again. */
   readonly children: (record: StaffRecord, query: UseQueryResult<StaffRecord>) => ReactNode;
 }
 
-function Reading({ id, heading, back, children }: WithProfileProps) {
+function Reading({ id, heading, back, ownsHeading = false, children }: WithProfileProps) {
   const query = useStaffIdentity(id);
 
   if (query.status === 'error') {
@@ -93,12 +104,19 @@ function Reading({ id, heading, back, children }: WithProfileProps) {
     }
   }
 
-  const { title, description, documentTitle } = heading(query.data?.identity);
+  const { title, description, breadcrumb, documentTitle } = heading(query.data?.identity);
+  const loaded = ownsHeading && query.status === 'success';
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
       {back === undefined ? <BackToStaff /> : back}
-      <PageHeader title={title} {...(description === undefined ? {} : { description })} />
+      {loaded ? null : (
+        <PageHeader
+          title={title}
+          {...(description === undefined ? {} : { description })}
+          {...(breadcrumb === undefined ? {} : { breadcrumb })}
+        />
+      )}
       {query.status === 'success' ? (
         children(query.data, query)
       ) : (
@@ -125,8 +143,8 @@ function Reading({ id, heading, back, children }: WithProfileProps) {
  * more on mount, and a version read twice is a version that changes under the person's hand.
  *
  * The heading, the title and the way back are the same elements while the profile is on its way and after it has come, so the focus the
- * frame put on the heading stays on it. A profile in a hub the session does not act in, and one that is not there, are pages of their own
- * (surfaces/ops-portal.md section 7) and take the focus the heading had.
+ * frame put on the heading stays on it (unless the page draws its own heading with a template: it then takes the focus the wrapper's had). A profile in a
+ * hub the session does not act in, and one that is not there, are pages of their own (surfaces/ops-portal.md section 7) and take the focus the heading had.
  */
 export function WithProfile(props: WithProfileProps) {
   if (!UUID.test(props.id)) return <ProfileNotFound />;

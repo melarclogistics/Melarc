@@ -24,6 +24,7 @@ import {
 } from '../../../test-support/rider-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders/{id}/device` (`revokeRiderDevice`, `reregisterRiderDevice`; S0.60b; AC-SLICE-000-74, -108 and -112). Two acts, two keys. **Revoking** is the
@@ -178,7 +179,7 @@ async function fillReplacement(
 }
 
 describe('the device page: what it shows', () => {
-  it('names the page, the rider and the device, and links back to the rider', async () => {
+  it('names the page, the rider and the device, and its one way back is the trail of its parents', async () => {
     await open();
 
     expect(
@@ -187,10 +188,59 @@ describe('the device page: what it shows', () => {
     expect(document.title).toBe('Revoke or replace a device · Melarc Ops Portal');
     expect(await screen.findByText('For Kwame Mensah.')).toBeVisible();
     expect(screen.getByText('One active device.')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to the rider' })).toHaveAttribute(
+    // The roster, then the rider by name (Stage 4.5): a task has the breadcrumb of its parents and no link of its own beside it that says the same.
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Riders' })).toHaveAttribute('href', '/admin/riders');
+    expect(trail.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
+    expect(screen.queryByRole('link', { name: 'Back to the rider' })).toBeNull();
+    // The two acts are two sections of the form, each under a heading of its own.
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Report a lost or stolen device' }),
+    ).toBeVisible();
+    expect(screen.getByRole('heading', { level: 2, name: 'Replace the handset' })).toBeVisible();
+  });
+
+  // Break caught (run 7, Stage 4.3): a page that draws its title twice, once while the rider is read and once in the form that comes of the read, so that the heading element is replaced when the read
+  // lands: the focus the frame put on it is lost, and a test that took the heading while it loaded held a node that was no longer in the document (this file failed four times in ten). The heading
+  // is the same element in every state, with the focus it had.
+  it('keeps one heading element, with its focus, while the rider is read and after', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    await open(REVOKER, { [RECORD]: () => gate });
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Revoke or replace a device',
+    });
+    await screen.findByText('Loading the rider…');
+    act(() => {
+      heading.focus();
+    });
+    expect(heading).toHaveFocus();
+
+    await act(async () => {
+      release(json(200, riderDetailFixture(), etag('v1')));
+      await gate;
+    });
+    expect(await screen.findByText('For Kwame Mensah.')).toBeVisible();
+
+    // The same node, which is not what `toEqual` of two nodes says (it compares what they look like).
+    expect(screen.getByRole('heading', { level: 1 })).toBe(heading);
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveFocus();
+  });
+
+  // Break caught (the PO's decision of 9 November 2026): paragraphs of rules above the content. What revoking does is told in the question of its dialog.
+  it('has no paragraph that explains the revoke: it is told in the dialog', async () => {
+    await open();
+    await screen.findByRole('button', { name: 'Revoke the device' });
+
+    expect(screen.queryByText(/No check of who is asking is made/)).toBeNull();
+    expect(screen.queryByText(/A new handset is registered afterwards, in person/)).toBeNull();
   });
 
   // Break caught: a revoke offered for a rider with no active device, which would be reported as done.
@@ -233,7 +283,7 @@ describe('the device page: what it shows', () => {
 
   it('is a page of its own for a rider outside the session’s hubs, for one that does not exist and for an address that is not an id', async () => {
     const view = await open(REVOKER, { [RECORD]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     view.unmount();
     api.restore();
 
@@ -376,8 +426,8 @@ describe('the device page: reporting a lost or stolen device', () => {
 
   // Break caught: a refusal worded as the operation's general failure, which would hide what the officer can do about it.
   it.each([
-    [403, 'PERMISSION_DENIED', /staff\.device\.revoke/],
-    [403, 'HUB_SCOPE_VIOLATION', /hub your session does not act in/],
+    [403, 'PERMISSION_DENIED', /can’t revoke a rider’s device/],
+    [403, 'HUB_SCOPE_VIOLATION', /hub your account does not work in/],
     [404, 'NOT_FOUND', /This rider could not be found\./],
     [403, 'CSRF_VALIDATION_FAILED', /The device could not be revoked\. Try again/],
   ])('words a %s %s for what it is, and keeps the dialog', async (status, code, words) => {
@@ -398,7 +448,7 @@ describe('the device page: replacing the handset', () => {
   it('names the permission a replacement needs, and offers no form, to a session without it', async () => {
     await open(REVOKER);
 
-    expect(await screen.findByText(/staff\.device\.reregister/)).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.device.reregister'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Show the QR code' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: NOTE_NAME })).toBeNull();
   });
@@ -435,12 +485,20 @@ describe('the device page: replacing the handset', () => {
   it('asks for a reason from its own catalogue and how the rider was verified, and says what happens', async () => {
     await open(REPLACER);
 
-    expect(
-      await screen.findByText(/Do this in person, once you have verified who the rider is/),
-    ).toBeVisible();
+    const intro = await screen.findByText(
+      /Do this in person, once you have verified who the rider is/,
+    );
+    expect(intro).toBeVisible();
+    // Break caught (the PO's decision of 9 November 2026): a task form keeps at most two short sentences under its title, and the rest is told where the choice is made.
+    expect(intro.textContent.split(/(?<=\.)\s+/)).toHaveLength(2);
+    expect(screen.queryByText(/which makes its own key and asks for a new PIN/)).toBeNull();
     await screen.findByRole('combobox', { name: 'Reason (required)' });
     expect(screen.getByRole('textbox', { name: NOTE_NAME })).toBeVisible();
     expect(screen.getByText(/One line, up to 1000 characters/)).toBeVisible();
+    // The one line that changes whether to act now, under the actions.
+    expect(
+      screen.getByText('Nothing changes for the old device until the new handset is registered.'),
+    ).toBeVisible();
     const asked = new URL(
       api.requests.find((request) => request.url.includes('/reason-definitions'))?.url ??
         'http://x',
@@ -641,6 +699,105 @@ describe('the device page: replacing the handset', () => {
   });
 });
 
+describe('the device page: leaving the replacement with what was entered (Stage 4.9)', () => {
+  type View = Awaited<ReturnType<typeof open>>;
+  const leaveQuestion = () => screen.findByRole('alertdialog', { name: 'Leave this page?' });
+  const leaving = async (view: View) => {
+    await act(async () => {
+      await view.router.navigate('/elsewhere');
+    });
+  };
+  const typeNote = async (view: View, note: string) => {
+    await view.user.click(await screen.findByRole('textbox', { name: NOTE_NAME }));
+    await view.user.paste(note);
+  };
+
+  // Break caught: a verification note typed with care and lost to a link or the browser's Back, without a word.
+  it('asks before the application leaves a replacement that holds a reason and a note, and the safe answer is to stay', async () => {
+    const view = await open(REPLACER);
+    await fillReplacement(view);
+
+    await leaving(view);
+
+    const question = await leaveQuestion();
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(view.router.state.location.pathname).toBe(`/admin/riders/${RIDER_ID}/device`);
+    await view.user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(screen.getByRole('textbox', { name: NOTE_NAME })).toHaveValue(
+      'Checked the rider’s Ghana card in person.',
+    );
+    expect(screen.getByRole('combobox', { name: 'Reason (required)' })).toHaveValue(
+      'HANDSET_REPLACED',
+    );
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('goes where the person was going when they choose to leave', async () => {
+    const view = await open(REPLACER);
+    await fillReplacement(view);
+
+    await leaving(view);
+    await view.user.click(
+      within(await leaveQuestion()).getByRole('button', { name: 'Leave the page' }),
+    );
+
+    await waitFor(() => {
+      expect(view.router.state.location.pathname).toBe('/elsewhere');
+    });
+  });
+
+  // Break caught: only one of the two fields counted as something entered.
+  it('asks after only a reason was chosen, and after only a note was typed', async () => {
+    const reason = await open(REPLACER);
+    await reason.user.selectOptions(
+      await screen.findByRole('combobox', { name: 'Reason (required)' }),
+      'HANDSET_REPLACED',
+    );
+    await leaving(reason);
+    expect(await leaveQuestion()).toBeVisible();
+    reason.unmount();
+    api.restore();
+
+    const note = await open(REPLACER);
+    await typeNote(note, 'Checked the card.');
+    await leaving(note);
+    expect(await leaveQuestion()).toBeVisible();
+  });
+
+  // Break caught: a form that asks about nothing it holds, or about blanks.
+  it('asks nothing of a replacement that holds nothing, or only spaces in the note', async () => {
+    const empty = await open(REPLACER);
+    await screen.findByRole('combobox', { name: 'Reason (required)' });
+    await leaving(empty);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(empty.router.state.location.pathname).toBe('/elsewhere');
+    empty.unmount();
+    api.restore();
+
+    const spaces = await open(REPLACER);
+    await typeNote(spaces, '     ');
+    await leaving(spaces);
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(spaces.router.state.location.pathname).toBe('/elsewhere');
+  });
+
+  // Break caught: the guard left on once the code is made, so that the person is asked about a form that was sent.
+  it('asks nothing once the code is shown', async () => {
+    const view = await open(REPLACER, {
+      [REREGISTER]: () => json(200, enrolmentGrantFixture({}, LIFETIME_MS)),
+    });
+    await fillReplacement(view);
+    await view.user.click(screen.getByRole('button', { name: 'Show the QR code' }));
+    await screen.findByRole('img', { name: QR_NAME });
+
+    await leaving(view);
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(view.router.state.location.pathname).toBe('/elsewhere');
+  });
+});
+
 describe('the device page: when the replacement is refused or in doubt', () => {
   async function submit(handler: Handler, extra: Record<string, Handler> = {}) {
     const view = await open(REPLACER, { [REREGISTER]: handler, ...extra });
@@ -716,7 +873,7 @@ describe('the device page: when the replacement is refused or in doubt', () => {
 
   // Break caught: a refusal worded as the operation's general failure, which would hide what the officer can do about it.
   it.each([
-    [403, 'PERMISSION_DENIED', /staff\.device\.reregister/],
+    [403, 'PERMISSION_DENIED', /can’t register a replacement handset/],
     [
       403,
       'HUB_SCOPE_VIOLATION',
@@ -1082,6 +1239,12 @@ describeInterfaceStates('The device page', {
       });
       await open(REVOKER, { [RECORD]: () => gate });
       expect(await screen.findByText('Loading the rider…')).toBeInTheDocument();
+      // The way back is there while the rider is read: its entry in the trail has no name to say yet, and goes to the rider all the same.
+      expect(
+        within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+          name: 'The rider',
+        }),
+      ).toHaveAttribute('href', `/admin/riders/${RIDER_ID}`);
       await act(async () => {
         release(json(200, riderDetailFixture(), etag('v1')));
         await gate;
@@ -1118,7 +1281,7 @@ describeInterfaceStates('The device page', {
       await startRevoking(view);
       const dialog = screen.getByRole('alertdialog', { name: 'Revoke this device?' });
       await view.user.click(within(dialog).getByRole('button', { name: 'Revoke the device' }));
-      expect(await within(dialog).findByText(/hub your session does not act in/)).toBeVisible();
+      expect(await within(dialog).findByText(/hub your account does not work in/)).toBeVisible();
     },
   },
   retry: {
@@ -1162,7 +1325,7 @@ describeInterfaceStates('The device page', {
   'permission-restricted': {
     test: async () => {
       await open(['dispatch.read', 'staff.device.register']);
-      expect(await screen.findByText(/staff\.device\.revoke/)).toBeVisible();
+      expect(await screen.findByText(cannotText('staff.device.revoke'))).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Revoke the device' })).toBeNull();
     },
   },

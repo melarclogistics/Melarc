@@ -1,7 +1,10 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { decodePainted } from './support/painted';
 import { reachableNames, watchPage, wcagViolations } from './support/page';
+import { expectShellAround, signOutFromMenu } from './support/shell';
+import { expectNoTableScrollsSideways } from './support/tables';
 import {
   CODE_FORMS,
   CODES,
@@ -35,8 +38,21 @@ const VIEWPORTS = [
 ] as const;
 
 const QR_NAME = 'QR code for the rider’s handset';
+const LONG_NAME = 'Kwabena Owusu-Ansah Boateng Mensah-Darko the Third of Kumasi and Accra Central';
 const REGISTER = `/admin/riders/${IDS.esi}/device/register`;
 const DEVICE = `/admin/riders/${IDS.kwame}/device`;
+
+/**
+ * Every cell of the table asks for 9.5rem and is kept on one line, as a long name, a long phone or a long status would ask: five columns ask for more than a box of 768 px has, and the lesser columns
+ * have to go for it not to scroll sideways. **Nothing else is done to the page**: the table grows wider than its box by itself, and the fit measures again when it does (run 7, Stage 1.3). The helper
+ * made the box two pixels wider and then as it was, in one breath, to make the table measure; when both sizes landed in one frame the table measured nothing and the test failed one run in twenty.
+ */
+async function cannotWrap(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content:
+      '.ui-data-table__table :is(td, th) { white-space: nowrap !important; min-width: 9.5rem !important; }',
+  });
+}
 
 async function overflowOf(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -124,7 +140,7 @@ test.describe('moving through the screens', () => {
     const { api, watch } = await open(page, '/');
 
     const menu = page.getByRole('navigation', { name: 'Primary' });
-    await expect(menu.getByRole('link')).toHaveText(['Overview', 'Riders', 'Trusted browsers']);
+    await expect(menu.getByRole('link')).toHaveText(['My work', 'Riders']);
     await menu.getByRole('link', { name: 'Riders' }).click();
     await expect(page).toHaveURL('/admin/riders');
     await focusedIs(page, 'Riders');
@@ -155,7 +171,7 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a person who cannot read the roster sees no entry for it, and is told which key the page needs', async ({
+  test('a person who cannot read the roster sees no entry for it, and is told what the account cannot do', async ({
     page,
   }) => {
     await open(page, '/admin/riders', { permissions: ['staff.read'] });
@@ -163,7 +179,10 @@ test.describe('moving through the screens', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'You do not have access to this page' }),
     ).toBeVisible();
-    await expect(page.getByText('dispatch.read', { exact: true })).toBeVisible();
+    await expect(
+      page.getByText('Your account can’t see riders. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('dispatch.read');
     await expect(
       page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Riders' }),
     ).toHaveCount(0);
@@ -184,19 +203,23 @@ test.describe('moving through the screens', () => {
     await expect(kwame).toContainText('Accra Central');
     await expect(table.getByRole('row', { name: /Esi Owusu/ })).toContainText('No active device');
 
-    await page.getByRole('combobox', { name: 'Status' }).selectOption('SUSPENDED');
+    // The status is a view of the roster (a tab), and the search a field in the filter row.
+    await page.getByRole('tab', { name: 'Suspended' }).click();
     await expect(page).toHaveURL('/admin/riders?status=SUSPENDED');
     await expect(table.getByRole('row')).toHaveCount(2);
     await expect(table.getByRole('row', { name: /Ama Boateng/ })).toBeVisible();
 
-    await page.getByRole('combobox', { name: 'Status' }).selectOption('');
-    // The status is out of the address before the search is made. The search is built from the filters the page last drew, so two choices
-    // made before the page has taken the first are a race of the test's own (messages.spec.ts waits the same way): a loaded runner lost it,
-    // and the address kept `status=SUSPENDED` beside `q=esi`.
+    await page.getByRole('tab', { name: 'All' }).click();
+    // The status is taken off, and the page has drawn the list without it, before the search is typed, as the step above waits for its own: the page
+    // builds the new address from what it last drew, so a search made before that (the development server is slow enough for it) keeps the old status.
     await expect(page).toHaveURL('/admin/riders');
+    await expect(table.getByRole('row')).toHaveCount(4);
+    // The search is a field in the bar, always there: nothing is opened to find it.
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toHaveCount(0);
     await page.getByRole('searchbox', { name: 'Search by name or phone' }).fill('  esi  ');
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL('/admin/riders?q=esi');
+    await expect(page.getByRole('button', { name: 'Remove filter: Search: esi' })).toBeVisible();
     await expect(table.getByRole('row')).toHaveCount(2);
     const last = api.calls.filter((call) => call.path === '/api/v1/ops/riders').at(-1);
     expect(new URL(`http://x${last?.search ?? ''}`).searchParams.get('q')).toBe('esi');
@@ -204,6 +227,98 @@ test.describe('moving through the screens', () => {
     // Nothing of what a server should never send reaches the page.
     expect(await page.content()).not.toContain(PLANTED);
   });
+
+  // The roster is drawn by the queue workspace template: a table with every column where the table's own box has room for them (40rem: at 1280 px with the menu open, and at 768 px),
+  // and cards under that, each with every fact of the rider, never both in the page. Nothing a server should never send reaches either.
+  for (const size of [
+    { width: 1280, height: 800 },
+    { width: 768, height: 1024 },
+  ]) {
+    // Break caught: a table squeezed into a room it cannot be read in, a column dropped where nothing else shows it, or a page wider than its window.
+    test(`the roster is a table of every column at ${String(size.width)} px, and no cards`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const { api, watch } = await open(page, '/admin/riders');
+
+      const table = page.getByRole('table', { name: 'Riders' });
+      await expect(table).toBeVisible();
+      await expect(table.getByRole('columnheader')).toHaveText([
+        'Rider / phone',
+        'Status',
+        'PIN',
+        'Device',
+        'Hub',
+      ]);
+      await expect(page.getByRole('list', { name: 'Riders' })).toHaveCount(0);
+      await expect(table.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
+        'href',
+        `/admin/riders/${IDS.kwame}`,
+      );
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.content()).not.toContain(PLANTED);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
+
+  // Break caught (the Product Owner, 10 November 2026: no table scrolls sideways): a roster that marks no column lesser, so that where its cells ask for more than a box of 768 px has (a style that
+  // gives every cell 9.5rem on one line stands for a long name, a long phone, a long status) its box scrolls sideways. It takes its lesser columns away instead, the hub first, and the name, the
+  // status and the device stay.
+  test('takes its lesser columns away, the hub first, rather than scroll sideways at 768 px, when its cells cannot wrap', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const { watch } = await open(page, '/admin/riders');
+
+    const table = page.getByRole('table', { name: 'Riders' });
+    await expect(table).toBeVisible();
+    await cannotWrap(page);
+    // The lesser columns go, the most lesser first: the hub is the first to be taken away.
+    await expect(table.getByRole('columnheader', { name: 'Hub' })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page
+          .locator('.ui-data-table__scroller')
+          .evaluate((element) => element.scrollWidth - element.clientWidth),
+      )
+      .toBeLessThanOrEqual(0);
+    const headers = await table.getByRole('columnheader').allTextContents();
+    for (const kept of ['Rider / phone', 'Status', 'Device']) expect(headers).toContain(kept);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  for (const size of [
+    { width: 390, height: 844 },
+    { width: 320, height: 640 },
+  ]) {
+    // Break caught: a fact the table shows and the card forgets, a card with no heading, or a table drawn where the room has none.
+    test(`the roster is a card for each rider at ${String(size.width)} px, with every fact, a heading and the link, and no table`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const { api, watch } = await open(page, '/admin/riders');
+
+      const cards = page.getByRole('list', { name: 'Riders' });
+      await expect(cards).toBeVisible();
+      await expect(page.getByRole('table', { name: 'Riders' })).toHaveCount(0);
+      await expect(cards.getByRole('listitem')).toHaveCount(3);
+      const card = cards.getByRole('listitem').filter({ hasText: 'Kwame Mensah' });
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText('Kwame Mensah');
+      await expect(card.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
+        'href',
+        `/admin/riders/${IDS.kwame}`,
+      );
+      for (const fact of ['Active', '+233201234567', 'Set', 'One active device', 'Accra Central']) {
+        await expect(card).toContainText(fact);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await page.content()).not.toContain(PLANTED);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
 
   test('the roster is paged with the token the server gave, and goes back', async ({ page }) => {
     const { api } = await open(page, '/admin/riders', { pageSize: 2 });
@@ -220,13 +335,62 @@ test.describe('moving through the screens', () => {
     await expect(page.getByText('Showing 2 riders. More follow on the next page.')).toBeVisible();
   });
 
+  // The rider is drawn by the record template: the name is the heading (in the heading face, wrapping: a long name never pushes the page sideways), the status is the header's and the
+  // readiness is facts apart from it, and the devices are a table where the table's own box has room (40rem) and cards under that, never both.
+  for (const [shown, size] of [
+    ['a table', { width: 1280, height: 800 }],
+    ['a table or cards, one of them', { width: 768, height: 1024 }],
+    ['cards', { width: 390, height: 844 }],
+    ['cards', { width: 320, height: 640 }],
+  ] as const) {
+    // Break caught: a name drawn as a code (monospaced, never broken), a fact the record forgets, devices drawn twice or not at all, or a page wider than a phone.
+    test(`the rider is a record with a long name wrapped in its heading and its devices as ${shown}, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      const { api, watch } = await open(page, `/admin/riders/${IDS.kwame}`, {
+        riders: [rider({ full_name: LONG_NAME })],
+      });
+
+      const heading = page.getByRole('heading', { level: 1, name: LONG_NAME });
+      await expect(heading).toBeVisible();
+      await expect(heading.locator('.ui-code')).toHaveCount(0);
+      await expect(page.getByText('This rider is active.')).toBeVisible();
+      for (const [term, value] of [
+        ['Phone', '+233201234567'],
+        ['Hub', 'Accra Central'],
+        ['PIN', 'Set'],
+        ['Device', 'One active device'],
+        ['Readiness', 'Ready to sign in.'],
+      ] as const) {
+        await expect(page.locator(`dt:text-is("${term}") + dd`)).toHaveText(value);
+      }
+      const table = page.getByRole('table', { name: 'Devices of the rider' });
+      const cards = page.getByRole('list', { name: 'Devices of the rider' });
+      if (shown === 'a table') {
+        await expect(table).toBeVisible();
+        await expect(cards).toHaveCount(0);
+      } else if (shown === 'cards') {
+        await expect(cards).toBeVisible();
+        await expect(table).toHaveCount(0);
+      } else {
+        expect((await table.count()) + (await cards.count())).toBe(1);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(await wcagViolations(page)).toEqual([]);
+      expect(await page.content()).not.toContain(PLANTED);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
+
   test('a rider of another hub and a rider that does not exist are pages of their own', async ({
     page,
   }) => {
     await open(page, `/admin/riders/${IDS.farAway}`, {
       riders: [rider({ id: IDS.farAway, full_name: 'Far Away', primary_hub_id: IDS.otherHub })],
     });
-    await expect(page.getByText(/hub your session does not act in/)).toBeVisible();
+    await expect(page.getByText(/hub your account does not work in/)).toBeVisible();
     await page.goto('/admin/riders/00000000-0000-4000-8000-000000000000');
     await expect(page.getByRole('heading', { level: 1, name: 'Rider not found' })).toBeVisible();
   });
@@ -387,7 +551,7 @@ test.describe('the enrolment code in a real browser', () => {
 
       await expect(page.getByText(news)).toBeVisible();
       await expect(
-        page.locator('.staff-notice', { hasText: 'The earlier code is no longer shown' }),
+        page.locator('.rider-notice', { hasText: 'The earlier code is no longer shown' }),
       ).toBeFocused();
     });
 
@@ -445,7 +609,11 @@ test.describe('the enrolment code in a real browser', () => {
   test('is gone on navigation, and does not return with the back button', async ({ page }) => {
     await showFirstCode(page);
 
-    await page.getByRole('link', { name: 'Back to the rider' }).click();
+    // The way back to the rider is the trail of the page's parents (the roster, then the rider by name).
+    await page
+      .getByRole('navigation', { name: 'Breadcrumb' })
+      .getByRole('link', { name: 'Esi Owusu' })
+      .click();
     await expect(page).toHaveURL(`/admin/riders/${IDS.esi}`);
     // The address changes before the page does: the router commits the new page a moment later. Going back in between is going back to a page
     // that never left, with its code still on it (a loaded runner did it, and the snapshot showed the register page and its code, with the link
@@ -483,7 +651,7 @@ test.describe('the enrolment code in a real browser', () => {
   test('is gone when the person signs out', async ({ page }) => {
     await showFirstCode(page);
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOutFromMenu(page);
 
     await expect(page).toHaveURL(/\/sign-in/);
     await expect(qr(page)).toHaveCount(0);
@@ -766,15 +934,57 @@ test.describe('replacing the handset', () => {
     expect(await whereIsTheCode(page)).toEqual([]);
   });
 
-  test('the replacement is not offered to a session without its key, which is told by name', async ({
+  test('the replacement is not offered to a session without its key, which is told in words', async ({
     page,
   }) => {
     await open(page, DEVICE, {
       permissions: ['dispatch.read', 'staff.device.revoke', 'settings.reason.read'],
     });
 
-    await expect(page.getByText(/staff\.device\.reregister/)).toBeVisible();
+    // What the account cannot do, in plain words (PRODUCT_DESIGN_DIRECTION section 6.5): never the permission key.
+    await expect(
+      page.getByText(
+        'Your account can’t register a replacement handset. Ask an administrator for access.',
+      ),
+    ).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('staff.device.reregister');
     await expect(page.getByRole('textbox', { name: /How you verified/ })).toHaveCount(0);
+  });
+
+  // Break caught (Stage 4.9): the verification note an officer has typed lost to a stray click on a menu entry, without a word. The page asks first and the safe answer, to stay, has the
+  // focus; what was typed is still there after it, and the other answer goes where the click was going.
+  test('a typed verification note survives a stray click on a menu entry: staying keeps it, and leaving goes', async ({
+    page,
+  }) => {
+    const { api } = await open(page, DEVICE);
+    await fillReplacement(page, 'Checked the rider’s Ghana card in person.');
+    const note = page.getByRole('textbox', {
+      name: 'How you verified the rider in person (required)',
+    });
+    const entry = page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('link', { name: 'Riders' });
+
+    await entry.click();
+
+    const question = page.getByRole('alertdialog', { name: 'Leave this page?' });
+    await expect(question).toBeVisible();
+    await expect(question.getByRole('button', { name: 'Stay here' })).toBeFocused();
+    await question.getByRole('button', { name: 'Stay here' }).click();
+    await expect(question).toHaveCount(0);
+    await expect(page).toHaveURL(DEVICE);
+    await expect(note).toHaveValue('Checked the rider’s Ghana card in person.');
+    await expect(page.getByRole('combobox', { name: 'Reason (required)' })).toHaveValue(
+      'HANDSET_REPLACED',
+    );
+    expect(acts(api)).toHaveLength(0);
+
+    await entry.click();
+    await page
+      .getByRole('alertdialog', { name: 'Leave this page?' })
+      .getByRole('button', { name: 'Leave the page' })
+      .click();
+    await expect(page).toHaveURL('/admin/riders');
   });
 });
 
@@ -804,7 +1014,8 @@ const STATES: { name: string; reach: (page: Page) => Promise<void>; setup?: Part
     name: 'the roster',
     reach: async (page) => {
       await open(page, '/admin/riders');
-      await expect(page.getByRole('table', { name: 'Riders' })).toBeVisible();
+      // A rider is a row of a table where the table has room and a card where it has not: the rider's link is in both.
+      await expect(page.getByRole('link', { name: 'Kwame Mensah' })).toBeVisible();
     },
   },
   {
@@ -951,16 +1162,9 @@ test.describe('every screen and state, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
-        const navigation = page.getByRole('navigation', { name: 'Primary', includeHidden: true });
-        await expect(navigation).toHaveCount(1);
-        if (width >= 768) {
-          await expect(page.locator('.ui-side-menu__panel')).toBeVisible();
-          await expect(page.locator('.ui-side-menu__bar')).toBeHidden();
-        } else {
-          await expect(page.locator('.ui-side-menu__bar')).toBeVisible();
-          await expect(page.locator('.ui-side-menu__panel')).toBeHidden();
-        }
+        await expectShellAround(page, width);
       });
     }
   }

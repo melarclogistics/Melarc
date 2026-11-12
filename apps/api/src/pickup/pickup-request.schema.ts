@@ -188,6 +188,25 @@ export const pickupRequest = pgTable(
       table.scheduledServiceDate,
     ),
     index('pickup_request_vendor_idx').on(table.vendorOrganizationId, table.createdAt),
+    // The late bookings waiting for the cutoff decision (`getQueueSummary`, `PICKUP_CUTOFF_REVIEW`): a few rows among every confirmed request there
+    // has ever been, so the count reads this index and not the table (a sequential scan of 400,000 requests took 98 ms).
+    index('pickup_request_cutoff_review_idx')
+      .on(table.responsibleHubId, table.confirmedAt)
+      .where(
+        sql`${table.state} = 'CONFIRMED' AND ${table.cutoffExceptionState} = 'PENDING_OPS_REVIEW'`,
+      ),
+    // The requests that carry an exception (an approval travels with the booking into its clones): where a filter on the state of the exception
+    // starts from the exceptions in that state and finds the requests that carry them.
+    index('pickup_request_carried_exception_idx')
+      .on(table.onePackageExceptionId)
+      .where(sql`${table.onePackageExceptionId} IS NOT NULL`),
+    // The search by a phone number typed in full (`lookupRecords`, task C2): an equality on either contact phone. An equality is leakproof, so it
+    // runs, and an index on it is used, before the row-level security policy (a scan of 400,000 requests took 0.1 s, the index 0.2 ms). The second
+    // is partial: most requests have no second number.
+    index('pickup_request_primary_phone_idx').on(table.primaryPhone),
+    index('pickup_request_secondary_phone_idx')
+      .on(table.secondaryPhone)
+      .where(sql`${table.secondaryPhone} IS NOT NULL`),
     check(
       'pickup_request_code_format',
       sql`${table.code} ~ '^[A-Z]{3}-PR-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$'`,
@@ -321,6 +340,16 @@ export const onePackageException = pgTable(
     uniqueIndex('one_package_exception_one_live')
       .on(table.pickupRequestId)
       .where(sql`${table.state} IN ('REQUESTED', 'APPROVED')`),
+    // The exceptions in a state, oldest first: the approver's queue and its count start here (`getQueueSummary`, `PICKUP_EXCEPTION_APPROVAL`; the
+    // filter `one_package_exception_state` of `listPickupRequests`), instead of asking every request what exception it shows.
+    index('one_package_exception_state_idx').on(table.state, table.requestedAt),
+    // Every exception of a request, newest first, refused ones included (the live index above holds only the requested and the approved): what
+    // a request shows is the one it carries or else the latest raised for it, and that is read here.
+    index('one_package_exception_request_idx').on(
+      table.pickupRequestId,
+      table.requestedAt.desc(),
+      table.id.desc(),
+    ),
     check(
       'one_package_exception_state_closed',
       sql.raw(`"one_package_exception"."state" IN (${quoted(ONE_PACKAGE_EXCEPTION_STATES)})`),

@@ -2,7 +2,6 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 
 import { FormPage } from '../../../components/FormPage';
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
@@ -13,14 +12,17 @@ import { ForbiddenState } from '../../../components/ui/forbidden-state/Forbidden
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { pesewasFromCedis } from '../../../components/ui/money/money-value';
 import { Picker, type PickerOption } from '../../../components/ui/picker/Picker';
 import { RadioGroup } from '../../../components/ui/radio/RadioGroup';
 import type { ReadQuery } from '../../../components/ui/read-state/ReadState';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Select } from '../../../components/ui/select/Select';
+import { TaskForm, TaskFormSection } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
+import { useActiveHub } from '../../../platform/hub/active-hub';
 import {
   createPickupRequest,
   type NewPickupRequest,
@@ -50,10 +52,14 @@ import {
   serviceDateText,
   weekdayOf,
 } from './pickup-presentation';
+import { QUEUE_PERMISSION } from './WithPickupRequest';
+import { cannotText } from '../../../platform/problem/capability-words';
 import './pickup-pages.css';
 
 const OPERATION = 'createPickupRequest';
 const VENDOR_READ = 'vendor.read';
+/** The queue above the page, for a session that holds the queue's key (`QUEUE_PERMISSION`): one that does not has no link to a page that would refuse it. */
+const BOOKING_TRAIL = [{ label: 'Pickup requests', to: '/pickup-requests' }] as const;
 const LOCATIONS_READ = 'vendor.pickup_location.manage';
 /** The longest search the server accepts (`listVendorAccounts`, `q`). */
 const SEARCH_LIMIT = 128;
@@ -65,12 +71,6 @@ const INTENT_HELP: Readonly<Record<PickupIntent, string>> = {
   ADHOC_SENDER: 'A person or business that is not a registered vendor.',
 };
 
-const PAYER_HELP: Readonly<Record<PayerIntent, string>> = {
-  RECIPIENT_PAYS: 'The recipient pays for delivery.',
-  SENDER_PAYS_FULL: 'The sender pays for delivery in full.',
-  SPLIT: 'The sender pays a part and the recipient the rest.',
-};
-
 type SenderSource = 'RETURNING' | 'NEW';
 type SplitBasis = 'FIXED_AMOUNT' | 'PERCENTAGE';
 /** The destination of a collection: the vendor's default saved location, or one of its saved locations by id. */
@@ -79,6 +79,8 @@ const DEFAULT_DESTINATION = 'DEFAULT';
 /** Everything the form holds, as typed. What is sent is built from it at submit time, for the intent chosen. */
 interface Values {
   readonly intent: PickupIntent | null;
+  /** The hub a walk-in is booked into (`hub_id`, task P1). Held for every intent and sent for a walk-in only. */
+  readonly hubId: string;
   readonly vendor: PickerOption | null;
   readonly locationId: string;
   readonly override: boolean;
@@ -117,6 +119,7 @@ interface Values {
 
 const EMPTY: Values = {
   intent: null,
+  hubId: '',
   vendor: null,
   locationId: '',
   override: false,
@@ -155,6 +158,7 @@ const EMPTY: Values = {
 
 type FieldKey =
   | 'intent'
+  | 'hub'
   | 'vendor'
   | 'overrideAddress'
   | 'goods'
@@ -217,6 +221,7 @@ type OptionalTextKey =
 /** The places the API names when it refuses a booking, and the field each is. */
 const POINTERS: Readonly<Record<string, FieldKey>> = {
   '/pickup_intent': 'intent',
+  '/hub_id': 'hub',
   '/vendor_organization_id': 'vendor',
   '/location_overrides': 'overrideAddress',
   '/location_overrides/address': 'overrideAddress',
@@ -252,6 +257,7 @@ const POINTERS: Readonly<Record<string, FieldKey>> = {
 
 const WORDS: Readonly<Record<FieldKey, string>> = {
   intent: 'Choose what is being booked.',
+  hub: 'Choose the hub this booking is made in.',
   vendor: 'Choose the vendor.',
   overrideAddress: 'Enter the address to collect from this time.',
   goods: 'Say what is being sent today.',
@@ -302,8 +308,10 @@ function countOf(text: string): number | undefined {
  * What is wrong with the booking before anything is sent: only what the server would refuse for certain, in the words of each field. The
  * service date's days are the product's calendar (Monday to Saturday, MSC-DEC-149), checked here for quicker news and decided by the server;
  * whether a value needs the liability-cap acknowledgement is the server's alone, because the threshold is a hub setting the page is not given.
+ * `hubsListed` is how many hubs the session lists: a walk-in names one of them whenever there is one to name (the server asks for it when the
+ * grant reaches more than one hub, `AC-SLICE-001-82`), and a session that lists none names none.
  */
-function problemsWith(values: Values): FieldErrors {
+function problemsWith(values: Values, hubsListed: number): FieldErrors {
   const found: FieldErrors = {};
   const need = (key: FieldKey, text: string): void => {
     if (blank(text)) found[key] = WORDS[key];
@@ -325,6 +333,7 @@ function problemsWith(values: Values): FieldErrors {
     need('primaryPhone', values.primaryPhone);
   }
   if (values.intent === 'ADHOC_SENDER') {
+    if (hubsListed > 0 && values.hubId === '') found.hub = WORDS.hub;
     if (values.senderSource === null) found.senderSource = WORDS.senderSource;
     if (values.senderSource === 'RETURNING' && values.sender === null) found.sender = WORDS.sender;
     if (values.senderSource === 'NEW') {
@@ -468,6 +477,8 @@ function bookingOf(values: Values): NewPickupRequest | undefined {
       const contact = values.newContact.trim();
       return {
         ...common,
+        // The hub of a walk-in is named; a registered vendor's booking is in its organisation's hub and names none (`hub_id` is refused there).
+        ...(values.hubId === '' ? {} : { hub_id: values.hubId }),
         ...(values.senderSource === 'RETURNING'
           ? { ad_hoc_sender_id: values.sender?.value ?? '' }
           : {
@@ -615,10 +626,7 @@ function SavedLocations({
     return (
       <>
         {children([])}
-        <p className="pickup-form-note">
-          Choosing another of the vendor’s saved locations needs the permission{' '}
-          <code>{LOCATIONS_READ}</code>, which your session does not hold.
-        </p>
+        <p className="pickup-form-note">{cannotText(LOCATIONS_READ)}</p>
       </>
     );
   }
@@ -704,7 +712,17 @@ function SenderPicker({
 
 function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestView) => void }) {
   const client = useApiClient();
-  const [values, setValues] = useState<Values>(EMPTY);
+  const me = useSignedInSession();
+  // The hubs the session lists are the hubs its grant reaches: a person who acts in one hub books into it without choosing, anyone else starts with the
+  // hub they chose in the switcher of the top bar, and nothing when they chose All hubs (the form is the request's own: they choose).
+  const hubs = me?.session.authorized_hubs ?? [];
+  const activeHub = useActiveHub();
+  const [values, setValues] = useState<Values>(() => ({
+    ...EMPTY,
+    hubId: hubs.length === 1 ? (hubs[0]?.id ?? '') : (activeHub ?? ''),
+  }));
+  /** The values the form began with: it is unsaved once any has been changed. */
+  const [initialValues] = useState(values);
   const [invalid, setInvalid] = useState<FieldErrors>({});
   const [attempts, setAttempts] = useState(0);
   const form = useRef<HTMLFormElement>(null);
@@ -749,7 +767,7 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
   function send(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (locked) return;
-    const found = problemsWith(values);
+    const found = problemsWith(values, hubs.length);
     setInvalid(found);
     const booking = bookingOf(values);
     if (Object.keys(found).length > 0 || booking === undefined) {
@@ -808,27 +826,72 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
   const vendorId = values.vendor?.value;
 
   return (
-    <form
-      ref={form}
-      noValidate
-      aria-busy={command.phase === 'sending' ? true : undefined}
+    <TaskForm
+      header={{
+        title: 'Book a pickup',
+        description:
+          'Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked.',
+        // The way back is the breadcrumb of the parents, and nothing beside it says it again.
+        ...(me?.holds(QUEUE_PERMISSION) === true ? { breadcrumb: BOOKING_TRAIL } : {}),
+      }}
+      formRef={form}
+      busy={command.phase === 'sending'}
+      dirty={values !== initialValues}
       onSubmit={send}
-    >
-      {command.phase === 'unknown' ? (
-        <Alert variant="danger" announce>
-          <p>{copyFor({ operation: OPERATION, context: 'unknown-outcome' })}</p>
-          {command.problem === undefined ? null : <p>{command.problem.message}</p>}
-        </Alert>
-      ) : null}
-      {command.phase === 'refused' && command.problem !== undefined && !belongsToAField ? (
-        <Alert variant="danger" announce>
-          <p>{command.problem.message}</p>
-          {command.problem.reference === undefined ? null : (
-            <p>Reference: {command.problem.reference}</p>
+      alerts={
+        <>
+          {command.phase === 'unknown' ? (
+            <Alert variant="danger" announce>
+              <p>{copyFor({ operation: OPERATION, context: 'unknown-outcome' })}</p>
+              {command.problem === undefined ? null : <p>{command.problem.message}</p>}
+            </Alert>
+          ) : null}
+          {command.phase === 'refused' && command.problem !== undefined && !belongsToAField ? (
+            <Alert variant="danger" announce>
+              <p>{command.problem.message}</p>
+              {command.problem.reference === undefined ? null : (
+                <p>Reference: {command.problem.reference}</p>
+              )}
+            </Alert>
+          ) : null}
+        </>
+      }
+      summary={{
+        title: 'After you book',
+        children: (
+          <>
+            <p>The booking waits for an Ops officer to confirm it.</p>
+            <p>
+              The server works out an indicative estimate and shows it once the booking is made: an
+              estimate, not a price.
+            </p>
+          </>
+        ),
+      }}
+      actions={
+        <>
+          {command.phase === 'unknown' ? (
+            <Button
+              key="retry"
+              type="button"
+              data-recovery
+              onClick={() => {
+                void command.retry();
+              }}
+            >
+              Try again
+            </Button>
+          ) : (
+            <>
+              <Button key="submit" type="submit" loading={command.phase === 'sending'}>
+                Book the pickup
+              </Button>
+              <Link to="/pickup-requests">Cancel</Link>
+            </>
           )}
-        </Alert>
-      ) : null}
-
+        </>
+      }
+    >
       <RadioGroup
         legend="What is being booked"
         name="intent"
@@ -853,8 +916,7 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
       ) : null}
 
       {intent === 'OWN_PACKAGES' || intent === 'COLLECT_FOR_VENDOR' ? (
-        <section className="pickup-form-section" aria-labelledby="booking-vendor">
-          <h2 id="booking-vendor">The vendor</h2>
+        <TaskFormSection title="The vendor">
           <VendorPicker
             value={values.vendor}
             error={errorOf('vendor').error}
@@ -863,12 +925,11 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               change({ vendor, locationId: '', destination: '' }, 'vendor', 'destination');
             }}
           />
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === 'OWN_PACKAGES' && vendorId !== undefined ? (
-        <section className="pickup-form-section" aria-labelledby="booking-own">
-          <h2 id="booking-own">Where the parcels are</h2>
+        <TaskFormSection title="Where the parcels are">
           <SavedLocations vendorId={vendorId}>
             {(locations) =>
               locations.length === 0 ? (
@@ -918,13 +979,12 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
           {text('goods', 'What is being sent today', {
             help: 'Optional for a vendor’s own packages: its goods profile already says what it sends.',
           })}
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === 'COLLECT_FOR_VENDOR' && vendorId !== undefined ? (
         <>
-          <section className="pickup-form-section" aria-labelledby="booking-point">
-            <h2 id="booking-point">Where the parcel is collected from</h2>
+          <TaskFormSection title="Where the parcel is collected from">
             {text('pointName', 'Person or business holding the parcel', { required: true })}
             {text('pointPhone', 'Their phone', {
               required: true,
@@ -933,9 +993,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
             })}
             {text('pointAddress', 'Their address', { required: true })}
             {optionalText('pointLandmark', 'Landmark', 'Optional. What people find it by.')}
-          </section>
-          <section className="pickup-form-section" aria-labelledby="booking-item">
-            <h2 id="booking-item">What is collected</h2>
+          </TaskFormSection>
+          <TaskFormSection title="What is collected">
             {text('referenceName', 'Name the seller holds it under', { required: true })}
             {optionalText(
               'sellerOrder',
@@ -949,9 +1008,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               The rider collects the item and pays the seller nothing: this is not a
               cash-on-delivery purchase.
             </p>
-          </section>
-          <section className="pickup-form-section" aria-labelledby="booking-destination">
-            <h2 id="booking-destination">Where the parcel goes</h2>
+          </TaskFormSection>
+          <TaskFormSection title="Where the parcel goes">
             <SavedLocations vendorId={vendorId}>
               {(locations) => (
                 <Field label="Destination" required {...errorOf('destination')}>
@@ -979,13 +1037,43 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               inputMode: 'tel',
               help: 'Include the country code, for example +233 24 000 0000.',
             })}
-          </section>
+          </TaskFormSection>
         </>
       ) : null}
 
       {intent === 'ADHOC_SENDER' ? (
-        <section className="pickup-form-section" aria-labelledby="booking-sender">
-          <h2 id="booking-sender">The sender</h2>
+        <TaskFormSection title="Where it is booked">
+          <Field
+            label="Hub"
+            required={hubs.length > 0}
+            help={
+              hubs.length === 0
+                ? 'Your session lists no hub to choose from. The booking is made in your own hub, if you have one.'
+                : 'The hub this walk-in is booked into.'
+            }
+            {...errorOf('hub')}
+          >
+            <Select
+              name="hub"
+              value={values.hubId}
+              disabled={locked || hubs.length === 0}
+              onChange={(event) => {
+                change({ hubId: event.target.value }, 'hub');
+              }}
+            >
+              <option value="">{hubs.length === 0 ? 'No hub to choose' : 'Choose the hub'}</option>
+              {hubs.map((hub) => (
+                <option key={hub.id} value={hub.id}>
+                  {hub.display_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </TaskFormSection>
+      ) : null}
+
+      {intent === 'ADHOC_SENDER' ? (
+        <TaskFormSection title="The sender">
           <RadioGroup
             legend="Has the sender used Melarc before?"
             name="sender-source"
@@ -1048,13 +1136,12 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
             inputMode: 'tel',
             help: 'Include the country code, for example +233 24 000 0000.',
           })}
-        </section>
+        </TaskFormSection>
       ) : null}
 
       {intent === null ? null : (
         <>
-          <section className="pickup-form-section" aria-labelledby="booking-when">
-            <h2 id="booking-when">When and how many</h2>
+          <TaskFormSection title="When and how many">
             <Field
               label="Service date"
               required
@@ -1081,10 +1168,9 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               'Optional. Include the country code.',
               'tel',
             )}
-          </section>
+          </TaskFormSection>
 
-          <section className="pickup-form-section" aria-labelledby="booking-payer">
-            <h2 id="booking-payer">Who pays</h2>
+          <TaskFormSection title="Who pays">
             <p className="pickup-form-note">
               The booking records who is meant to pay, never a price: the price is set when the
               parcels are itemized.
@@ -1095,8 +1181,8 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
               required
               options={PAYER_INTENTS.map((value) => ({
                 value,
+                // The label says it whole ("The recipient pays"): a line of help that repeats it is noise.
                 label: PAYER_LABELS[value],
-                help: PAYER_HELP[value],
               }))}
               value={values.payer}
               disabled={locked}
@@ -1141,10 +1227,9 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
                   : null}
               </>
             ) : null}
-          </section>
+          </TaskFormSection>
 
-          <section className="pickup-form-section" aria-labelledby="booking-value">
-            <h2 id="booking-value">Declared value</h2>
+          <TaskFormSection title="Declared value">
             {text('declaredValue', 'Declared value of the goods, in cedis', {
               inputMode: 'decimal',
               help: 'Optional. A value above the hub’s limit for declarations needs the sender’s acknowledgement of the liability cap.',
@@ -1161,32 +1246,10 @@ function BookingForm({ onBooked }: { readonly onBooked: (request: PickupRequestV
                 }}
               />
             )}
-          </section>
+          </TaskFormSection>
         </>
       )}
-
-      <div className="ui-form-page__actions">
-        {command.phase === 'unknown' ? (
-          <Button
-            key="retry"
-            type="button"
-            data-recovery
-            onClick={() => {
-              void command.retry();
-            }}
-          >
-            Try again
-          </Button>
-        ) : (
-          <>
-            <Button key="submit" type="submit" loading={command.phase === 'sending'}>
-              Book the pickup
-            </Button>
-            <Link to="/pickup-requests">Cancel</Link>
-          </>
-        )}
-      </div>
-    </form>
+    </TaskForm>
   );
 }
 
@@ -1205,14 +1268,16 @@ function Booked({
   }, []);
   return (
     <div className="pickup-booked" ref={box} tabIndex={-1}>
-      <Alert variant="success">
-        <h2 className="pickup-booked__heading">Pickup booked</h2>
-        <p>
-          {`${request.code} is booked for ${serviceDateText(request.scheduled_service_date)}. It is ${PICKUP_STATE_MAP[
-            request.state
-          ].label.toLowerCase()}.`}
-        </p>
-      </Alert>
+      <div className="pickup-booked__news">
+        <Alert variant="success">
+          <h2 className="pickup-booked__heading">Pickup booked</h2>
+          <p>
+            {`${request.code} is booked for ${serviceDateText(request.scheduled_service_date)}. It is ${PICKUP_STATE_MAP[
+              request.state
+            ].label.toLowerCase()}.`}
+          </p>
+        </Alert>
+      </div>
       {request.declared_package_count === 1 ? (
         <p className="pickup-act__text">
           It is for a single package: request its one-package exception from the request’s page. It
@@ -1243,29 +1308,33 @@ function Booked({
  * being filled is the server's answer (`SENDER_SUSPENDED`), told as such.
  */
 export function PickupRequestCreatePage() {
+  const me = useSignedInSession();
   const [booked, setBooked] = useState<PickupRequestView | undefined>(undefined);
   // A new form for each booking: its own state, and its own key.
   const [form, setForm] = useState(0);
   return (
     <>
       <title>Book a pickup · Melarc Ops Portal</title>
-      <PageHeader
-        title="Book a pickup"
-        description="Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked."
-      />
-      <FormPage>
-        {booked === undefined ? (
-          <BookingForm key={form} onBooked={setBooked} />
-        ) : (
-          <Booked
-            request={booked}
-            onAnother={() => {
-              setBooked(undefined);
-              setForm((count) => count + 1);
-            }}
+      {booked === undefined ? (
+        <BookingForm key={form} onBooked={setBooked} />
+      ) : (
+        <>
+          <PageHeader
+            title="Book a pickup"
+            description="Enter a booking from WhatsApp, a vendor’s call or a walk-in sender. It waits for confirmation once it is booked."
+            {...(me?.holds(QUEUE_PERMISSION) === true ? { breadcrumb: BOOKING_TRAIL } : {})}
           />
-        )}
-      </FormPage>
+          <FormPage>
+            <Booked
+              request={booked}
+              onAnother={() => {
+                setBooked(undefined);
+                setForm((count) => count + 1);
+              }}
+            />
+          </FormPage>
+        </>
+      )}
     </>
   );
 }

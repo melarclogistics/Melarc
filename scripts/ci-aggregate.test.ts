@@ -385,6 +385,8 @@ describe('the arguments of the command', () => {
     assert.deepEqual(parseArguments(['--skipped-on-pull-request=a,b', 'static', 'a', 'b']), {
       jobs: ['static', 'a', 'b'],
       skippedOnPullRequest: ['a', 'b'],
+      runsAlways: [],
+      plan: undefined,
       unreadable: [],
     });
     assert.deepEqual(
@@ -392,6 +394,8 @@ describe('the arguments of the command', () => {
       {
         jobs: [],
         skippedOnPullRequest: ['a', 'b'],
+        runsAlways: [],
+        plan: undefined,
         unreadable: [],
       },
     );
@@ -411,10 +415,259 @@ describe('the arguments of the command', () => {
       assert.deepEqual(parseArguments([argument, 'static']), {
         jobs: ['static'],
         skippedOnPullRequest: [],
+        runsAlways: [],
+        plan: undefined,
         unreadable: [argument],
       });
     });
   }
+
+  it('reads the one option that names the plan', () => {
+    assert.deepEqual(parseArguments(['--plan=plan', 'plan', 'static']), {
+      jobs: ['plan', 'static'],
+      skippedOnPullRequest: [],
+      runsAlways: [],
+      plan: 'plan',
+      unreadable: [],
+    });
+  });
+
+  // Break caught: a plan named twice, or with no name or several, believed in part: the verdict would trust whichever it met last.
+  for (const args of [
+    ['--plan='],
+    ['--plan=a,b'],
+    ['--plan=a', '--plan=b'],
+    ['--plan=a', '--plan=a'],
+  ]) {
+    it(`finds ${args.join(' ')} unreadable`, () => {
+      const parsed = parseArguments([...args, 'static']);
+      assert.deepEqual(parsed.jobs, ['static']);
+      assert.ok(parsed.unreadable.length >= 1, 'an unreadable argument is reported');
+    });
+  }
+});
+
+describe('the jobs the plan does not decide (run 4, Stage 1, item 4: the dependency audit)', () => {
+  it('reads the option that names them, and finds an empty name unreadable', () => {
+    assert.deepEqual(parseArguments(['--runs-always=audit', 'audit', 'static']).runsAlways, [
+      'audit',
+    ]);
+    assert.deepEqual(parseArguments(['--runs-always=a,b', 'static']).runsAlways, ['a', 'b']);
+    for (const argument of ['--runs-always=', '--runs-always=a,']) {
+      const parsed = parseArguments([argument, 'static']);
+      assert.deepEqual(parsed.unreadable, [argument]);
+      assert.deepEqual(parsed.runsAlways, []);
+    }
+  });
+
+  const JOBS = ['plan', 'static', 'audit'] as const;
+  const night = (results: Record<string, string>, run: string): string =>
+    JSON.stringify(
+      Object.fromEntries(
+        JOBS.map((job) => [
+          job,
+          { result: results[job] ?? 'success', outputs: job === 'plan' ? { run } : {} },
+        ]),
+      ),
+    );
+  const judge = (needs: string, runsAlways: readonly string[]) =>
+    aggregate(needs, JOBS, { event: 'schedule', plan: 'plan', runsAlways });
+
+  // Break caught: the audit skipped with the rest on a night that stands down, which is the finding: an advisory is published with no commit, and the night
+  // that finds the code unchanged would have passed without looking for one.
+  it('does not accept a skip of the audit on a night that stands down, though it accepts the skip of every other job', () => {
+    const needs = night({ static: 'skipped', audit: 'skipped' }, 'false');
+
+    const named = judge(needs, ['audit']);
+    assert.deepEqual(
+      named.problems.map((problem) => [problem.code, problem.job]),
+      [['JOB_NOT_SUCCESSFUL', 'audit']],
+    );
+    assert.deepEqual(
+      named.verdicts.find((verdict) => verdict.job === 'static'),
+      {
+        job: 'static',
+        result: 'skipped',
+        allowed: true,
+        skippedBy: 'plan',
+      },
+    );
+
+    // The control: with nothing named, the plan's word allows the skip of the audit too, which is what the workflow no longer says.
+    assert.deepEqual(judge(needs, []).problems, []);
+  });
+
+  it('is satisfied when the audit ran on the night that stood down', () => {
+    assert.deepEqual(judge(night({ static: 'skipped' }, 'false'), ['audit']).problems, []);
+  });
+
+  // Break caught: a failed audit absorbed by the plan's allowance, or a job named as always-running that the check was not told to expect.
+  it('fails an audit that failed, and refuses an always-running job that is not a mandatory one', () => {
+    assert.deepEqual(
+      judge(night({ audit: 'failure', static: 'skipped' }, 'false'), ['audit']).problems.map(
+        (problem) => problem.code,
+      ),
+      ['JOB_NOT_SUCCESSFUL'],
+    );
+    assert.deepEqual(
+      judge(night({ static: 'skipped' }, 'false'), ['audit', 'elsewhere']).problems.map(
+        (problem) => problem.code,
+      ),
+      ['ALWAYS_JOB_UNKNOWN'],
+    );
+  });
+});
+
+describe('the plan of the nightly run (task CI.2)', () => {
+  const PLAN = 'plan';
+  const SKIPPABLE = 'browser-firefox-webkit';
+  const PLANNED = [PLAN, 'static', 'unit', 'browser-chromium', SKIPPABLE] as const;
+  const OTHERS = PLANNED.filter((job) => job !== PLAN);
+  const EVENTS = ['pull_request', 'push', 'schedule', 'workflow_dispatch'] as const;
+
+  /** The needs of a planned run: the plan with the answer it gave, and every other job with its result (success unless given). */
+  function planned(run: string | undefined, results: Record<string, string> = {}): string {
+    return JSON.stringify(
+      Object.fromEntries(
+        PLANNED.map((job) => [
+          job,
+          {
+            result: results[job] ?? 'success',
+            outputs: job === PLAN && run !== undefined ? { run } : {},
+          },
+        ]),
+      ),
+    );
+  }
+  const allSkipped = Object.fromEntries(OTHERS.map((job) => [job, 'skipped']));
+  const judge = (needs: string, event: string | undefined) =>
+    aggregate(needs, PLANNED, { event, plan: PLAN, skippedOnPullRequest: [SKIPPABLE] });
+  const codes = (needs: string, event: string | undefined): string[][] =>
+    judge(needs, event).problems.map((problem) => [problem.code, problem.job ?? '']);
+
+  // Break caught: the night that finds nothing changed turning red (every job skipped is a failure of "CI result" by the ordinary rule), or the
+  // plan's word allowing the skip anywhere else.
+  it('accepts the nightly run in which a plan that succeeded said run=false and every other job was skipped', () => {
+    const { problems, verdicts } = judge(planned('false', allSkipped), 'schedule');
+    assert.deepEqual(problems, []);
+    assert.deepEqual(verdicts[0], { job: PLAN, result: 'success' });
+    assert.deepEqual(
+      verdicts.slice(1),
+      OTHERS.map((job) => ({ job, result: 'skipped', allowed: true, skippedBy: 'plan' })),
+    );
+  });
+
+  it('says in the report that it was the plan that allowed the skips', () => {
+    const report = renderReport(judge(planned('false', allSkipped), 'schedule'));
+    assert.match(
+      report,
+      /unit\s+skipped \(allowed: the plan found nothing changed since the last successful nightly run\)/,
+    );
+    assert.match(report, /CI result: passed/);
+  });
+
+  // Break caught: a push, a pull request or a manual run standing down on the plan's word, so that a commit is left with a green check and no test.
+  for (const event of EVENTS.filter((name) => name !== 'schedule')) {
+    it(`refuses run=false on ${event}: only the nightly run may stand down, and the skipped jobs are failures there`, () => {
+      const problems = codes(planned('false', allSkipped), event);
+      assert.deepEqual(problems[0], ['PLAN_SKIP_NOT_ALLOWED', PLAN]);
+      for (const job of OTHERS) {
+        const expected = event === 'pull_request' && job === SKIPPABLE;
+        assert.equal(
+          problems.some(([code, name]) => code === 'JOB_NOT_SUCCESSFUL' && name === job),
+          !expected,
+          `${event}: ${job}`,
+        );
+      }
+    });
+  }
+
+  // Break caught: the skip allowed when the plan said to run, so that a night in which a job was skipped for another reason passes.
+  it('allows no skip on the nightly run when the plan said run=true', () => {
+    assert.deepEqual(codes(planned('true', { unit: 'skipped' }), 'schedule'), [
+      ['JOB_NOT_SUCCESSFUL', 'unit'],
+    ]);
+    assert.deepEqual(codes(planned('true'), 'schedule'), []);
+  });
+
+  // Break caught: the plan's allowance covering a job that failed or was cancelled beside the skipped ones.
+  for (const result of ['failure', 'cancelled']) {
+    it(`still fails a job that is ${result} when the plan said run=false`, () => {
+      const needs = planned('false', { ...allSkipped, unit: result });
+      assert.deepEqual(codes(needs, 'schedule'), [['JOB_NOT_SUCCESSFUL', 'unit']]);
+    });
+  }
+
+  // Break caught: a plan that did not succeed (failed, cancelled, skipped) still lending its answer to the skips.
+  for (const result of ['failure', 'cancelled', 'skipped']) {
+    it(`allows no skip when the plan itself is ${result}, whatever it output`, () => {
+      const problems = codes(planned('false', { ...allSkipped, [PLAN]: result }), 'schedule');
+      assert.deepEqual(problems[0], ['JOB_NOT_SUCCESSFUL', PLAN]);
+      assert.equal(problems.length, PLANNED.length, 'the plan and every skipped job are reported');
+    });
+  }
+
+  // Break caught: an answer read loosely (a case fold, a number, a missing output) as "run" or as "stand down".
+  for (const run of ['maybe', 'False', 'TRUE', '0', '', ' false', undefined]) {
+    it(`cannot read the plan's answer ${JSON.stringify(run)}, and fails the run`, () => {
+      const problems = codes(planned(run, allSkipped), 'schedule');
+      assert.deepEqual(problems[0], ['PLAN_UNREADABLE', PLAN]);
+      assert.ok(problems.some(([code, job]) => code === 'JOB_NOT_SUCCESSFUL' && job === 'unit'));
+    });
+  }
+
+  it('fails when the plan is not in the needs, and when it is named but not among the mandatory jobs', () => {
+    const without = JSON.parse(planned('true')) as Record<string, unknown>;
+    Reflect.deleteProperty(without, PLAN);
+    assert.deepEqual(codes(JSON.stringify(without), 'schedule'), [['JOB_MISSING', PLAN]]);
+    const named = aggregate(planned('true'), OTHERS, { event: 'schedule', plan: PLAN });
+    assert.deepEqual(
+      named.problems.map((problem) => [problem.code, problem.job]),
+      [
+        ['PLAN_UNKNOWN', PLAN],
+        ['JOB_UNEXPECTED', PLAN],
+      ],
+    );
+  });
+
+  it('needs the event as soon as a plan is named, and allows no skip without it', () => {
+    for (const event of [undefined, '', '  ']) {
+      const problems = codes(planned('false', allSkipped), event).map(([code]) => code);
+      assert.equal(problems[0], 'EVENT_UNREADABLE', String(event));
+      assert.ok(problems.includes('JOB_NOT_SUCCESSFUL'), String(event));
+    }
+  });
+
+  it('passes a pull request that ran, with the plan, and skipped only the job it is allowed to', () => {
+    assert.deepEqual(codes(planned('true', { [SKIPPABLE]: 'skipped' }), 'pull_request'), []);
+  });
+
+  it('does not change a run that names no plan', () => {
+    const { problems } = aggregate(planned('false', allSkipped), PLANNED, { event: 'schedule' });
+    assert.equal(
+      problems.length,
+      OTHERS.length,
+      'each skipped job is reported, as before the plan existed',
+    );
+  });
+
+  it('is the verdict of the command: 0 for the night that stood down, 1 for a push that said so', () => {
+    const lines: string[] = [];
+    const print = (line: string): void => void lines.push(line);
+    const args = [`--plan=${PLAN}`, `--skipped-on-pull-request=${SKIPPABLE}`, ...PLANNED];
+    assert.equal(
+      runAggregate(args, { NEEDS: planned('false', allSkipped), EVENT: 'schedule' }, print),
+      0,
+    );
+    assert.equal(
+      runAggregate(args, { NEEDS: planned('false', allSkipped), EVENT: 'push' }, print),
+      1,
+    );
+    assert.match(
+      lines.join('\n'),
+      /::error title=CI result::The plan "plan" says nothing is to run/,
+    );
+  });
 });
 
 describe('the command, with the event and the allowance', () => {

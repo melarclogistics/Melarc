@@ -15,8 +15,10 @@ import {
   riderFixture,
   unboundRider,
 } from '../../../test-support/rider-fixture';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders/{id}` (`getRider`; S0.60a; AC-SLICE-000-113). One rider: status, whether a PIN is set and a device is active, and every device the rider has held.
@@ -34,6 +36,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 function open(
@@ -70,18 +73,60 @@ describe('the rider: what it shows', () => {
   it('names the rider and the facts about readiness, in words', async () => {
     open();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Kwame Mensah' })).toBeVisible();
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Kwame Mensah' });
+    expect(heading).toBeVisible();
     expect(document.title).toBe('Kwame Mensah · Melarc Ops Portal');
-    expect(screen.getByText('This rider is active.')).toBeVisible();
+    // A rider is named, not coded: the heading is the name in the heading face.
+    expect(heading.querySelector('.ui-code')).toBeNull();
+    // The record's header: the name, the administrative status as a badge beside it and one sentence of what that status means.
+    const header = heading.closest('.ui-record-header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByText('Active')).toBeVisible();
+    expect(within(header as HTMLElement).getByText('This rider is active.')).toBeVisible();
     expect(factOf('Phone')).toBe('+233201234567');
     expect(factOf('Hub')).toBe('Accra Central');
     expect(factOf('PIN')).toBe('Set');
     expect(factOf('Device')).toBe('One active device');
     expect(factOf('Readiness')).toBe('Ready to sign in.');
+    // A record page has one way back, a link to the roster (Stage 4.5), and no breadcrumb: the trail is for the tasks on the rider.
     expect(screen.getByRole('link', { name: 'Back to riders' })).toHaveAttribute(
       'href',
       '/admin/riders',
     );
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+  });
+
+  // Break caught (PRODUCT_DESIGN_DIRECTION section 6.2): the administrative status and the readiness told as one, in one badge. The status is the header's; the PIN, the device and the
+  // readiness are facts, apart from it.
+  it('tells the status apart from the readiness: the status in the header, the readiness as facts', async () => {
+    open(READER, {
+      [RECORD]: () =>
+        json(200, riderDetailFixture(unboundRider({ status: 'SUSPENDED' }), []), etag('v1')),
+    });
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Kwame Mensah' });
+
+    const header = heading.closest<HTMLElement>('.ui-record-header');
+    if (header === null) throw new Error('The heading is not in a record header');
+    expect(within(header).getByText('Suspended')).toBeVisible();
+    // The identity of the record (its name, its status, its sentence) says nothing of the readiness. The line under the acts is another thing: it is about the act (here: a device cannot be
+    // registered while the access has ended), and it is not part of what the header says of the rider.
+    const identity = header.querySelector<HTMLElement>('.ui-record-header__identity');
+    if (identity === null) throw new Error('The header has no identity');
+    expect(within(identity).queryByText(/PIN|device|ready/i)).toBeNull();
+    for (const label of ['PIN', 'Device', 'Readiness']) {
+      const term = screen.getByText(label, { selector: 'dt' });
+      expect(term.closest('.ui-record-header'), label).toBeNull();
+    }
+  });
+
+  // Break caught (the PO's decision of 9 November 2026): paragraphs of rules above the content. What the device pages do is told on those pages.
+  it('has no paragraph that explains the device acts', async () => {
+    open(REVOKER);
+    await screen.findByRole('heading', { level: 1, name: 'Kwame Mensah' });
+
+    expect(screen.queryByText(/If the handset is lost or stolen/)).toBeNull();
+    expect(screen.queryByText(/Register their first one in person/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
   });
 
   // Break caught: a readiness that says "ready" for a rider who cannot sign in, or does not say what is missing.
@@ -167,6 +212,36 @@ describe('the rider: what it shows', () => {
     expect(document.body.textContent).not.toContain('8b9c0d1e');
   });
 
+  it('draws the devices as cards with the same facts in a room too narrow for the columns', async () => {
+    narrowRoom();
+    open(READER, {
+      [RECORD]: () =>
+        json(
+          200,
+          riderDetailFixture(riderFixture(), [
+            riderDeviceFixture(),
+            riderDeviceFixture({
+              id: '9c0d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f',
+              status: 'REVOKED',
+              registered_at: '2026-09-01T09:00:00Z',
+              registered_by: null,
+            }),
+          ]),
+          etag('v1'),
+        ),
+    });
+
+    const cards = await screen.findByRole('list', { name: 'Devices of the rider' });
+    const [active, revoked] = within(cards).getAllByRole('listitem');
+    if (active === undefined || revoked === undefined) throw new Error('The devices have no cards');
+    expect(within(active).getByText('Active')).toBeVisible();
+    expect(within(active).getByText('A Melarc officer, in person')).toBeVisible();
+    expect(within(active).getByText('20 Oct, 09:00')).toBeVisible();
+    expect(within(revoked).getByText('Revoked')).toBeVisible();
+    expect(within(revoked).getByText('Not recorded', { selector: 'dd' })).toBeVisible();
+    expect(document.body.textContent).not.toContain('8b9c0d1e');
+  });
+
   // Break caught: a PIN, a hash, a key or an attestation that a server should never send drawn on the record.
   it('draws nothing of a PIN, a hash, a key or an attestation, even when an answer carries one', async () => {
     open(READER, {
@@ -224,6 +299,8 @@ describe('the rider: the acts it offers', () => {
 
     expect(link).toHaveAttribute('href', `/admin/riders/${RIDER_ID}/device/register`);
     expect(screen.queryByRole('link', { name: /Revoke or replace/ })).toBeNull();
+    // The act is the header's, where the record says what can be done next.
+    expect(link.closest('.ui-record-header')).not.toBeNull();
   });
 
   it('names the permission a first binding needs, and offers nothing, to a session without it', async () => {
@@ -231,7 +308,10 @@ describe('the rider: the acts it offers', () => {
       [RECORD]: () => json(200, riderDetailFixture(unboundRider(), []), etag('v1')),
     });
 
-    expect(await screen.findByText(/staff\.device\.register/)).toBeVisible();
+    // One short muted line under the acts, in the header (the Product Owner, 9 November 2026).
+    expect(await screen.findByText(cannotText('staff.device.register'))).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
   });
 
@@ -247,7 +327,7 @@ describe('the rider: the acts it offers', () => {
         await screen.findByText(
           'A device cannot be registered while this rider’s access has ended.',
         ),
-      ).toBeVisible();
+      ).toHaveClass('ui-record-header__note');
       expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
     },
   );
@@ -271,12 +351,15 @@ describe('the rider: the acts it offers', () => {
 
     expect(link).toHaveAttribute('href', `/admin/riders/${RIDER_ID}/device`);
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
+    expect(link.closest('.ui-record-header')).not.toBeNull();
   });
 
   it('names the permission revoking needs, and offers nothing, to a session without it', async () => {
     open(REGISTERER);
 
-    expect(await screen.findByText(/staff\.device\.revoke/)).toBeVisible();
+    expect(await screen.findByText(cannotText('staff.device.revoke'))).toHaveClass(
+      'ui-record-header__note',
+    );
     expect(screen.queryByRole('link', { name: 'Revoke or replace the device' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Register the first device' })).toBeNull();
   });
@@ -350,19 +433,22 @@ describe('the rider: the version an act takes', () => {
 describe('the rider: a record that cannot be shown', () => {
   it('is a page of its own for a rider outside the session’s hubs, and for one that does not exist', async () => {
     const view = open(READER, { [RECORD]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     view.unmount();
     api.restore();
 
     open(READER, { [RECORD]: () => refusal(404, 'NOT_FOUND') });
     expect(await screen.findByRole('heading', { level: 1, name: 'Rider not found' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to riders' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Back to riders' })).toHaveAttribute(
+      'href',
+      '/admin/riders',
+    );
   });
 
   it('is a page of its own for a session whose key is refused by the server', async () => {
     open(READER, { [RECORD]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText(/dispatch\.read/)).toBeVisible();
+    expect(await screen.findByText(cannotText('dispatch.read'))).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
   });
 
@@ -385,11 +471,15 @@ describeInterfaceStates('The rider', {
       });
       open(READER, { [RECORD]: () => gate });
       expect(await screen.findByText('Loading the rider…')).toBeInTheDocument();
+      // The way back is there while the rider is read, and it is the same link once the page has replaced the loading state: a press on it is not lost to the page replacing it.
+      const back = screen.getByRole('link', { name: 'Back to riders' });
+      expect(back).toHaveAttribute('href', '/admin/riders');
       await act(async () => {
         release(json(200, riderDetailFixture(), etag('v1')));
         await gate;
       });
       await screen.findByText('This rider is active.');
+      expect(screen.getByRole('link', { name: 'Back to riders' })).toBe(back);
     },
   },
   empty: {
@@ -443,7 +533,7 @@ describeInterfaceStates('The rider', {
   'permission-restricted': {
     test: async () => {
       open(['staff.read']);
-      expect(await screen.findByText(/dispatch\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('dispatch.read'))).toBeVisible();
       expect(screen.queryByRole('heading', { name: 'Kwame Mensah' })).toBeNull();
     },
   },

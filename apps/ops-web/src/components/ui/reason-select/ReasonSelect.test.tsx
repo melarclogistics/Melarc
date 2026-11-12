@@ -13,6 +13,7 @@ import { reasonFixture } from '../../../test-support/reason-fixture';
 import { renderWithProviders } from '../../../test-support/render-providers';
 import { wcagViolations } from '../../../test-support/wcag';
 import { ReasonSelect } from './ReasonSelect';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -182,7 +183,7 @@ describe('ReasonSelect: when the reasons cannot be had', () => {
     api.on(`GET ${LIST}`, () => errorResponse(403, 'PERMISSION_DENIED'));
     renderWithProviders(<Picker />);
 
-    expect(await screen.findByText('settings.reason.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });

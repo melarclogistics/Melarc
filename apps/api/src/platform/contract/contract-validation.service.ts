@@ -1,8 +1,9 @@
 import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
+import type { Logger } from 'pino';
 
 import type { AppConfig } from '../config/load-config.js';
-import { APP_CONFIG } from '../platform.tokens.js';
+import { APP_CONFIG, LOGGER } from '../platform.tokens.js';
 import { listBoundOperations } from './contract-operation.js';
 import { CONTRACT_SOURCE, type ContractSource } from './contract-source.js';
 import { ContractValidator } from './contract-validator.js';
@@ -20,6 +21,7 @@ export class ContractValidationService implements OnApplicationBootstrap {
     @Inject(CONTRACT_SOURCE) private readonly source: ContractSource,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly modules: ModulesContainer,
+    @Inject(LOGGER) private readonly logger: Logger,
   ) {}
 
   /** Responses are checked outside production only: a check on every answer is for finding defects, not for serving. */
@@ -27,19 +29,27 @@ export class ContractValidationService implements OnApplicationBootstrap {
     return this.config.nodeEnv !== 'production';
   }
 
+  /**
+   * The validator of the contract. **In production it prepares the request side alone** (run 5, Stage 1.6): no response is validated there, and compiling the response
+   * schemas of every operation is seconds of the synchronous start that nothing uses.
+   */
   validator(): ContractValidator {
-    this.instance ??= new ContractValidator(this.source.load());
+    this.instance ??= new ContractValidator(this.source.load(), {
+      responses: this.validatesResponses,
+    });
     return this.instance;
   }
 
   /**
    * Refuses to start an application that binds a handler to an operation the contract does not have, or whose
-   * schemas cannot be compiled: either would leave a route unvalidated without a sound.
+   * schemas cannot be compiled: either would leave a route unvalidated without a sound. Says, once, how long reading
+   * and preparing the contract took (run 5, Stage 1.6), because it is a synchronous part of the start that a slow start can be told from a slow database by.
    */
   onApplicationBootstrap(): void {
     const bound = listBoundOperations(this.modules);
     if (bound.length === 0) return;
 
+    const started = performance.now();
     const validator = this.validator();
     const unknown = bound.filter(({ operationId }) => !validator.hasOperation(operationId));
     if (unknown.length > 0) {
@@ -62,5 +72,13 @@ export class ContractValidationService implements OnApplicationBootstrap {
       );
     }
     for (const { operationId } of bound) validator.prepare(operationId);
+    this.logger.info(
+      {
+        operations: bound.length,
+        responseValidators: this.validatesResponses,
+        milliseconds: Math.round(performance.now() - started),
+      },
+      'contract prepared',
+    );
   }
 }

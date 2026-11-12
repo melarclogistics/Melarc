@@ -1,5 +1,6 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { act, screen, waitFor, within } from '@testing-library/react';
+import { use } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSessionStore } from '../../../platform/session/session-context';
@@ -22,6 +23,7 @@ import {
 } from '../../../test-support/rider-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/riders/{id}/device/register` (`registerRiderDevice`; S0.60b; the render clause of AC-SLICE-000-40, and -124). The first binding of a rider's device, in person:
@@ -50,9 +52,16 @@ function Probe() {
   return <h1 tabIndex={-1}>Probe</h1>;
 }
 
+/** A page that is not drawn for a while (an engine under load, a chunk on its way): the page the person left stays on the screen until it is. */
+function NotYet(): null {
+  use(new Promise<never>(() => undefined));
+  return null;
+}
+
 const routes = [
   { path: 'probe', element: <Probe /> },
   { path: 'elsewhere', element: <h1 tabIndex={-1}>Elsewhere</h1> },
+  { path: 'not-yet', element: <NotYet /> },
 ];
 
 /** What follows the focus in the test that is running (`followFocus`), taken off when it ends. */
@@ -184,12 +193,82 @@ describe('the first binding: before a code is asked for', () => {
     expect(await screen.findByText('For Kwame Mensah.')).toBeVisible();
     expect(screen.getByText(/Do this in person, with the rider and the handset/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Show the QR code' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to the rider' })).toHaveAttribute(
+    // The way back is the trail of the page's parents: the roster, then the rider by name (Stage 4.5). No link of its own beside it says the same.
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Riders' })).toHaveAttribute('href', '/admin/riders');
+    expect(trail.getByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
       'href',
       `/admin/riders/${RIDER_ID}`,
     );
-    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Back to the rider' })).toBeNull();
+    // No picture on the page: the QR code is the only one it ever draws. (The page, not the document: the sidebar around it draws the logo.)
+    expect(within(screen.getByRole('main')).queryByRole('img')).toBeNull();
     expect(posts()).toHaveLength(0);
+  });
+
+  // Break caught (run 7, Stage 4.3): the form's own heading, replaced by the page's when the read of the rider lands and says that a first device cannot be registered: the focus the frame put on
+  // the heading is lost. It is the same element in the form and in the refusal.
+  it('keeps one heading element, with its focus, when the read of the rider turns the form into the refusal', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    await open(REGISTERER, { [RECORD]: () => gate });
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Register a first device',
+    });
+    await screen.findByRole('button', { name: 'Show the QR code' });
+    act(() => {
+      heading.focus();
+    });
+    expect(heading).toHaveFocus();
+
+    await act(async () => {
+      release(json(200, riderDetailFixture(), etag('v1')));
+      await gate;
+    });
+    expect(await screen.findByText(/This rider already has a device/)).toBeVisible();
+
+    expect(screen.getByRole('heading', { level: 1 })).toBe(heading);
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveFocus();
+  });
+
+  // Break caught (Stage 4.5): a way back that waits for the rider to be read. The page does not wait for the rider, so its trail says "The rider" until it is read, and goes to it all the same.
+  it('has its way back before the rider is read, and names the rider once it has been', async () => {
+    let release: (response: Response) => void = () => undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    await open(REGISTERER, { [RECORD]: () => gate });
+    const trail = () => within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+
+    expect(await screen.findByRole('button', { name: 'Show the QR code' })).toBeVisible();
+    expect(trail().getByRole('link', { name: 'The rider' })).toHaveAttribute(
+      'href',
+      `/admin/riders/${RIDER_ID}`,
+    );
+    await act(async () => {
+      release(json(200, riderDetailFixture(unboundRider(), []), etag('v1')));
+      await gate;
+    });
+
+    expect(await trail().findByRole('link', { name: 'Kwame Mensah' })).toHaveAttribute(
+      'href',
+      `/admin/riders/${RIDER_ID}`,
+    );
+    expect(trail().queryByRole('link', { name: 'The rider' })).toBeNull();
+  });
+
+  // Break caught (the PO's decision of 9 November 2026): paragraphs and lists of rules above the content. A task form keeps at most two short sentences under its title.
+  it('tells the task in two short sentences, with no list of steps', async () => {
+    await open();
+    const intro = await screen.findByText(/Do this in person, with the rider and the handset/);
+
+    expect(intro.textContent.split(/(?<=\.)\s+/)).toHaveLength(2);
+    expect(screen.queryByText(/Check that this is the rider/)).toBeNull();
+    expect(screen.queryByText(/Then come back here/)).toBeNull();
   });
 
   // Break caught: a code asked for by merely opening the page, which would make a grant for a rider nobody is with.
@@ -419,6 +498,22 @@ describe('the first binding: when the code is gone', () => {
     });
     await screen.findByRole('heading', { level: 1, name: 'Register a first device' });
 
+    expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
+    expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
+  });
+
+  // Break caught (found in WebKit on 9 November 2026, riders.spec.ts "is gone on navigation, and does not return with the back button"): the code let go of only when the page it was on is
+  // replaced. The page a navigation leads to may take a while to be drawn; until it is, the page the person left is still on the screen with the code on it, and a Back in that time shows it
+  // again. The code is let go of the moment the router moves.
+  it('is gone the moment the router moves, before the next page has been drawn', async () => {
+    const { router } = await shown();
+
+    await act(async () => {
+      void router.navigate('/not-yet');
+      await Promise.resolve();
+    });
+
+    expect(router.state.location.pathname).toBe('/not-yet');
     expect(screen.queryByRole('img', { name: QR_NAME })).toBeNull();
     expect(whereIs(...ENROLMENT_FORMS)).toEqual([]);
   });
@@ -938,7 +1033,11 @@ describe('the first binding: a new code asked for while a code is on the screen'
       await waitFor(() => {
         expect(posts()).toHaveLength(2);
       });
-      const back = screen.getByRole('link', { name: 'Back to the rider' });
+      // A link elsewhere on the page that the officer has moved to: the trail's link to the rider.
+      const back = within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole(
+        'link',
+        { name: 'Kwame Mensah' },
+      );
       act(() => {
         back.focus();
       });
@@ -1249,8 +1348,8 @@ describe('the first binding: when the API refuses', () => {
       'STATE_CONFLICT',
       /A first device cannot be registered for this rider\. The rider already has an active device/,
     ],
-    [403, 'PERMISSION_DENIED', /staff\.device\.register/],
-    [403, 'HUB_SCOPE_VIOLATION', /hub your session does not act in/],
+    [403, 'PERMISSION_DENIED', /can’t register a rider’s first device/],
+    [403, 'HUB_SCOPE_VIOLATION', /hub your account does not work in/],
     [404, 'NOT_FOUND', /This rider could not be found\./],
   ])('words a %s %s for what it is', async (status, code, words) => {
     await ask(() => refusal(status, code));
@@ -1370,7 +1469,7 @@ describeInterfaceStates('The first binding', {
   'permission-restricted': {
     test: async () => {
       await open(['dispatch.read']);
-      expect(await screen.findByText(/staff\.device\.register/)).toBeVisible();
+      expect(await screen.findByText(cannotText('staff.device.register'))).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Show the QR code' })).toBeNull();
     },
   },

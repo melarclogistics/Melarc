@@ -129,9 +129,15 @@ describe('describing an operation', () => {
   // Break caught: the document-level default being lost, so an operation that inherits its security
   // reads as having none, or an operation that overrides it reads as inheriting.
   it('applies the document default security, and an operation override replaces it', () => {
+    // An operation that states no security inherits the document's default: a browser session with its token, or a rider session.
+    expect(describeIn(CONTRACT, 'signOut').security.alternatives).toEqual([
+      ['browserSession', 'csrfToken'],
+      ['riderSession'],
+    ]);
+    // One that states its own replaces it: a safe staff read names the browser session alone (task A3.1 of the audit follow-up: `getPickupRequest` is not served
+    // to a Rider; before it, the operation named a browser session or a rider session and this test took that for the default).
     expect(describeIn(CONTRACT, 'getPickupRequest').security.alternatives).toEqual([
       ['browserSession'],
-      ['riderSession'],
     ]);
     expect(describeIn(CONTRACT, 'riderSignIn').security.alternatives).toEqual([]);
   });

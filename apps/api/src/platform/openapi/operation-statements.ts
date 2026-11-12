@@ -276,7 +276,7 @@ function statingHandlers(modules: ModulesContainer): Handler[] {
 }
 
 /** The operations of a description by `operationId`. */
-function operationsOf(document: OpenAPIObject): Map<string, Record<string, unknown>> {
+export function operationsOf(document: OpenAPIObject): Map<string, Record<string, unknown>> {
   const found = new Map<string, Record<string, unknown>>();
   for (const item of Object.values(document.paths)) {
     for (const operation of Object.values(item as Record<string, unknown>)) {

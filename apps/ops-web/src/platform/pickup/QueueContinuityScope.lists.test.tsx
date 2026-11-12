@@ -353,3 +353,86 @@ describe('the manifest list’s place: a screen outside the scope', () => {
     expect(manifests.backTo(MANIFEST)).toBeUndefined();
   });
 });
+
+/**
+ * The approver's queue keeps its place in a memory of its own (run 5, the review of 499399c), and its records are the pickup queue's requests (`/pickup-requests/{id}`): a place left from `/approvals` for a request
+ * is given back on the browser's Back from that request's page, and is never offered to the pickup queue or to the manifest list, which hold places of their own.
+ */
+describe('the approver’s queue’s place', () => {
+  const APPROVALS_SIGNATURE = 'APPROVALS|';
+  const approvalsPlace = (overrides: Partial<QueuePlace> = {}): QueuePlace => ({
+    signature: APPROVALS_SIGNATURE,
+    search: '',
+    tokens: ['token-four'],
+    scrollY: 210,
+    requestId: REQUEST,
+    ...overrides,
+  });
+  let approvals: QueueContinuityHandle;
+  let pickup: QueueContinuityHandle;
+  let runs: QueueContinuityHandle;
+
+  function AllLists() {
+    approvals = useQueueContinuity('approvals');
+    pickup = useQueueContinuity();
+    runs = useQueueContinuity('manifests');
+    return <p>A screen</p>;
+  }
+
+  function mountApprovals() {
+    const store = new SessionStore();
+    store.signedIn(sessionFixture());
+    const routes: RouteObject[] = [
+      {
+        element: <QueueContinuityScope />,
+        children: [
+          { path: '/approvals', element: <AllLists /> },
+          { path: '/pickup-requests', element: <AllLists /> },
+          { path: '/pickup-requests/:id', element: <AllLists /> },
+          { path: '/manifests', element: <AllLists /> },
+        ],
+      },
+    ];
+    const router = createMemoryRouter(routes, { initialEntries: ['/approvals'] });
+    render(
+      <SessionProvider store={store}>
+        <RouterProvider router={router} />
+      </SessionProvider>,
+    );
+    return router;
+  }
+
+  it('is kept through the request that was opened and given back on the browser’s Back', async () => {
+    const router = mountApprovals();
+    approvals.leave(approvalsPlace());
+    await go(router, QUEUE_RECORD);
+
+    await go(router, -1);
+
+    expect(approvals.returningTo(APPROVALS_SIGNATURE)).toEqual(approvalsPlace());
+  });
+
+  // Break caught: the approver's place offered to the pickup queue or to the manifest list, which would restore a page and a request that belong to another queue.
+  it('is never offered to the pickup queue or the manifest list, nor theirs to it', async () => {
+    const router = mountApprovals();
+    approvals.leave(approvalsPlace());
+    await go(router, QUEUE_RECORD);
+    await go(router, -1);
+
+    expect(pickup.returningTo(APPROVALS_SIGNATURE)).toBeUndefined();
+    expect(pickup.backTo(REQUEST)).toBeUndefined();
+    expect(runs.returningTo(APPROVALS_SIGNATURE)).toBeUndefined();
+    expect(approvals.returningTo(APPROVALS_SIGNATURE)).toEqual(approvalsPlace());
+  });
+
+  it('is let go of on the pickup queue, which is another visit', async () => {
+    const router = mountApprovals();
+    approvals.leave(approvalsPlace());
+    await go(router, QUEUE_RECORD);
+
+    await go(router, '/pickup-requests');
+    await go(router, -1);
+
+    expect(approvals.returningTo(APPROVALS_SIGNATURE)).toBeUndefined();
+  });
+});

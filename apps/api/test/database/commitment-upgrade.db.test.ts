@@ -525,7 +525,7 @@ describe('the built commands, run in the order the procedure documents', () => {
       const pending = migrationsFrom(NEW_FROM);
       const migrated = await run(
         DB_MIGRATE,
-        { DATABASE_MIGRATION_URL: target.urlFor(MIGRATION_ROLE) },
+        { DATABASE_MIGRATION_URL: target.urlFor(MIGRATION_ROLE), DATABASE_LOCK_TIMEOUT_MS: '2000' },
         [],
         60_000,
       );

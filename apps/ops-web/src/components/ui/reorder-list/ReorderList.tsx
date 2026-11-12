@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { IconButton } from '../icon-button/IconButton';
+import { motion, useMotion } from '../motion/motion';
 import './reorder-list.css';
 
 export interface ReorderItem {
@@ -53,10 +54,13 @@ function neighbour(items: readonly ReorderItem[], from: number, direction: Direc
  * - Each move is announced in a polite status region: which item, its new place and how many there are. The position is also written in the
  *   item (a number before it), not only in the order of the list.
  * - Drag and drop is not offered: two buttons are the whole of the control, and nothing is lost for want of a pointer gesture.
+ * - **A move glides** (Motion's layout animation, over `motion.normal`, position only): the items that change place slide to it instead of jumping. Nothing moves
+ *   when the person asked the system for less motion, and the order, the focus and the announcement are the same either way.
  *
  * It decides nothing about what may be moved or whether an order is acceptable: the server does, and a refusal is the caller's to show.
  */
 export function ReorderList({ label, items, onChange, disabled = false }: ReorderListProps) {
+  const motionKit = useMotion();
   const [announcement, setAnnouncement] = useState('');
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   // Where focus goes once the new order is drawn: the item that was moved, and the way it was moved.
@@ -103,8 +107,10 @@ export function ReorderList({ label, items, onChange, disabled = false }: Reorde
           const canMoveDown =
             !disabled && item.fixed !== true && neighbour(items, index, 'down') !== -1;
           return (
-            <li
+            <motion.li
               key={item.id}
+              layout={motionKit.reduced ? false : 'position'}
+              transition={{ layout: motionKit.transition('normal') }}
               className={
                 item.fixed === true
                   ? 'ui-reorder__item ui-reorder__item--fixed'
@@ -150,7 +156,7 @@ export function ReorderList({ label, items, onChange, disabled = false }: Reorde
                   />
                 </div>
               )}
-            </li>
+            </motion.li>
           );
         })}
       </ol>

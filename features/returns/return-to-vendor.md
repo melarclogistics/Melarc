@@ -181,11 +181,11 @@ checks the reduced amount for the immediate-demand path.
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `returns.initiate`| Ops Staff, Senior Ops, Platform Admin| own hub| [permissions.md](../../contracts/permissions.md) §7 — new this pass|
-| `returns.close`| Rider, Ops Staff, Senior Ops, Platform Admin| Rider: assigned return · Ops: own hub| permissions.md §7 — new this pass|
-| `returns.waiver.request`| Ops Staff, Senior Ops, Platform Admin| own hub| permissions.md §7 — existing|
-| `returns.waiver.approve`| Senior Ops, Platform Admin| own hub, approver ≠ requester (a Platform Admin excepted)| permissions.md §7 — existing|
-| `returns.read`| Ops Staff, Senior Ops, Platform Admin, Vendor| own hub · own record| permissions.md §7 — existing|
+| `returns.initiate`| Ops Staff, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7 — new this pass|
+| `returns.close`| Rider, Ops Staff, Senior Ops, Platform Admin| Rider: assigned return · Ops: own hub (Platform Admin: all hubs)| permissions.md §7 — new this pass|
+| `returns.waiver.request`| Ops Staff, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)| permissions.md §7 — existing|
+| `returns.waiver.approve`| Senior Ops, Platform Admin| own hub (Platform Admin: all hubs), approver ≠ requester (a Platform Admin excepted)| permissions.md §7 — existing|
+| `returns.read`| Ops Staff, Senior Ops, Platform Admin, Vendor| own hub (Platform Admin: all hubs) · own record| permissions.md §7 — existing|
 
 **Two permission keys implement the existing routing authority** — the actors are already named by
 the signed state machine (`MSC-DEC-332`'s "Authorised Ops"; the fulfilment machine's own "Rider

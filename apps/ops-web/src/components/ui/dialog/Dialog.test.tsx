@@ -1,8 +1,9 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { StrictMode, useState } from 'react';
+import { StrictMode, useEffect, useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { pressWithoutFocus } from '../../../test-support/press';
 import { wcagViolations } from '../../../test-support/wcag';
 import { Button } from '../button/Button';
 import { Dialog, DialogActions, type DialogProps } from './Dialog';
@@ -17,10 +18,18 @@ interface HarnessProps {
   readonly role?: DialogProps['role'];
   readonly description?: string;
   readonly initiallyOpen?: boolean;
+  /** What is drawn inside the button that opens it: a person's press lands on this, not on the button itself. */
+  readonly trigger?: ReactNode;
 }
 
 /** A page with a button that opens a dialog, which is how a person meets one: focus has to come back to the button. */
-function Harness({ dismiss, role, description, initiallyOpen = false }: HarnessProps) {
+function Harness({
+  dismiss,
+  role,
+  description,
+  initiallyOpen = false,
+  trigger: inner = 'Open the demo dialog',
+}: HarnessProps) {
   const [open, setOpen] = useState(initiallyOpen);
   return (
     <>
@@ -30,7 +39,7 @@ function Harness({ dismiss, role, description, initiallyOpen = false }: HarnessP
           setOpen(true);
         }}
       >
-        Open the demo dialog
+        {inner}
       </button>
       <Dialog
         open={open}
@@ -228,6 +237,132 @@ describe('Dialog: leaving it', () => {
 
     await waitFor(() => {
       expect(trigger()).toHaveFocus();
+    });
+  });
+
+  // Break caught (Safari, decision of 10 November 2026): WebKit gives no focus to a button that a pointer pressed, so what had focus when the dialog opened was the
+  // body, and focus had nowhere to go back to: the person who used a mouse or a finger was left at the top of the page. The dialog remembers the control that was
+  // pressed, and the press may land on something inside it (an icon, a span).
+  it('gives focus back to the control that was pressed, in an engine that gives a pressed button no focus', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        dismiss={() => undefined}
+        trigger={<span data-testid="inside-the-button">Open the demo dialog</span>}
+      />,
+    );
+    pressWithoutFocus(screen.getByTestId('inside-the-button'));
+    expect(screen.getByRole('dialog', { name: 'Demo dialog' })).toBeVisible();
+    expect(trigger()).not.toHaveFocus();
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(trigger()).toHaveFocus();
+    });
+  });
+
+  // Break caught: the press outliving the keyboard. A person who pressed a button with the mouse and then went on by keyboard, to a control of their own and a shortcut that
+  // opens a dialog, gets focus back on the control they were on, and not on the button they pressed some time ago.
+  it('goes back to the focused control when the keyboard opened it, whatever was pressed before', async () => {
+    function Shortcut() {
+      const [open, setOpen] = useState(false);
+      useEffect(() => {
+        const onKey = (event: KeyboardEvent): void => {
+          if (event.key === 'k' && event.ctrlKey) setOpen(true);
+        };
+        document.addEventListener('keydown', onKey);
+        return () => {
+          document.removeEventListener('keydown', onKey);
+        };
+      }, []);
+      return (
+        <>
+          <button type="button">Pressed first</button>
+          <button type="button">Reached by keyboard</button>
+          <Dialog
+            open={open}
+            title="Opened by a shortcut"
+            onRequestClose={() => {
+              setOpen(false);
+            }}
+          >
+            <input type="text" aria-label="Inside" />
+          </Dialog>
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Shortcut />);
+    pressWithoutFocus(screen.getByRole('button', { name: 'Pressed first' }));
+    screen.getByRole('button', { name: 'Reached by keyboard' }).focus();
+
+    await user.keyboard('{Control>}k{/Control}');
+    expect(screen.getByRole('dialog', { name: 'Opened by a shortcut' })).toBeVisible();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Reached by keyboard' })).toHaveFocus();
+    });
+  });
+
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): the press remembered until a key is pressed, so a dialog that something other than a press opens later (a timer, a
+  // route, a message from the server) gave focus back to a control pressed to open an earlier one. A press belongs to the dialog that took it; this one goes back to where the person is.
+  it('goes back to the focused control, and not to the one that opened an earlier dialog, when something that was no press opens it', async () => {
+    let openLater: () => void = () => undefined;
+    let closeNow: () => void = () => undefined;
+    function Timed() {
+      const [open, setOpen] = useState(false);
+      openLater = () => {
+        setOpen(true);
+      };
+      closeNow = () => {
+        setOpen(false);
+      };
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(true);
+            }}
+          >
+            Pressed once
+          </button>
+          <button type="button">Where the person is</button>
+          <Dialog
+            open={open}
+            title="Opened twice"
+            onRequestClose={() => {
+              setOpen(false);
+            }}
+          >
+            <input type="text" aria-label="Inside" />
+          </Dialog>
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Timed />);
+    pressWithoutFocus(screen.getByRole('button', { name: 'Pressed once' }));
+    expect(screen.getByRole('dialog', { name: 'Opened twice' })).toBeVisible();
+    // The page closes it (no key, no press), and focus is back on the control that opened it.
+    act(() => {
+      closeNow();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Pressed once' })).toHaveFocus();
+    });
+
+    screen.getByRole('button', { name: 'Where the person is' }).focus();
+    act(() => {
+      openLater();
+    });
+    expect(screen.getByRole('dialog', { name: 'Opened twice' })).toBeVisible();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Where the person is' })).toHaveFocus();
     });
   });
 

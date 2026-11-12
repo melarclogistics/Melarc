@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { FormPage } from '../../../components/FormPage';
 import { PageHeading } from '../../../components/PageHeading';
@@ -19,11 +19,16 @@ import { useGrantToken } from '../../../platform/auth/use-grant-token';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { manualKeyOf } from '../../../platform/secrets/otpauth';
 import { MAX_HOLD_MS } from '../../../platform/secrets/use-transient-secret';
-import { SETUP_MFA_COMPLETE_PATH } from '../../../platform/session/paths';
+import { SETUP_MFA_COMPLETE_PATH, SETUP_MFA_PATH } from '../../../platform/session/paths';
 import { GrantProblem } from './GrantProblem';
 import { NoReferrer } from './NoReferrer';
 import { FormNotice, noticeOf, type Notice } from './notice';
-import { ENROLLED_STATE, usePreSignInFlow } from './pre-sign-in-flow';
+import {
+  ENROLLED_STATE,
+  ENROLLING_STATE,
+  usePreSignInFlow,
+  wasEnrolling,
+} from './pre-sign-in-flow';
 
 const BEGIN_OPERATION = 'beginMfaReenrolment';
 const ENROL_OPERATION = 'completeMfaEnrolment';
@@ -48,6 +53,7 @@ const SIX_DIGITS_WORDS =
 export function SetupMfaPage() {
   const client = useApiClient();
   const navigate = useNavigate();
+  const location = useLocation();
   const grant = useGrantToken();
   const { enrolment } = usePreSignInFlow();
   const [refused, setRefused] = useState(false);
@@ -82,6 +88,8 @@ export function SetupMfaPage() {
       if (next === undefined) throw unexpectedResponse(answer.status);
       if (!enrolment.hold(flow, next, MAX_HOLD_MS)) return 'failed';
       grant.clear();
+      // The entry says the code was shown here, so that a person who comes back after it has gone is told so (the grant's own replacement of the entry has already taken the fragment off).
+      void navigate(SETUP_MFA_PATH, { replace: true, state: ENROLLING_STATE });
       return 'accepted';
     } catch (error) {
       if (!flow.current()) return 'failed';
@@ -158,6 +166,8 @@ export function SetupMfaPage() {
   });
 
   if (leaving) return null;
+  // The router has moved on and the material went with it (the review of f6cf02b): the page is on its way out and draws nothing, not the link's error in the place of the picture.
+  if (enrolment.moved) return null;
   if (grant.reading) return <NoReferrer />;
 
   if (refused) {
@@ -232,6 +242,25 @@ export function SetupMfaPage() {
               </Button>
             </div>
           </form>
+        </FormPage>
+      </>
+    );
+  }
+
+  // The code was shown in this tab and has gone (the person left and came back, the page was reloaded, or the time was up): the link was used and the password is set, so the page says what
+  // happened and what to do, and not that the link cannot be used. Anyone else has no code and no link, and is told the link's one error.
+  if (wasEnrolling(location.state)) {
+    return (
+      <>
+        <NoReferrer />
+        <title>Your authenticator is not set up yet · Melarc Ops Portal</title>
+        <PageHeading>Your authenticator is not set up yet</PageHeading>
+        <FormPage>
+          <p>The code for your authenticator is shown once, and it is no longer on this screen.</p>
+          <p>
+            You cannot sign in until your authenticator is set up. Ask an administrator to reset
+            your authenticator; they will send you a new link.
+          </p>
         </FormPage>
       </>
     );

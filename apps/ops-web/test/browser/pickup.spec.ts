@@ -1,6 +1,12 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
-import { tabReachesLinks, watchPage, wcagViolations } from './support/page';
+import { watchPage, wcagViolations } from './support/page';
+import { menuEntry } from './support/shell';
+import { disturbTheFit, expectCardsOfTheFit, markNode, stillThere } from './support/fit';
+import { wordsOf } from './support/words';
+import { expectWholeInTheWindow } from './support/whole';
+import { expectNoTableScrollsSideways } from './support/tables';
 import {
   IDS,
   PLANTED_PRICE_TEXT,
@@ -68,10 +74,7 @@ async function fillBooking(page: Page): Promise<void> {
   await page.getByRole('searchbox', { name: /Search vendors/ }).fill('demo');
   await page.getByRole('searchbox', { name: /Search vendors/ }).press('Enter');
   await page.getByRole('button', { name: 'Choose: Demo Fabrics Ltd' }).click();
-  const day = page
-    .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first();
+  const day = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await day.click();
   await page.keyboard.type('03112026');
   await page.getByRole('textbox', { name: /Number of packages/ }).fill('3');
@@ -84,20 +87,25 @@ test.describe('moving through the screens', () => {
     page,
   }) => {
     const { api, watch } = await open(page, '/');
-    await page.getByRole('link', { name: 'Pickup requests' }).first().click();
+    await menuEntry(page, 'Requests').click();
     await expect(page.getByRole('heading', { level: 1, name: 'Pickup requests' })).toBeFocused();
 
-    await page.getByRole('link', { name: 'ACC-PR-7KQ2MZ' }).click();
+    await goToRequest(page, 'ACC-PR-7KQ2MZ');
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' })).toBeFocused();
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
 
-  test('a session without the key sees no entry, and the page names the key', async ({ page }) => {
+  test('a session without the key sees no entry, and the page says what it cannot do', async ({
+    page,
+  }) => {
     await open(page, '/pickup-requests', { permissions: ['staff.read'] });
 
-    await expect(page.getByText('pickup.read')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Pickup requests' })).toHaveCount(0);
+    await expect(
+      page.getByText('Your account can’t see pickup requests. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('pickup.read');
+    await expect(menuEntry(page, 'Requests')).toHaveCount(0);
   });
 });
 
@@ -106,14 +114,14 @@ test.describe('the queue', () => {
     page,
   }) => {
     const { api } = await open(page, '/pickup-requests');
-    await page.getByRole('combobox', { name: 'State' }).selectOption('DECLINED');
+    await page.getByRole('tab', { name: 'Declined' }).click();
 
     await expect(page).toHaveURL('/pickup-requests?state=DECLINED');
     await expect(page.getByRole('heading', { name: 'No pickup requests match' })).toBeVisible();
     expect(api.calls.some((call) => call.search === '?state=DECLINED')).toBe(true);
 
     await page.getByRole('button', { name: 'Show every request' }).click();
-    await expect(page.getByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+    await expect(opener(page, 'ACC-PR-7KQ2MZ')).toBeVisible();
   });
 
   test('says when there are no requests at all', async ({ page }) => {
@@ -124,27 +132,72 @@ test.describe('the queue', () => {
 });
 
 /**
- * The queue draws every request twice, as a row of a table and as a card, and the stylesheet shows the one that fits the room the results have
- * (queue-table.css): a table from 64rem, cards below. What is not shown is `display: none`, so a role query finds one drawing and never both.
- * The room is the results region and not the screen: at 1280 px the docked menu leaves 976 px, which is cards, and a collapsed menu leaves enough
- * for the table.
+ * The queue is drawn by the queue workspace template (redesign step R6): a table where the table's own box has room (40rem) and cards where it has not, the table and the cards
+ * never both in the page, a request opened in a panel beside it. The room is the table's box and not the screen: at 1280 px the docked menu leaves 984 px, which is a table, and
+ * with the panel open beside it the table has less. The kit's browser specs hold the template's look (WCAG 2.2 in both themes, 320 px, 200% text, forced colours); these hold
+ * what the pickup queue adds to it.
  */
-const WIDE = { width: 1440, height: 900 } as const; // 1136 px of room beside the menu: a table
+const WIDE = { width: 1440, height: 900 } as const; // 1144 px of room beside the menu: a table
 const NARROW = { width: 390, height: 844 } as const;
 const PHONE = { width: 320, height: 640 } as const;
 const CODE = 'ACC-PR-7KQ2MZ';
 
 const queueTable = (page: Page) => page.getByRole('table', { name: 'Pickup requests' });
 const queueCards = (page: Page) => page.getByRole('list', { name: 'Pickup requests' });
+/** The box of the queue's rows: it holds the table or the cards, whichever is drawn. */
+const queueRegion = (page: Page) => page.getByRole('region', { name: 'Pickup requests' });
+
+/** The columns of the queue's table, in order, for a session that may confirm (the last is the row's own act). */
+const QUEUE_COLUMNS = [
+  'Request / sender',
+  'State',
+  'Service date',
+  'Pickup address / hub',
+  'Packages / booking type',
+  'Needs',
+  'Actions',
+];
+
+/** The button that opens a request, which the table draws in its row and the cards in each card. */
+const opener = (page: Page, code: string) =>
+  page.getByRole('button', { name: new RegExp(`^Open ${code}, `) });
+
+/** The officer opens a request from its row, in the panel beside the queue, and goes to its own page by the panel's "Open full page". */
+async function goToRequest(page: Page, code: string): Promise<void> {
+  await opener(page, code).click();
+  await page
+    .getByRole('dialog', { name: code })
+    .getByRole('link', { name: 'Open full page' })
+    .click();
+}
+
+/** The heavier acts of a request are in the menu of its header: the menu is opened and the act chosen, and the act brings its own question or form. */
+async function chooseAct(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: /^More actions for / }).click();
+  await page.getByRole('menuitem', { name }).click();
+}
 
 const LONG_ADDRESS =
   'Plot 14, Block C, off the Independence Avenue service road beside the old demo bakery, Ridge, Accra, Greater Accra Region';
 const LONG_SENDER = 'Demo Fabrics and Household Linen Wholesale Trading Company Limited';
 
+/**
+ * The queue as it is: its two requests and the one that waits for an approval of its one-package exception, whose note ("One-package exception waiting for approval") is the longest words the queue says.
+ * Without that request a test of the words has nothing long to break.
+ */
+const asItIs = (): Partial<World> => ({
+  requests: [
+    ...world().requests,
+    { ...waiting(IDS.colleague), id: IDS.single, code: 'ACC-PR-2SY7Z5' },
+  ],
+});
+
 /** Two requests with long words where they are likely to be: an address, a sender, and the two notes a queue says in words. */
 const longWorld = (): Partial<World> => ({
   requests: [
+    // A late booking waiting for its decision is a confirmed request (task C1.1: a request cancelled since is not asked to be decided).
     pickup({
+      state: 'CONFIRMED',
       declared_package_count: 1,
       sender: LONG_SENDER,
       address: LONG_ADDRESS,
@@ -160,60 +213,16 @@ const longWorld = (): Partial<World> => ({
   ],
 });
 
-/** What is wider than its own box among what the queue shows: a word cut off, or a region that scrolls where its text should wrap. */
-function overflowingInQueue(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    [
-      ...document.querySelectorAll<HTMLElement>(
-        '.ui-queue-table__results th, .ui-queue-table__results td, .ui-queue-table__card, .ui-table__scroller',
-      ),
-    ]
-      .filter((element) => element.getClientRects().length > 0)
-      .filter((element) => element.scrollWidth > element.clientWidth + 1)
-      .map(
-        (element) =>
-          `${element.tagName.toLowerCase()} ${element.textContent.trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
-      ),
-  );
-}
-
-/** The terms of the cards that run onto a second line: "Packages / booking type" breaking where it has a whole line to itself. */
-function wrappedTerms(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    [...document.querySelectorAll('.ui-queue-table__card dt')]
-      .filter((term) => term.getClientRects().length > 0)
-      .filter((term) => {
-        const range = document.createRange();
-        range.selectNodeContents(term);
-        return range.getClientRects().length > 1;
-      })
-      .map((term) => term.textContent),
-  );
-}
-
 test.describe('the queue, drawn for the room it has', () => {
   // Break caught: a table squeezed into a room it cannot be read in, or both drawings exposed at once, which reads every request twice.
-  test('draws a table of six columns where there is room, and keeps the cards out of the accessibility tree', async ({
-    page,
-  }) => {
+  test('draws a table of six columns where there is room, and no cards', async ({ page }) => {
     await page.setViewportSize(WIDE);
     const { api, watch } = await open(page, '/pickup-requests');
 
     await expect(queueTable(page)).toBeVisible();
-    await expect(queueTable(page).getByRole('columnheader')).toHaveText([
-      'Request / sender',
-      'State',
-      'Service date',
-      'Pickup address / hub',
-      'Packages / booking type',
-      'Needs',
-    ]);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
     await expect(queueCards(page)).toHaveCount(0);
-    // Drawn and hidden, not left out: without this, a test that found no cards would prove nothing.
-    await expect(
-      page.getByRole('list', { name: 'Pickup requests', includeHidden: true }),
-    ).toHaveCount(1);
-    await expect(page.getByRole('link', { name: CODE })).toHaveCount(1);
+    await expect(opener(page, CODE)).toHaveCount(1);
     await expect(page.getByRole('main').getByRole('link', { name: 'Book a pickup' })).toBeVisible();
     // The queue is asked for as it always was: no filter, no token, whatever the drawing.
     const asked = api.calls.filter((call) => call.path === '/api/v1/pickup-requests');
@@ -222,7 +231,26 @@ test.describe('the queue, drawn for the room it has', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('draws a list of cards where there is not, and keeps the table out of the accessibility tree', async ({
+  // Break caught (the review of 499399c): the queue drawn as cards at 1280 px with the menu open, a box of about 61rem, though its table has room for most of its columns: a table that
+  // keeps its columns from 40rem up and is cards only under that. Replaces "keeps the table, with every column" (run 7, Stage 1.1): the prose columns now keep 8rem each (the words stay whole),
+  // so the box of 61rem takes the packages, the most lesser column, away to make that room, and keeps every other column.
+  test('keeps the table, without its packages, at 1280 px with the menu open, and no cards', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const { watch } = await open(page, '/pickup-requests');
+
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(
+      QUEUE_COLUMNS.filter((name) => name !== 'Packages / booking type'),
+    );
+    await expect(queueCards(page)).toHaveCount(0);
+    await expect(opener(page, CODE)).toHaveCount(1);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  test('draws a list of cards where there is not, with every fact of a request and no table', async ({
     page,
   }) => {
     await page.setViewportSize(NARROW);
@@ -232,14 +260,14 @@ test.describe('the queue, drawn for the room it has', () => {
     await expect(cards).toBeVisible();
     await expect(cards.getByRole('listitem')).toHaveCount(2);
     await expect(queueTable(page)).toHaveCount(0);
-    await expect(
-      page.getByRole('table', { name: 'Pickup requests', includeHidden: true }),
-    ).toHaveCount(1);
-    await expect(page.getByRole('link', { name: CODE })).toHaveCount(1);
+    await expect(opener(page, CODE)).toHaveCount(1);
     await expect(page.getByRole('main').getByRole('link', { name: 'Book a pickup' })).toBeVisible();
     const first = cards.getByRole('listitem').first();
+    // Each card keeps a heading, its code, for heading navigation (it is outside the card's button, whose content is presentational).
     await expect(first.getByRole('heading', { level: 2 })).toHaveText(CODE);
+    await expect(cards.getByRole('heading', { level: 2 })).toHaveCount(2);
     for (const fact of [
+      CODE,
       'Waiting for confirmation',
       'Demo Fabrics Ltd',
       'Tue 3 Nov 2026',
@@ -250,32 +278,44 @@ test.describe('the queue, drawn for the room it has', () => {
     ]) {
       await expect(first).toContainText(fact);
     }
+    // Break caught (the review of 499399c): the card's words about 5px from the edge of the glass. The card has its own inner padding (space-4, 16px) where it starts.
+    const inset = await first.evaluate((card) => {
+      const body = card.querySelector('.ui-data-table__card-body');
+      if (body === null) throw new Error('the card has no body');
+      return body.getBoundingClientRect().left - card.getBoundingClientRect().left;
+    });
+    expect(inset).toBeGreaterThanOrEqual(16);
     expect(watch.problems).toEqual([]);
   });
 
-  // Break caught: a drawing hidden in a way that leaves it in the Tab order and the accessibility tree (`opacity: 0`, no height, off the
-  // screen), so that a keyboard walks through every request twice, the second time unseen. A `display: none` element cannot take focus at all.
-  for (const [shown, size, hidden] of [
-    ['a table', WIDE, '.ui-queue-table__cards'],
-    ['cards', NARROW, '.ui-queue-table__table'],
-  ] as const) {
-    test(`takes no focus in the drawing that is not shown, beside ${shown}`, async ({ page }) => {
-      await page.setViewportSize(size);
-      await open(page, '/pickup-requests');
-      const link = page.getByRole('link', { name: CODE });
-      await link.focus();
-      await expect(link).toBeFocused();
+  // Break caught (the Product Owner, 9 November 2026): the views of the queue running off a narrow screen with nothing to say so, or the current view (the address names it) left
+  // behind the edge: the end that is cut off fades, and the current view is whole inside the row.
+  for (const width of [320, 390]) {
+    test(`fades the cut-off end of the views, and brings the current view into view, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      const { watch } = await open(page, '/pickup-requests');
+      const row = page.locator('.ui-view-tabs__scroll');
+      await expect(row).toHaveAttribute('data-fade', 'end');
+      // The first page has loaded its fonts before the second is asked for: a font still on its way when the page is left is a request that WebKit reports as cancelled ("Load request cancelled"),
+      // which the page watcher counts as a failure of the page and is the test's own navigation (the engines run of 10 November 2026).
+      await page.evaluate(() => document.fonts.ready);
 
-      const out = page.locator(hidden);
-      await expect(out).toBeHidden();
-      const took = await out.locator('a, [tabindex="0"]').evaluateAll((elements) =>
-        elements.map((element) => {
-          (element as HTMLElement).focus();
-          return document.activeElement === element;
-        }),
+      await page.goto('/pickup-requests?state=CANCELLED');
+      const current = page.getByRole('tab', { name: /^Cancelled/ });
+      await expect(current).toHaveAttribute('aria-selected', 'true');
+      await expect(row).toHaveAttribute('data-fade', 'start');
+      const room = await row.boundingBox();
+      const tab = await current.boundingBox();
+      expect(room).not.toBeNull();
+      expect(tab).not.toBeNull();
+      expect(tab?.x ?? -1).toBeGreaterThanOrEqual((room?.x ?? 0) - 0.5);
+      expect((tab?.x ?? 0) + (tab?.width ?? 0)).toBeLessThanOrEqual(
+        (room?.x ?? 0) + (room?.width ?? 0) + 0.5,
       );
-      expect(took.length).toBeGreaterThan(0);
-      expect(took.filter(Boolean)).toEqual([]);
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      expect(watch.problems).toEqual([]);
     });
   }
 
@@ -283,53 +323,62 @@ test.describe('the queue, drawn for the room it has', () => {
     ['a table', WIDE],
     ['cards', NARROW],
   ] as const) {
-    test(`reaches the code of each request by Tab, and opens it with Enter, beside ${shown}`, async ({
+    // Break caught: a request that cannot be reached and opened from the keyboard, or one that opens the page where it should open the panel.
+    test(`reaches each request by the keyboard, and opens it in the panel with Enter, beside ${shown}`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
       await open(page, '/pickup-requests');
-      // The page is ready before the engine is asked: a Tab pressed before the application has drawn reaches no link in any engine, and the
-      // test would be skipped for a reason that is not the engine's.
-      await expect(page.getByRole('link', { name: CODE })).toBeVisible();
-      const reaches = await tabReachesLinks(page);
-      test.skip(!reaches, 'This engine does not move focus to a link with Tab (support/page.ts).');
-      const link = page.getByRole('link', { name: CODE });
-      await expect(link).toBeVisible();
+      await expect(opener(page, CODE)).toBeVisible();
 
-      await page.getByRole('combobox', { name: 'State' }).focus();
-      for (let step = 0; step < 20; step += 1) {
-        if (await link.evaluate((element) => element === document.activeElement)) break;
+      await page.getByRole('button', { name: 'Filter', exact: true }).focus();
+      for (let step = 0; step < 12; step += 1) {
+        if (await opener(page, CODE).evaluate((element) => element === document.activeElement))
+          break;
         await page.keyboard.press('Tab');
       }
-      await expect(link).toBeFocused();
-      // The next stop is the next request's code, and nothing of the other drawing comes between.
-      await page.keyboard.press('Tab');
-      await expect(page.getByRole('link', { name: 'ACC-PR-9WXH4T' })).toBeFocused();
-      await page.keyboard.press('Shift+Tab');
+      await expect(opener(page, CODE)).toBeFocused();
+      // The arrows move between requests (the table has one stop in the Tab order), and Enter opens the one the officer is on.
+      await page.keyboard.press('ArrowDown');
+      await expect(opener(page, 'ACC-PR-9WXH4T')).toBeFocused();
+      await page.keyboard.press('ArrowUp');
       await page.keyboard.press('Enter');
 
-      await expect(page).toHaveURL(DETAIL);
-      await expect(page.getByRole('heading', { level: 1, name: CODE })).toBeFocused();
+      await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+      await expect(page).toHaveURL('/pickup-requests');
     });
 
     // Break caught: a request opened by a script on the row (no new tab, no copy of the address), instead of by a link.
-    test(`opens a request in a new tab with a modifier-click, and in place with a plain click, beside ${shown}`, async ({
+    test(`opens a request's own page in a new tab with a modifier-click on the panel's link, and in place with a plain click, beside ${shown}`, async ({
       page,
       context,
     }) => {
       await page.setViewportSize(size);
-      // The stand-in answers for the whole context, so that the new tab has an API as well and stays on the request it was opened for: a tab
-      // with none would be sent to sign in, in some engines before a test could look at it.
+      // The stand-in answers for the whole context, so that the new tab has an API as well and stays on the request it was opened for.
       await stubPickupApi(context, world());
       await page.goto('/pickup-requests');
-      const link = page.getByRole('link', { name: CODE });
+      await opener(page, CODE).click();
+      const link = page
+        .getByRole('dialog', { name: CODE })
+        .getByRole('link', { name: 'Open full page' });
       await expect(link).toHaveAttribute('href', DETAIL);
 
       const [tab] = await Promise.all([
         context.waitForEvent('page'),
         link.click({ modifiers: ['ControlOrMeta'] }),
       ]);
-      await expect(tab.getByRole('heading', { level: 1, name: CODE })).toBeVisible();
+      // A fresh tab on the development server loads every module of the application one request at a time, which the default 5 s of an assertion (for a page that is open) does
+      // not allow on a machine with two processors: the wait for the new tab's first paint is stated, for the development projects only (the production build loads at once). The wait
+      // is as long as the test's own 30 s, which would end the test first and make the wait count for nothing: the development projects are slow tests (three times the time) and
+      // the production build is not (the review of 499399c).
+      const development = test.info().project.name.includes('-dev-');
+      test.slow(
+        development,
+        'A fresh tab on the development server loads every module one request at a time.',
+      );
+      const loading = { timeout: development ? 30_000 : 5_000 };
+      await tab.waitForLoadState('load', loading);
+      await expect(tab.getByRole('heading', { level: 1, name: CODE })).toBeVisible(loading);
       await expect(tab).toHaveURL(DETAIL);
       await tab.close();
       await expect(page).toHaveURL('/pickup-requests');
@@ -339,51 +388,23 @@ test.describe('the queue, drawn for the room it has', () => {
     });
   }
 
-  // Break caught: a query on the width of the screen, which would show the same drawing at 1280 px whether the menu was open or shut, and
-  // squeeze the table into the room the menu leaves.
-  test('follows the room the queue has, so that shutting the menu changes the drawing', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1280, height: 800 }); // 976 px beside the open menu, 1104 px beside the rail
-    await open(page, '/pickup-requests');
-
-    await expect(queueCards(page)).toBeVisible();
-    await expect(queueTable(page)).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Collapse menu' }).click();
-    await expect(queueTable(page)).toBeVisible();
-    await expect(queueCards(page)).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Expand menu' }).click();
-    await expect(queueCards(page)).toBeVisible();
-    await expect(queueTable(page)).toHaveCount(0);
-  });
-
   // Break caught: a long address or note cut off, hidden behind a tooltip, or pushed past the edge of the screen (the page scrolling sideways).
   for (const size of [WIDE, { width: 1280, height: 800 }, NARROW, PHONE]) {
-    test(`keeps a long address, sender and note whole, wrapped, with no sideways scrolling at ${String(size.width)} px`, async ({
+    test(`keeps a long address, sender and note whole, with no sideways scrolling at ${String(size.width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
       await open(page, '/pickup-requests', longWorld());
 
-      const address = page.getByText(LONG_ADDRESS).locator('visible=true');
-      await expect(address).toHaveCount(2);
+      // One drawing at a time (a row, or a card) of each of the two requests.
+      await expect(page.getByText(LONG_ADDRESS).locator('visible=true')).toHaveCount(2);
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
       await expect(page.getByText('Late booking to decide').locator('visible=true')).toHaveCount(1);
       await expect(
         page.getByText('One-package exception waiting for approval').locator('visible=true'),
       ).toHaveCount(1);
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
-      expect(await overflowingInQueue(page)).toEqual([]);
-      expect(await wrappedTerms(page)).toEqual([]);
-      const box = await address.first().boundingBox();
-      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.width);
-      // Wrapped, not truncated: the text is on more than one line, and no element clips it.
-      expect(box?.height ?? 0).toBeGreaterThan(30);
-      expect(
-        await address.first().evaluate((element) => getComputedStyle(element).textOverflow),
-      ).toBe('clip');
+      expect(await clippedControls(page)).toEqual([]);
     });
   }
 
@@ -404,69 +425,58 @@ test.describe('the queue, drawn for the room it has', () => {
       await expect(queueTable(page)).toHaveCount(0);
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
       expect(await clippedControls(page)).toEqual([]);
-      expect(await overflowingInQueue(page)).toEqual([]);
-      expect(await wrappedTerms(page)).toEqual([]);
     });
   }
 
-  // Break caught: a queue with a violation that only shows in one of its drawings, or in one state's colours (the four badges are four tones).
-  test('has no WCAG 2.2 A or AA violation as a table, or as cards, with every state in it', async ({
-    page,
-  }) => {
-    const states = [
-      pickup({ id: IDS.pending, code: 'ACC-PR-7KQ2MZ', state: 'PENDING' }),
-      pickup({ id: IDS.confirmed, code: 'ACC-PR-9WXH4T', state: 'CONFIRMED' }),
-      pickup({ id: IDS.booked, code: 'ACC-PR-3TZ8A6', state: 'DECLINED' }),
-      pickup({ id: IDS.single, code: 'ACC-PR-4VA9B7', state: 'CANCELLED' }),
-    ];
+  // Break caught: a queue with a violation that only shows in one of its drawings, or in one state's colours (the four badges are four tones), or with the panel open. One test for each drawing:
+  // four scans of the page in one test took 28 s on WebKit with 30 allowed (the engines run of 10 November 2026); the time is not raised, the work is divided.
+  const everyState = () => [
+    pickup({ id: IDS.pending, code: 'ACC-PR-7KQ2MZ', state: 'PENDING' }),
+    pickup({ id: IDS.confirmed, code: 'ACC-PR-9WXH4T', state: 'CONFIRMED' }),
+    pickup({ id: IDS.booked, code: 'ACC-PR-3TZ8A6', state: 'DECLINED' }),
+    pickup({ id: IDS.single, code: 'ACC-PR-4VA9B7', state: 'CANCELLED' }),
+  ];
+
+  test('has no WCAG 2.2 A or AA violation as a table, with every state in it', async ({ page }) => {
     await page.setViewportSize(WIDE);
-    await open(page, '/pickup-requests', { requests: states });
+    await open(page, '/pickup-requests', { requests: everyState() });
     await expect(queueTable(page)).toBeVisible();
     expect(await wcagViolations(page)).toEqual([]);
+  });
 
-    for (const size of [{ width: 1280, height: 800 }, { width: 768, height: 1024 }, PHONE]) {
+  test('has no WCAG 2.2 A or AA violation with a request open beside the table, with every state in it', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests', { requests: everyState() });
+    await expect(queueTable(page)).toBeVisible();
+
+    await opener(page, CODE).click();
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+    await expect(page.getByText('It waits for an Ops officer to confirm it.')).toBeVisible();
+    expect(await wcagViolations(page), 'with the panel open').toEqual([]);
+  });
+
+  for (const size of [NARROW, PHONE]) {
+    test(`has no WCAG 2.2 A or AA violation as cards at ${String(size.width)} px, with every state in it`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(WIDE);
+      await open(page, '/pickup-requests', { requests: everyState() });
+      await expect(queueTable(page)).toBeVisible();
+
       await page.setViewportSize(size);
       await expect(queueCards(page)).toBeVisible();
       expect(await wcagViolations(page), `${String(size.width)} px`).toEqual([]);
-    }
-  });
-
-  // Break caught: a border that forced colours paints away, so that the cards run into one another, or a link whose focus ring disappears.
-  test('under forced colours the cards keep their panel’s border and their dividers, and a code its focus ring', async ({
-    page,
-    browserName,
-  }) => {
-    test.skip(browserName === 'webkit', 'Playwright cannot emulate forced colours in WebKit.');
-    await page.emulateMedia({ forcedColors: 'active' });
-    await page.setViewportSize(NARROW);
-    await open(page, '/pickup-requests');
-
-    // The list draws no border of its own inside the panel (the panel's is drawn, and held beside the table by the panel's own test).
-    const look = await queueCards(page).evaluate((list) => {
-      const panel = list.closest('.ui-queue-panel');
-      const card = list.querySelector('.ui-queue-table__card');
-      return {
-        panel: panel === null ? null : getComputedStyle(panel).borderTopStyle,
-        divider: card === null ? null : getComputedStyle(card).borderBottomStyle,
-      };
     });
-    expect(look).toEqual({ panel: 'solid', divider: 'solid' });
-
-    // By keyboard, so that the focus is a keyboard user's, which shows its ring.
-    const link = page.getByRole('link', { name: CODE });
-    await link.focus();
-    await page.keyboard.press('Shift+Tab');
-    await page.keyboard.press('Tab');
-    await expect(link).toBeFocused();
-    expect(await link.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe('solid');
-  });
+  }
 
   test('with reduced motion nothing in the queue moves, in either drawing', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     for (const size of [WIDE, NARROW]) {
       await page.setViewportSize(size);
       await open(page, '/pickup-requests');
-      await expect(page.getByRole('link', { name: CODE })).toBeVisible();
+      await expect(opener(page, CODE)).toBeVisible();
 
       const running = await page.evaluate(
         () =>
@@ -476,8 +486,7 @@ test.describe('the queue, drawn for the room it has', () => {
     }
   });
 
-  // Break caught: a pager whose button is gone while the next page loads and drops focus on the document, or a results region that no longer
-  // takes focus now that it holds two drawings.
+  // Break caught: a pager whose button is gone while the next page loads and drops focus on the document, or a results region that no longer takes focus.
   for (const [shown, size] of [
     ['a table', WIDE],
     ['cards', NARROW],
@@ -490,21 +499,757 @@ test.describe('the queue, drawn for the room it has', () => {
       await expect(
         page.getByText('Showing 1 request. More follow on the next page.'),
       ).toBeVisible();
-      await expect(page.getByRole('link', { name: CODE })).toBeVisible();
+      await expect(opener(page, CODE)).toBeVisible();
 
       await page.getByRole('button', { name: 'Next page' }).click();
 
       await expect(page.getByText('Showing 1 request on page 2.')).toBeVisible();
-      await expect(page.getByRole('link', { name: 'ACC-PR-9WXH4T' })).toBeVisible();
-      await expect(page.getByRole('link', { name: CODE })).toHaveCount(0);
-      await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+      await expect(opener(page, 'ACC-PR-9WXH4T')).toBeVisible();
+      await expect(opener(page, CODE)).toHaveCount(0);
+      await expect(page.locator('.ui-data-table__scroller')).toBeFocused();
       expect(api.calls.some((call) => call.search === '?page_token=1')).toBe(true);
 
       await page.getByRole('button', { name: 'Previous page' }).click();
-      await expect(page.getByRole('link', { name: CODE })).toBeVisible();
+      await expect(opener(page, CODE)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Previous page' })).toHaveCount(0);
     });
   }
+});
+
+/**
+ * The parts that stay in view, the long text and the room the queue has (run 4, Stage 2; the review of 5edada2, M2, M5 and M6). Forty requests make the queue taller than the window.
+ */
+/** The characters an operational code is made of: none that can be confused when read aloud (no 0, 1, I, L or O). */
+const CODE_CHARACTERS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const TALL = Array.from({ length: 40 }, (_, index) =>
+  pickup({
+    id: `5e0b0000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    code: `ACC-PR-${CODE_CHARACTERS.charAt(index % 31)}${CODE_CHARACTERS.charAt(Math.floor(index / 31))}22QX`,
+    scheduled_service_date: '2026-11-03',
+  }),
+);
+
+/** What in the queue is wider than its own box: a cell, a card or the box of the rows itself, cut off or scrolling where its words should wrap. */
+function overflowingInQueue(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        '.ui-data-table__scroller, .ui-data-table__scroller th, .ui-data-table__scroller td, .ui-data-table__card',
+      ),
+    ]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => element.scrollWidth > element.clientWidth + 1)
+      .map(
+        (element) =>
+          `${element.tagName.toLowerCase()} ${element.textContent.trim().slice(0, 30)}: ${String(element.scrollWidth)} > ${String(element.clientWidth)}`,
+      ),
+  );
+}
+
+/** What in the queue is cut off with an ellipsis: nothing that is a name, an address or a note may be. */
+function ellipsisedInQueue(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.ui-data-table__scroller *')]
+      .filter((element) => element.getClientRects().length > 0)
+      .filter((element) => getComputedStyle(element).textOverflow === 'ellipsis')
+      .map((element) => element.textContent.trim().slice(0, 30)),
+  );
+}
+
+test.describe('the queue: the parts that stay in view, long text and the room it has', () => {
+  // Break caught: a panel that sticks 16px from the top of the window, under the sticky top bar, so that its header (the code, "Open full page", the close button) is covered once the
+  // queue has scrolled; and a panel taller than the room below the bar, whose last act cannot be reached.
+  test('keeps the panel below the top bar and whole in the window while the queue scrolls, its last act in reach', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await open(page, '/pickup-requests', { requests: TALL });
+    const code = TALL.at(0)?.code ?? '';
+    await opener(page, code).click();
+    const panel = page.getByRole('dialog', { name: code });
+    await expect(panel).toBeVisible();
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+
+    const bar = await page.getByRole('banner').boundingBox();
+    const box = await panel.boundingBox();
+    const barBottom = (bar?.y ?? 0) + (bar?.height ?? 0);
+    expect(barBottom).toBeGreaterThan(40);
+    // Its top is not under the bar, and the whole of it is in the window.
+    expect(box?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(640 + 1);
+    await expectWholeInTheWindow(page, panel.getByRole('link', { name: 'Open full page' }));
+    await expectWholeInTheWindow(page, panel.getByRole('button', { name: 'Close the panel' }));
+    // The act of the panel is reached by scrolling the panel, never by scrolling the page out from under it.
+    const confirm = panel.getByRole('button', { name: 'Confirm pickup' });
+    await confirm.scrollIntoViewIfNeeded();
+    await expectWholeInTheWindow(page, confirm);
+    const after = await confirm.boundingBox();
+    expect(after?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
+  });
+
+  // Break caught (the review of 5edada2, M5): a cell that never wraps, so that a long address or a long name runs out of its box, is cut with an ellipsis or makes the box scroll sideways
+  // (the old table's guards, which run 3 removed): the text is on the page whole, in the box it has, at every width and with the panel open.
+  for (const size of [WIDE, { width: 1280, height: 800 }, { width: 768, height: 1024 }]) {
+    test(`wraps a long address, name and note whole, and never cuts it off or scrolls the box sideways, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, '/pickup-requests', longWorld());
+
+      // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). At 768px the table either fits
+      // without it, and then no address is on the page, or has nothing more to give, and then the requests are cards, which carry every fact of a request, the address among them. Which of the
+      // two the page reaches depends on the face the table was first measured in (that measure is made in the fallback face, and a list that went to cards stays cards: `useColumnFit`): the
+      // production build reached the table and the development server, which sends the face later, reached cards (the hosted run of 12 November 2026). Both keep the rule, so both are held here,
+      // and so is what matters in either: wherever the address is drawn, it is drawn whole. Wider than 768px it is drawn, in the table or in the cards of a table that ran out of room.
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
+      await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
+      const address = page.getByText(LONG_ADDRESS).locator('visible=true');
+      if (size.width > 768) await expect(address).toHaveCount(2);
+      else await expect.poll(async () => [0, 2].includes(await address.count())).toBe(true);
+      const drawsAddress = (await address.count()) > 0;
+      // No table scrolls sideways, at 768px either (restored: the narrowed check of 7aa6135 let the box scroll there and held only that no cell cut its words off), and the page never does.
+      expect(await overflowingInQueue(page)).toEqual([]);
+      expect(await ellipsisedInQueue(page)).toEqual([]);
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      // Wrapped, not truncated: the address takes more than one line and the box holds it.
+      if (drawsAddress) {
+        const box = await address.first().boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThan(30);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.width);
+      }
+    });
+  }
+
+  test('keeps a long name and address whole with a request open beside the queue', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests', longWorld());
+    await opener(page, CODE).click();
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+
+    await expect(page.getByText(LONG_SENDER).locator('visible=true').first()).toBeVisible();
+    expect(await overflowingInQueue(page)).toEqual([]);
+    expect(await ellipsisedInQueue(page)).toEqual([]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+
+    // Wrapped cells are not clamped (the Product Owner, 9 November 2026): with the panel open the sender takes as many lines as its words need, and its cell is as tall as those lines.
+    const sender = queueTable(page).getByText(LONG_SENDER).first();
+    const senderBox = await sender.boundingBox();
+    const cellBox = await sender
+      .locator('xpath=ancestor::*[self::th or self::td][1]')
+      .boundingBox();
+    expect(senderBox?.height ?? 0).toBeGreaterThan(30);
+    expect((senderBox?.y ?? 0) + (senderBox?.height ?? 0)).toBeLessThanOrEqual(
+      (cellBox?.y ?? 0) + (cellBox?.height ?? 0) + 1,
+    );
+    // Nothing is hidden by a line count or a height: neither the text's element nor its cell holds more than it shows.
+    const hidden = await sender.evaluate((element) =>
+      [element, element.closest('th, td')].map((box) =>
+        box === null ? 0 : box.scrollHeight - box.clientHeight,
+      ),
+    );
+    expect(hidden.every((height) => height <= 1)).toBe(true);
+  });
+
+  // Break caught (the Product Owner, 10 and 11 November 2026: no table scrolls sideways, and a table never breaks a word; the review of f6cf02b: the queue at 768px kept every column in a box of 41rem, which
+  // scrolled sideways with the act and what a request needs out of view): a queue that keeps a column it has no room for, or one that keeps its table when every lesser column is gone and the box still
+  // overflows, so that "exception" breaks as "exceptio / n". At 768px (a box of 41rem) the table has nothing more to give, and the requests are cards: every fact of a request in them, the button that
+  // opens each, the act of each in view, and no table beside them.
+  test('draws cards at 768px with no request open, where the table has nothing more to give, with every fact of a request and no sideways scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/pickup-requests');
+
+    await expectCardsOfTheFit(queueRegion(page));
+    await expect(queueCards(page)).toBeVisible();
+    await expect(queueTable(page)).toHaveCount(0);
+    const first = queueCards(page).getByRole('listitem').first();
+    for (const fact of [
+      CODE,
+      'Waiting for confirmation',
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+      'Accra Central',
+    ]) {
+      await expect(first).toContainText(fact);
+    }
+    await expect(opener(page, CODE)).toHaveCount(1);
+    // The act of the request is in view: nothing is scrolled out of reach.
+    await expectWholeInTheWindow(page, first.getByRole('button', { name: `Confirm ${CODE}` }));
+    expect(await overflowingInQueue(page)).toEqual([]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('draws cards with every fact under 40rem with no request open, at 640px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 640, height: 900 });
+    await open(page, '/pickup-requests');
+
+    const cards = queueCards(page);
+    await expect(cards).toBeVisible();
+    await expect(queueTable(page)).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    // Each card keeps a heading, its code, for heading navigation (it is outside the card's button, whose content is presentational).
+    await expect(first.getByRole('heading', { level: 2 })).toHaveText(CODE);
+    await expect(cards.getByRole('heading', { level: 2 })).toHaveCount(2);
+    for (const fact of [
+      CODE,
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+      'Accra Central',
+      '3 packages',
+      'A vendor’s own packages',
+    ]) {
+      await expect(first).toContainText(fact);
+    }
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  test('keeps the table, without its lesser columns, with a request open beside it at 1440px', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests');
+    await expect(queueTable(page)).toBeVisible();
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Service date' }),
+    ).toBeVisible();
+
+    await opener(page, CODE).click();
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+
+    // What the columns of lesser weight hold is in the panel, so the table gives them up and does not scroll sideways. The service date is not lesser (the Product Owner, 10 November 2026):
+    // it stays with the state.
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueTable(page).getByRole('columnheader', { name: 'State' })).toBeVisible();
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Service date' }),
+    ).toBeVisible();
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Pickup address / hub' }),
+    ).toHaveCount(0);
+    await expect(
+      queueTable(page).getByRole('columnheader', { name: 'Packages / booking type' }),
+    ).toHaveCount(0);
+    expect(await overflowingInQueue(page)).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 1.6; replaces two unit tests that read an attribute no component draws any more and a layout jsdom cannot measure, so that they could not fail): the crowding of the queue
+  // decided by whether a panel is open (a template that keeps the columns the panel has no room for, or one that drops them with nothing open), when it is the table's own box that decides. Opening
+  // the panel narrows the box and the lesser columns go; closing it widens the box and they come back; the table never scrolls sideways in either.
+  test('drops the lesser columns when a request is opened beside the queue at 1440px, and brings them back when it is closed', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests');
+    const header = (name: string) => queueTable(page).getByRole('columnheader', { name });
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+
+    await opener(page, CODE).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await expect(panel).toBeVisible();
+    await expect(header('Pickup address / hub')).toHaveCount(0);
+    await expect(header('Packages / booking type')).toHaveCount(0);
+    await expect(header('Needs')).toBeVisible();
+    expect(await overflowingInQueue(page)).toEqual([]);
+
+    await panel.getByRole('button', { name: 'Close the panel' }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(queueTable(page).getByRole('columnheader')).toHaveText(QUEUE_COLUMNS);
+    expect(await overflowingInQueue(page)).toEqual([]);
+  });
+
+  // Break caught (the Product Owner, 11 November 2026): text cells that shrink to a letter ("One-packag / e / excepti / on", a row eight lines tall), because `overflow-wrap: anywhere` lowers every
+  // cell's least width to one character, so that the fit never dropped a lesser column for text. The words keep their room (8rem for prose) and break at their spaces only; the lesser columns go
+  // first; and where a table has no more to give it is cards (**a table never breaks a word**, the Product Owner's decision on run 7, finding 1): so at every width and on every engine, with no
+  // condition, no word is broken inside and no row or card is taller than its content needs. The queue "as it is" carries the request that waits for an approval of its one-package exception, whose
+  // note is the long one: a world without it could not fail (the default world's two rows carry no such note).
+  for (const [size, world] of [
+    [{ width: 1280, height: 800 }, 'the queue as it is'],
+    [{ width: 1280, height: 800 }, 'long words'],
+    [{ width: 768, height: 1024 }, 'the queue as it is'],
+    [{ width: 768, height: 1024 }, 'long words'],
+  ] as const) {
+    test(`breaks no word inside and has no row or card taller than its content needs at ${String(size.width)} px, with ${world}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, '/pickup-requests', world === 'long words' ? longWorld() : asItIs());
+      const region = queueRegion(page);
+      await expect(region).toBeVisible();
+      // The row that makes the test able to fail is on the screen, in a table or in a card.
+      await expect(
+        region.getByText('One-package exception waiting for approval').first(),
+      ).toBeVisible();
+
+      const words = await wordsOf(region);
+      expect(words.broken).toEqual([]);
+      expect(words.tall).toEqual([]);
+      expect(await overflowingInQueue(page)).toEqual([]);
+    });
+  }
+
+  // Break caught (run 7, Stage 1.5): the card's facts inside its one button, where a button's content is presentational (a screen reader hears the label and never the state, the date, the address or
+  // what the request needs) and may be phrasing content only. The button is the card's title; the facts follow it in the tree, outside it, in the order a person reads them; and a press on the facts
+  // still opens the request, by the button's reach stretched over the card.
+  test('reads the facts of a card outside its button, and opens the request from a press on them, at 390px', async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW);
+    const { watch } = await open(page, '/pickup-requests');
+    const first = queueCards(page).getByRole('listitem').first();
+    await expect(first).toBeVisible();
+
+    const lines = (await first.ariaSnapshot()).split('\n');
+    const at = lines.findIndex((line) => line.includes(`button "Open ${CODE}, `));
+    expect(at).toBeGreaterThanOrEqual(0);
+    const indent = (line: string) => line.length - line.trimStart().length;
+    // The button is a leaf: whatever follows it is not inside it.
+    expect(lines[at]?.trimEnd().endsWith(':')).toBe(false);
+    const after = lines.slice(at + 1).join('\n');
+    for (const fact of [
+      'Waiting for confirmation',
+      'Demo Fabrics Ltd',
+      'Tue 3 Nov 2026',
+      '14 Demo Lane, Osu',
+    ]) {
+      expect(after).toContain(fact);
+    }
+    expect(
+      Math.min(
+        ...lines
+          .slice(at + 1)
+          .filter((line) => line.trim() !== '')
+          .map(indent),
+      ),
+    ).toBeLessThanOrEqual(indent(lines[at] ?? ''));
+
+    // A press on the sender, which is a fact outside the button, lands on the button's reach and opens the request.
+    const sender = first.getByText('Demo Fabrics Ltd').first();
+    const where = await sender.boundingBox();
+    expect(where).not.toBeNull();
+    await page.mouse.click(
+      (where?.x ?? 0) + (where?.width ?? 0) / 2,
+      (where?.y ?? 0) + (where?.height ?? 0) / 2,
+    );
+    await expect(page.getByRole('dialog', { name: CODE })).toBeVisible();
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+/**
+ * Confirming from the queue (run 4, Stage 3.1 to 3.3; the review of 5edada2): the row's Confirm opens the request in the panel with focus on the panel's own Confirm, and the panel
+ * confirms with the version of the read it shows. A request that changed since is told as changed, in the panel, with the way to read it again; after a confirmation the rows stay,
+ * the row that changed is told, focus is on it and the panel shows the state from the answer.
+ */
+test.describe('the queue: confirming in the panel', () => {
+  const rowButton = (page: Page) => opener(page, CODE);
+  const READ = `/api/v1/pickup-requests/${IDS.pending}`;
+
+  // Break caught: the queue's Confirm that read the request again just before it confirmed, so that a request changed in the meantime was confirmed at a version the officer never saw.
+  test('opens the panel on the row’s Confirm, asks first, confirms on the version the panel read, and shows what happened', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const { api, watch } = await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+
+    const panel = page.getByRole('dialog', { name: CODE });
+    const confirm = panel.getByRole('button', { name: 'Confirm pickup' });
+    await expect(confirm).toBeFocused();
+    expect(posts(api)).toEqual([]);
+
+    await confirm.click();
+    const question = page.getByRole('alertdialog', { name: 'Confirm this pickup?' });
+    await expect(question.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await question.getByRole('button', { name: 'Confirm the pickup' }).click();
+
+    // The request was read once, for the panel, and the act carries that read's version: it is not read again for the act.
+    await expect.poll(() => posts(api).length).toBe(1);
+    expect(posts(api)[0]?.ifMatch).toBe('"v1"');
+    expect(api.calls.filter((call) => call.method === 'GET' && call.path === READ)).toHaveLength(1);
+    // What the officer sees: the panel shows the state from the answer, the row that changed is told, and focus is on it.
+    await expect(panel.getByText('Confirmed').first()).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Confirm pickup' })).toHaveCount(0);
+    await expect(rowButton(page)).toBeFocused();
+    await expect(rowButton(page)).toHaveAccessibleDescription('Updated');
+    await expect(page.getByText(`${CODE} is confirmed.`)).toBeVisible();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  test('tells a request that changed since the panel read it as changed, in the panel, and confirms on the new version once it is read again', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const { api } = await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+    // Someone else changed the request after the panel read it: the version the panel holds is no longer the record's.
+    const row = api.world.requests.find((each) => each.id === IDS.pending);
+    if (row !== undefined) row.version += 1;
+    const question = page.getByRole('alertdialog', { name: 'Confirm this pickup?' });
+    await question.getByRole('button', { name: 'Confirm the pickup' }).click();
+    await expect(question).toContainText('changed after you opened it');
+
+    // Dismissing the question leaves the panel saying so, with the way to read the request again.
+    await question.getByRole('button', { name: 'Cancel' }).click();
+    const banner = panel.getByRole('alert');
+    await expect(banner).toContainText('changed');
+    expect(posts(api)).toHaveLength(1);
+    await banner.getByRole('button', { name: 'Reload' }).click();
+    await expect(banner).toHaveCount(0);
+
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+    await page
+      .getByRole('alertdialog', { name: 'Confirm this pickup?' })
+      .getByRole('button', { name: 'Confirm the pickup' })
+      .click();
+    await expect.poll(() => posts(api).length).toBe(2);
+    expect(posts(api)[1]?.ifMatch).toBe('"v2"');
+  });
+
+  /**
+   * Confirms the request in its panel and, while the queue is read again for it (the read is held until `release`), opens another request in the panel: the officer is working in that one when the
+   * read lands. `settled` waits for the end of the read and for the effect it runs.
+   */
+  async function confirmThenOpenAnother(page: Page) {
+    await page.setViewportSize(WIDE);
+    const other = 'ACC-PR-9WXH4T';
+    const { api, watch } = await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+
+    // From here the queue's read is held: the read the act asks for is under way until the test lets it go.
+    const busy = page.locator('.ui-data-table__scroller[aria-busy="true"]');
+    const queueRead = /\/api\/v1\/pickup-requests(\?.*)?$/;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = 0;
+    await page.route(queueRead, async (route) => {
+      held += 1;
+      await gate;
+      await route.fallback();
+    });
+    await page
+      .getByRole('alertdialog', { name: 'Confirm this pickup?' })
+      .getByRole('button', { name: 'Confirm the pickup' })
+      .click();
+    await expect.poll(() => posts(api).length).toBe(1);
+    await expect.poll(() => held).toBe(1);
+    await expect(busy).toHaveCount(1);
+
+    // The officer moves on while the queue is read again: another request opens in the panel, and its heading has focus.
+    await opener(page, other).click();
+    const next = page.getByRole('dialog', { name: other });
+    await expect(next.getByRole('heading', { name: other })).toBeFocused();
+
+    return {
+      watch,
+      other,
+      next,
+      settled: async () => {
+        release();
+        await expect(busy).toHaveCount(0);
+        // Two frames, so that the effect the end of the read runs is behind us.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  resolve();
+                });
+              });
+            }),
+        );
+      },
+    };
+  }
+
+  // Break caught (run 7, Stage 2.1; a regression of 765e873): the page took every container at tabindex -1 that is no control for focus nobody chose, and the panel's heading is one. An officer who
+  // confirms one request and opens another while the queue is read again was taken from the second request's panel back to the first one's row. Run on WebKit too, where the panel's content region
+  // (also tabindex -1, and marked by the kit) is where focus lands after the press that confirmed, which the page must still read as nobody's.
+  test('leaves focus on the heading of the request opened while the queue is read again after an act', async ({
+    page,
+  }) => {
+    const { watch, other, next, settled } = await confirmThenOpenAnother(page);
+
+    await settled();
+    await expect(next.getByRole('heading', { name: other })).toBeFocused();
+    await expect(rowButton(page)).not.toBeFocused();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  // Break caught (the Product Owner's review of 67bc979, finding 4): a press on plain text in the panel of the request opened meanwhile focuses that panel's read-state region (the nearest element that
+  // can have focus: Chromium and Firefox; WebKit does the same for text), which carries the mark that says "nobody's", so that the read that landed took focus from the panel the officer is working in
+  // back to the row of the request they had confirmed a moment before. Focus anywhere inside a panel is the officer's, whatever holds it.
+  test('leaves focus in the panel of the request opened while the queue is read again, where the officer pressed on its text', async ({
+    page,
+  }) => {
+    const { watch, next, settled } = await confirmThenOpenAnother(page);
+    const inThePanel = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          active !== null &&
+          active !== document.body &&
+          active.closest('[role="dialog"]') !== null &&
+          active.tagName !== 'H2'
+        );
+      });
+
+    // A press on a fact of the request: text that is no control. The nearest element that can have focus is the panel's region.
+    await next.getByRole('definition').first().click();
+    expect(await inThePanel()).toBe(true);
+
+    await settled();
+    expect(await inThePanel()).toBe(true);
+    await expect(rowButton(page)).not.toBeFocused();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  // Break caught (the Product Owner's review of 67bc979, finding 2): the queue at 768 px is cards because its table ran out of room, and every change of rows, face loaded or width of the box drew
+  // the table again to measure it, which drew every card again: the card whose Confirm opened the panel was gone when the panel was dismissed, and focus went to the document.
+  test('at 768 px, gives focus back to the card whose Confirm opened the panel, though the table would have measured itself again meanwhile', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/pickup-requests', asItIs());
+    await expectCardsOfTheFit(queueRegion(page));
+    const confirm = page.getByRole('button', { name: `Confirm ${CODE}` });
+    await markNode(confirm, 'data-test-opener');
+    await confirm.click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await expect(panel).toBeVisible();
+
+    await disturbTheFit(page);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    expect(await stillThere(page, 'data-test-opener')).toBe(1);
+    await expect(page.locator('[data-test-opener]')).toBeFocused();
+  });
+
+  // Break caught (the same): the act made from a card at 768 px, and the cards drawn again under the officer's hand while the panel was open. At 768px the panel is a full-screen sheet, a modal dialog: the
+  // cards are behind it and inert, so focus stays in the sheet after the confirmation (the document never has it), and when the sheet is closed it goes to the card's own button, the one that was on the
+  // page when the officer began.
+  test('at 768 px, confirms from the card, and focus is in the sheet afterwards and then on that card, never on the document', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const { api } = await open(page, '/pickup-requests', asItIs());
+    await expectCardsOfTheFit(queueRegion(page));
+    await markNode(opener(page, CODE), 'data-test-card');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await panel.getByRole('button', { name: 'Confirm pickup' }).click();
+
+    await disturbTheFit(page);
+    await page
+      .getByRole('alertdialog', { name: 'Confirm this pickup?' })
+      .getByRole('button', { name: 'Confirm the pickup' })
+      .click();
+    await expect.poll(() => posts(api).length).toBe(1);
+    await expect(panel.getByText('Confirmed').first()).toBeVisible();
+
+    const inTheSheet = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          active !== null && active !== document.body && active.closest('[role="dialog"]') !== null
+        );
+      });
+    expect(await inTheSheet()).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(page.locator('[data-test-card]')).toBeFocused();
+    expect(await stillThere(page, 'data-test-card')).toBe(1);
+  });
+
+  // Break caught: the queue header's booking link taking the one primary of the view from the panel's act.
+  test('has one primary act in view: the panel’s Confirm, and the booking link as a secondary', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests');
+    await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
+    const panel = page.getByRole('dialog', { name: CODE });
+    await expect(panel.getByRole('button', { name: 'Confirm pickup' })).toBeVisible();
+
+    const colourOf = (locator: Locator) =>
+      locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const book = page.getByRole('main').getByRole('link', { name: 'Book a pickup' });
+    await expect(book).toBeVisible();
+    expect(await colourOf(book)).not.toBe(
+      await colourOf(panel.getByRole('button', { name: 'Confirm pickup' })),
+    );
+    await expect(book).toHaveClass(/ui-button--secondary/);
+  });
+});
+
+/**
+ * The request's own page and the booking, at the widths they are used at (run 4, Stage 3.4 and 3.5; the review of 5edada2).
+ */
+test.describe('one request: the record page', () => {
+  // Break caught: focus on the code heading drawn with a ring, as if the heading were a control.
+  test('lands focus on the code heading with no ring', async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, DETAIL);
+
+    const heading = page.getByRole('heading', { level: 1, name: CODE });
+    await expect(heading).toBeFocused();
+    expect(await heading.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe(
+      'none',
+    );
+  });
+
+  // Break caught (the review of 5edada2): one long column at 1280px, with who to reach and the history after the attempts, where a side column has the room.
+  for (const [width, beside] of [
+    [1440, true],
+    [1280, true],
+    [768, false],
+  ] as const) {
+    test(`puts who to reach, the history and what is related ${beside ? 'beside' : 'after'} the work at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await open(page, DETAIL);
+
+      const work = await page.getByRole('heading', { level: 2, name: 'The request' }).boundingBox();
+      const people = await page
+        .getByRole('heading', { level: 2, name: 'Who to reach, and who pays' })
+        .boundingBox();
+      const history = await page.getByRole('heading', { level: 2, name: 'History' }).boundingBox();
+      const attempts = await page
+        .getByRole('heading', { level: 2, name: 'Attempts' })
+        .boundingBox();
+      expect(work).not.toBeNull();
+      expect(people).not.toBeNull();
+      if (beside) {
+        // The side column is to the right of the work and starts at its height; the attempts stay in the work's column.
+        expect(people?.x ?? 0).toBeGreaterThan((work?.x ?? 0) + 300);
+        expect(Math.abs((people?.y ?? 0) - (work?.y ?? 0))).toBeLessThan(60);
+        expect(history?.x ?? 0).toBeGreaterThan((work?.x ?? 0) + 300);
+        expect(Math.abs((attempts?.x ?? 0) - (work?.x ?? 0))).toBeLessThan(8);
+      } else {
+        expect(Math.abs((people?.x ?? 0) - (work?.x ?? 0))).toBeLessThan(8);
+        expect(people?.y ?? 0).toBeGreaterThan(work?.y ?? 0);
+      }
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    });
+  }
+
+  // Break caught: a path the contract does not give, or an end drawn as a stage still to come.
+  test('tells where the request is on the contract’s one forward path, and the history by its own dated facts', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, DETAIL);
+
+    const tracker = page.getByRole('list', { name: 'Progress of the pickup request' });
+    await expect(tracker.getByRole('listitem')).toHaveText([
+      /Waiting for confirmation/,
+      /Confirmed/,
+    ]);
+    await expect(tracker.locator('[aria-current="step"]')).toContainText(
+      'Waiting for confirmation',
+    );
+    const history = page.getByRole('list', { name: 'History of this request, oldest first' });
+    await expect(history.getByRole('listitem')).toHaveCount(1);
+    await expect(history).toContainText('Booked');
+    await expect(history).toContainText('29 Oct, 08:15');
+  });
+});
+
+test.describe('the booking, at the widths it is used at', () => {
+  const gridColumns = (page: Page) =>
+    page.evaluate(() => {
+      const grids = [...document.querySelectorAll<HTMLElement>('.ui-task-form__grid')].filter(
+        (element) => element.getClientRects().length > 0 && element.children.length >= 2,
+      );
+      return grids.map((grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+    });
+
+  // Break caught: two columns of fields on the tablet, where the pattern says one at 768px and below.
+  for (const [width, columns] of [
+    [1440, 2],
+    [1280, 2],
+    [768, 1],
+    [390, 1],
+  ] as const) {
+    test(`lays the fields out in ${String(columns)} column${columns === 1 ? '' : 's'} at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await open(page, '/pickup-requests/new');
+      await fillBooking(page);
+
+      const counts = await gridColumns(page);
+      expect(counts.length).toBeGreaterThan(0);
+      for (const count of counts) expect(count).toBe(columns);
+    });
+  }
+
+  // Break caught: what the booking comes to read after the button that sends it, on a narrow page.
+  for (const size of [{ width: 768, height: 1024 }, NARROW]) {
+    test(`puts "After you book" before the button that books it at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, '/pickup-requests/new');
+
+      const summary = await page
+        .getByRole('heading', { level: 2, name: 'After you book' })
+        .boundingBox();
+      const submit = await page.getByRole('button', { name: 'Book the pickup' }).boundingBox();
+      expect(summary).not.toBeNull();
+      expect(submit).not.toBeNull();
+      expect(summary?.y ?? 0).toBeLessThan(submit?.y ?? 0);
+    });
+  }
+
+  test('puts "After you book" beside the sections at 1440 px, and the button under them', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/pickup-requests/new');
+
+    const summary = await page
+      .getByRole('heading', { level: 2, name: 'After you book' })
+      .boundingBox();
+    // The rail stands beside the first thing the form asks (what is being booked), and the button that books is under the sections, in the column of the sections.
+    const first = await page.getByRole('group', { name: /What is being booked/ }).boundingBox();
+    const submit = await page.getByRole('button', { name: 'Book the pickup' }).boundingBox();
+    expect(summary?.x ?? 0).toBeGreaterThan((first?.x ?? 0) + 400);
+    expect(Math.abs((summary?.y ?? 0) - (first?.y ?? 0))).toBeLessThan(80);
+    expect(submit?.x ?? 1000).toBeLessThan(summary?.x ?? 0);
+  });
+
+  // Break caught: a line of help under an option that says again what the option says.
+  test('has no help under a payer that repeats its label', async ({ page }) => {
+    await open(page, '/pickup-requests/new');
+    await fillBooking(page);
+
+    const group = page.getByRole('group', { name: /Who pays for delivery/ });
+    await expect(group).toContainText('The recipient pays');
+    await expect(group).not.toContainText('for delivery.');
+    await expect(group).not.toContainText('and the recipient the rest.');
+  });
 });
 
 const LIST = /\/api\/v1\/pickup-requests(\?.*)?$/;
@@ -530,101 +1275,10 @@ const failing = (status: number, code: string) => (route: Route) =>
   });
 
 /**
- * The filters, the count, the rows and the pager of the queue are one white panel with hairlines between them (the reference of 1 November
- * 2026; COMPONENT_PATTERNS section 22f), and whatever stands in the place of the rows (loading, nothing, a failure, a refusal) stands inside it
- * and inset from its edges. The State and Service date controls share a line, with the date's help beneath its control.
+ * The views, the filters, the count, the rows and the pager of the queue are one page card, and whatever stands in the place of the rows (loading, nothing, a failure, a
+ * refusal) stands inside it: the states of one screen are drawn on the one surface.
  */
-test.describe('the queue, set in one panel', () => {
-  const stateSelect = (page: Page) => page.getByRole('combobox', { name: 'State' });
-  const dateControl = (page: Page) => page.getByRole('group', { name: 'Service date' });
-
-  // Break caught: the select aligned to the bottom of the date's help text, so that it hangs a line below the date control.
-  for (const size of [WIDE, { width: 768, height: 1024 }]) {
-    test(`puts the State and Service date controls on one line, with the date's help beneath its control, at ${String(size.width)} px`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(size);
-      await open(page, '/pickup-requests');
-      const help = page.getByText('Day, month and year.');
-      await expect(help).toBeVisible();
-
-      const [select, date, note] = await Promise.all([
-        stateSelect(page).boundingBox(),
-        dateControl(page).boundingBox(),
-        help.boundingBox(),
-      ]);
-
-      expect(select).not.toBeNull();
-      expect(date).not.toBeNull();
-      expect(Math.abs((select?.y ?? 0) - (date?.y ?? 1000))).toBeLessThanOrEqual(1);
-      expect(Math.abs((select?.height ?? 0) - (date?.height ?? 1000))).toBeLessThanOrEqual(1);
-      expect(note?.y ?? 0).toBeGreaterThanOrEqual((date?.y ?? 1000) + (date?.height ?? 1000));
-    });
-  }
-
-  // Break caught: the button aligned to the bottom of the help text, as the select was, instead of to the control it clears.
-  test('puts the button that clears the date on the line of the date control', async ({ page }) => {
-    await page.setViewportSize(WIDE);
-    await open(page, '/pickup-requests?date=2026-11-03');
-    const clear = page.getByRole('button', { name: 'Every service date' });
-    await expect(clear).toBeVisible();
-
-    const [button, date] = await Promise.all([
-      clear.boundingBox(),
-      dateControl(page).boundingBox(),
-    ]);
-
-    expect(Math.abs((button?.y ?? 0) - (date?.y ?? 1000))).toBeLessThanOrEqual(1);
-    expect(Math.abs((button?.height ?? 0) - (date?.height ?? 1000))).toBeLessThanOrEqual(1);
-  });
-
-  for (const [shown, size] of [
-    ['a table', WIDE],
-    ['cards', NARROW],
-  ] as const) {
-    // Break caught: the filters, the count and the rows on three surfaces of their own, or a border inside the panel drawn twice.
-    test(`draws the filters, the count and the results in one white panel with hairlines between them, beside ${shown}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(size);
-      await open(page, '/pickup-requests');
-      const panel = page.locator('.ui-queue-panel');
-
-      await expect(panel).toHaveCount(1);
-      await expect(panel.getByRole('group', { name: 'Filter the pickup requests' })).toBeVisible();
-      await expect(panel.getByText(/^Showing 2 requests/)).toHaveText('Showing 2 requests.');
-      await expect(panel.getByRole('link', { name: CODE })).toBeVisible();
-
-      const look = await panel.evaluate((element) => {
-        const style = getComputedStyle(element);
-        const hairline = (selector: string) => {
-          const part = element.querySelector(selector);
-          return part === null ? null : getComputedStyle(part).borderBottomWidth;
-        };
-        const nested = [...element.querySelectorAll('.ui-table__scroller, .ui-queue-table__cards')]
-          .filter((part) => part.getClientRects().length > 0)
-          .map((part) => getComputedStyle(part).borderTopWidth);
-        return {
-          background: style.backgroundColor,
-          border: `${style.borderTopStyle} ${style.borderTopWidth}`,
-          radius: style.borderTopLeftRadius,
-          // The band of the filters and of the refresh beside them carries the hairline, not the group of filters inside it.
-          filtersHairline: hairline('.ui-queue-bar'),
-          countHairline: hairline('.ui-queue-table__count'),
-          nested,
-        };
-      });
-      expect(look).toEqual({
-        background: 'rgb(255, 255, 255)',
-        border: 'solid 1px',
-        radius: '8px',
-        filtersHairline: '1px',
-        countHairline: '1px',
-        nested: ['0px'],
-      });
-    });
-  }
-
+test.describe('the queue, set in one page card', () => {
   const STATES: readonly {
     readonly name: string;
     readonly reach: (page: Page) => Promise<unknown>;
@@ -636,7 +1290,7 @@ test.describe('the queue, set in one panel', () => {
         openAnswering(page, () => {
           // Never answered: the read stays under way.
         }),
-      shows: 'Loading the pickup requests…',
+      shows: 'Loading pickup requests',
     },
     {
       name: 'the empty state of a queue with nothing in it',
@@ -654,72 +1308,34 @@ test.describe('the queue, set in one panel', () => {
       shows: 'The pickup requests could not be loaded.',
     },
     {
-      name: 'a refusal that names the permission',
+      name: 'a refusal, in plain words',
       reach: (page) => openAnswering(page, failing(403, 'PERMISSION_DENIED')),
-      shows: /pickup\.read/,
+      shows: 'Your account can’t see pickup requests. Ask an administrator for access.',
     },
   ];
 
   for (const state of STATES) {
-    // Break caught: a state drawn against the panel's edge, or outside the panel on the page behind it, so that the states of one screen
-    // do not look like one another.
-    test(`keeps the filters and ${state.name} in the one panel, inset from its edges`, async ({
-      page,
-    }) => {
+    test(`keeps the views, the filters and ${state.name} in the one card`, async ({ page }) => {
       await page.setViewportSize(WIDE);
       await state.reach(page);
-      const panel = page.locator('.ui-queue-panel');
+      const card = page.locator('.ui-queue-workspace__main');
 
-      await expect(panel).toHaveCount(1);
-      await expect(panel.getByRole('group', { name: 'Filter the pickup requests' })).toBeVisible();
-      await expect(panel.getByText(state.shows).first()).toBeVisible();
-
-      const insets = await panel.evaluate((element) => {
-        const edge = element.getBoundingClientRect();
-        return [...element.querySelectorAll('.ui-read-state > *')].map((child) => {
-          const box = child.getBoundingClientRect();
-          return { left: box.left - edge.left, right: edge.right - box.right };
-        });
-      });
-      expect(insets.length).toBeGreaterThan(0);
-      for (const inset of insets) {
-        expect(inset.left).toBeGreaterThanOrEqual(16);
-        expect(inset.right).toBeGreaterThanOrEqual(16);
-      }
+      await expect(card).toHaveCount(1);
+      await expect(
+        card.getByRole('tablist', { name: 'Views of the pickup requests' }),
+      ).toBeVisible();
+      await expect(card.getByRole('group', { name: 'Filter the pickup requests' })).toBeVisible();
+      await expect(card.getByText(state.shows).first()).toBeAttached();
     });
   }
 
-  test('sets the pager in the panel, under a hairline', async ({ page }) => {
+  test('sets the pager in the card, under a hairline', async ({ page }) => {
     await page.setViewportSize(WIDE);
     await open(page, '/pickup-requests', { pageSize: 1 });
-    const pager = page.locator('.ui-queue-panel .ui-queue-table__pager');
+    const pager = page.locator('.ui-queue-workspace__main .ui-queue-pager');
 
     await expect(pager.getByRole('button', { name: 'Next page' })).toBeVisible();
     expect(await pager.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('1px');
-  });
-
-  // Break caught: a border that forced colours paints away, so that the panel and its parts run into the page.
-  test('under forced colours the panel keeps its border and its hairlines', async ({
-    page,
-    browserName,
-  }) => {
-    test.skip(browserName === 'webkit', 'Playwright cannot emulate forced colours in WebKit.');
-    await page.emulateMedia({ forcedColors: 'active' });
-    await page.setViewportSize(WIDE);
-    await open(page, '/pickup-requests');
-    const panel = page.locator('.ui-queue-panel');
-
-    const look = await panel.evaluate((element) => {
-      const style = getComputedStyle(element);
-      const filters = element.querySelector('.ui-queue-bar');
-      const count = element.querySelector('.ui-queue-table__count');
-      return {
-        border: `${style.borderTopStyle} ${style.borderTopWidth}`,
-        filters: filters === null ? null : getComputedStyle(filters).borderBottomStyle,
-        count: count === null ? null : getComputedStyle(count).borderBottomStyle,
-      };
-    });
-    expect(look).toEqual({ border: 'solid 1px', filters: 'solid', count: 'solid' });
   });
 });
 
@@ -755,9 +1371,9 @@ async function holdReads(page: Page): Promise<() => void> {
   return release;
 }
 
-test.describe('the queue: Refresh page', () => {
-  const refresh = (page: Page) => page.getByRole('button', { name: 'Refresh page' });
-  const checked = (page: Page) => page.getByText(/^Last checked /);
+test.describe('the queue: Refresh', () => {
+  const refresh = (page: Page) => page.getByRole('button', { name: 'Refresh' });
+  const checked = (page: Page) => page.getByText(/^Updated /);
 
   test('reads the page again with its filters and its cursor, and leaves the officer on that page', async ({
     page,
@@ -789,13 +1405,12 @@ test.describe('the queue: Refresh page', () => {
     await page.keyboard.press('Enter');
 
     await expect(refresh(page)).toHaveAttribute('aria-busy', 'true');
-    await expect(page.getByText('Loading the pickup requests…')).toBeVisible();
-    await expect(page.getByText('Checking this page…')).toBeVisible();
-    await expect(page.getByRole('link', { name: codeOf(0) })).toHaveCount(0);
-    await expect(queueTable(page).or(queueCards(page))).toHaveCount(0);
+    await expect(page.getByText('Loading pickup requests')).toBeAttached();
+    await expect(page.getByText('Checking…')).toBeVisible();
+    await expect(opener(page, codeOf(0))).toHaveCount(0);
     release();
 
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
+    await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(checked(page)).toBeVisible();
     await expect(refresh(page)).toBeFocused();
     await expect(refresh(page)).not.toHaveAttribute('aria-busy', 'true');
@@ -807,14 +1422,14 @@ test.describe('the queue: Refresh page', () => {
     page,
   }) => {
     await open(page, '/pickup-requests', FIVE_AT_A_TIME);
-    const time = ((await checked(page).textContent()) ?? '').replace('Last checked ', '');
+    const time = ((await checked(page).textContent()) ?? '').replace('Updated ', '');
     expect(time).toMatch(/^\d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}$/);
     await page.route(LIST, failing(500, 'INTERNAL_ERROR'), { times: 1 });
 
     await refresh(page).click();
 
-    await expect(page.getByText('The pickup requests could not be loaded.')).toBeVisible();
-    await expect(page.getByRole('link', { name: codeOf(0) })).toHaveCount(0);
+    await expect(page.getByRole('alert')).toContainText('The pickup requests could not be loaded.');
+    await expect(opener(page, codeOf(0))).toHaveCount(0);
     await expect(page.getByText(`Refresh failed. Last successful check: ${time}`)).toBeVisible();
     await expect(checked(page)).toHaveCount(0);
     await expect(refresh(page)).not.toHaveAttribute('aria-busy', 'true');
@@ -832,16 +1447,16 @@ test.describe('the queue: Refresh page', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByText('Page refreshed.')).toHaveCount(1);
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('CONFIRMED');
+    await page.getByRole('tab', { name: 'Confirmed' }).click();
     await expect(page.getByRole('heading', { name: 'No pickup requests match' })).toBeVisible();
     const release = await holdReads(page);
-    await page.getByRole('combobox', { name: 'State' }).selectOption('');
-    await expect(page.getByText('Loading the pickup requests…')).toBeVisible();
+    await page.getByRole('tab', { name: 'All' }).click();
+    await expect(page.getByText('Loading pickup requests')).toBeAttached();
 
     // While the newer read of the first filter is under way, and after it: nobody asked for it as a refresh.
     await expect(page.getByText('Page refreshed.')).toHaveCount(0);
     release();
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
+    await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText('Page refreshed.')).toHaveCount(0);
   });
 
@@ -868,61 +1483,6 @@ test.describe('the queue: Refresh page', () => {
 
     expect(listReads(api)).toHaveLength(reads);
   });
-
-  for (const [where, size] of [
-    ['a wide room', WIDE],
-    ['a narrow one', NARROW],
-    ['a phone', PHONE],
-  ] as const) {
-    // Break caught: a control pushed past the edge of the panel or the screen, or set on a line of its own where there is room for it beside the filters.
-    test(`sets the button inside the panel, with no sideways scrolling, in ${where}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(size);
-      await open(page, '/pickup-requests?date=2026-11-03', FIVE_AT_A_TIME);
-      await expect(checked(page)).toBeVisible();
-
-      const panel = await page.locator('.ui-queue-panel').boundingBox();
-      const button = await refresh(page).boundingBox();
-      const select = await page.getByRole('combobox', { name: 'State' }).boundingBox();
-
-      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
-      expect(button).not.toBeNull();
-      expect(button?.x ?? -1).toBeGreaterThanOrEqual(panel?.x ?? 0);
-      expect((button?.x ?? 0) + (button?.width ?? 0)).toBeLessThanOrEqual(
-        (panel?.x ?? 0) + (panel?.width ?? 0),
-      );
-      if (size === WIDE) {
-        // Beside the filters: on the line of the controls, which is the line of the select, and at the end of the row, where the line of text
-        // over the button ends at the panel's padding.
-        expect(Math.abs((button?.y ?? 1000) - (select?.y ?? 0))).toBeLessThanOrEqual(1);
-        const text = await page.locator('.pickup-freshness__text').boundingBox();
-        expect(
-          (panel?.x ?? 0) + (panel?.width ?? 0) - ((text?.x ?? 0) + (text?.width ?? 0)),
-        ).toBeLessThanOrEqual(24);
-      } else {
-        // Under them, as nothing of the filters is wider than the room.
-        expect(button?.y ?? 0).toBeGreaterThan((select?.y ?? 1000) + 20);
-      }
-    });
-  }
-});
-
-test.describe('the queue: Refresh page, when nothing has been read', () => {
-  // Break caught: a button that moves up when the line over it has nothing to say, so that it no longer sits on the line of the controls.
-  test('keeps the button on the line of the controls when the line over it has nothing to say', async ({
-    page,
-  }) => {
-    await page.setViewportSize(WIDE);
-    await openAnswering(page, failing(500, 'INTERNAL_ERROR'));
-    await expect(page.getByText('The pickup requests could not be loaded.')).toBeVisible();
-    await expect(page.locator('.pickup-freshness__text')).toHaveText('');
-
-    const button = await page.getByRole('button', { name: 'Refresh page' }).boundingBox();
-    const select = await page.getByRole('combobox', { name: 'State' }).boundingBox();
-
-    expect(Math.abs((button?.y ?? 1000) - (select?.y ?? 0))).toBeLessThanOrEqual(1);
-  });
 });
 
 test.describe('the queue: coming back from a request', () => {
@@ -934,7 +1494,7 @@ test.describe('the queue: coming back from a request', () => {
     const view = await open(page, '/pickup-requests?state=PENDING', FIVE_AT_A_TIME);
     await page.getByRole('button', { name: 'Next page' }).click();
     await expect(page.getByText(/on page 2/)).toBeVisible();
-    await page.getByRole('link', { name: opened }).click();
+    await goToRequest(page, opened);
     await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
     return view;
   }
@@ -945,7 +1505,7 @@ test.describe('the queue: coming back from a request', () => {
   async function expectTheOfficerBack(page: Page, api: PickupApi) {
     await expect(page).toHaveURL('/pickup-requests?state=PENDING');
     await expect(page.getByText(/on page 2/)).toBeVisible();
-    await expect(page.getByRole('link', { name: opened })).toBeFocused();
+    await expect(opener(page, opened)).toBeFocused();
     expect(listReads(api).at(-1)?.search).toBe('?state=PENDING&page_token=5');
     // The cursor is in no storage, and in no address.
     expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
@@ -977,30 +1537,32 @@ test.describe('the queue: coming back from a request', () => {
     });
   }
 
-  // Break caught: a place that outlives the page, or one kept where a reload, the menu or an address could find it.
-  test('starts at the first page after a reload, from the menu and from a typed address', async ({
-    page,
-  }) => {
+  // Break caught: a place that outlives the page, or one kept where a reload, the menu or an address could find it. One test for each of the three ways in (they were one
+  // test that walked all three, which took 27 of its 30 seconds on the development server in the review of f6cf02b): each goes to the request on the second page, as the
+  // officer does, and then leaves it that way.
+  test('starts at the first page after a reload', async ({ page }) => {
     await toTheRequest(page);
     await backLink(page).click();
     await expect(page.getByText(/on page 2/)).toBeVisible();
 
     await page.reload();
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
+    await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
+  });
 
-    await page.getByRole('button', { name: 'Next page' }).click();
-    await page.getByRole('link', { name: opened }).click();
-    await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
-    await page.getByRole('link', { name: 'Pickup requests' }).first().click();
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
+  test('starts at the first page from the menu', async ({ page }) => {
+    await toTheRequest(page);
+
+    await menuEntry(page, 'Requests').click();
+    await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
+  });
 
-    await page.getByRole('button', { name: 'Next page' }).click();
-    await page.getByRole('link', { name: opened }).click();
-    await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
+  test('starts at the first page from a typed address', async ({ page }) => {
+    await toTheRequest(page);
+
     await page.goto('/pickup-requests?state=PENDING');
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
+    await expect(opener(page, codeOf(0))).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
   });
 
@@ -1014,11 +1576,18 @@ test.describe('the queue: coming back from a request', () => {
     }) => {
       await page.setViewportSize({ width: 1440, height: 500 });
       await open(page, '/pickup-requests', { requests: MANY, pageSize: 12 });
-      const far = page.getByRole('link', { name: codeOf(10) });
+      const far = opener(page, codeOf(10));
       await far.scrollIntoViewIfNeeded();
-      const before = await page.evaluate(() => window.scrollY);
-      expect(before).toBeGreaterThan(200);
+      expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+      // The place that is left is the one the officer leaves from: the page as it stands when they press the panel's link (the panel is in view where it is, and the page is not
+      // moved to it), which is where Playwright would otherwise scroll to before its click.
       await far.click();
+      const link = page
+        .getByRole('dialog', { name: codeOf(10) })
+        .getByRole('link', { name: 'Open full page' });
+      await link.scrollIntoViewIfNeeded();
+      const before = await page.evaluate(() => window.scrollY);
+      await link.click();
       await expect(page.getByRole('heading', { level: 1, name: codeOf(10) })).toBeVisible();
 
       await back(page);
@@ -1043,7 +1612,7 @@ test.describe('the queue: coming back from a request', () => {
     // The queue still lists the request; by the time it is opened the server says it is not there.
     await page.route(`**/api/v1/pickup-requests/${MANY[7]?.id ?? ''}`, failing(404, 'NOT_FOUND'));
 
-    await page.getByRole('link', { name: opened }).click();
+    await goToRequest(page, opened);
     await expect(
       page.getByRole('heading', { level: 1, name: 'Pickup request not found' }),
     ).toBeVisible();
@@ -1084,7 +1653,7 @@ test.describe('the queue: coming back from a request', () => {
       // The queue lists the request; by the time it is opened the server refuses the officer it.
       await page.route(`**/api/v1/pickup-requests/${MANY[7]?.id ?? ''}`, failing(403, code));
 
-      await page.getByRole('link', { name: opened }).click();
+      await goToRequest(page, opened);
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
       await expect(backLink(page)).toHaveAttribute('href', '/pickup-requests?state=PENDING');
       const reads = listReads(api).length;
@@ -1134,9 +1703,9 @@ test.describe('the queue: coming back from a request', () => {
 
     await backLink(page).click();
 
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.locator('.ui-data-table__scroller')).toBeFocused();
     await expect(page.getByText(/on page 2/)).toBeVisible();
-    await expect(page.getByRole('link', { name: opened })).toHaveCount(0);
+    await expect(opener(page, opened)).toHaveCount(0);
   });
 
   // Break caught: focus pulled back to the request from the control the officer had already moved to while the page was being read.
@@ -1145,12 +1714,12 @@ test.describe('the queue: coming back from a request', () => {
     const release = await holdReads(page);
 
     await backLink(page).click();
-    await expect(page.getByText('Loading the pickup requests…')).toBeVisible();
-    await page.getByRole('combobox', { name: 'State' }).focus();
+    await expect(page.getByText('Loading pickup requests')).toBeAttached();
+    await page.getByRole('button', { name: 'Filter', exact: true }).focus();
     release();
 
-    await expect(page.getByRole('link', { name: opened })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'State' })).toBeFocused();
+    await expect(opener(page, opened)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
   });
 
   test('shows the focus ring on the request when the officer came and went by keyboard', async ({
@@ -1158,8 +1727,13 @@ test.describe('the queue: coming back from a request', () => {
   }) => {
     await page.setViewportSize(WIDE);
     await open(page, '/pickup-requests', FIVE_AT_A_TIME);
-    const link = page.getByRole('link', { name: codeOf(2) });
+    const link = opener(page, codeOf(2));
     await link.focus();
+    await page.keyboard.press('Enter');
+    await page
+      .getByRole('dialog', { name: codeOf(2) })
+      .getByRole('link', { name: 'Open full page' })
+      .focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { level: 1, name: codeOf(2) })).toBeVisible();
     await backLink(page).focus();
@@ -1183,14 +1757,16 @@ test.describe('the queue: coming back from a request', () => {
 
     await backLink(page).click();
 
-    await expect(page.getByRole('heading', { name: 'No requests on this page' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'No pickup requests on this page' }),
+    ).toBeVisible();
     await expect(page.getByRole('heading', { name: 'No pickup requests yet' })).toHaveCount(0);
     expect(listReads(api)).toHaveLength(reads + 1);
 
     await page.getByRole('button', { name: 'Back to first page' }).click();
 
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(opener(page, codeOf(0))).toBeVisible();
+    await expect(page.locator('.ui-data-table__scroller')).toBeFocused();
     expect(listReads(api).at(-1)?.search).toBe('?state=PENDING');
   });
 
@@ -1215,14 +1791,19 @@ test.describe('the queue: coming back from a request', () => {
 
     await page.getByRole('button', { name: 'Next page' }).click();
 
-    await expect(page.getByText(/That page of the queue could not be opened/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    await expect(page.getByRole('alert')).toContainText(
+      'That page of the queue could not be opened',
+    );
+    await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
     await expect(page).toHaveURL('/pickup-requests?state=PENDING');
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('PENDING');
+    await expect(page.getByRole('tab', { name: 'Waiting for confirmation' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
     await expect(page.locator('body')).not.toContainText('Diagnostic text');
 
     await page.getByRole('button', { name: 'Back to first page' }).click();
-    await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
+    await expect(opener(page, codeOf(0))).toBeVisible();
   });
 });
 
@@ -1316,11 +1897,12 @@ test.describe('one request', () => {
   // The catalogue's codes are not seeded: the act cannot be done here, and the page says so and who adds them, and sends nothing.
   test('says no cancellation reason is configured, and cannot cancel', async ({ page }) => {
     const { api } = await open(page, DETAIL);
-    await page.getByRole('button', { name: 'Cancel the request' }).click();
+    await chooseAct(page, 'Cancel the request');
     const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
 
     await expect(dialog).toContainText('No cancellation reason is configured yet');
-    await expect(dialog).toContainText('settings.reason.manage');
+    await expect(dialog).toContainText('An administrator adds the reasons to the reason catalogue');
+    await expect(dialog).not.toContainText('settings.reason.manage');
     await expect(dialog.getByRole('button', { name: 'Cancel the request' })).toBeDisabled();
     expect(posts(api)).toEqual([]);
   });
@@ -1337,7 +1919,7 @@ test.describe('one request', () => {
         },
       ],
     });
-    await page.getByRole('button', { name: 'Cancel the request' }).click();
+    await chooseAct(page, 'Cancel the request');
     const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await dialog
       .getByRole('combobox', { name: /^Reason/ })
@@ -1393,7 +1975,7 @@ const SCREENS: readonly Screen[] = [
     name: 'the queue',
     reach: async (page) => {
       await open(page, '/pickup-requests');
-      await expect(page.getByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+      await expect(opener(page, 'ACC-PR-7KQ2MZ')).toBeVisible();
     },
   },
   {
@@ -1407,7 +1989,9 @@ const SCREENS: readonly Screen[] = [
     name: 'the queue that could not be read',
     reach: async (page) => {
       await openAnswering(page, failing(500, 'INTERNAL_ERROR'));
-      await expect(page.getByText('The pickup requests could not be loaded.')).toBeVisible();
+      await expect(page.getByRole('alert')).toContainText(
+        'The pickup requests could not be loaded.',
+      );
     },
   },
   {
@@ -1430,7 +2014,7 @@ const SCREENS: readonly Screen[] = [
     name: 'one request',
     reach: async (page) => {
       await open(page, LATE);
-      await expect(page.getByRole('heading', { name: 'What you can do' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     },
   },
   {
@@ -1439,7 +2023,7 @@ const SCREENS: readonly Screen[] = [
       await open(page, DETAIL, {
         cancellationReasons: [{ code: 'DEMO_A', label: 'Demo reason A', attribution: 'CUSTOMER' }],
       });
-      await page.getByRole('button', { name: 'Cancel the request' }).click();
+      await chooseAct(page, 'Cancel the request');
       await expect(
         page.getByRole('alertdialog').getByRole('combobox', { name: /^Reason/ }),
       ).toBeVisible();
@@ -1488,7 +2072,9 @@ test.describe('the approver’s queue', () => {
     await expect(
       page.getByText('The one-package exception of ACC-PR-7KQ2MZ is approved by you.'),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No exceptions waiting' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeVisible();
     const [approval] = posts(api);
     expect(approval?.path).toBe(
       `/api/v1/pickup-requests/${IDS.pending}/one-package-exception/approve`,
@@ -1514,7 +2100,7 @@ test.describe('the approver’s queue', () => {
     await dialog.getByRole('button', { name: 'Approve the exception' }).click();
 
     await expect(dialog).toContainText(
-      'You requested this exception yourself, so another holder of pickup.exception.approve has to approve it.',
+      'You requested this exception yourself, so a different approver has to decide it.',
     );
     expect(posts(api)).toHaveLength(1);
     await page.getByRole('button', { name: 'Cancel' }).click();
@@ -1523,18 +2109,214 @@ test.describe('the approver’s queue', () => {
     ).toBeVisible();
   });
 
-  // Break caught: the queue or its entry offered to a session that may not decide, or a refusal that does not name the key.
-  test('names the key to a session without it, and offers it no entry', async ({ page }) => {
+  // Break caught: the queue or its entry offered to a session that may not decide, or a refusal that names the key instead of what the account cannot do.
+  test('says what a session without the key cannot do, and offers it no entry', async ({
+    page,
+  }) => {
     await open(page, '/approvals', { permissions: ['pickup.read'] });
 
-    await expect(page.getByText('pickup.exception.approve')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Exceptions to approve' })).toHaveCount(0);
+    await expect(
+      page.getByText(
+        'Your account can’t decide a one-package exception. Ask an administrator for access.',
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('pickup.exception.approve');
+    await expect(menuEntry(page, 'Decisions')).toHaveCount(0);
   });
 
   test('says when no exception waits', async ({ page }) => {
     await open(page, '/approvals', { requests: [] });
 
-    await expect(page.getByRole('heading', { name: 'No exceptions waiting' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'No exceptions waiting for approval yet' }),
+    ).toBeVisible();
+  });
+
+  // Break caught (the review of 499399c): the approver's queue drawn as cards at 1280 px with the menu open, though its table has room for most of its columns. Replaces "keeps the table, with every
+  // column" (run 7, Stage 1.1): the prose columns now keep 8rem each (their words stay whole), so the box of 61rem takes the hub, the most lesser column, away to make that room.
+  test('keeps the table, without its hub, at 1280 px with the menu open, and no cards', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Request / sender',
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Request state',
+      'Actions',
+    ]);
+    await expect(
+      page.getByRole('list', { name: 'One-package exceptions waiting for approval' }),
+    ).toHaveCount(0);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (the Product Owner's review of 499399c, Stage 3 item 7, found again in the pictures of run 5): an empty band above the table of a queue that has no views, no filters and no
+  // notice. The page card has no header, so it took 24px of its own above its content, and the body 16px more, above a header row that has nothing above it.
+  test('starts its table at the top of the page card, with no empty band above it', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table).toBeVisible();
+    const head = await table.getByRole('row').first().boundingBox();
+    const card = await table
+      .locator(
+        'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ui-panel ")][1]',
+      )
+      .boundingBox();
+    expect(head).not.toBeNull();
+    expect(card).not.toBeNull();
+    // The card's own border is 1px, and nothing else is above the header row.
+    expect((head?.y ?? 0) - (card?.y ?? 0)).toBeLessThanOrEqual(2);
+  });
+
+  // Break caught (the Product Owner, 10 and 11 November 2026: no table scrolls sideways, and a table never breaks a word): the approver's table keeping a column it has no room for, so that its box scrolls
+  // and the act is out of view; or keeping its table when every lesser column is gone and the box still overflows, which looked right at 768px only because its words are short. At 768px (a box of 41rem)
+  // the table has nothing more to give (the hub, the packages and the recipient go, the marks of the Product Owner, 11 November 2026) and the exceptions are cards, with every fact of each, the act
+  // in view and no word broken inside.
+  test('draws cards at 768px, where the table has nothing more to give, with every fact of the exception, and never scrolls sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+
+    const name = 'One-package exceptions waiting for approval';
+    const region = page.getByRole('region', { name });
+    await expectCardsOfTheFit(region);
+    await expect(page.getByRole('table', { name })).toHaveCount(0);
+    const card = page.getByRole('list', { name }).getByRole('listitem').first();
+    await expect(card.getByRole('term')).toHaveText([
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Hub',
+    ]);
+    for (const fact of [
+      'Abena Demo',
+      '9 Demo Street, Tema',
+      'Bridal gown, urgent',
+      'Accra Central',
+    ]) {
+      await expect(card).toContainText(fact);
+    }
+    await expectWholeInTheWindow(
+      page,
+      card.getByRole('button', { name: 'Approve the exception of ACC-PR-7KQ2MZ' }),
+    );
+    const words = await wordsOf(region);
+    expect(words.broken).toEqual([]);
+    expect(words.tall).toEqual([]);
+    expect(await overflowingInQueue(page)).toEqual([]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught: a card that tells less than the row it replaces (the facts of the lesser columns, or what is said under the state, left out where there is no room for them).
+  test('draws a card with every fact of the exception at 390px, each a label and its value', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, '/approvals', {
+      requests: [
+        waiting(IDS.colleague),
+        { ...waiting(IDS.colleague), id: IDS.single, code: 'ACC-PR-2SY7Z5', state: 'CANCELLED' },
+      ],
+    });
+
+    const cards = page
+      .getByRole('list', { name: 'One-package exceptions waiting for approval' })
+      .getByRole('listitem');
+    await expect(cards).toHaveCount(2);
+    await expect(cards.first().getByRole('term')).toHaveText([
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Hub',
+    ]);
+    for (const fact of [
+      'Abena Demo',
+      '9 Demo Street, Tema',
+      'Bridal gown, urgent',
+      'Accra Central',
+    ]) {
+      await expect(cards.first()).toContainText(fact);
+    }
+    // A request that is no longer waiting for confirmation says so in its card, as it does under its state in the table.
+    await expect(cards.nth(1).getByRole('term')).toHaveText([
+      'Packages',
+      'Recipient',
+      'Why',
+      'Asked',
+      'Hub',
+      'Request state',
+    ]);
+    await expect(cards.nth(1)).toContainText(
+      'Nothing to approve: the request is no longer waiting for confirmation.',
+    );
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+/**
+ * The usual next act of a row is drawn at rest (the Product Owner, 10 November 2026: an act that waited for the pointer was not found on a touch screen, by a keyboard or by a pointer that had
+ * not reached the row). The kit's browser spec holds it against the development server, a project the Firefox and WebKit run does not use; these hold it against the production build, in the
+ * queue's Confirm and the approver's Approve at 1280 px, with the pointer away from the table (run 7, Stage 4.3).
+ */
+async function actDrawn(
+  act: Locator,
+): Promise<{ opacity: string; visibility: string; hasBox: boolean }> {
+  return act.evaluate((button) => {
+    // What is seen is the opacity of the button and of everything it is in: an act in a cell that is invisible is not drawn, whatever its own opacity says.
+    let opacity = 1;
+    for (let node: Element | null = button; node !== null; node = node.parentElement) {
+      opacity *= parseFloat(getComputedStyle(node).opacity);
+    }
+    const reach = button.getBoundingClientRect();
+    return {
+      opacity: String(opacity),
+      visibility: getComputedStyle(button).visibility,
+      hasBox: reach.width > 0 && reach.height > 0,
+    };
+  });
+}
+
+test.describe('the row act at rest', () => {
+  // Break caught: a row act that is invisible until the row is hovered or has focus.
+  test('draws the queue’s Confirm at rest at 1280 px, with the pointer away from the table', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/pickup-requests');
+    await expect(queueTable(page)).toBeVisible();
+    await page.mouse.move(0, 0);
+
+    const confirm = queueTable(page).getByRole('button', { name: `Confirm ${CODE}` });
+    await expect(confirm).toBeVisible();
+    expect(await actDrawn(confirm)).toEqual({ opacity: '1', visibility: 'visible', hasBox: true });
+  });
+
+  test('draws the approver’s Approve at rest at 1280 px, with the pointer away from the table', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(page, '/approvals', { requests: [waiting(IDS.colleague)] });
+    const table = page.getByRole('table', { name: 'One-package exceptions waiting for approval' });
+    await expect(table).toBeVisible();
+    await page.mouse.move(0, 0);
+
+    const approve = table.getByRole('button', { name: `Approve the exception of ${CODE}` });
+    await expect(approve).toBeVisible();
+    expect(await actDrawn(approve)).toEqual({ opacity: '1', visibility: 'visible', hasBox: true });
   });
 });
 
@@ -1550,6 +2332,7 @@ test.describe('every screen, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
       });
     }

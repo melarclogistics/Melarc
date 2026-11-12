@@ -1,19 +1,29 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 
-import { PageHeader } from '../../../components/PageHeader';
 import { Alert } from '../../../components/ui/alert/Alert';
-import { Button } from '../../../components/ui/button/Button';
 import { ConfirmationDialog } from '../../../components/ui/confirmation/ConfirmationDialog';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import {
+  CellLines,
+  RowTitle,
+  NoWrap,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { Link } from '../../../components/ui/link/Link';
-import { QueueTable } from '../../../components/ui/queue-table/QueueTable';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
+import {
+  QueueWorkspace,
+  type QueueEmptiness,
+  type QueueResult,
+  type QueueWorkspaceHandle,
+} from '../../../components/ui/templates/QueueWorkspace';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import type { TableColumn } from '../../../components/ui/table/Table';
 import { useApiClient } from '../../../platform/api/api-client';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import { approveOnePackageException } from '../../../platform/pickup/pickup-commands';
+import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
 import type {
   ApprovalView,
   OnePackageExceptionView,
@@ -21,10 +31,13 @@ import type {
   PickupRequestView,
 } from '../../../platform/pickup/pickup-shape';
 import { usePickupRequests } from '../../../platform/pickup/use-pickup-queries';
+import { cannotText } from '../../../platform/problem/capability-words';
+import { problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf } from '../staff/staff-presentation';
 import { actorText, isSelf, packagesText, PICKUP_STATE_MAP } from './pickup-presentation';
+import { requestOfClick, restoreQueuePlace } from './queue-return';
 import './pickup-pages.css';
 
 /** A row of the queue: a request and the exception it waits on (the query refuses a page where a request carries none in that state). */
@@ -46,175 +59,394 @@ const rowsOf = (page: PickupRequestPageView): Waiting[] =>
       : [{ request, exception: request.one_package_exception }],
   );
 
+const NOTHING_TO_APPROVE = 'Nothing to approve: the request is no longer waiting for confirmation.';
+
 /**
- * The one-package exceptions waiting for approval (surfaces/ops-portal.md section 7, `/approvals`; S1.19): the approver's queue, which is the
- * list of pickup requests whose exception is `REQUESTED` (`listPickupRequests` with `one_package_exception_state`), read and scoped by the
- * server, paged by its tokens. Each row says what is asked and by whom, and offers one act, the approval (`approveOnePackageException`),
- * behind a confirmation that says what it does.
+ * One exception waiting, as a card for a room too narrow for the columns: every fact of the row, each a label and its value (`CardFacts`), and no control (the table draws the card's one
+ * button, and the approval). What is said under the request's state in the table (it is no longer waiting, or the account may not approve) is its own fact, so that the card tells it too.
+ */
+function WaitingCard({
+  row,
+  principalId,
+  hubs,
+  stateNote,
+}: {
+  readonly row: Waiting;
+  readonly principalId: string | undefined;
+  readonly hubs: readonly { readonly id: string; readonly display_name: string }[];
+  readonly stateNote: string | undefined;
+}) {
+  const { request, exception } = row;
+  return (
+    <CardFacts
+      head={<StatusBadge status={request.state} map={PICKUP_STATE_MAP} />}
+      lead={request.sender_name ?? 'Not recorded'}
+      facts={[
+        { label: 'Packages', value: packagesText(request) },
+        {
+          label: 'Recipient',
+          value: (
+            <CellLines
+              first={exception.recipient.name}
+              second={exception.recipient.location.address}
+            />
+          ),
+        },
+        { label: 'Why', value: exception.note },
+        {
+          label: 'Asked',
+          value: (
+            <CellLines
+              first={actorText(exception.requested_by, principalId)}
+              second={formatInstant(exception.requested_at) ?? ''}
+            />
+          ),
+        },
+        { label: 'Hub', value: hubNameOf(request.responsible_hub_id, hubs) },
+        ...(stateNote === undefined ? [] : [{ label: 'Request state', value: stateNote }]),
+      ]}
+    />
+  );
+}
+
+/**
+ * The one-package exceptions waiting for approval (surfaces/ops-portal.md section 7, `/approvals`; S1.19; redesign step R7a): the approver's queue, which is the list of pickup requests
+ * whose exception is `REQUESTED` (`listPickupRequests` with `one_package_exception_state`), read and scoped by the server, paged by its tokens, drawn by the queue workspace template.
+ * Each row says what is asked and by whom, and offers one act, the approval (`approveOnePackageException`), behind a confirmation that says what it does.
  *
- * **The page decides nothing the server decides.** It says the maker-checker rule in plain words, and sends the approval whoever asked: a
- * refusal (`SELF_APPROVAL_FORBIDDEN`) is told as the rule, with the key of who can approve instead, and never a role. After an approval the
- * page shows what the answer said (approved, and by whom) and reads the queue again, which no longer holds the request; it states no fee. An
- * exception of a request that is no longer pending is shown with its state and offered no approval: the request is not going to be collected.
+ * **The page decides nothing the server decides.** It says the maker-checker rule in plain words in the question of the approval, where the choice is made (not in a paragraph above the
+ * queue: the Product Owner, 9 November 2026), and sends the approval whoever asked: a refusal (`SELF_APPROVAL_FORBIDDEN`) is told as the
+ * rule (a different approver decides), and never by a key or a role. After an approval the page shows what the answer said (approved, and by whom), keeps its rows while it reads the queue
+ * again, which no longer holds the request, and states no fee. An exception of a request that is no longer pending is shown with its state and offered no approval: the request is not going
+ * to be collected.
  */
 export function ApprovalsPage() {
   const me = useSignedInSession();
   const client = useApiClient();
-  const paging = useQueuePaging('one-package-exceptions-requested');
+  // The hub the switcher chose (task C3) is one of the filters of the queue: another hub starts again at the first page.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const signature = `one-package-exceptions-requested|${hubId ?? ''}`;
+  // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
+  const continuity = useQueueContinuity('approvals');
+  const [arrival] = useState(() => continuity.returningTo(signature));
+  const paging = useQueuePaging(signature, arrival?.tokens);
   const list = usePickupRequests({
     exceptionState: 'REQUESTED',
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
   const [target, setTarget] = useState<Waiting | undefined>(undefined);
   const [approved, setApproved] = useState<Approved | undefined>(undefined);
+  /** The queue is read again after an approval, and its rows stay while it is (the officer keeps their place). */
+  const [afterAct, setAfterAct] = useState(false);
+  /** The page whose reading again after an approval failed: its rows stay, under a line that says they may be out of date (the review of 499399c). */
+  const [staleAfterAct, setStaleAfterAct] = useState<string | undefined>();
+  const pageKey = `${signature}|${paging.pageToken ?? ''}`;
   const noticeBox = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (approved !== undefined) noticeBox.current?.focus();
   }, [approved]);
 
+  // The workspace's handle puts focus where a person is given back: on the results once a page is read, and on the request they opened when they come back to the queue.
+  const workspace = useRef<QueueWorkspaceHandle>(null);
+  const settled = !list.isFetching && (list.isSuccess || list.isError);
+
+  // A place is for one arrival at the queue: whether this one used it or it was not for this one, it is let go of once the queue is on screen.
+  const { discard } = continuity;
+  useEffect(() => {
+    discard();
+  }, [discard]);
+
+  // Once the page that was left has been read again and drawn, the officer gets their position back, and focus where nobody has put it (the request they opened, else the results).
+  // Only if the page is still the one they came back to: not after a change of hub or of page.
+  const restored = useRef(arrival === undefined);
+  const stillThere =
+    signature === arrival?.signature &&
+    paging.tokens.length === arrival.tokens.length &&
+    paging.tokens.every((token, index) => token === arrival.tokens[index]);
+  useEffect(() => {
+    if (arrival === undefined || restored.current || !settled) return;
+    restored.current = true;
+    if (stillThere && workspace.current !== null) restoreQueuePlace(workspace.current, arrival);
+  }, [arrival, settled, stillThere]);
+
+  // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been read,
+  // whatever it holds (rows, nothing, a failure), focus goes to the results, once.
+  const { takeFocus } = paging;
+  useEffect(() => {
+    if (!settled || !takeFocus()) return;
+    workspace.current?.focusResults();
+  }, [settled, list.dataUpdatedAt, takeFocus]);
+
+  /** Opening a request leaves where the officer was, for the visit: a plain click on its link, which is a move in this tab. */
+  function leavePlace(event: MouseEvent<HTMLDivElement>): void {
+    const requestId = requestOfClick(event, {
+      selector: 'a[href]',
+      key: 'href',
+      // The code is the link of its row, or of its card, which carry the request's id.
+      idOf: (link) => link.closest<HTMLElement>('[data-row-id]')?.dataset.rowId,
+    });
+    if (requestId === undefined) return;
+    continuity.leave({
+      signature,
+      search: '',
+      tokens: paging.tokens,
+      scrollY: window.scrollY,
+      requestId,
+    });
+  }
+
+  /** The first page, on purpose: the officer's choice, and the end of any place left. */
+  function firstPage(): void {
+    continuity.discard();
+    paging.toFirstPage();
+  }
+
   if (me === undefined) return null;
   const principalId = me.session.principal_id;
   const mayApprove = me.holds('pickup.exception.approve');
+  const hubs = me.session.authorized_hubs;
 
+  /** The queue is read again, its rows kept; if that read fails the rows stay with a line that says they may be out of date and the way to read them again. */
   function refresh(): Promise<unknown> {
-    return list.refetch();
+    setStaleAfterAct(undefined);
+    setAfterAct(true);
+    return list
+      .refetch()
+      .then((read) => {
+        if (read.isError) setStaleAfterAct(pageKey);
+      })
+      .finally(() => {
+        setAfterAct(false);
+      });
   }
 
-  const columns: TableColumn<Waiting>[] = [
+  /** What is said under a request's state when something needs saying: it is no longer waiting for confirmation, or this account may not approve. */
+  const stateNoteOf = (request: PickupRequestView): string | undefined =>
+    request.state !== 'PENDING'
+      ? NOTHING_TO_APPROVE
+      : mayApprove
+        ? undefined
+        : cannotText('pickup.exception.approve');
+
+  const columns: DataColumn<Waiting>[] = [
     {
-      key: 'code',
-      header: 'Request',
+      id: 'request',
+      header: 'Request / sender',
       rowHeader: true,
       cell: ({ request }) => (
-        <span className="pickup-nowrap">
-          <Link to={`/pickup-requests/${request.id}`}>{request.code}</Link>
-        </span>
+        <RowTitle
+          code={request.code}
+          name={request.sender_name ?? 'Not recorded'}
+          to={`/pickup-requests/${request.id}`}
+        />
       ),
     },
     {
-      key: 'sender',
-      header: 'Sender',
-      cell: ({ request }) => request.sender_name ?? 'Not recorded',
+      id: 'packages',
+      header: 'Packages',
+      kind: 'count',
+      priority: 3,
+      cell: ({ request }) => <NoWrap>{packagesText(request)}</NoWrap>,
     },
-    { key: 'packages', header: 'Packages', cell: ({ request }) => packagesText(request) },
     {
-      key: 'recipient',
+      id: 'recipient',
       header: 'Recipient',
+      kind: 'prose',
+      priority: 2,
       cell: ({ exception }) => (
-        <span className="pickup-lines">
-          <span>{exception.recipient.name}</span>
-          <span>{exception.recipient.location.address}</span>
-        </span>
+        <CellLines first={exception.recipient.name} second={exception.recipient.location.address} />
       ),
     },
-    { key: 'why', header: 'Why', cell: ({ exception }) => exception.note },
+    { id: 'why', header: 'Why', kind: 'prose', cell: ({ exception }) => exception.note },
     {
-      key: 'asked',
+      id: 'asked',
       header: 'Asked',
+      kind: 'prose',
       cell: ({ exception }) => (
-        <span className="pickup-lines">
-          <span>{actorText(exception.requested_by, principalId)}</span>
-          <span className="pickup-nowrap">{formatInstant(exception.requested_at)}</span>
-        </span>
+        <CellLines
+          first={actorText(exception.requested_by, principalId)}
+          second={formatInstant(exception.requested_at) ?? ''}
+        />
       ),
     },
     {
-      key: 'hub',
+      id: 'hub',
       header: 'Hub',
-      cell: ({ request }) => hubNameOf(request.responsible_hub_id, me.session.authorized_hubs),
+      priority: 3,
+      cell: ({ request }) => hubNameOf(request.responsible_hub_id, hubs),
     },
     {
-      key: 'state',
+      id: 'state',
       header: 'Request state',
-      cell: ({ request }) => <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />,
-    },
-    {
-      key: 'decision',
-      header: 'Decision',
-      cell: (row) =>
-        row.request.state !== 'PENDING' ? (
-          'Nothing to approve: the request is no longer waiting for confirmation.'
-        ) : mayApprove ? (
-          <Button
-            type="button"
-            aria-label={`Approve the exception of ${row.request.code}`}
-            onClick={() => {
-              setApproved(undefined);
-              setTarget(row);
-            }}
-          >
-            Approve
-          </Button>
-        ) : (
-          <>
-            Approving needs the permission <code>pickup.exception.approve</code>.
-          </>
-        ),
+      kind: 'badge',
+      cell: ({ request }) => {
+        const note = stateNoteOf(request);
+        const badge = <StatusBadge status={request.state} map={PICKUP_STATE_MAP} />;
+        return note === undefined ? badge : <CellLines first={badge} second={note} />;
+      },
     },
   ];
 
-  const approvedBy = approved?.approval.approved_by;
+  // The rows of the last page that was read, which a failed read again after an approval keeps (the data of a query stays when a later read of it fails).
+  const rows = list.data === undefined ? [] : rowsOf(list.data);
 
+  const result: QueueResult<Waiting> = (() => {
+    if (list.status === 'pending') return { status: 'loading' };
+    if (list.isFetching && list.status === 'success') {
+      // After an approval the rows stay while the queue is read again; any other read again takes the loading rows' place.
+      return afterAct ? { status: 'ready', rows, refreshing: true } : { status: 'loading' };
+    }
+    // Read again after an approval and failed (or being read once more): the rows the officer was working on stay, under the line that says so.
+    if (
+      list.status === 'error' &&
+      list.data !== undefined &&
+      (afterAct || staleAfterAct === pageKey)
+    ) {
+      return {
+        status: 'ready',
+        rows,
+        refreshing: afterAct,
+        stale: {
+          message: 'The exceptions could not be read again, so these rows may be out of date.',
+          onRefresh: () => {
+            void refresh();
+          },
+        },
+      };
+    }
+    if (list.status === 'error') {
+      const problem = problemOf(list.error, {
+        operation: 'listPickupRequests',
+        context: 'approvals',
+      });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale')
+        return { status: 'loading' };
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message:
+          problem.kind === 'forbidden' && problem.forbidden === 'permission-missing'
+            ? cannotText('pickup.read')
+            : problem.reference === undefined
+              ? problem.message
+              : `${problem.message} Reference: ${problem.reference}`,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void list.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    return { status: 'ready', rows };
+  })();
+
+  const empty: QueueEmptiness = {
+    noun: 'exceptions waiting for approval',
+    none: 'A one-package exception appears here when an Ops officer asks for one at your hubs, and leaves once it is approved.',
+    // A page after the first can hold nothing without the queue being empty (exceptions are decided between reads): the template says so, as every list does.
+    laterPage: { page: paging.page, onFirstPage: firstPage },
+    ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
+  };
+
+  const approvedBy = approved?.approval.approved_by;
+  const updatedAt =
+    list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
   return (
     <>
       <title>One-package exceptions to approve · Melarc Ops Portal</title>
-      <PageHeader
-        title="One-package exceptions to approve"
-        description="Single-package pickups at your hubs that wait for an approval before they can be confirmed."
-      />
-      <p className="pickup-form-note">
-        Approving an exception lets a single package be collected: the single-package pickup fee
-        becomes due, and the request can then be confirmed. Whoever asked for an exception cannot
-        also approve it, unless they approve at the platform’s highest tier: the server checks this.
-      </p>
-
-      {approved === undefined ? null : (
-        <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
-          <Alert variant="success">
-            <p>
-              {`The one-package exception of ${approved.request.code} is approved${
-                approvedBy === undefined
-                  ? ''
-                  : ` by ${actorText(approvedBy, principalId).toLowerCase()}`
-              }. The request can now be confirmed.`}
-            </p>
-            <p>
-              <Link to={`/pickup-requests/${approved.request.id}`}>
-                {`Open ${approved.request.code}`}
+      <div onClickCapture={leavePlace}>
+        <QueueWorkspace<Waiting>
+          ref={workspace}
+          header={{
+            title: 'One-package exceptions to approve',
+            description:
+              'Single-package pickups at your hubs that wait for an approval before they can be confirmed.',
+            freshness: {
+              state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+              ...(updatedAt === undefined ? {} : { updatedAt }),
+              onRefresh: () => {
+                void refresh();
+              },
+            },
+          }}
+          notice={
+            approved === undefined ? undefined : (
+              <div className="pickup-notice" ref={noticeBox} tabIndex={-1}>
+                <Alert variant="success">
+                  <p>
+                    {`The one-package exception of ${approved.request.code} is approved${
+                      approvedBy === undefined
+                        ? ''
+                        : ` by ${actorText(approvedBy, principalId).toLowerCase()}`
+                    }. The request can now be confirmed.`}
+                  </p>
+                  <p>
+                    <Link to={`/pickup-requests/${approved.request.id}`}>
+                      {`Open ${approved.request.code}`}
+                    </Link>
+                  </p>
+                </Alert>
+              </div>
+            )
+          }
+          result={result}
+          empty={empty}
+          table={{
+            label: 'One-package exceptions waiting for approval',
+            columns,
+            rowId: ({ request }) => request.id,
+            density: 'two-line',
+            card: (row) => (
+              <WaitingCard
+                row={row}
+                principalId={principalId}
+                hubs={hubs}
+                stateNote={stateNoteOf(row.request)}
+              />
+            ),
+            // The rows open the request's own page (the link of the first line), so the lesser columns may go: their facts are in the record.
+            opens: 'record',
+            // The code is the heading of each card and the link to the request's own page.
+            cardTitle: ({ request }) => (
+              <Link to={`/pickup-requests/${request.id}`}>
+                <OperationalCode>{request.code}</OperationalCode>
               </Link>
-            </p>
-          </Alert>
-        </div>
-      )}
-
-      <ReadState<PickupRequestPageView>
-        query={list}
-        isEmpty={(data) => data.items.length === 0}
-        empty={
-          <EmptyState kind="none" heading="No exceptions waiting">
-            A one-package exception appears here when an Ops officer asks for one at your hubs, and
-            leaves once it is approved.
-          </EmptyState>
-        }
-        loadingLabel="Loading the exceptions waiting for approval…"
-        skeleton={<Skeleton lines={4} />}
-        permission="pickup.read"
-        operation="listPickupRequests"
-        context="approvals"
-      >
-        {(data) => (
-          <QueueTable
-            caption="One-package exceptions waiting for approval"
-            columns={columns}
-            rows={rowsOf(data)}
-            rowKey={({ request }) => request.id}
-            noun={{ one: 'exception', other: 'exceptions' }}
-            paging={paging}
-            nextPageToken={data.nextPageToken}
-          />
-        )}
-      </ReadState>
+            ),
+            rowAction: {
+              label: 'Approve',
+              ariaLabel: ({ request }) => `Approve the exception of ${request.code}`,
+              isAvailable: ({ request }) => mayApprove && request.state === 'PENDING',
+              onRun: (row) => {
+                setApproved(undefined);
+                setTarget(row);
+              },
+            },
+            // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+            footer: (
+              <QueuePager
+                label="Pages of exceptions"
+                noun={{ one: 'exception', other: 'exceptions' }}
+                shown={
+                  result.status === 'ready' && list.data !== undefined ? rows.length : undefined
+                }
+                page={paging.page}
+                hasNext={list.data !== undefined && list.data.nextPageToken !== null}
+                onNext={() => {
+                  if (list.data !== undefined && list.data.nextPageToken !== null)
+                    paging.toNextPage(list.data.nextPageToken);
+                }}
+                onPrevious={paging.toPreviousPage}
+              />
+            ),
+          }}
+        />
+      </div>
 
       <ConfirmationDialog<ApprovalView>
         open={target !== undefined}
@@ -227,8 +459,8 @@ export function ApprovalsPage() {
             </p>
             {target !== undefined && isSelf(target.exception.requested_by, principalId) ? (
               <p>
-                You asked for this exception yourself. Whoever asks for one cannot also approve it,
-                unless they approve at the platform’s highest tier: the server decides.
+                You asked for this exception yourself. Another approver usually decides it, and
+                approving it yourself may be refused.
               </p>
             ) : null}
           </>

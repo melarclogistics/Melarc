@@ -36,6 +36,8 @@ export interface ManifestRow {
   /** Whether a `CANCELLED` manifest was dispatched before it was cancelled; the other states say it themselves. */
   readonly dispatchedBeforeCancel?: boolean;
   readonly createdBy: string;
+  /** The moment a run in progress (or completed) was started (a fixed one when left out), for a test of which run has been out the longest. */
+  readonly startedAt?: Date;
 }
 
 /** A `DRAFT` manifest of the hub for a day, assigned to nobody. */
@@ -70,7 +72,7 @@ export async function insertManifest(client: Query, row: ManifestRow): Promise<M
       row.assignedRiderId,
       row.assignedRiderId === null ? null : new Date('2026-11-02T10:00:00Z'),
       dispatched ? new Date('2026-11-02T11:00:00Z') : null,
-      started ? new Date('2026-11-03T08:00:00Z') : null,
+      started ? (row.startedAt ?? new Date('2026-11-03T08:00:00Z')) : null,
       row.state === 'COMPLETED' ? new Date('2026-11-03T17:00:00Z') : null,
       row.createdBy,
     ],

@@ -1,10 +1,12 @@
 import { useRef, type ReactNode } from 'react';
 
+import { type CapabilityWords } from '../../../platform/problem/capability-words';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
 import { Alert } from '../alert/Alert';
 import { Button } from '../button/Button';
 import { ForbiddenState } from '../forbidden-state/ForbiddenState';
 import { LoadingIndicator } from '../loading/LoadingIndicator';
+import { UNCLAIMED_FOCUS_ATTRIBUTE } from './unclaimed-focus';
 import './read-state.css';
 
 /** What `ReadState` needs of a query: its result, and the way to ask again. A TanStack `useQuery` result is one. */
@@ -28,8 +30,10 @@ export interface ReadStateProps<Data> {
   readonly loadingLabel?: string;
   /** A placeholder for the shape of the content, shown beside the loading indicator. Decoration only. */
   readonly skeleton?: ReactNode;
-  /** The permission key the read needs. A refusal names it. */
+  /** The permission key the read needs. A refusal says what it lets a person do, in plain words (`capability-words.ts`), and never the key. */
   readonly permission?: string;
+  /** What the page reads with that key where it is not what the table says ("see pickup runs" for the key that also reads requests): words of the table, never free text. */
+  readonly capability?: CapabilityWords;
   /** The `operationId` of the read, so that its failures are worded for it. */
   readonly operation?: string;
   readonly context?: string;
@@ -43,12 +47,14 @@ export interface ReadStateProps<Data> {
 function RefusalOrFailure({
   problem,
   permission,
+  capability,
   onRetry,
   retrying,
   recovery,
 }: {
   readonly problem: Problem;
   readonly permission: string | undefined;
+  readonly capability: CapabilityWords | undefined;
   readonly onRetry: () => void;
   readonly retrying: boolean;
   readonly recovery: ReactNode;
@@ -57,7 +63,7 @@ function RefusalOrFailure({
 
   if (problem.kind === 'forbidden' && problem.forbidden !== undefined) {
     const kind = problem.forbidden;
-    // A refusal for want of a permission names it; with no key to name, the refusal is told in the generic words, as any other.
+    // A refusal for want of a permission tells what the account cannot do, in the words of the key; with no key to go by, it is told in the generic words, as any other.
     if (kind !== 'permission-missing') {
       return (
         <ForbiddenState
@@ -68,7 +74,14 @@ function RefusalOrFailure({
       );
     }
     if (permission !== undefined) {
-      return <ForbiddenState kind={kind} permission={permission} announce />;
+      return (
+        <ForbiddenState
+          kind={kind}
+          permission={permission}
+          announce
+          {...(capability === undefined ? {} : { capability })}
+        />
+      );
     }
     return (
       <Alert variant="danger" announce>
@@ -102,7 +115,7 @@ function RefusalOrFailure({
 /**
  * A read of the API, in every state the screen owes (COMPONENT_PATTERNS section 33.1): loading (a loading indicator and, if the screen
  * wants one, a skeleton), the error in approved words with a retry that is a control beside the error and not part of it, the refusals of
- * authority (naming the permission), nothing at all, and the content. It shows nothing for a session that has ended or a stale answer,
+ * authority (told in plain words, never by the key), nothing at all, and the content. It shows nothing for a session that has ended or a stale answer,
  * because the session boundary has already taken the person away. It never shows the diagnostic `message`, and it never shows data from an
  * earlier answer beside a failed refresh: the person is told it failed, and may try again.
  *
@@ -117,6 +130,7 @@ export function ReadState<Data>({
   loadingLabel,
   skeleton,
   permission,
+  capability,
   operation,
   context,
   recovery,
@@ -140,6 +154,7 @@ export function ReadState<Data>({
       <RefusalOrFailure
         problem={problemOf(query.error, place)}
         permission={permission}
+        capability={capability}
         retrying={query.isFetching}
         recovery={recovery}
         onRetry={() => {
@@ -156,7 +171,12 @@ export function ReadState<Data>({
   }
 
   return (
-    <div className="ui-read-state" ref={region} tabIndex={-1}>
+    <div
+      className="ui-read-state"
+      ref={region}
+      tabIndex={-1}
+      {...{ [UNCLAIMED_FOCUS_ATTRIBUTE]: '' }}
+    >
       {content}
     </div>
   );

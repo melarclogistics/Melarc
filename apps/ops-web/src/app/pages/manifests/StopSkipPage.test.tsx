@@ -81,6 +81,8 @@ function open(handlers: Record<string, Handler> = {}, keys: readonly string[] = 
       {
         [STOP]: () => json(200, waitingStop(), etag('s1')),
         [REASONS]: () => json(200, CATALOGUE),
+        // The run the stop belongs to, read for its code (the way back names it).
+        [MANIFEST]: () => json(200, manifestFixture(), etag('m1')),
         ...handlers,
       },
     ),
@@ -119,16 +121,64 @@ describe('the skip: what the page says and asks', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Skip a stop' })).toBeVisible();
     expect(await screen.findByText('Stop 1, ACC-PR-7KQ2MZ.')).toBeVisible();
     expect(await screen.findByText(/The vendor is always told/)).toBeVisible();
-    expect(screen.getByText(/uses up no pickup attempt/)).toBeVisible();
+    // A task form keeps at most two short sentences under its title (the Product Owner, 9 November 2026): what the skip does to the request is told in the question of the skip, where the
+    // choice is made (the dialog's test below), and not in paragraphs above the form.
+    expect(screen.queryByText(/uses up no pickup attempt/)).toBeNull();
+    const sentences = [...document.querySelectorAll('.pickup-form-note')].flatMap((note) =>
+      note.textContent.split(/(?<=\.)\s+/),
+    );
+    expect(sentences.length).toBeLessThanOrEqual(2);
+  });
+
+  // Break caught: the heading the page had while the stop was read replaced by the form's own, so that the focus the frame put on it falls to the document and a keyboard user is left
+  // at the top of the page (found by the browser spec of the run's final affected run: it depends on which comes first, the frame's move of focus or the stop's answer). Run 7, Stage 4.3: and
+  // not replaced at all: it is the same element, which a heading that took the focus the old one had lost is not.
+  it('keeps focus on the heading when the form replaces the page that was loading', async () => {
+    const held = byHand();
+    open({ [STOP]: held.handler });
+    const loading = await screen.findByRole('heading', { level: 1, name: 'Skip a stop' });
+    loading.focus();
+    expect(loading).toHaveFocus();
+
+    await held.answer(json(200, waitingStop(), etag('s1')));
+    await form();
+
+    const arrived = screen.getByRole('heading', { level: 1, name: 'Skip a stop' });
+    expect(arrived).toBe(loading);
+    expect(loading).toBeInTheDocument();
+    expect(arrived).toHaveFocus();
+  });
+
+  // Break caught (the Product Owner, 9 November 2026): a way back that calls every run "The pickup run", so that an officer with two runs open cannot tell which this is.
+  it('names the pickup run by its code in the way back', async () => {
+    open();
+
+    const link = await screen.findByRole('link', { name: 'ACC-MF-Q92422' });
+    expect(link).toHaveAttribute('href', `/manifests/${MANIFEST_ID}`);
+    expect(screen.queryByRole('link', { name: 'The pickup run' })).toBeNull();
+    expect(link.closest('nav')).toHaveAccessibleName(/./);
+  });
+
+  // Break caught: a run that cannot be read taking the page down, or leaving a way back that goes nowhere: the words stay, and the form is as before.
+  it('says "The pickup run" in the way back when the run cannot be read, and the form is as before', async () => {
+    open({ [MANIFEST]: () => refusal(500, 'INTERNAL_ERROR') });
+
+    await form();
+    expect(await screen.findByRole('link', { name: 'The pickup run' })).toHaveAttribute(
+      'href',
+      `/manifests/${MANIFEST_ID}`,
+    );
+    expect(screen.getByRole('button', { name: 'Skip this stop' })).toBeVisible();
   });
 
   // Break caught: the skip offered as a way to clear a failed pickup, which is another permission's page.
-  it('says this is not the way to clear a failed pickup, and names the key that is', async () => {
+  it('says this is not the way to clear a failed pickup, and where that is decided', async () => {
     open();
     await form();
 
     expect(screen.getByText(/not the way to clear a failed pickup/)).toBeVisible();
-    expect(screen.getByText('pickup.failure.resolve')).toBeVisible();
+    expect(screen.getByText(/decided in the pickup request\./)).toBeVisible();
+    expect(document.body.textContent).not.toContain('pickup.failure.resolve');
   });
 
   // Break caught: reason codes written into the page, which would offer a code the catalogue has retired.
@@ -171,13 +221,16 @@ describe('the skip: what the page says and asks', () => {
     expect(screen.getByRole('textbox', { name: /Note/ })).not.toBeRequired();
   });
 
-  it('says plainly that no skip reason is configured, naming the key that adds one', async () => {
+  it('says plainly that no skip reason is configured, and who adds one', async () => {
     open({ [REASONS]: () => json(200, []) });
 
     expect(
       await screen.findByText(/No reason for skipping a stop is configured yet/),
     ).toBeVisible();
-    expect(screen.getByText('settings.reason.manage')).toBeVisible();
+    expect(
+      screen.getByText(/An administrator adds the reasons to the reason catalogue/),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('settings.reason.manage');
     expect(screen.queryByRole('button', { name: 'Skip this stop' })).toBeNull();
   });
 
@@ -264,15 +317,16 @@ describe('the skip: doing it', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'ACC-MF-Q92422' })).toBeVisible();
     expect(screen.getByText(/The stop is skipped and the vendor is told\./)).toBeVisible();
-    expect(sent(MANIFEST)).toHaveLength(1);
+    // Once on the skip page (the way back names the run by its code) and once more on arrival: the run is read again, and never kept from before the skip.
+    expect(sent(MANIFEST)).toHaveLength(2);
   });
 
   it.each([
     ['STATE_CONFLICT', 409, /can no longer be skipped/],
     ['REASON_NOT_ACTIVE', 422, /can no longer be used to skip a stop/],
     ['REASON_REQUIRED', 422, /a reason, or the note the reason asks for/],
-    ['PERMISSION_DENIED', 403, /pickup\.stop\.skip/],
-    ['HUB_SCOPE_VIOLATION', 403, /hub your session does not act in/],
+    ['PERMISSION_DENIED', 403, /can’t skip a stop/],
+    ['HUB_SCOPE_VIOLATION', 403, /hub your account does not work in/],
   ])('tells %s in the officer’s words, and shows no diagnostic', async (code, status, words) => {
     const { user } = open({ [SKIP]: () => refusal(status, code) });
     const dialog = await review(user);
@@ -369,6 +423,13 @@ describe('the skip: a stop that cannot be skipped, or is not there', () => {
       expect(api.requests.some((request) => request.url.includes('reason-definitions'))).toBe(
         false,
       );
+      // The page's header has the breadcrumb of its parents, which is its one way back (Stage 4.5): no link of its own beside it.
+      const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+      expect(await trail.findByRole('link', { name: 'ACC-MF-Q92422' })).toHaveAttribute(
+        'href',
+        `/manifests/${MANIFEST_ID}`,
+      );
+      expect(screen.queryByRole('link', { name: 'Back to the pickup run' })).toBeNull();
     },
   );
 
@@ -386,7 +447,7 @@ describe('the skip: a stop that cannot be skipped, or is not there', () => {
     open({ [STOP]: () => refusal(404, 'NOT_FOUND') });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Stop not found' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Back to the manifest' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Back to the pickup run' })).toHaveAttribute(
       'href',
       `/manifests/${MANIFEST_ID}`,
     );
@@ -395,7 +456,7 @@ describe('the skip: a stop that cannot be skipped, or is not there', () => {
   it('tells a stop of another hub as that', async () => {
     open({ [STOP]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
 
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
   });
 
   it('names the pickup by a read of its request when the stop carries no summary', async () => {
@@ -477,7 +538,11 @@ describeInterfaceStates('the skip page', {
   'permission-restricted': {
     test: async () => {
       open({ [STOP]: () => refusal(403, 'PERMISSION_DENIED') });
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(
+        await screen.findByText(
+          'Your account can’t see pickup runs. Ask an administrator for access.',
+        ),
+      ).toBeVisible();
     },
   },
 });

@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
+import type { RouteObject } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { groupedKey } from '../../../platform/secrets/otpauth';
@@ -13,6 +14,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { NeverReady } from '../../../test-support/never-ready';
 import { decodeRenderedSvg } from '../../../test-support/qr-decode';
 import { renderApp } from '../../../test-support/render-app';
 
@@ -28,6 +30,8 @@ const SEED = 'SENTINELSEED234567ABCDEFGH';
 const URI = `otpauth://totp/Melarc:synthetic.officer?secret=${SEED}&issuer=Melarc&period=30`;
 const CONTINUATION = 'synthetic-continuation-grant';
 const SETUP = 'POST /auth/staff/setup/credential';
+/** The heading of a person who comes back after the code has gone (run 7, Stage 2.4). */
+const NOT_SET_UP = 'Your authenticator is not set up yet';
 const BEGIN = 'POST /auth/staff/setup/mfa/begin';
 const ENROL = 'POST /auth/staff/setup/mfa';
 const PRIVILEGED = {
@@ -52,9 +56,12 @@ afterEach(() => {
 type View = ReturnType<typeof renderApp>;
 
 /** The way in for a new privileged employee: the first password, answered with the material of an authenticator. */
-async function viaCredential(handlers: Record<string, Handler> = {}): Promise<View> {
+async function viaCredential(
+  handlers: Record<string, Handler> = {},
+  routes: RouteObject[] = [],
+): Promise<View> {
   api = installFakeApi({ [SETUP]: () => json(200, PRIVILEGED), ...handlers });
-  const view = renderApp(`/setup/credential#token=${GRANT}`);
+  const view = renderApp(`/setup/credential#token=${GRANT}`, routes);
   await view.user.type(await screen.findByLabelText('New password (required)'), PASSWORD);
   await view.user.click(screen.getByRole('button', { name: 'Set password' }));
   await screen.findByRole('region', { name: 'Authenticator set-up' });
@@ -607,7 +614,49 @@ describe('the seed is transient (OB-23)', () => {
       await view.router.navigate(-1);
     });
 
-    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    // Back at the page the person was on: the code is gone, and the page says what happened and what to do, and not that the link cannot be used (the password is set, the link was used).
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'This link cannot be used' })).toBeNull();
+    expect(whereIsTheSeed()).toEqual([]);
+  });
+
+  // Break caught (the review of f6cf02b): the authenticator's material, a bearer secret, still drawn while the page the person went to is awaited (it is let go of when the page that held it is
+  // replaced, which a slow page delays), and the page, once it was let go of, telling a person who navigated that the link cannot be used in the picture's place.
+  it('is gone the moment the router moves, before the next page is drawn, and the page draws nothing in its place', async () => {
+    const view = await viaCredential({}, [{ path: 'later', element: <NeverReady /> }]);
+    expect(whereIsTheSeed()).toEqual(['page']);
+
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    // The router is at the new page; what is drawn is still the page the person left, with nothing of the seed on it, and not the link's error either.
+    expect(view.router.state.location.pathname).toBe('/later');
+    expect(whereIsTheSeed()).toEqual([]);
+    expect(screen.queryByRole('region', { name: 'Authenticator set-up' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'This link cannot be used' })).toBeNull();
+  });
+
+  // Break caught: the picture back when the person presses Back, or Forward, in the moment the page they went to has not appeared (the WebKit run of 9 November 2026).
+  it('does not come back with Back, or with Forward, while the next page is awaited', async () => {
+    const view = await viaCredential({}, [{ path: 'later', element: <NeverReady /> }]);
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await view.router.navigate(-1);
+    });
+    // Back at the page, which has nothing left to show: what happened, and no picture.
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
+    expect(whereIsTheSeed()).toEqual([]);
+
+    await act(async () => {
+      await view.router.navigate(1);
+    });
+    expect(view.router.state.location.pathname).toBe('/later');
     expect(whereIsTheSeed()).toEqual([]);
   });
 
@@ -632,8 +681,38 @@ describe('the seed is transient (OB-23)', () => {
       vi.advanceTimersByTime(15 * 60 * 1000);
     });
 
-    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
     expect(whereIsTheSeed()).toEqual([]);
+  });
+
+  // Break caught (run 7, Stage 2.4; the Product Owner's review of 198e5be): a person who comes back to /setup/mfa after the code has gone was told "This link cannot be used", though the link was
+  // used and the password is set, and sent to sign in, which asks for the set-up link they were sent. The page says what happened and what to do next, from re-enrolment as well.
+  it('tells a person who comes back after a re-enrolment what happened, and to ask for a reset', async () => {
+    const view = viaLink({ [BEGIN]: () => json(200, BEGUN) });
+    await view.user.click(await screen.findByRole('button', { name: 'Begin set-up' }));
+    await screen.findByRole('region', { name: 'Authenticator set-up' });
+
+    await act(async () => {
+      await view.router.navigate('/sign-in');
+    });
+    await screen.findByRole('heading', { name: 'Sign in' });
+    await act(async () => {
+      await view.router.navigate(-1);
+    });
+
+    expect(await screen.findByRole('heading', { name: NOT_SET_UP })).toBeVisible();
+    expect(screen.getByText(/ask an administrator to reset your authenticator/i)).toBeVisible();
+    expect(whereIsTheSeed()).toEqual([]);
+  });
+
+  // Break caught: the new words shown to everyone who has no material, which would tell a stranger something about an account that the link's one error never does: only a tab that was
+  // taken through the flow (the history entry says so, and says nothing of anybody) is told.
+  it('says it only to a tab that was taken through the set-up, and the link’s one error to anyone else', async () => {
+    api = installFakeApi();
+    renderApp('/setup/mfa');
+
+    expect(await screen.findByRole('heading', { name: 'This link cannot be used' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: NOT_SET_UP })).toBeNull();
   });
 
   // Break caught: the seed, the code or the grant written to the console by a diagnostic.

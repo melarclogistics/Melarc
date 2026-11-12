@@ -218,8 +218,9 @@ describe('reissueVendorCredentialSetup (AC-SLICE-000-101)', () => {
     expect([absent.status, codeOf(absent)]).toEqual([404, 'NOT_FOUND']);
   });
 
-  // The Platform Admin's grant of the key is own-hub: one whose primary hub is the vendor's acts, one with no primary hub reaches none.
-  it('lets a Platform Admin of the vendor’s hub re-issue, and not one whose grant reaches no hub', async () => {
+  // The Platform Admin's grant of the key is of all hubs (the decision of 5 November 2026, task P1): one with a hub of its own and one with none
+  // both re-issue the grant of a vendor of any hub. (The e2e journey used a Senior Ops user for this because the administrator reached none.)
+  it('lets a Platform Admin re-issue for a vendor of any hub, with a hub of its own or none', async () => {
     const account = await vendor();
     const ofTheHub = await routes.actor(BUNDLE_IDS.platformAdmin, HUB_A);
     expect((await reissue(ofTheHub, account)).status).toBe(200);
@@ -229,7 +230,7 @@ describe('reissueVendorCredentialSetup (AC-SLICE-000-101)', () => {
       origin: OPS,
       headers: { 'If-Match': await etagOf(hubless, other.accountId) },
     });
-    expect([response.status, codeOf(response)]).toEqual([403, 'HUB_SCOPE_VIOLATION']);
+    expect(response.status).toBe(200);
   });
 
   it('refuses a stale ETag with STATE_CONFLICT, an empty reason with REASON_REQUIRED and an unknown one with REASON_NOT_ACTIVE', async () => {

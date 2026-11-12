@@ -1,7 +1,8 @@
 /*
- * Timeline: a vertical list of steps joined by a rule, each with a round marker. The current step's marker is filled and its title carries words
- * that say so, so it is never told by colour alone; under forced colours the marker and the rule take the system's text colour. Everything is
- * in rem, so enlarged text grows it, and a step's text wraps rather than pushing the page sideways at 320 px.
+ * Timeline: a vertical list of steps joined by a rule, each with a small round marker (about the height of the text, not a disc). The current
+ * step's marker is filled, which differs from a hollow one in form and in weight, and a page may give it words, drawn as a tag of their own
+ * after the title, set apart from it; under forced colours the marker and the rule take the system's text colour. Everything is in rem, so
+ * enlarged text grows it, and a step's text wraps rather than pushing the page sideways at 320 px.
  */
 .ui-timeline {
   margin: 0;
@@ -12,16 +13,16 @@
 .ui-timeline__step {
   position: relative;
   display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr);
+  grid-template-columns: 1rem minmax(0, 1fr);
   column-gap: var(--space-3);
   padding-bottom: var(--space-4);
 }
 
-/* The rule from one marker to the next: it stops at the last step. */
+/* The rule from one marker to the next, just under the marker: it stops at the last step. The title's line is 1.375rem, the marker 0.625rem. */
 .ui-timeline__step:not(:last-child)::before {
   position: absolute;
-  inset-block: 1.25rem 0;
-  inset-inline-start: calc(0.625rem - 1px);
+  inset-block: 1.125rem 0;
+  inset-inline-start: calc(0.5rem - 1px);
   width: 2px;
   background: var(--color-border-default);
   content: '';
@@ -29,9 +30,10 @@
 
 .ui-timeline__marker {
   box-sizing: border-box;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-top: 0.125rem;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-top: 0.375rem;
+  justify-self: center;
   border: 2px solid var(--color-border-strong);
   border-radius: var(--radius-full);
   background: var(--color-surface-default);
@@ -52,9 +54,17 @@
   overflow-wrap: anywhere;
 }
 
+/* The words of the current step: a tag of their own, with a gap from the title (it wraps to the next line whole rather than breaking). */
 .ui-timeline__current {
+  display: inline-block;
+  margin-inline-start: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
-  font-weight: var(--text-body-md-weight);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
 }
 
 .ui-timeline__details {

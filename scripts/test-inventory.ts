@@ -178,6 +178,16 @@ export interface VitestFacts {
 
 const STRING_LITERAL = /(['"])((?:(?!\1).)*)\1/g;
 
+/**
+ * The one `exclude` this check reads (task CI.2): the project of the database tests that run alone leaves out the files whose bounds are
+ * wall-clock time when, and only when, `MELARC_SKIP_TIMING_TESTS` is 1, which the job of a pull request sets and no other run does
+ * (apps/api/test/timing-sensitive-tests.ts). The files are run by every other kind of run, so they are not files that no runner runs, and
+ * the exclusion takes nothing out of this check; `apps/api/src/database-test-isolation.test.ts` holds the list to the files' own first lines
+ * and the switch to the value 1. Any other `exclude`, and this one in another form, is still refused.
+ */
+const TIMING_EXCLUDE =
+  /\bexclude\s*:\s*skipsTimingTests\(process\.env\)\s*\?\s*\[\s*\.\.\.configDefaults\.exclude\s*,\s*\.\.\.TIMING_SENSITIVE_TESTS\s*\]\s*:\s*configDefaults\.exclude\s*,/g;
+
 const stringLiterals = (text: string): string[] =>
   [...text.matchAll(STRING_LITERAL)].map((match) => match[2] ?? '');
 
@@ -189,7 +199,7 @@ export function readVitestConfig(text: string): VitestFacts {
   if (keys.length !== lists.length) {
     unreadable.push('an include that is not a list of string literals');
   }
-  if (/\bexclude\s*:/.test(text)) {
+  if (/\bexclude\s*:/.test(text.replaceAll(TIMING_EXCLUDE, ''))) {
     unreadable.push('an exclude, which this check does not model');
   }
   return {

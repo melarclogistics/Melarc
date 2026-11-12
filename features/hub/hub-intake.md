@@ -113,8 +113,8 @@ Non-obvious: `rider_declared_count` is **never readable before commit and never 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
 | `hub.handover.submit`| **Rider only**| owned completed run| [permissions.md](../../contracts/permissions.md) §7|
-| `hub.intake.count`| Ops, Senior Ops, Platform Admin| own hub||
-| `hub.osd.adjudicate`| **Senior Ops, Platform Admin** — not Ops Staff| own hub||
+| `hub.intake.count`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs)||
+| `hub.osd.adjudicate`| **Senior Ops, Platform Admin** — not Ops Staff| own hub (Platform Admin: all hubs)||
 | `hub.intake.reopen`| **Platform Admin only**| all hubs||
 
 ## 9. Settings — *pointer*

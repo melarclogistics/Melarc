@@ -75,6 +75,18 @@ describe('the ETag of a pickup manifest', () => {
     expect(pickupManifestEtagOf(view(change), 1)).not.toBe(pickupManifestEtagOf(view(), 1));
   });
 
+  // Break caught (run 6, Stage 1.2): the moment the run was made in the digest. It is set once and never changes, so it tells a client nothing the version does not; it was added to the
+  // digest with contract 5.100.0 and moved the ETag of every run. A rolling release (DEPLOYMENT_AND_ENVIRONMENTS.md section 7) serves the build before and the build after side by
+  // side, so a run read through one and acted on through the other was refused as stale on every assign, dispatch, cancel and stop order until the old build had drained. (This replaces
+  // the row 'moves with the moment it was made' of the table above, which asserted the opposite.)
+  it('does not move with the moment the run was made: two representations that differ only in created_at have one ETag', () => {
+    const earlier = view({ created_at: new Date('2026-11-02T08:00:00.000Z') });
+    const later = view({ created_at: new Date('2026-11-02T10:30:00.000Z') });
+
+    expect(earlier.created_at).not.toBe(later.created_at);
+    expect(pickupManifestEtagOf(earlier, 1)).toBe(pickupManifestEtagOf(later, 1));
+  });
+
   // Break caught: a member of a stop left out of the digest.
   it.each([
     ['its request', { pickup_request_id: '5eed0200-0000-4000-8000-0000000000ff' }],
@@ -172,6 +184,44 @@ describe('the ETag of a pickup manifest', () => {
     for (const version of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
       expect(() => pickupManifestEtagOf(view(), version)).toThrow(RangeError);
     }
+  });
+});
+
+/**
+ * The digests a build before contract 5.100.0 (499399c) computed for these two runs, taken by running that build's file over the same representations. The build after must compute
+ * the same, member for member and in the same order, or a rolling release that serves both refuses a run read through one and acted on through the other (run 6, Stage 1.2).
+ */
+describe('the ETag of a run, between the build before contract 5.100.0 and this one', () => {
+  const inProgress = view(
+    {
+      state: 'IN_PROGRESS',
+      assigned_rider_id: '5eed0900-0000-4000-8000-000000000001',
+      assigned_at: new Date('2026-11-02T10:00:00.000Z'),
+      dispatched_at: new Date('2026-11-02T11:00:00.000Z'),
+      started_at: new Date('2026-11-03T08:00:00.000Z'),
+    },
+    [
+      stop(1, { state: 'COLLECTED', arrived_at: new Date('2026-11-03T09:00:00.000Z') }),
+      stop(2, { state: 'ARRIVED', arrived_at: new Date('2026-11-03T09:30:00.000Z') }),
+      stop(3),
+    ],
+  );
+
+  it.each([
+    [
+      'a draft of three stops, at version 1',
+      view(),
+      1,
+      '"06rYBRV-F2myyTKM61IiiHaj3PwWQlnW3dQgNzFzzv4"',
+    ],
+    [
+      'a run in progress with its rider and two stops worked, at version 7',
+      inProgress,
+      7,
+      '"thKSuWbjIZROQy-mW3j-OK9X2gW2Rr0WgMHE-11PkKI"',
+    ],
+  ] as const)('is the ETag that build computed for %s', (_label, run, version, expected) => {
+    expect(pickupManifestEtagOf(run, version)).toBe(expected);
   });
 });
 

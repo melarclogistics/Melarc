@@ -1,11 +1,15 @@
-import type { ReactNode } from 'react';
-
-import { Link } from '../../../components/ui/link/Link';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import {
+  CellLines,
+  NoWrap,
+  RowTitle,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import type { TableColumn } from '../../../components/ui/table/Table';
 import type { PickupRequestView, PickupState } from '../../../platform/pickup/pickup-shape';
 import { hubNameOf } from '../staff/staff-presentation';
 import {
+  canBeConfirmed,
   hasApprovedException,
   hasRequestedException,
   INTENT_LABELS,
@@ -31,7 +35,11 @@ const NO_NOTE = 'No additional note';
  * does not add urgency, a blocker or a claim that a request may be confirmed.
  */
 function attentionOf(request: PickupRequestView): string {
-  if (request.cutoff_exception_state === 'PENDING_OPS_REVIEW') return 'Late booking to decide';
+  // Only a confirmed request has a decision to make: one cancelled since keeps the decision it had, with nothing left to decide on it (as the
+  // request's own page and the landing's count have it).
+  if (request.state === 'CONFIRMED' && request.cutoff_exception_state === 'PENDING_OPS_REVIEW') {
+    return 'Late booking to decide';
+  }
   if (request.state === 'PENDING' && isSinglePackage(request) && !hasApprovedException(request)) {
     return hasRequestedException(request)
       ? 'One-package exception waiting for approval'
@@ -54,6 +62,8 @@ export interface QueueFacts {
   readonly packages: string;
   readonly bookedAs: string;
   readonly needs: string;
+  /** The screen offers to confirm it (waiting, and not a single package without its approved exception). The server decides whatever is offered. */
+  readonly confirmable: boolean;
 }
 
 export function queueFactsOf(
@@ -73,6 +83,7 @@ export function queueFactsOf(
     bookedAs:
       request.pickup_intent === undefined ? NOT_RECORDED : INTENT_LABELS[request.pickup_intent],
     needs: attentionOf(request),
+    confirmable: canBeConfirmed(request),
   };
 }
 
@@ -89,104 +100,76 @@ function Dash({ means }: { readonly means: string }) {
   );
 }
 
-/** Two facts that belong together, the first as it is and the second quieter beneath it. */
-function Pair({ first, second }: { readonly first: string; readonly second: string }) {
-  return (
-    <span className="pickup-lines">
-      <span>{first}</span>
-      <span className="pickup-support">{second}</span>
-    </span>
-  );
-}
-
-/** The state as a badge that wraps at its words in a narrow column, instead of making the column as wide as the longest state. */
+/** The state as a badge, on one line: the column takes its width. */
 function State({ state }: { readonly state: PickupState }) {
-  return (
-    <span className="pickup-state">
-      <StatusBadge status={state} map={PICKUP_STATE_MAP} />
-    </span>
-  );
+  return <StatusBadge status={state} map={PICKUP_STATE_MAP} />;
 }
 
 const Needs = ({ text }: { readonly text: string }) =>
   text === '' ? <Dash means={NO_NOTE} /> : <>{text}</>;
 
 /**
- * The nine facts of the queue in six columns, grouped by what they mean: who and which request, where it stands, when, where and for which hub,
- * what is being collected and as what, and what it needs. The code is the row's header and its one link; the row itself is not a link.
+ * The nine facts of the queue in six columns, grouped by what they mean: who and which request, where it stands, when, where and for which hub, what is being
+ * collected and as what, and what it needs. The code over the sender is the row's header, and **the button that opens the request in the panel beside the queue**
+ * (the table draws it, stretched over the row); the row is no link. **The columns that go when the table's own box is narrow are the screen's choice, and the table takes them away only
+ * as far as it takes for the box not to scroll sideways** (the Product Owner, 10 November 2026): the packages with the booking type first (weight 3), then the pickup address with the hub
+ * (weight 2). The request with its sender, the state, the service date and what a request needs stay; a card, under 40rem, shows every fact.
  */
-export const QUEUE_COLUMNS: readonly TableColumn<QueueFacts>[] = [
+export const QUEUE_COLUMNS: readonly DataColumn<QueueFacts>[] = [
   {
-    key: 'request',
+    id: 'request',
     header: 'Request / sender',
     rowHeader: true,
-    cell: (row) => (
-      <span className="pickup-lines">
-        <span className="pickup-nowrap">
-          <Link to={row.href} data-request-id={row.id}>
-            {row.code}
-          </Link>
-        </span>
-        <span className="pickup-support">{row.sender}</span>
-      </span>
-    ),
+    cell: (row) => <RowTitle code={row.code} name={row.sender} />,
   },
-  { key: 'state', header: 'State', cell: (row) => <State state={row.state} /> },
+  { id: 'state', header: 'State', kind: 'badge', cell: (row) => <State state={row.state} /> },
   {
-    key: 'date',
+    id: 'date',
     header: 'Service date',
-    cell: (row) => <span className="pickup-nowrap">{row.date}</span>,
+    kind: 'date',
+    cell: (row) => <NoWrap>{row.date}</NoWrap>,
   },
   {
-    key: 'where',
+    id: 'where',
     header: 'Pickup address / hub',
-    cell: (row) => <Pair first={row.address} second={row.hub} />,
+    kind: 'prose',
+    priority: 2,
+    cell: (row) => <CellLines first={row.address} second={row.hub} />,
   },
   {
-    key: 'packages',
+    id: 'packages',
     header: 'Packages / booking type',
-    cell: (row) => <Pair first={row.packages} second={row.bookedAs} />,
+    kind: 'count',
+    priority: 3,
+    cell: (row) => <CellLines first={row.packages} second={row.bookedAs} oneLine />,
   },
-  { key: 'needs', header: 'Needs', cell: (row) => <Needs text={row.needs} /> },
+  { id: 'needs', header: 'Needs', kind: 'prose', cell: (row) => <Needs text={row.needs} /> },
 ];
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="pickup-card__fact">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
+/** What opens a request, for the pointer and for assistive technology: its code and its sender. */
+export const openLabelOf = (row: QueueFacts): string => `Open ${row.code}, ${row.sender}`;
 
 /**
- * A request as a card, for a room too narrow for the columns: the code (the one link) with the state, the sender, and then the facts in the
- * order a person reads them, each under the name of its column. The code is a heading, so that a screen reader can move from request to request.
+ * A request as a card, for a room too narrow for the columns: the state, the sender, and then the facts in the order a person reads them, each a label and its value (`CardFacts`). It holds
+ * **no control**: the table draws the card's one hit target (the button that opens the request, stretched over the card) and its heading, the code.
  */
 export function QueueCard({ facts }: { readonly facts: QueueFacts }) {
   return (
-    <>
-      <div className="pickup-card__head">
-        <h2 className="pickup-card__title">
-          <Link to={facts.href} data-request-id={facts.id}>
-            {facts.code}
-          </Link>
-        </h2>
-        <State state={facts.state} />
-      </div>
-      <p className="pickup-card__sender pickup-support">{facts.sender}</p>
-      <dl className="pickup-card__facts">
-        <Fact label="Service date">{facts.date}</Fact>
-        <Fact label="Pickup address / hub">
-          <Pair first={facts.address} second={facts.hub} />
-        </Fact>
-        <Fact label="Packages / booking type">
-          <Pair first={facts.packages} second={facts.bookedAs} />
-        </Fact>
-        <Fact label="Needs">
-          <Needs text={facts.needs} />
-        </Fact>
-      </dl>
-    </>
+    <CardFacts
+      head={<State state={facts.state} />}
+      lead={facts.sender}
+      facts={[
+        { label: 'Service date', value: facts.date },
+        {
+          label: 'Pickup address / hub',
+          value: <CellLines first={facts.address} second={facts.hub} />,
+        },
+        {
+          label: 'Packages / booking type',
+          value: <CellLines first={facts.packages} second={facts.bookedAs} />,
+        },
+        { label: 'Needs', value: <Needs text={facts.needs} /> },
+      ]}
+    />
   );
 }

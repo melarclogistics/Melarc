@@ -6,9 +6,17 @@ import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { ConfirmationDialog } from '../../../components/ui/confirmation/ConfirmationDialog';
+import {
+  DescriptionList,
+  type DescriptionItem,
+} from '../../../components/ui/description-list/DescriptionList';
+import { Link } from '../../../components/ui/link/Link';
+import { Panel } from '../../../components/ui/panel/Panel';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import { RecordPage } from '../../../components/ui/templates/RecordPage';
 import { useApiClient } from '../../../platform/api/api-client';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import {
   decideStaffIdentity,
@@ -20,7 +28,7 @@ import { useAssignableBundles, type StaffRecord } from '../../../platform/staff/
 import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf, roleNameOf, STAFF_STATUS_MAP } from './staff-presentation';
 import { TrustedBrowsersSection } from './TrustedBrowsersSection';
-import { WithProfile } from './WithProfile';
+import { useFocusFallenToHeading, WithProfile } from './WithProfile';
 import './staff-pages.css';
 
 const BUNDLE_READ = 'permission.assignable_bundle.read';
@@ -62,6 +70,8 @@ function Profile({
   const [act, setAct] = useState<Act | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const noticeBox = useRef<HTMLDivElement>(null);
+  // The record page draws the person's name as the heading (the one the wrapper drew while the profile loaded is gone): focus is put on it if the old one's has fallen.
+  useFocusFallenToHeading();
 
   // The news replaces what the person was looking at, so a keyboard user lands on it.
   useEffect(() => {
@@ -94,7 +104,6 @@ function Profile({
   const maySeeSessions = identity.status === 'ACTIVE' && me.holds('staff.session.revoke');
   // Only a person with an authenticator can have asked to be remembered, and ending standing access is the key that ends their sessions.
   const maySeeTrustedBrowsers = maySeeSessions && identity.mfa_enrolled;
-  const hasActions = waiting || mayReissue || mayRecover || mayReset || maySeeSessions;
 
   function finish(message: string): void {
     setAct(undefined);
@@ -107,175 +116,156 @@ function Profile({
   }
 
   const shows = identity.mfa_enrolled || identity.mfa_reset_state !== 'NOT_ELIGIBLE';
+  const facts: DescriptionItem[] = [
+    { label: 'Work email', value: identity.work_email },
+    { label: 'Phone', value: identity.phone ?? 'Not given' },
+    ...(role === undefined ? [] : [{ label: 'Role', value: role }]),
+    { label: 'Hub', value: hubNameOf(identity.primary_hub_id, me.session.authorized_hubs) },
+    ...(shows
+      ? [
+          {
+            label: 'Authenticator',
+            value:
+              identity.mfa_reset_state === 'ENROLMENT_UNFINISHED'
+                ? 'Set-up not finished'
+                : 'Set up',
+          },
+        ]
+      : []),
+  ];
+
+  // The acts of the record are the header's (Stage 4.4; PRODUCT_DESIGN_DIRECTION section 6.2): the person never meets a panel that holds nothing but buttons. The decision is the primary act of a
+  // profile that waits: the checker's half of the maker-checker rule, the one thing a waiting profile is for. The session lists permission keys and no tiers, so the page
+  // cannot tell a Platform Admin (who decides what they made) from another maker (who needs a different person): it offers the acts to a holder of the key, says in one line who
+  // may use them, and the server decides.
+  const decide = waiting && canApprove;
+  const approve = decide ? (
+    <Button
+      type="button"
+      loading={refreshing}
+      onClick={() => {
+        setAct('approve');
+      }}
+    >
+      Approve profile
+    </Button>
+  ) : undefined;
+
+  // The other acts do not compete with the decision: rejecting a profile that waits, and the acts on the person's credentials (a first setup link for a profile that has no password, a
+  // recovery of the password, and the reset of an authenticator, which is a page of its own). A profile has at most two of them at a time, so they are drawn beside the name and not
+  // kept in a menu; each is passed in only when the session may take it.
+  const others = [
+    decide ? (
+      <Button
+        key="reject"
+        type="button"
+        variant="danger"
+        loading={refreshing}
+        onClick={() => {
+          setAct('reject');
+        }}
+      >
+        Reject profile
+      </Button>
+    ) : null,
+    mayReissue ? (
+      <Button
+        key="reissue"
+        type="button"
+        variant="secondary"
+        loading={refreshing}
+        onClick={() => {
+          setAct('reissue');
+        }}
+      >
+        Send a new setup link
+      </Button>
+    ) : null,
+    mayRecover ? (
+      <Button
+        key="recover"
+        type="button"
+        variant="secondary"
+        loading={refreshing}
+        onClick={() => {
+          setAct('recover');
+        }}
+      >
+        Start password recovery
+      </Button>
+    ) : null,
+    mayReset ? (
+      <ButtonLink key="reset" variant="secondary" to={`/admin/staff/${identity.id}/mfa/reset`}>
+        Reset authenticator
+      </ButtonLink>
+    ) : null,
+  ].filter((act) => act !== null);
+
+  // What changes whether to act now, in one short muted line under the acts (the Product Owner, 9 November 2026: a rule is in the act's own question, and a paragraph of rules is not
+  // drawn above the content): why the session may not decide, that the maker's own profile needs a different person, and that the role needs a Platform Admin. Said in one line.
+  const lines = [
+    ...(waiting && !canApprove ? [cannotText('staff.identity.approve')] : []),
+    ...(waiting && canApprove && mine
+      ? [
+          'You created this profile. A Platform Admin can approve or reject a profile they made; anyone else needs a different person to.',
+        ]
+      : []),
+    ...(waiting && canApprove && needsAdmin ? ['This role needs a Platform Admin to decide.'] : []),
+  ];
 
   return (
     <>
-      {notice === undefined ? null : (
-        <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
-          <Alert variant="success">
-            <p>{notice}</p>
-          </Alert>
-        </div>
-      )}
-
-      <p className="staff-status">
-        <StatusBadge status={identity.status} map={STAFF_STATUS_MAP} />{' '}
-        <span>{statusSentence(identity)}</span>
-      </p>
-
-      <dl className="staff-facts">
-        <dt>Work email</dt>
-        <dd>{identity.work_email}</dd>
-        <dt>Phone</dt>
-        <dd>{identity.phone ?? 'Not given'}</dd>
-        {role === undefined ? null : (
+      <RecordPage
+        header={{
+          code: name,
+          titleKind: 'name',
+          status: <StatusBadge status={identity.status} map={STAFF_STATUS_MAP} />,
+          sentence: statusSentence(identity),
+        }}
+        {...(approve === undefined && others.length === 0 && lines.length === 0
+          ? {}
+          : {
+              acts: {
+                ...(approve === undefined ? {} : { primary: approve }),
+                ...(others.length === 0 ? {} : { secondary: others }),
+                ...(lines.length === 0 ? {} : { note: lines.join(' ') }),
+              },
+            })}
+        {...(notice === undefined
+          ? {}
+          : {
+              notice: (
+                <div className="staff-notice" ref={noticeBox} tabIndex={-1}>
+                  <Alert variant="success">
+                    <p>{notice}</p>
+                  </Alert>
+                </div>
+              ),
+            })}
+        main={
           <>
-            <dt>Role</dt>
-            <dd>{role}</dd>
-          </>
-        )}
-        <dt>Hub</dt>
-        <dd>{hubNameOf(identity.primary_hub_id, me.session.authorized_hubs)}</dd>
-        {shows ? (
-          <>
-            <dt>Authenticator</dt>
-            <dd>
-              {identity.mfa_reset_state === 'ENROLMENT_UNFINISHED'
-                ? 'Set-up not finished'
-                : 'Set up'}
-            </dd>
-          </>
-        ) : null}
-      </dl>
+            <Panel title="Profile">
+              <DescriptionList items={facts} />
+            </Panel>
 
-      {hasActions ? (
-        <section className="staff-actions" aria-labelledby="staff-actions">
-          <h2 id="staff-actions">What you can do</h2>
-
-          {waiting ? (
-            <div>
-              {!canApprove ? (
-                <p className="staff-note">
-                  Approving or rejecting a profile needs the permission{' '}
-                  <code>staff.identity.approve</code>, which your session does not hold.
-                </p>
-              ) : (
-                <>
-                  <p className="staff-action__text">
-                    Check the role and the hub, then approve or reject the profile.
+            {maySeeTrustedBrowsers ? <TrustedBrowsersSection id={identity.id} name={name} /> : null}
+          </>
+        }
+        // The sessions are a page of their own (the list narrowed to this person): a link beside the work, in the panel of what is related, for a session that holds the key that lists them.
+        {...(maySeeSessions
+          ? {
+              side: (
+                <Panel title="Related" headingLevel={2}>
+                  <p>
+                    <Link to={`/admin/sessions?principal_type=STAFF&principal_id=${identity.id}`}>
+                      See sessions
+                    </Link>
                   </p>
-                  {/* The session lists permission keys and no tiers, so the page cannot tell a Platform Admin (who decides what they
-                      made) from another maker (who needs a different person): it says who may, and the server decides. */}
-                  {mine ? (
-                    <p className="staff-note">
-                      You created this profile. A Platform Admin can approve or reject a profile
-                      they made; anyone else needs a different person to.
-                    </p>
-                  ) : null}
-                  {needsAdmin ? (
-                    <p className="staff-note">This role needs a Platform Admin to decide.</p>
-                  ) : null}
-                  <div className="staff-action__buttons">
-                    <Button
-                      type="button"
-                      loading={refreshing}
-                      onClick={() => {
-                        setAct('approve');
-                      }}
-                    >
-                      Approve profile
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      loading={refreshing}
-                      onClick={() => {
-                        setAct('reject');
-                      }}
-                    >
-                      Reject profile
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : null}
-
-          {mayReissue ? (
-            <div>
-              <p className="staff-action__text">
-                If {name}’s first setup link expired or never arrived, send a new one to their work
-                email.
-              </p>
-              <div className="staff-action__buttons">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  loading={refreshing}
-                  onClick={() => {
-                    setAct('reissue');
-                  }}
-                >
-                  Send a new setup link
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {mayRecover ? (
-            <div>
-              <p className="staff-action__text">
-                If {name} has forgotten their password, send a recovery link to their work email.
-                They set the new password themselves; nobody else sees it.
-              </p>
-              <div className="staff-action__buttons">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  loading={refreshing}
-                  onClick={() => {
-                    setAct('recover');
-                  }}
-                >
-                  Start password recovery
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          {mayReset ? (
-            <div>
-              <p className="staff-action__text">
-                If {name} has lost their authenticator app, reset it. Their sessions end, and a link
-                to set up a new one is sent to their work email.
-              </p>
-              <div className="staff-action__buttons">
-                <ButtonLink variant="secondary" to={`/admin/staff/${identity.id}/mfa/reset`}>
-                  Reset authenticator
-                </ButtonLink>
-              </div>
-            </div>
-          ) : null}
-
-          {maySeeSessions ? (
-            <div>
-              <p className="staff-action__text">
-                See where {name} is signed in, and end a session.
-              </p>
-              <div className="staff-action__buttons">
-                <ButtonLink
-                  variant="secondary"
-                  to={`/admin/sessions?principal_type=STAFF&principal_id=${identity.id}`}
-                >
-                  See sessions
-                </ButtonLink>
-              </div>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {maySeeTrustedBrowsers ? <TrustedBrowsersSection id={identity.id} name={name} /> : null}
+                </Panel>
+              ),
+            }
+          : {})}
+      />
 
       <ConfirmationDialog<StaffIdentityView>
         open={act === 'approve'}
@@ -399,10 +389,11 @@ function Profile({
 }
 
 /**
- * One staff profile (surfaces/ops-portal.md section 7, `/admin/staff/{id}`): who the person is, where the profile stands, and what the
- * session may do with it: approve or reject it (the checker's half of the maker-checker rule), send a new first setup link, go on to reset an
- * authenticator, go on to the person's sessions, and see and remove the browsers they chose to be remembered at (staff-authentication.md
- * section 5.8).
+ * One staff profile (surfaces/ops-portal.md section 7, `/admin/staff/{id}`; redesign step R7b, Stage 4.4): who the person is, where the profile stands, and what the
+ * session may do with it, on the record page template (COMPONENT_PATTERNS, *RecordPage*). The header carries the name, the status, the sentence of what it means and **every act**: for a profile
+ * that waits, the decision (approve it, which is the primary act, or reject it: the checker's half of the maker-checker rule); for a person who has a credential, the acts on it (a new first
+ * setup link, a recovery of the password, and the reset of an authenticator, which is a page of its own), beside the name and not in a panel of buttons. The body holds the facts and the browsers the person chose to
+ * be remembered at (staff-authentication.md section 5.8), each in a panel, and the side column the sessions (a page of their own) as a link in the panel of what is related.
  *
  * Every act sends the version the page read (`If-Match`, the `ETag` exactly as the server gave it), so a record that moved is a conflict that
  * is explained and read again, never a silent overwrite. The page can show nothing that opens an account: no credential, no link and no
@@ -414,6 +405,7 @@ export function StaffDetailPage() {
   return (
     <WithProfile
       id={id}
+      ownsHeading
       heading={(identity) => {
         const title = identity?.full_name ?? 'Staff profile';
         return { title, documentTitle: title };

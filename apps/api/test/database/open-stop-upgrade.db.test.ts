@@ -220,7 +220,10 @@ describe('the built command, run as the owner runs it', () => {
 
       const migrated = await run(
         DB_MIGRATE,
-        { DATABASE_MIGRATION_URL: built.target.urlFor(MIGRATION_ROLE) },
+        {
+          DATABASE_MIGRATION_URL: built.target.urlFor(MIGRATION_ROLE),
+          DATABASE_LOCK_TIMEOUT_MS: '2000',
+        },
         [],
         60_000,
       );

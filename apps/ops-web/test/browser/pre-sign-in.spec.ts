@@ -1,9 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { SIGNED_IN_SESSION } from './support/api';
 import { decodePainted } from './support/painted';
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
 import { errorAnswer, stubPreSignInApi, type PreSignInApi } from './support/pre-sign-in-api';
+import { accountButton } from './support/shell';
 
 /**
  * The five pre-sign-in screens in a real browser (S0.43): `/sign-in`, `/sign-in/mfa`, `/setup/credential`, `/setup/mfa` and `/setup/mfa/complete`.
@@ -181,7 +183,7 @@ test.describe('a link page: the grant in the fragment (GBT-W16, the page’s hal
 
 test.describe('the sign-in in a browser', () => {
   // Break caught: a sign-in that does not reach the landing, that needs a second read, or that leaves the form's password behind.
-  test('signs an ordinary employee in with the keyboard and lands on the landing, with the shell’s side menu', async ({
+  test('signs an ordinary employee in with the keyboard and lands on My work, with the shell’s sidebar and top bar', async ({
     page,
   }) => {
     const api = await stubPreSignInApi(page, { signIn: { status: 200, json: SIGNED_IN_SESSION } });
@@ -196,7 +198,7 @@ test.describe('the sign-in in a browser', () => {
     await expect(page).toHaveURL('/');
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
     await expect(page.getByRole('navigation')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+    await expect(accountButton(page)).toBeVisible();
     expect(api.requests.map((request) => request.operation)).toEqual(['signIn']);
     expect(api.requests[0]?.body).toEqual({ email: EMAIL, password: PASSWORD });
     expect(api.requests[0]?.origin).toBeDefined();
@@ -225,7 +227,7 @@ test.describe('the sign-in in a browser', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Enter your code' })).toBeVisible();
     await expect(page).toHaveURL('/sign-in/mfa');
     await expect(page.getByRole('navigation')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(accountButton(page)).toHaveCount(0);
     expect(page.url()).not.toContain(CHALLENGE.challenge_id);
 
     await field(page, 'Authenticator code (required)').fill(CODE);
@@ -356,8 +358,9 @@ test.describe('the authenticator in a browser', () => {
 
     await page.reload();
 
+    // The entry remembers that the code was shown here (not the code): the page says what happened and what to do (run 7, Stage 2.4), and the seed is not on it.
     await expect(
-      page.getByRole('heading', { level: 1, name: 'This link cannot be used' }),
+      page.getByRole('heading', { level: 1, name: 'Your authenticator is not set up yet' }),
     ).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
   });
@@ -395,9 +398,41 @@ test.describe('the authenticator in a browser', () => {
     await page.goBack();
 
     await expect(
-      page.getByRole('heading', { level: 1, name: 'This link cannot be used' }),
+      page.getByRole('heading', { level: 1, name: 'Your authenticator is not set up yet' }),
     ).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
+  });
+
+  // Break caught (the review of f6cf02b; run 7, Stage 4.3): the authenticator's material drawn again by a Back in the moment the next page is awaited. The test above leaves the page by a full
+  // navigation, which loads everything afresh and proves nothing about the router. Here the person leaves **inside the application** and comes Back in the same task: the router has committed the
+  // other address and then this one again, and React, which draws a page it leads to later (this application has no page that loads on demand, so none can be held for longer), has drawn
+  // nothing in between. The page is still on the screen, and it must hold nothing a Back could show: it let the material go when the router moved (`releaseWhenRouterMoves`), so the page that
+  // comes back says the code is gone and never draws the QR code or the key.
+  test('does not draw the material again when the person leaves inside the application and comes Back before the next page is drawn', async ({
+    page,
+  }) => {
+    await toTheAuthenticator(page);
+    const region = page.getByRole('region', { name: 'Authenticator set-up' });
+    await expect(region.getByRole('textbox', { name: 'Setup key' })).toHaveValue(
+      'SENT INEL SEED 2345 67AB CDEF GH',
+    );
+
+    // An in-application move to the other screen of the family and straight Back, with nothing drawn in between.
+    await page.evaluate(() => {
+      window.history.pushState(null, '', '/sign-in');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      window.history.back();
+    });
+
+    await expect(page).toHaveURL('/setup/mfa');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Your authenticator is not set up yet' }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.outerHTML)).not.toContain(SEED);
+    await expect(page.getByRole('img', { name: 'QR code for your authenticator app' })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole('textbox', { name: 'Setup key' })).toHaveCount(0);
   });
 
   test('begins a re-enrolment from the link only when the person presses the button', async ({
@@ -515,15 +550,21 @@ test.describe('the split screen', () => {
       page.getByRole('banner').getByRole('img', { name: 'Melarc Logistics' }),
     ).toBeVisible();
 
-    // The photograph is a real picture: loaded, cropped to its place and not stretched, and it says nothing a screen reader would read.
-    const photograph = await art
-      .locator('.ui-auth-art__picture img')
-      .evaluate((image: HTMLImageElement) => ({
-        loaded: image.complete && image.naturalWidth > 0,
-        fit: getComputedStyle(image).objectFit,
-        alt: image.alt,
-        src: image.currentSrc,
-      }));
+    // The photograph is a real picture: loaded, cropped to its place and not stretched, and it says nothing a screen reader would read. It is read once it has loaded: it is
+    // a third of a megabyte, and a page that is drawn is not a picture that has arrived (a slow machine read `loaded: false` in the review of f6cf02b). A picture that never
+    // loads still fails the test, at the end of the wait.
+    const picture = art.locator('.ui-auth-art__picture img');
+    await expect
+      .poll(() =>
+        picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0),
+      )
+      .toBe(true);
+    const photograph = await picture.evaluate((image: HTMLImageElement) => ({
+      loaded: image.complete && image.naturalWidth > 0,
+      fit: getComputedStyle(image).objectFit,
+      alt: image.alt,
+      src: image.currentSrc,
+    }));
     expect(photograph).toMatchObject({ loaded: true, fit: 'cover', alt: '' });
     expect(photograph.src).toMatch(/auth-art-\d/);
     // Nothing in it can be operated or reached.
@@ -831,7 +872,7 @@ test.describe('every screen and state, at the verified widths', () => {
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
         await expect(page.getByRole('navigation')).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+        await expect(accountButton(page)).toHaveCount(0);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
       });
     }

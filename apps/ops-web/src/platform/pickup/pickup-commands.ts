@@ -49,18 +49,29 @@ export async function createPickupRequest(
   return request;
 }
 
-/** `confirmPickupRequest`: `PENDING` to `CONFIRMED` on the version read. Its answer carries the indicative estimate. */
+/**
+ * What `confirmPickupRequest` answered: the request, and **the version it has now**, the `ETag` of the answer (the contract declares it, and it is the one a read of the request would give: the
+ * same function over the same representation). A screen that keeps the answer keeps it with that version and never with the version of the read before the act, which the act has moved on
+ * (the review of f6cf02b: the queue's panel wrote the confirmed request with the old one, and "Open full page" could act on a version that was not the record's). `undefined` only for an
+ * answer that carried no `ETag`: the screen then reads the request again.
+ */
+export interface ConfirmedPickup {
+  readonly request: PickupRequestView;
+  readonly etag: string | undefined;
+}
+
+/** `confirmPickupRequest`: `PENDING` to `CONFIRMED` on the version read. Its answer carries the indicative estimate and the new version. */
 export async function confirmPickupRequest(
   client: ApiClient,
   id: string,
   version: string,
-): Promise<PickupRequestView> {
+): Promise<ConfirmedPickup> {
   const answer = answerOf(
     await client.POST('/pickup-requests/{id}/confirm', {
       params: { path: { id }, header: { 'If-Match': version } },
     }),
   );
-  return actedOn(answer.data, answer.status, id);
+  return { request: actedOn(answer.data, answer.status, id), etag: answer.etag };
 }
 
 /** What a cancellation takes of the person, as the dialog collected it. */

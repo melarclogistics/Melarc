@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { main } from './test-ca-main.ts';
@@ -70,7 +73,11 @@ describe('the test CA command', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.days).toBe(3);
     expect(seen[0]?.directory).toMatch(/safe[\\/]tls$/);
-    expect(seen[0]?.checkoutRoot).toMatch(/Melarc|melarc|checkout/i);
+    // The checkout it is given is the one this file is in, which the test resolves for itself from where the file is: never from the name of a folder, which a clone is free to
+    // choose (this assertion once read the path for "Melarc" or "checkout" and failed on any clone named otherwise).
+    const checkout = resolve(import.meta.dirname, '..', '..');
+    expect(seen[0]?.checkoutRoot).toBe(checkout);
+    expect(existsSync(join(checkout, 'pnpm-workspace.yaml'))).toBe(true);
   });
 
   // Break caught: the result of the command carrying a key, and the next step being left for the reader to guess.

@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the pre-sign-in screens put in place of the API (S0.43). Each of the operations a person reaches with no session (the five of S0.43 and the two recovery operations of S0.52a) is
  * answered as the test says, every request is recorded as the browser sent it (method, path, the headers that matter and the body), and any other
@@ -90,6 +92,8 @@ export async function stubPreSignInApi(
   const attempts = new Map<OperationName, number>();
 
   await page.route('**/api/v1/**', async (route) => {
+    // The shell of the signed-in screen a sign-in lands on reads the queue summary for the menu (task C1): no queue, and not a request of the test.
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const line = `${request.method()} ${url.pathname}`;

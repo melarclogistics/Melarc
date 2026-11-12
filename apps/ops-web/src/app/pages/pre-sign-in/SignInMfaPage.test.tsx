@@ -1,9 +1,11 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
+import type { RouteObject } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MAX_HOLD_MS } from '../../../platform/secrets/use-transient-secret';
 import {
   errorResponse,
+  exceptSummary,
   installFakeApi,
   json,
   type FakeApi,
@@ -13,6 +15,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { NeverReady } from '../../../test-support/never-ready';
 import { renderApp } from '../../../test-support/render-app';
 import { sessionFixture } from '../../../test-support/session-fixture';
 
@@ -44,13 +47,14 @@ type View = ReturnType<typeof renderApp>;
 async function atTheSecondStep(
   second?: Handler,
   extra: Record<string, Handler> = {},
+  routes: RouteObject[] = [],
 ): Promise<View> {
   api = installFakeApi({
     [SIGN_IN]: () => json(202, CHALLENGE),
     ...(second === undefined ? {} : { [SECOND_STEP]: second }),
     ...extra,
   });
-  const view = renderApp('/sign-in');
+  const view = renderApp('/sign-in', routes);
   await view.user.type(await screen.findByLabelText('Work email (required)'), 'admin@example.test');
   await view.user.type(screen.getByLabelText('Password (required)'), 'a long enough passphrase');
   await view.user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -63,7 +67,7 @@ async function enter(view: View, code = CODE) {
   await view.user.click(screen.getByRole('button', { name: 'Verify and sign in' }));
 }
 
-const lastBody = async (): Promise<unknown> => api.requests.at(-1)?.clone().json();
+const lastBody = async (): Promise<unknown> => exceptSummary(api.requests).at(-1)?.clone().json();
 
 describe('the second step of sign-in', () => {
   it('is a page of its own with a labelled code field, a title and one button', async () => {
@@ -83,7 +87,7 @@ describe('the second step of sign-in', () => {
 
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-    expect(screen.queryByText('Nothing is waiting.')).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'My work' })).toBeNull();
     expect(api.requests.filter((request) => request.method === 'GET')).toHaveLength(0);
   });
 
@@ -111,7 +115,7 @@ describe('the second step of sign-in', () => {
       expect(view.router.state.location.pathname).toBe('/');
       expect(view.router.state.historyAction).toBe('REPLACE');
       expect(await lastBody()).toEqual({ challenge_id: CHALLENGE.challenge_id, code: CODE });
-      expect(api.requests).toHaveLength(2);
+      expect(exceptSummary(api.requests)).toHaveLength(2);
     });
 
     // Break caught: signing in clearing the challenge, and the page, finding none, sending the person back to the first step on their way to the
@@ -124,7 +128,7 @@ describe('the second step of sign-in', () => {
       });
 
       await enter(view);
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
       unsubscribe();
 
       expect(visited).not.toContain('/sign-in');
@@ -205,13 +209,13 @@ describe('the second step of sign-in', () => {
     });
 
     // Break caught (AC-SLICE-000-123): a privileged employee with no authenticator told they typed a wrong code.
-    it('MFA_ENROLMENT_REQUIRED: says the authenticator is not set up and where to find the link', async () => {
+    it('MFA_ENROLMENT_REQUIRED: says the authenticator is not set up, and what to do when the set-up link is gone', async () => {
       const view = await atTheSecondStep(() => errorResponse(403, 'MFA_ENROLMENT_REQUIRED'));
 
       await enter(view);
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'You cannot sign in until your authenticator is set up. Use the set-up link you were sent.',
+        'You cannot sign in until your authenticator is set up. If your set-up link has expired or was already used, ask someone who can reset authenticators to reset yours: a new link will be sent to your work email.',
       );
       expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
       expect(document.body.textContent).not.toMatch(/not accepted/i);
@@ -309,7 +313,7 @@ describe('the second step of sign-in', () => {
       );
       expect(screen.getByLabelText('Authenticator code (required)')).toHaveValue('');
       await enter(view, '654321');
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
       expect(attempts).toBe(2);
     });
 
@@ -332,7 +336,7 @@ describe('the second step of sign-in', () => {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
     });
   });
 
@@ -389,7 +393,7 @@ describeInterfaceStates('The second step of sign-in', {
         release(json(200, sessionFixture()));
         await gate;
       });
-      await screen.findByText('Nothing is waiting.');
+      await screen.findByRole('heading', { level: 1, name: 'My work' });
     },
   },
   empty: {
@@ -431,7 +435,7 @@ describeInterfaceStates('The second step of sign-in', {
 
       await enter(view, '654321');
 
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
@@ -444,7 +448,7 @@ describeInterfaceStates('The second step of sign-in', {
       const view = await atTheSecondStep(() => json(200, sessionFixture()));
       await enter(view);
 
-      expect(await screen.findByText('Nothing is waiting.')).toBeVisible();
+      expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     },
   },
   'permission-restricted': {
@@ -516,8 +520,50 @@ describe('the choice to remember the browser (staff-authentication.md section 5.
     await view.user.click(screen.getByRole('checkbox', { name: /Remember this browser/ }));
     await enter(view);
 
-    await screen.findByText('Nothing is waiting.');
+    await screen.findByRole('heading', { level: 1, name: 'My work' });
     expect(document.body.innerHTML).not.toContain('SENTINEL');
+  });
+});
+
+// Break caught (the review of f6cf02b): the challenge, which stands for a password that was proved, still held while the page the person went to is awaited (it was let go of when the page that held
+// it was replaced, which a slow page delays), and, once it is let go of at the moment the router moves, the second step sending the person back to the first over the navigation they made.
+describe('the challenge when the router moves', () => {
+  it('is gone the moment the router moves, before the next page is drawn, and the page sends the person nowhere', async () => {
+    const view = await atTheSecondStep(undefined, {}, [{ path: 'later', element: <NeverReady /> }]);
+    expect(screen.getByLabelText('Authenticator code (required)')).toBeVisible();
+
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    // The router is where the person asked to go, and not back at the first step; what is drawn is the page they left, without its form.
+    expect(view.router.state.location.pathname).toBe('/later');
+    expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verify and sign in' })).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Sign in' })).toBeNull();
+  });
+
+  // Break caught: the second step drawn again, with its challenge, by Back or by Forward in the moment the page the person went to has not appeared.
+  it('does not come back with Back, or with Forward, while the next page is awaited', async () => {
+    const view = await atTheSecondStep(undefined, {}, [{ path: 'later', element: <NeverReady /> }]);
+    await act(async () => {
+      void view.router.navigate('/later');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await view.router.navigate(-1);
+    });
+    // Back at the second step, which holds no challenge now: it sends the person to the first step, as it does for a visit with none.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+    expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
+
+    await act(async () => {
+      await view.router.navigate(1);
+    });
+    expect(view.router.state.location.pathname).toBe('/later');
+    expect(screen.queryByLabelText('Authenticator code (required)')).toBeNull();
   });
 });
 

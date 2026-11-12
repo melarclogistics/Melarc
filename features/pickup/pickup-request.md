@@ -32,7 +32,7 @@ A pickup request is **the front door of the parcel journey** (§21.1). It record
 |---|---|---|---|
 | Melarc Ops| Ops Staff| Create for any vendor or ad-hoc sender; confirm; decline; cancel; request a one-package exception; resolve a cutoff exception; reschedule| `pickup.request.create`, `pickup.request.confirm`, `pickup.request.cancel`, `pickup.exception.request`|
 | Melarc Ops| Senior Ops| All Ops actions, plus force-extension past the attempt cap| `pickup.attempt.extend`|
-| Melarc Ops| **Any holder of `pickup.exception.approve`** — Senior Ops, Ops Staff explicitly granted it, or Platform Admin| All the above, plus approving a one-package exception. **The permission is authoritative, not the role**| `pickup.exception.approve`|
+| Melarc Ops| **Any holder of `pickup.exception.approve`** — every Ops Staff member, Senior Ops and Platform Admin (Product Owner, 29 October 2026); never a vendor, and never the requester of that exception (a Platform Admin excepted)| All the above, plus approving a one-package exception. **The permission is authoritative, not the role**| `pickup.exception.approve`|
 | Melarc Vendor| Vendor account| Create for itself; cancel **its own `PENDING`** request| `pickup.request.create`, `pickup.request.cancel` — own record only|
 | Melarc Rider| Rider| **N/A** — §21.1: riders and recipients have no request-creation role| —|
 | Recipient channel| —| **N/A** at this stage. The recipient is not yet known for a standard request| —|
@@ -187,13 +187,13 @@ Fields whose behaviour here is non-obvious: `attempt_number` (capped at 3), `rep
 | Key| Holders| Scope| Home|
 |---|---|---|---|
 | `pickup.request.create`| Ops, Senior Ops, Platform Admin, Vendor| Vendor: own only| [permissions.md](../../contracts/permissions.md) §7|
-| `pickup.request.confirm`| Ops, Senior Ops, Platform Admin| own hub — **Ops only in V1**||
+| `pickup.request.confirm`| Ops, Senior Ops, Platform Admin| per [permissions.md](../../contracts/permissions.md) — **Ops only in V1**||
 | `pickup.request.cancel`| Ops, Senior Ops, Platform Admin, Vendor| Vendor: own `PENDING` only||
 | `pickup.exception.request`| Ops| own hub||
-| `pickup.exception.approve`| **S P, and Ops Staff explicitly granted it**| own hub · P: all hubs| Widened off `P only` at Gate C. **The permission is authoritative, not the role**|
-| `pickup.request.cancel_chargeable`| Ops, Senior Ops, Platform Admin| own hub. **Never a vendor**||
-| `pickup.cancellation_charge.waive`| **Senior Ops, Platform Admin**| own hub. **Above the charge in authority — Ops applies, Senior Ops relieves**||
-| `pickup.attempt.extend`| Senior Ops, Platform Admin| own hub, reason mandatory||
+| `pickup.exception.approve`| **A S P** (every Ops Staff member, Product Owner, 29 October 2026)| own hub · P: all hubs| Widened off `P only` at Gate C, and to every Ops Staff member on 29 October 2026. **The permission is authoritative, not the role**. Approver ≠ requester, and never available to a vendor|
+| `pickup.request.cancel_chargeable`| Ops, Senior Ops, Platform Admin| own hub (Platform Admin: all hubs). **Never a vendor**||
+| `pickup.cancellation_charge.waive`| **Senior Ops, Platform Admin**| own hub (Platform Admin: all hubs). **Above the charge in authority — Ops applies, Senior Ops relieves**||
+| `pickup.attempt.extend`| Senior Ops, Platform Admin| own hub (Platform Admin: all hubs), reason mandatory||
 
 ## 9. Settings — *pointer*
 
@@ -263,10 +263,13 @@ And when a user WITHOUT pickup.exception.approve attempts to approve the excepti
 And when any holder of pickup.exception.approve approves it - Ops Staff, Senior Ops or
   Platform Admin - the request can then be confirmed and the approving actor is audited,
 And a drafting user who is not a Platform Admin may not approve their own request,
+And an exception whose request is no longer waiting for confirmation (a request cancelled since,
+  or any request that is not PENDING; its exception stays REQUESTED) cannot be approved: the
+  backend answers STATE_CONFLICT, and the request is not in the approver's queue (AC-QSUM-12),
 And the approved GH₵20 single-package fee becomes due on acceptance.
 ```
 
-**Governs:** §21.1, §11.4 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `PICKUP_MINIMUM_NOT_MET`, `PERMISSION_DENIED`, `SELF_APPROVAL_FORBIDDEN`
+**Governs:** §21.1, §11.4 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `PICKUP_MINIMUM_NOT_MET`, `PERMISSION_DENIED`, `SELF_APPROVAL_FORBIDDEN`, `STATE_CONFLICT`
 
 ### `AC-SLICE-001-04` — A late booking queues, it does not fail
 
@@ -489,6 +492,69 @@ And a declared value at or below the threshold needs no acknowledgement.
 ```
 
 **Governs:** §23.4, `MSC-DEC-212`, `MSC-DEC-220` · **Surface:** Melarc Ops, Melarc Vendor · **Test level:** API · **Code:** `VALUE_DECLARATION_REQUIRED`
+
+### `AC-SLICE-001-82` — A walk-in booking is made in a hub the session's grant reaches, and names it when the grant reaches more than one
+
+```text
+Given a Platform Admin session whose grant of pickup.request.create is of all hubs and which has no primary hub, an Ops Staff officer of hub A, and a Vendor session,
+When each books a walk-in sender (pickup_intent ADHOC_SENDER) with and without hub_id,
+Then the Platform Admin without hub_id is VALIDATION_FAILED naming /hub_id (required), and with the id of hub B the request is created in hub B (its code, its estimate and the events of the booking are hub B's),
+And the officer without hub_id books in hub A, with the id of hub A books in hub A, and with the id of hub B is HUB_SCOPE_VIOLATION and nothing is written,
+And an id that names no hub is VALIDATION_FAILED naming /hub_id for a session whose grant reaches every hub, and HUB_SCOPE_VIOLATION for one whose grant reaches fewer (the scope is judged before anything of the hub is read, so that a caller learns nothing of a hub outside their grant),
+And a booking for a registered vendor is made in the vendor organisation's hub: a hub_id that names another hub is VALIDATION_FAILED naming /hub_id, and the one that names its hub changes nothing,
+And a staff session whose grant does not reach the hub of the organisation the booking names is HUB_SCOPE_VIOLATION, judged as soon as the organisation is found and before anything else of it is judged or told (an active, a suspended and a not-active organisation, and any hub_id the body names, are answered alike, and no configuration of that hub is read), so that an officer is told only that the organisation is not theirs (SECURITY_DESIGN.md 14.4b, staff alone),
+And a Vendor session that names a hub other than its organisation's is VALIDATION_FAILED,
+And the same Idempotency-Key and body replay the first answer, and the same key with another hub_id is IDEMPOTENCY_KEY_CONFLICT.
+```
+
+**Governs:** §37.3, [permissions.md](../../contracts/permissions.md) §5 (the Platform Admin's reach, `AC-SLICE-001-83`), `OB-S1-76` · **Surface:** Melarc Ops · **Test level:** API · **Code:** `VALIDATION_FAILED`, `HUB_SCOPE_VIOLATION`, `IDEMPOTENCY_KEY_CONFLICT`
+
+### `AC-SLICE-001-83` — The Platform Admin holds every key it holds at every hub
+
+```text
+Given the seeded Platform Admin, who has no primary hub, an Ops Staff officer and a Senior Ops user of hub A, and records of hubs A and B for every hub-scoped read the Platform Admin holds (pickup requests with their stops, pickup manifests, riders, the message log, run custody handovers, vendor pickup locations),
+When each calls the list and the read of each of those operations and the Platform Admin reads the queue summary,
+Then the Platform Admin is given the records of both hubs, reads a record of hub B by its id without HUB_SCOPE_VIOLATION, and every count of the queue summary equals the list of its queue,
+And the officer and the Senior Ops user are given hub A's records alone, exactly as before this decision,
+And under a hub set of hub A the runtime role reads no row of hub B, and under no hub scope reads none (row-level security is unchanged),
+And every grant of the Platform Admin bundle keeps its tier P and its ownership scope, the maker-checker exception still being the tier of the acting grant (a Senior Ops maker approving their own record is SELF_APPROVAL_FORBIDDEN as before),
+And the Platform Admin's grant of staff.device.reregister is of all hubs too (the Product Owner's decision of 6 November 2026, replacing that of 8 October 2026 for the Platform Admin; AC-SLICE-000-23), while Senior Ops keep it at their own hub,
+And a grant whose hub scope is none (global configuration) is still none.
+```
+
+**Governs:** [permissions.md](../../contracts/permissions.md) §5 and §7 (Product Owner, 5 November 2026: "Platform Admin holds every domain at every hub"), [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §14.1a, `OB-S1-75` · **Surface:** Melarc Ops · **Test level:** API and integration · **Code:** `HUB_SCOPE_VIOLATION`, `SELF_APPROVAL_FORBIDDEN`
+
+### `AC-SLICE-001-84` — A database seeded before that decision gets it as an addition
+
+```text
+Given a database seeded with the Platform Admin's operational grants of its own hub, and a live session of that bundle,
+When migration 0075 is applied, and then migration 0077 (the Product Owner's decision of 6 November 2026, task P1.1: it widens the one grant 0075 left at the Platform Admin's own hub, staff.device.reregister),
+Then every grant of the bundle that was of its own hub is of all hubs (0075 all but staff.device.reregister, 0077 that one), with the ownership scope and the tier of every grant unchanged and no key added or removed,
+And the bundle-change primitive reads each change as an ADDITION: the bundle's revision rises by one for each migration, its floor does not, no session is ended and no revocation is written,
+And the session issued before keeps the snapshot it was issued with, and a sign-in after each migration carries the new scope,
+And the grants of the database, once both are applied, equal those a new seed writes, no other bundle's revision moves, and a second run of either changes nothing,
+And each widening is on record (the Product Owner's decision of 7 November 2026, audit finding A3): once migration 0078 is applied, the database has one enhanced permission.bundle.widened for the widening of 0075 and one for that of 0077, written by the system, each with the correlation label of its migration, the grants it widened as they were and as they are, and the revision it raised the bundle to, and 0078 changes no revision, no floor and no grant,
+And a database whose bundle was seeded after the decisions (its revision is 1) or has no bundle gets none, because nothing was widened on it,
+And a database whose bundle has the revision that only 0077's widening leaves (2) gets the record of 0077 alone, and one at revision 3, 4 or 5 gets both (a history that the four release steps cannot have left, a floor other than 1 or a revision above 5, gets a warning and none),
+And the record is once-only (the Product Owner's decision of 7 November 2026, afternoon): applying 0078 again, by hand or by the migrator, writes nothing more, whatever the database holds, because each of the two events has a fixed identity that the ledger's primary key refuses to take twice.
+```
+
+**Governs:** [MIGRATION_AND_SEEDING.md](../../architecture/MIGRATION_AND_SEEDING.md) §4 and §5, [permissions.md](../../contracts/permissions.md) §5, [audit.md](../../contracts/audit.md) §5.6 · **Surface:** backend · **Test level:** integration · **Code:** none
+
+### `AC-SLICE-001-85` — A widening of a bundle is on record, and a reduction is recorded as before
+
+```text
+Given a bundle that holds some grants, a live session issued from it, and the bundle-change primitive called with the correlation label of a release step,
+When a grant is added, or the hub scope of a grant is widened from none to own or from own to all, or the ownership scope or the tier of a grant is widened (an addition),
+Then the bundle's revision rises by one and its floor does not, the session stays live, and no auth.session.authority_revoked is written,
+And one enhanced permission.bundle.widened is written in the same transaction, by the system with no actor and no hub, about the bundle, carrying that correlation label, the bundle's new revision and its floor, and as before and after the grants the change added or widened (an added grant has no before), each as its key, hub scope, ownership scope and tier,
+And a change that removes a grant, narrows any attribute, or adds one grant and removes another is a reduction: it ends the sessions below the new floor and writes their auth.session.authority_revoked as it did, and writes no permission.bundle.widened,
+And a change of the name alone, and a change that sets the grants the bundle already holds, write no event and raise nothing,
+And a change that is rolled back leaves no event,
+And the event is one the audit writer would accept: its code, tier, object type and facts pass the writer's own checks, so that the ledger holds one shape of it.
+```
+
+**Governs:** [audit.md](../../contracts/audit.md) §5.6 and §6 category 6, [permission-enforcement.md](../identity/permission-enforcement.md) §5.5, [SECURITY_DESIGN.md](../../architecture/SECURITY_DESIGN.md) §13.10a (Product decision of 7 November 2026) · **Surface:** backend · **Test level:** integration · **Code:** none
 
 ---
 

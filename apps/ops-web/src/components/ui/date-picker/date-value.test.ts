@@ -4,8 +4,11 @@ import {
   BUSINESS_TIME_ZONE,
   DATE_LOCALE,
   dateFromText,
+  describeDay,
+  monthName,
   textFromDate,
   todayInAccra,
+  weekdayInitial,
 } from './date-value';
 
 describe('dateFromText', () => {
@@ -81,6 +84,46 @@ describe('todayInAccra', () => {
     vi.setSystemTime(new Date('2026-03-31T13:45:12Z'));
 
     expect(todayInAccra().toString()).toBe('2026-03-31');
+  });
+});
+
+describe('monthName', () => {
+  // Break caught: a month named in the browser's language, or off by one (the month 1 is January), which the words that refuse a day ("There is no 30 February") would repeat to the person.
+  it('names the months from 1, in English, and none for a month that is not one', () => {
+    expect([1, 2, 4, 9, 12].map(monthName)).toEqual([
+      'January',
+      'February',
+      'April',
+      'September',
+      'December',
+    ]);
+    expect([monthName(0), monthName(13)]).toEqual(['', '']);
+  });
+});
+
+describe('describeDay', () => {
+  // Break caught: a day named in the browser's language and order (jsdom's is United States English), or with a weekday that is not the day's, which a screen reader would
+  // read out to a person choosing a pickup date.
+  it.each([
+    ['2026-10-08', 'Thursday, 8 October 2026'],
+    ['2026-10-28', 'Wednesday, 28 October 2026'],
+    ['2026-11-01', 'Sunday, 1 November 2026'],
+    ['2026-01-05', 'Monday, 5 January 2026'],
+    ['2028-02-29', 'Tuesday, 29 February 2028'],
+  ])('names %s as %s', (text, name) => {
+    const date = dateFromText(text);
+    if (date === null) throw new Error(`${text} is not a date`);
+
+    expect(describeDay(date)).toBe(name);
+  });
+});
+
+describe('weekdayInitial', () => {
+  // Break caught: the heading of a column of the calendar taken from the browser's language, or the week not starting on Monday (the headings of a week that does are M T W T F S S).
+  it('is the first letter of the weekday of a JavaScript date', () => {
+    const week = [26, 27, 28, 29, 30, 31, 32].map((day) => weekdayInitial(new Date(2026, 9, day)));
+
+    expect(week.join('')).toBe('MTWTFSS');
   });
 });
 

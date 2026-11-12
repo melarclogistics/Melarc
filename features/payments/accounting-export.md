@@ -146,6 +146,12 @@ prior-period adjustment and amended exports are all coherent alternatives; this 
 5. A holder of `payment.ledger.read` lists and reads export records (`listAccountingExports`,
    `getAccountingExport`) — metadata, row counts and manifest digest, **never a package and never
    a row of payment data**.
+   **The `hub_id` of the list follows the rule of every hub filter** (the audit follow-up of 7 November 2026, task A3.8;
+   [hub filters](../operations/hub-filters.md) §5, `AC-HUBF-05` and `-13`): when the operation is built, a staff session whose grant of
+   `payment.ledger.read` is a set of hubs and which names a hub outside it is answered with the empty page and **no transaction and no
+   statement**, judged after every validation, so that a hub that exists and a hub that does not take the same time; a grant of
+   every hub reads as it is, and `ALL_HUBS` records carry no hub. The test that holds it is the one of the other lists
+   (`src/hub-filter-older-lists.test.ts` is the pattern).
 6. A holder of `payment.ledger.export` obtains a short-lived single-object retrieval authorization
    over a generated package (`createAccountingExportRetrievalAuthorization`), per 5.7.
    `payment.ledger.export_retrieval_authorized` is emitted, **Enhanced**.

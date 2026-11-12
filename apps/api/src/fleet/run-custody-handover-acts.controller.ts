@@ -47,7 +47,7 @@ const correlation = (): string => currentRequestContext()?.requestId ?? randomUU
  * The three acts on the custody of a run (S1.24), addressed by the run: `POST /pickup-manifests/{id}/custody-handover` (open one),
  * `.../custody-handover/accept` and `.../custody-handover/fail`.
  *
- * - **Opening and failing** are Ops's (`fleet.custody.initiate`, Ops Staff, Senior Ops and Platform Admin at their hubs): the Ops Portal alone,
+ * - **Opening and failing** are Ops's (`fleet.custody.initiate`, Ops Staff and Senior Ops at their hubs, Platform Admin at every hub): the Ops Portal alone,
  *   a browser session with its synchronizer token and the `If-Match` of what they act on (the run's `ETag` to open, the handover's to fail), and
  *   for failing an `Idempotency-Key`. A rider cannot use them, because the rider who needs a handover is the one who cannot act.
  * - **Accepting** is the named receiving rider's, or Ops's where the hub is the destination (`fleet.custody.accept`): it serves the Ops Portal

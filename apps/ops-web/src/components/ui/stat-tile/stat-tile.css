@@ -1,0 +1,70 @@
+/*
+ * StatTile (design/COMPONENT_PATTERNS.md, *StatTile*; brief section 8): an 11.5px label in muted capitals (0.06em), a 22px figure in weight 700 and tabular
+ * numbers, and a caption in the quiet small text. The tile has no surface of its own: it sits in a Panel or on the page. Every colour is a token.
+ */
+.ui-stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ui-stat-tile p {
+  margin: 0;
+}
+
+.ui-stat-tile__label {
+  color: var(--color-text-muted);
+  font-size: var(--text-section-label-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-caption-line-height);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ui-stat-tile__value {
+  color: var(--color-text-primary);
+  font-size: var(--text-stat-figure-size);
+  font-weight: 700;
+  line-height: var(--text-stat-figure-line-height);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* A figure that was not stated: a dash, and the words for assistive technology. Not 0. */
+.ui-stat-tile__value--missing {
+  color: var(--color-text-muted);
+}
+
+/* While the figure is read: a bar the width of a short figure, never a number. */
+.ui-stat-tile__placeholder {
+  display: block;
+  width: 3.5rem;
+  height: 1.375rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-border-default);
+}
+
+.ui-stat-tile__caption {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-stat-tile__placeholder {
+    animation: ui-stat-tile-pulse var(--motion-pulse) ease-in-out infinite;
+  }
+}
+
+@keyframes ui-stat-tile-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (forced-colors: active) {
+  .ui-stat-tile__placeholder {
+    border: 1px solid CanvasText;
+  }
+}

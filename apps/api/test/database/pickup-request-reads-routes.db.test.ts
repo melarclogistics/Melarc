@@ -214,6 +214,9 @@ describe('listPickupRequests: what each reader sees', () => {
     ['a position that is not one', 'page_token=not-a-position'],
     ['a manifested filter that is not a boolean', 'manifested=maybe'],
     ['an exception state that is not one', 'one_package_exception_state=PENDING'],
+    // Task C1.1 (AC-QSUM-10): the late bookings' filter takes the three cut-off states and nothing else.
+    ['a cut-off state that is not one', 'cutoff_exception_state=LATE'],
+    ['an empty cut-off state', 'cutoff_exception_state='],
     ['an empty state', 'state='],
   ])('refuses %s as a validation failure', async (_label, query) => {
     const ops = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
@@ -252,16 +255,19 @@ describe('who may ask', () => {
     expect(codeOf(answer)).toBe('SESSION_INVALID');
   });
 
-  // Break caught: a Rider reaching a request. The registry gives it no direct read of the table; its key is for the stops it is assigned.
-  it('shows a Rider no request, in the list or by id', async () => {
+  // Break caught (task A3.1 of the audit follow-up, `AC-HUBF-15`): a Rider reaching a request, or told something other than what every staff read tells it. The
+  // registry gives a Rider no pickup request and the surface says the reads are "not a rider act" (the rider works from the manifest): the two routes name the
+  // browser session alone, so a Rider's bearer is `SESSION_INVALID`, for the list and for one request, and nothing of a request is in the answer. (Until A3.1 the
+  // list answered a Rider an empty page and the read of one a refusal or a not-found, which this test accepted whichever it was.)
+  it('does not serve a Rider the list or the read of one request: SESSION_INVALID', async () => {
     const rider = await arrangedFixedSession(routes.kit, routes.admin, 'RIDER');
     const client = routes.kit.client.fork().bearer(rider.token);
     const list = await client.get(LIST);
     const one = await client.get(ONE(id('oneInA')));
-    // Whatever the guard answers a Rider, it is never the request and never a page that holds one.
-    if (list.status === 200) expect(idsOf(list)).toEqual([]);
-    else expect([401, 403]).toContain(list.status);
-    expect([403, 404]).toContain(one.status);
+    for (const answer of [list, one]) {
+      expect(answer.status).toBe(401);
+      expect(codeOf(answer)).toBe('SESSION_INVALID');
+    }
     expect(one.text).not.toContain(id('oneInA'));
   });
 });

@@ -70,45 +70,55 @@ describe('the workflow’s HTTPS matrix, held to the shards of the harness, on a
     );
   });
 
+  // The numbers below follow the harness's table (the shards were two until the task CI.2 made them three), so that a shard added to the
+  // harness changes what these tests expect and not whether they hold.
+  const TOTAL = HTTPS_SHARDS.length;
+
   // Break caught: a shard taken out of the matrix, so that the runs it holds are made by no job, while every other job is as green as before.
   it('reports a shard taken out of the matrix, and one added to it', () => {
     assert.deepEqual(httpsShardProblems(GOOD.slice(1), HTTPS_SHARDS), [
-      'the matrix lists 1 shards and the harness has 2',
-      'no entry makes shard 1 of 2, so the runs it holds are made by no job',
+      `the matrix lists ${String(TOTAL - 1)} shards and the harness has ${String(TOTAL)}`,
+      `no entry makes shard 1 of ${String(TOTAL)}, so the runs it holds are made by no job`,
     ]);
     assert.ok(
       httpsShardProblems(GOOD.slice(0, 1), HTTPS_SHARDS).includes(
-        'no entry makes shard 2 of 2, so the runs it holds are made by no job',
+        `no entry makes shard ${String(TOTAL)} of ${String(TOTAL)}, so the runs it holds are made by no job`,
       ),
     );
-    assert.deepEqual(httpsShardProblems([...GOOD, entry(3, 3, 'webkit')], HTTPS_SHARDS), [
-      'the matrix lists 3 shards and the harness has 2',
-    ]);
+    assert.deepEqual(
+      httpsShardProblems([...GOOD, entry(TOTAL + 1, TOTAL + 1, 'webkit')], HTTPS_SHARDS),
+      [`the matrix lists ${String(TOTAL + 1)} shards and the harness has ${String(TOTAL)}`],
+    );
   });
 
   // Break caught: a shard that installs other browsers than its runs need: a missing one fails the job in CI, and the harness refuses a
   // total that is not its own.
   it('reports browsers that are not the ones a shard’s runs need, and a total that is not the harness’s', () => {
+    const replacing = (index: number, replacement: HttpsShardEntry): HttpsShardEntry[] =>
+      GOOD.map((each, at) => (at === index ? replacement : each));
+    const need = (index: number): string => HTTPS_SHARDS[index]?.browsers.join(' ') ?? '';
     assert.deepEqual(
-      httpsShardProblems(
-        [entry(1, 2, 'chromium'), GOOD[1] ?? entry(2, 2, 'firefox')],
-        HTTPS_SHARDS,
-      ),
-      ['shard 1 of 2 installs chromium and its runs need chromium webkit'],
+      httpsShardProblems(replacing(0, entry(1, TOTAL, 'chromium webkit')), HTTPS_SHARDS),
+      [`shard 1 of ${String(TOTAL)} installs chromium webkit and its runs need ${need(0)}`],
     );
     assert.deepEqual(
       httpsShardProblems(
-        [GOOD[0] ?? entry(1, 2, ''), entry(2, 2, 'chromium firefox webkit')],
+        replacing(TOTAL - 1, entry(TOTAL, TOTAL, 'chromium firefox webkit')),
         HTTPS_SHARDS,
       ),
-      ['shard 2 of 2 installs chromium firefox webkit and its runs need firefox'],
-    );
-    assert.deepEqual(
-      httpsShardProblems([entry(1, 3, 'chromium webkit'), entry(2, 3, 'firefox')], HTTPS_SHARDS),
       [
-        'the entry of shard 1 of 2 says 3 shards, and the harness has 2',
-        'the entry of shard 2 of 2 says 3 shards, and the harness has 2',
+        `shard ${String(TOTAL)} of ${String(TOTAL)} installs chromium firefox webkit and its runs need ${need(TOTAL - 1)}`,
       ],
+    );
+    assert.deepEqual(
+      httpsShardProblems(
+        GOOD.map((each) => ({ ...each, shards: TOTAL + 1 })),
+        HTTPS_SHARDS,
+      ),
+      GOOD.map(
+        (_, index) =>
+          `the entry of shard ${String(index + 1)} of ${String(TOTAL)} says ${String(TOTAL + 1)} shards, and the harness has ${String(TOTAL)}`,
+      ),
     );
   });
 });
@@ -129,15 +139,16 @@ describe('this repository: the workflow’s HTTPS matrix lists the shards of the
 
   // The failures to show, on the real workflow changed by one line: a shard out of the matrix, and a shard that installs the wrong browser.
   it('fails when a shard is taken out of the workflow’s matrix', (context) => {
-    const line = "          - { shard: 2, shards: 2, browsers: 'firefox' }\n";
+    const total = HTTPS_SHARDS.length;
+    const line = `          - { shard: 2, shards: ${String(total)}, browsers: 'firefox' }\n`;
     assert.ok(workflow.includes(line));
     const [job] = httpsJobsOf(workflow.replace(line, ''));
     assert.ok(job !== undefined);
     const problems = [...job.faults, ...httpsShardProblems(job.entries, HTTPS_SHARDS)];
     assert.deepEqual(problems, [
-      'the HTTPS run has no entry for shard 2 of 2, so the tests of that shard are never run',
-      'the matrix lists 1 shards and the harness has 2',
-      'no entry makes shard 2 of 2, so the runs it holds are made by no job',
+      `the HTTPS run has no entry for shard 2 of ${String(total)}, so the tests of that shard are never run`,
+      `the matrix lists ${String(total - 1)} shards and the harness has ${String(total)}`,
+      `no entry makes shard 2 of ${String(total)}, so the runs it holds are made by no job`,
     ]);
     context.diagnostic(problems.join(' | '));
   });
@@ -148,7 +159,9 @@ describe('this repository: the workflow’s HTTPS matrix lists the shards of the
     const [job] = httpsJobsOf(workflow.replace(line, "browsers: 'chromium' }"));
     assert.ok(job !== undefined);
     const problems = [...job.faults, ...httpsShardProblems(job.entries, HTTPS_SHARDS)];
-    assert.deepEqual(problems, ['shard 2 of 2 installs chromium and its runs need firefox']);
+    assert.deepEqual(problems, [
+      `shard 2 of ${String(HTTPS_SHARDS.length)} installs chromium and its runs need firefox`,
+    ]);
     context.diagnostic(problems.join(' | '));
   });
 });

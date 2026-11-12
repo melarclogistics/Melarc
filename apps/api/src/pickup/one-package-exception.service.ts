@@ -182,7 +182,7 @@ export class OnePackageExceptions {
       }
 
       // An exception is decided for a request that still waits for it: one cancelled since it was asked for keeps its exception REQUESTED (and
-      // so in the approver's queue), and approving it would link a cancelled request, which its guard refuses.
+      // is out of the approver's queue for that reason, AC-QSUM-12), and approving it would link a cancelled request, which its guard refuses.
       if (row.state !== 'PENDING') {
         throw ApiException.of(
           ErrorCode.StateConflict,

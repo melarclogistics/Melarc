@@ -348,7 +348,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**192 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 76 `NORMAL`.**
+**194 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 78 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -427,6 +427,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `failDeliveryStop`| `CRITICAL_WRITE`| failed-delivery attribution; custody stays with the Rider|
 | `getAccountingExport`| `NORMAL`| — A metadata read. It moves no custody, money or allocation, and it reaches no package: the bytes are behind `createAccountingExportRetrievalAuthorization`|
 | `getCurrentSession`| `NORMAL`| —|
+| `getQueueSummary`| `NORMAL`| — A read: the count of the work waiting in each queue the session may read (task C1). One request, one `count(*)` per queue (five of them an index lookup; the pool of confirmed pickups reads every confirmed request, which the marker of the plan's performance task will end); **each count is bounded at 3 seconds, and a longer count ends the read as a failed read (`AC-QSUM-13`)**; it returns no record, writes nothing and is `background` activity|
 | `getRider`| `NORMAL`| — The rider roster's detail read, and the `ETag` source `reregisterRiderDevice` takes. Identity and readiness only; it moves no custody, money or allocation|
 | `getStaffIdentity`| `NORMAL`| — The `ETag` source for the staff-targeted mutations. A read; it moves nothing|
 | `getVendorAccount`| `NORMAL`| — The `ETag` source for the vendor-targeted mutations. Readiness only, never a credential|
@@ -470,6 +471,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `listPickupManifests`| `NORMAL`| —|
 | `listPickupRequests`| `NORMAL`| —|
 | `listVendorDevices`| `NORMAL`| —|
+| `lookupRecords`| `NORMAL`| — A read, though a POST so that a number typed in full is in no URL (task C2, C2.1): finds a record by its code, a name or a phone number typed in full. One short statement for each kind the session may search (at most five, each in a transaction of its own key and in the scope of that key's grant), each limited to eight rows and ordered. A code is an index probe on the unique code of the table; a phone number is an equality on the request's two contact phones (an index on each, migration `0076`) or on the rider's unique phone; **a name is a scan of the requests that are current work with a case-insensitive prefix condition, which no index can serve under row-level security and which a window of current work does not bound while a collected request stays `CONFIRMED`: the measure, the cause and the options are in [the feature, section 14](../features/operations/global-lookup.md#14-unresolved-requirements)**. It runs through the locked path of the runner, because it is a POST: the cost and the lock that path takes are in the same section. It returns pointers (and a request's sender name) and never a record, writes only the hub-crossing audit event of the lists, and is `qualifying` activity|
 | `listRiders`| `NORMAL`| — A hub-scoped roster read|
 | `listSessions`| `NORMAL`| — The read `revokeSession` needs; no credential, hash or bundle contents|
 | `listStaffTrustedBrowsers`| `NORMAL`| — The read `revokeStaffTrustedBrowsers` needs; labels and dates, no credential|

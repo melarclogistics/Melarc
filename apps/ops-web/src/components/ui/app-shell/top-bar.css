@@ -1,0 +1,317 @@
+/*
+ * The top bar of the authenticated Ops shell and what is in it (design/COMPONENT_PATTERNS.md section 12.6; DESIGN_SYSTEM sections 4.6, 11 and 13.1):
+ * 56px high, on the default surface, with the subtle border under it and 24px of padding at the sides (16px on a narrow screen). Every colour is a
+ * token. The controls are the small control height (36px), so that the bar is dense and the targets are above the 24px of WCAG 2.2; the menus
+ * that open from it are the primitives', drawn by their own classes and sized here.
+ *
+ * **It is 56px at least, and a second row when its controls do not fit in one** (text enlarged to 200% on a phone: WCAG 1.4.4 and 1.4.10, which ask
+ * that nothing is lost or pushed out of the window): a fixed height would push the New and account buttons out of the window. At the sizes the
+ * specification draws (a desktop, a tablet, a phone) everything fits in one row and the bar is exactly 56px.
+ */
+.ui-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-height: var(--topbar-height);
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+}
+
+.ui-topbar__start,
+.ui-topbar__end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ui-topbar__start {
+  /* A long hub name gives way, so that the search and the menus keep their room. */
+  flex: 0 1 auto;
+}
+
+/* A basis of 0, not of its own width: the search takes what the other controls leave, and shrinks before the bar wraps (a basis of its own width, about 20rem, made
+   the bar wrap at 768px beside an open sidebar, where there is room for everything but the whole width of the search). It shrinks to the button without its
+   words (see `@container` below) and no further: when even that does not fit the row, the bar wraps. It is the container that the query asks about, so the words
+   are drawn where there is room for them, whatever the window is. */
+.ui-topbar__search {
+  flex: 1 1 0;
+  min-width: var(--control-height-sm);
+  max-width: 28rem;
+  container-type: inline-size;
+}
+
+/* The controls at the end keep their sizes and wrap among themselves when the bar is narrower than they are (a phone with text at 200%): the group
+   may shrink to the width of its own line, which `flex: none` would not let it do. */
+.ui-topbar__end {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+  margin-left: auto;
+  gap: var(--space-3);
+}
+
+/* ---- The hub switcher ---- */
+
+.ui-hub {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  height: var(--control-height-sm);
+  margin: 0;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--text-body-md-size);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--motion-fast);
+}
+
+.ui-hub:hover {
+  background: var(--color-surface-subtle);
+}
+
+.ui-hub:active {
+  background: var(--button-pressed-background);
+}
+
+/* A hub the session has no other to choose from: its name, with no border and no menu. */
+.ui-hub--static {
+  padding-left: 0;
+  border-color: transparent;
+  cursor: default;
+}
+
+/* The mark of the active hub: a 6px crimson square (`--hub-mark-size`). Crimson is the brand's and appears here, on the New button, the logo and the current entry only. */
+.ui-hub__square {
+  flex: none;
+  width: var(--hub-mark-size);
+  height: var(--hub-mark-size);
+  border-radius: 1px;
+  background: var(--color-brand-default);
+}
+
+.ui-hub__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The search ---- */
+
+.ui-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--text-body-sm-size);
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.ui-search:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.ui-search__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-search__key {
+  flex: none;
+  /* The line is 20px and the padding is the sides': the key is as tall as it was with 2px above and below a line of 16px. */
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--text-group-label-size);
+  font-weight: 500;
+  line-height: var(--text-label-md-line-height);
+}
+
+/*
+ * Too little room for the words and the key (the sidebar open beside the bar at a tablet's width, text enlarged to 200%, a phone): only the picture
+ * is drawn, and the words stay in the name of the button. Words cut short ("Search a code, na…") would be clipped text, which WCAG 1.4.4 and 1.4.10
+ * do not allow. The width asked about is the room the bar gives the search (its container), in `rem`, so that it grows with the text; the room the
+ * words and the key need is about 18.5rem.
+ */
+@container (max-width: 18.5rem) {
+  .ui-search {
+    justify-content: center;
+    width: var(--control-height-sm);
+    padding: 0;
+  }
+
+  .ui-search__text,
+  .ui-search__key {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* ---- The New button, the theme control and the account button ---- */
+
+/* The ring of a keyboard user's focus is there at once: the button's colour transitions (its hover) are not the outline's, which would fade in. */
+.ui-new {
+  flex: none;
+  transition-property: color, background-color, border-color;
+}
+
+.ui-account {
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  cursor: pointer;
+}
+
+.ui-account__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-selected);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-sm-size);
+  font-weight: 700;
+  transition: background-color var(--motion-fast);
+}
+
+.ui-account:hover .ui-account__avatar {
+  background: var(--color-border-default);
+}
+
+/* ---- The menus that open from the bar ---- */
+
+/* The menus are never wider than the screen, whatever the size of the text (task R5.2, M9: a min-width in rem alone is 448px to 512px at 200%). */
+.ui-menu {
+  min-width: min(14rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+}
+
+.ui-menu--hubs {
+  min-width: min(15rem, calc(100vw - 1rem));
+}
+
+.ui-menu--account {
+  min-width: min(16rem, calc(100vw - 1rem));
+}
+
+.ui-menu__who {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-block: var(--space-2);
+}
+
+.ui-menu__name {
+  font-size: var(--text-body-md-size);
+  font-weight: 700;
+  line-height: var(--text-label-md-line-height);
+}
+
+.ui-menu__detail {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption-size);
+  font-weight: 400;
+  line-height: var(--text-caption-line-height);
+}
+
+/* A section label inside a menu: 11.5px, upper case, 0.06em apart, muted. */
+.ui-menu__section {
+  color: var(--color-text-muted);
+  font-size: var(--text-section-label-size);
+  font-weight: 600;
+  line-height: var(--text-section-label-line-height);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-hub,
+  .ui-search,
+  .ui-account__avatar {
+    transition: none;
+  }
+}
+
+/* ---- A narrow screen: the bar holds the button that opens the sidebar, and the search is an icon ---- */
+
+@media (max-width: 47.9375rem) {
+  .ui-topbar {
+    gap: var(--space-2);
+    padding-right: var(--space-4);
+    padding-left: var(--space-4);
+  }
+
+  /* The hub takes what the other controls leave, and its name gives way first; a bar whose fixed controls do not fit wraps them to a second row. */
+  .ui-topbar__start {
+    flex: 1 1 0;
+  }
+
+  /* The slot of the search is no wider than its button, so that the query of `.ui-search` above draws only the picture and keeps the words in the name. */
+  .ui-topbar__search {
+    flex: 0 0 auto;
+  }
+
+  .ui-topbar__end {
+    margin-left: auto;
+    gap: var(--space-2);
+  }
+}
+
+/* Forced colours drop the fills: a control keeps its border. */
+@media (forced-colors: active) {
+  .ui-topbar {
+    border-bottom-color: CanvasText;
+  }
+
+  .ui-account__avatar {
+    border: 1px solid ButtonText;
+  }
+
+  .ui-hub__square {
+    background: Highlight;
+  }
+}

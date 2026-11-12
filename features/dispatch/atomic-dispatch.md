@@ -130,7 +130,7 @@ A failed dispatch changes nothing. The run stays `DRAFT`, every order is untouch
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `dispatch.run.dispatch`| A S P| own hub| [permissions.md](../../contracts/permissions.md) §7|
+| `dispatch.run.dispatch`| A S P| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7|
 | `pickup.run.execute`| Rider| assigned| §7 — the rider's start|
 
 ## 9. Settings — *pointer*

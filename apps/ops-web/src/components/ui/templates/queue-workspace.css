@@ -1,0 +1,69 @@
+/*
+ * QueueWorkspace (design/COMPONENT_PATTERNS.md, *QueueWorkspace*; PRODUCT_DESIGN_DIRECTION section 6.1): the queue's page. The page header, then one page card (16px) that holds
+ * the views, the filter row and the table, which runs to the card's edges; the record that is open stands in a column of its own beside the card. The panel's column exists
+ * only while the panel is open, so the table has the whole width otherwise, and it is the table's own box (its container) that the column priorities and the cards are read
+ * from: opening the panel narrows it, and the table drops the columns the page marked lesser instead of scrolling sideways. Every size is a token or a rem.
+ */
+.ui-queue-workspace {
+  min-width: 0;
+}
+
+.ui-queue-workspace__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+/* The panel's column, drawn only while the panel is open (a closed panel leaves no gap). At 768px and below the panel is a full-screen sheet and has no column. */
+@media (min-width: 48.0625rem) {
+  .ui-queue-workspace__split[data-panel='open'] {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--space-4);
+  }
+}
+
+.ui-queue-workspace__main {
+  min-width: 0;
+}
+
+/*
+ * The panel stays in view while the queue scrolls beside it, **below the top bar** (`--sticky-top`, base.css) and never past the foot of the window: its own height is bounded
+ * (`--sticky-room`, side-panel.css), and what it holds scrolls inside it, under its header.
+ */
+.ui-queue-workspace__aside {
+  position: sticky;
+  top: var(--sticky-top);
+}
+
+/* The views sit inside the page card with its padding; the table beneath them runs to the card's edges. */
+.ui-queue-workspace .ui-view-tabs__scroll {
+  padding-inline: var(--space-4);
+}
+
+.ui-queue-workspace__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-block-start: var(--space-4);
+}
+
+/*
+ * A queue with no views, no filters and no notice has nothing above its rows, so they start at the top of the page card, which cuts them to its rounded corners. Neither the
+ * body's own top padding nor the 24px that a page card with no header takes above its content (panel.css: it beats `padding: none` by its selector, and it is right above views
+ * and filters) is drawn there as an empty band. The selector is the longer one so that it wins whatever the order of the two stylesheets.
+ */
+.ui-queue-workspace__body[data-bare='true'] {
+  padding-block-start: 0;
+}
+
+.ui-queue-workspace__main
+  .ui-panel[data-padding='none']
+  .ui-panel__body:has(> .ui-queue-workspace__body[data-bare='true']) {
+  padding-top: 0;
+}
+
+.ui-queue-workspace__filters,
+.ui-queue-workspace__notice {
+  padding-inline: var(--space-4);
+}

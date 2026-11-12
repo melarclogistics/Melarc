@@ -1,0 +1,83 @@
+/*
+ * SidePanel (design/COMPONENT_PATTERNS.md, *SidePanel*; PRODUCT_DESIGN_DIRECTION section 6.1): a record beside its list. Docked, it is 360 to 420px wide
+ * (22.5rem to 26.25rem, in rem so that enlarged text grows it), 12px corners, the default border and the one floating shadow; the page puts it in the column
+ * it has set aside. At 768px and below the same header and body are a full-screen sheet. The motion is Motion's (SidePanel.tsx), on the tokens.
+ */
+.ui-side-panel {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: clamp(22.5rem, 28vw, 26.25rem);
+  /* The room below the top bar (base.css): the header stays where it is and the body scrolls inside, so the panel's last act is always in reach. */
+  max-height: var(--sticky-room, calc(100dvh - 2rem));
+  overflow: hidden;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-floating);
+}
+
+.ui-side-panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+/* The code is the heading: 18px, in the monospaced face by the code's own rule. It takes focus when the panel opens, and shows no ring for it: it is not a control (the named exception of base.css). */
+.ui-side-panel__heading {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.ui-side-panel__status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ui-side-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+}
+
+.ui-side-panel__body {
+  min-height: 0;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  overflow-y: auto;
+}
+
+/* The sheet: the whole screen, on the default surface, with the same header and body. The primitive's close button sits at the top end. */
+.ui-side-sheet {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  gap: 0;
+  border: 0;
+  background: var(--color-surface-default);
+}
+
+/* The sheet's header is a row, as the docked panel's is: the primitive's header is a column, which would stack and centre the code, the status and the link. */
+.ui-side-sheet .ui-side-panel__header {
+  flex-direction: row;
+  padding: var(--space-4) var(--space-12) var(--space-3) var(--space-4);
+}
+
+.ui-side-sheet .ui-side-panel__body {
+  flex: 1 1 auto;
+  padding: var(--space-4);
+}
+
+@media (forced-colors: active) {
+  .ui-side-panel {
+    border-color: CanvasText;
+  }
+}

@@ -1,4 +1,4 @@
-// Runs alone: the bootstrap functions it drives act as the provisioning login under wall-clock deadlines (BOOTSTRAP_DEADLINES).
+// Runs alone: the bootstrap functions it drives act as the provisioning login under deadlines of real time (BOOTSTRAP_DEADLINES), which files beside it would delay.
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';

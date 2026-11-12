@@ -167,6 +167,92 @@ describe('DatabaseService: a budget that expires mid-work (OB-37)', () => {
     });
   });
 
+  // Break caught (run 5, Stage 1): a lookup whose client left, told in the log as a budget that ran out and as a warning. The cancel is the lookup's own doing, as designed: the line
+  // says why it was done, under the budget's label, below warn, and is not the line a budget that ran out writes. The statement is cancelled, the transaction rolled back and the
+  // connection destroyed all the same.
+  it('says why a budget that was cancelled is over, below warn, and not as one that ran out; the statement is cancelled all the same', async () => {
+    const { pool, service, canceller, logs } = build();
+    const connection = new FakeConnection().hang(/select 1 as work/);
+    canceller.cancel.mockImplementation(() => {
+      connection.rejectPending(serverError('57014', 'canceling statement due to user request'));
+      return Promise.resolve('signalled');
+    });
+    pool.hand(connection);
+    const lookup = new ExecutionBudget(clock, 'lookupRecords', 3_000);
+
+    const outcome = settled(
+      runWithBudget(lookup, () => service.transactionWithContext(STAFF, runningStatement)),
+    );
+    await pass(50);
+    expect(connection.pending).toHaveLength(1);
+    lookup.cancel('abandoned by the client');
+    await vi.advanceTimersByTimeAsync(0);
+
+    const result = await outcome;
+    expect(result).toMatchObject({ error: expect.any(BudgetExpiredError) as unknown });
+    expect(canceller.cancel).toHaveBeenCalledExactlyOnceWith(4242);
+    expect(connection.statements.at(-1)).toBe('rollback');
+    expect(connection.destroyed).toBe(true);
+    const records = logs.records();
+    expect(records.some((record) => String(record.msg).includes('budget ran out'))).toBe(false);
+    expect(
+      records.find(
+        (record) => record.msg === 'database transaction cancelled: abandoned by the client',
+      ),
+    ).toMatchObject({
+      level: 'info',
+      label: 'lookupRecords',
+      reason: 'abandoned by the client',
+      phase: 'working',
+      cancel: 'signalled',
+      rolledBack: true,
+    });
+  });
+
+  // Break caught (run 6, Stage 1.7): a lookup the client abandons just as its last statement completes, told as a budget that ran out and as a warning. The owner cancels the
+  // budget while the work is outside the database, and the work finishes afterwards: the lateness is the abandon's too, said once, below warn, with its reason, and nothing it did is
+  // committed. A budget that really ran out is still the warning of the next test.
+  it('says, below warn and with its reason, that work finished after its budget was cancelled, and not as one that ran out; nothing is committed', async () => {
+    const { pool, service, logs } = build();
+    const connection = new FakeConnection();
+    pool.hand(connection);
+    let finish: () => void = () => undefined;
+    const outsideWork = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const lookup = new ExecutionBudget(clock, 'lookupRecords', 3_000);
+
+    const outcome = settled(
+      runWithBudget(lookup, () =>
+        service.transactionWithContext(STAFF, async () => {
+          await outsideWork;
+          return 'finished late';
+        }),
+      ),
+    );
+    await pass(50);
+    lookup.cancel('abandoned by the client');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await outcome).toMatchObject({ error: expect.any(BudgetExpiredError) as unknown });
+
+    // The work finishes after the caller was told: nothing is committed, and the lateness is told as the abandon was.
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connection.statements).not.toContain('commit');
+    const records = logs.records();
+    expect(records.some((record) => String(record.msg).includes('budget ran out'))).toBe(false);
+    expect(
+      records.find((record) =>
+        String(record.msg).includes('finished after its budget was cancelled'),
+      ),
+    ).toMatchObject({
+      level: 'info',
+      label: 'lookupRecords',
+      reason: 'abandoned by the client',
+      msg: 'database work finished after its budget was cancelled (abandoned by the client); nothing it did was committed',
+    });
+  });
+
   // Break caught: a budget that expires while the work waits on something that is not the database (an outbound call, a hash),
   // where there is no statement to cancel but the transaction is still open and holds its locks.
   it('rolls back and destroys when the work is outside the database, cancels nothing, and never commits what finishes late', async () => {

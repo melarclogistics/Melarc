@@ -1,102 +1,117 @@
 /*
  * The design tokens of the Ops Portal: the one executable source (design/DESIGN_SYSTEM.md section 29.1). Components
  * consume these custom properties and write no colour of their own. scripts/design-tokens.test.ts holds this file to
- * the document: every token it defines exists here with the same value, and the pairings the components use meet their
- * contrast thresholds. Change a value in the document and here together, and add a pairing to section 4.6 first.
+ * the document: every token it defines exists here with the same value, in each theme the document gives one for, and
+ * the pairings the components use meet their contrast thresholds in both. Change a value in the document and here
+ * together, and add a pairing to section 4.6 first.
  *
  * Names follow section 29.1: dots become hyphens and camelCase becomes kebab-case, so color.action.primaryHover is
  * --color-action-primary-hover. Type and spacing are in rem so that enlarged text scales them; borders, outlines and
- * focus widths are in px. Every value is a provisional baseline until the Product Owner reviews the document, except
- * where the document records a decision. Dark mode is deferred (section 31).
+ * focus widths are in px.
+ *
+ * Two themes (section 31, decided 5 November 2026). The light values are the :root block. The dark values are the
+ * overrides below it, applied in two places that say the same thing: by the operating system's setting unless the
+ * root says data-theme="light", and by data-theme="dark". So a later toggle wins both ways, and the file needs no
+ * script. A component consumes the semantic token and never asks which theme is in force. color-scheme follows the
+ * theme so that native controls (scrollbars, checkboxes, form fields) do too. A token that is another token
+ * (--color-surface-disabled is the sunken surface) is written as one and follows it into the dark theme.
  */
 :root {
   color-scheme: light;
 
-  /* Primitive tokens: the palette (section 4.2). Feature code consumes the semantic layer below, not these. */
-  --crimson-50: #fff4f5;
-  --crimson-100: #fcebed;
-  --crimson-200: #f7cdd2;
-  --crimson-300: #eda3ac;
-  --crimson-500: #c93d4a;
-  --crimson-600: #b4232e;
-  --crimson-700: #971b26;
-  --crimson-800: #7d1720;
-  --crimson-900: #65131b;
-
-  --ink-950: #172033;
-  --gray-900: #1f2937;
-  --gray-800: #344054;
-  --gray-700: #475467;
-  --gray-600: #667085;
-  --gray-550: #7c879b;
-  --gray-500: #8a94a6;
-  --gray-400: #98a2b3;
-  --gray-300: #d0d5dd;
-  --gray-200: #dde1e7;
-  --gray-100: #eaecf0;
-  --gray-50: #f7f8fa;
+  /* Fixed colours (section 4.2): the same in every theme. A QR code is black on white in both, so a scanner can read it. */
   --white: #ffffff;
   --black: #000000;
 
-  /* Semantic colour tokens (sections 4.3 and 4.4). */
-  --color-surface-page: var(--gray-50);
-  --color-surface-default: var(--white);
-  --color-surface-subtle: #f2f4f7;
-  --color-surface-inverse: var(--ink-950);
-  --color-surface-selected: var(--crimson-100);
+  /* Semantic colour tokens, the light theme (sections 4.3 and 4.4). Feature code consumes these, not values. */
+  /* Surfaces */
+  --color-surface-page: #f3f4f7;
+  --color-surface-default: #ffffff;
+  --color-surface-raised: #f8f9fb;
+  --color-surface-subtle: #eef0f4;
+  --color-surface-inverse: #0e1525;
+  --color-surface-selected: #e2e5eb;
   --color-surface-disabled: var(--color-surface-subtle);
 
-  --color-text-primary: var(--ink-950);
-  --color-text-secondary: var(--gray-700);
-  --color-text-muted: var(--gray-600);
-  --color-text-disabled: var(--gray-400);
-  --color-text-inverse: var(--white);
-  --color-text-link: var(--crimson-700);
-  --color-text-link-hover: var(--crimson-800);
+  /* Text */
+  --color-text-primary: #0e1525;
+  --color-text-secondary: #475066;
+  --color-text-muted: #626b81;
+  --color-text-disabled: #8a94a8;
+  --color-text-inverse: #ffffff;
+  --color-text-link: #0e1525;
+  --color-text-link-hover: var(--color-brand-default);
 
-  --color-border-subtle: var(--gray-200);
-  --color-border-default: var(--gray-300);
-  --color-border-control: var(--gray-550);
-  --color-border-strong: var(--gray-600);
-  --color-border-disabled: var(--gray-200);
+  /* Borders */
+  --color-border-subtle: #e2e5eb;
+  --color-border-default: #c9ced8;
+  --color-border-control: #7c859a;
+  --color-border-strong: #626b81;
+  --color-border-disabled: var(--color-border-subtle);
 
-  --color-action-primary: var(--crimson-600);
-  --color-action-primary-hover: var(--crimson-700);
-  --color-action-primary-pressed: var(--crimson-800);
-  --color-action-primary-text: var(--white);
-  --color-action-secondary: var(--white);
-  --color-action-secondary-text: var(--ink-950);
-  --color-action-disabled: var(--gray-100);
-  --color-action-disabled-text: var(--gray-400);
+  /* Brand */
+  --color-brand-default: #be1e2d;
 
-  --color-status-success-foreground: #0f5d42;
-  --color-status-success-background: #e8f6f0;
-  --color-status-success-border: #86cdb1;
-  --color-status-warning-foreground: #8a5200;
-  --color-status-warning-background: #fff4e5;
-  --color-status-warning-border: #e8b76a;
-  --color-status-danger-foreground: #8f1d27;
-  --color-status-danger-background: var(--crimson-100);
-  --color-status-danger-border: #e8aab1;
-  --color-status-info-foreground: #1f4f86;
-  --color-status-info-background: #eaf2fb;
-  --color-status-info-border: #9fc1e3;
-  --color-status-neutral-foreground: var(--gray-700);
-  --color-status-neutral-background: #f2f4f7;
-  --color-status-neutral-border: var(--gray-300);
+  /* Actions */
+  --color-action-primary: #0e1525;
+  --color-action-primary-hover: #1c2539;
+  --color-action-primary-pressed: #26304a;
+  --color-action-primary-text: #ffffff;
+  --color-action-secondary: var(--color-surface-default);
+  --color-action-secondary-text: var(--color-text-primary);
+  --color-action-disabled: #eef0f4;
+  --color-action-disabled-text: #8a94a8;
+  --color-action-new: var(--color-brand-default);
+  --color-action-new-hover: #a91a28;
+  --color-action-new-pressed: #94151f;
+  --color-action-new-text: #ffffff;
+
+  /* Focus colours */
+  --focus-ring: #2563a6;
+  --focus-offset: #ffffff;
+  --focus-ring-inverse: #ffffff;
+  --focus-offset-inverse: #0e1525;
+
+  /* The sidebar on Ink (sections 4.3 and 4.6) */
+  --shell-text: #ffffff;
+  --shell-text-muted: #c3cad7;
+  --shell-text-subtle: #8a94a8;
+  --shell-surface-hover: #1c2539;
+  --shell-surface-pressed: #26304a;
+  --shell-border: #1c2539;
+  --shell-active: #be1e2d;
+  --shell-active-text: #ffffff;
+  --shell-active-hover: #a91a28;
+  /* The pill of a count on the current entry: white at 18% over the crimson. A component token and not the design system's (recorded in scripts/design-tokens.test.ts): at 22% the white figure measures 4.32:1. */
+  --shell-active-badge: rgb(255 255 255 / 0.18);
+
+  /* Status (section 4.4): a foreground, a background and a border for each of the five. */
+  --color-status-warning-foreground: #8a4f00;
+  --color-status-warning-background: #fff3e0;
+  --color-status-warning-border: #dcc29d;
+  --color-status-success-foreground: #0b6b44;
+  --color-status-success-background: #e7f6ef;
+  --color-status-success-border: #a5ccbc;
+  --color-status-info-foreground: #1f4e96;
+  --color-status-info-background: #eaf1fb;
+  --color-status-info-border: #adc0dd;
+  --color-status-neutral-foreground: #475066;
+  --color-status-neutral-background: #eef0f4;
+  --color-status-neutral-border: #bcc0c9;
+  --color-status-danger-foreground: #a8320e;
+  --color-status-danger-background: #fdede7;
+  --color-status-danger-border: #e4b5a6;
 
   /* Focus (sections 4.3 and 4.6): a ring outside a band that separates it from the control. Drawn with outline. */
-  --focus-ring: #2563a6;
-  --focus-offset: var(--white);
   --focus-width: 2px;
   --focus-offset-width: 2px;
-  /* The inverse recipe, for the authenticated Ops shell on surface.inverse (approved 6 October 2026). */
-  --focus-ring-inverse: var(--white);
-  --focus-offset-inverse: var(--ink-950);
 
-  /* Typography (section 5). Inter is self-hosted by fonts.css (section 5.1); the rest of the stack shows while it loads. */
+  /* Typography (section 5). Inter and JetBrains Mono are self-hosted by fonts.css (section 5.1); the rest of each stack shows while a file loads. */
   --font-family-sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* For operational codes only (section 5.1): a component takes the face from here and never names it. */
+  --font-family-mono:
+    'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
 
   --text-display-sm-size: 2rem;
   --text-display-sm-line-height: 2.5rem;
@@ -146,53 +161,200 @@
   --space-16: 4rem;
   --space-20: 5rem;
 
-  /* Radius (section 7), elevation (section 8) and motion (section 9). */
+  /* Radius (section 7): 8px for controls, 12px for panels, 16px for page cards. */
   --radius-none: 0;
   --radius-sm: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   --radius-full: 9999px;
 
+  /* Elevation (section 8): one soft shadow, for what floats. The dark theme has its own value. */
   --shadow-none: none;
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.06);
-  --shadow-md: 0 4px 12px rgb(16 24 40 / 0.1);
-  --shadow-lg: 0 12px 28px rgb(16 24 40 / 0.14);
+  --shadow-floating: 0 8px 24px rgb(14 21 37 / 0.12);
 
+  /* Motion (section 9). A reduced-motion rule at the end of the file sets every duration to zero. */
   --motion-fast: 120ms;
-  --motion-normal: 180ms;
-  --motion-slow: 240ms;
+  --motion-normal: 200ms;
+  --motion-slow: 280ms;
+  --motion-highlight: 900ms;
+  --motion-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
 
   /* Control heights are minimums (section 11): a control sets min-height in rem so enlarged text grows it. */
-  --control-height-sm: 2rem;
-  --control-height-md: 2.5rem;
-  --control-height-lg: 3rem;
+  --control-height-sm: 2.25rem;
+  --control-height-md: 2.75rem;
+  --control-height-lg: 3.5rem;
+
+  /* The heights of a row (section 10): the control heights under the names a row is given. */
+  --density-row-compact: var(--control-height-sm);
+  --density-row-standard: var(--control-height-md);
+  --density-row-touch: var(--control-height-lg);
 
   /*
    * Component tokens (section 3.3), added only where a component needs a value the semantic layer does not name.
-   * The pressed fill of a Secondary button is written in section 4.6 as a bare #EAECF0, which is gray.100.
+   * The pressed fill of the Secondary and Danger buttons (section 4.6), a step beyond the hover fill. It has a value for each theme.
    */
-  --button-pressed-background: var(--gray-100);
+  --button-pressed-background: #e2e5eb;
 
   /*
-   * The side menu of the authenticated shell, on Ink (section 4.6, the shell recipe; approved by the Product Owner on 25 October 2026).
-   * Aliases of the palette: every text pairing on Ink or on its hovered and pressed fills is at least 5.7:1 (scripts/design-tokens.test.ts).
-   * The current item is the Primary action colour with its text (6.52:1), so no new red is introduced.
+   * The sizes the signed-in shell sets outside the type scale and the spacing scale (the Product Owner's brief for redesign step R4, 6 November 2026;
+   * recorded in section 5.2, and decided on 7 November 2026 to be tokens): component tokens (section 3.3), each used by the one component it is named
+   * for, in rem so that enlarged text enlarges them. The number is written here once, and no stylesheet of a component carries it.
    */
-  --shell-surface-hover: var(--gray-900);
-  --shell-surface-pressed: var(--gray-800);
-  --shell-border: var(--gray-800);
-  --shell-text: var(--color-text-inverse);
-  --shell-text-muted: var(--gray-300);
-  --shell-text-subtle: var(--gray-400);
+  --text-nav-entry-size: 0.84375rem; /* 13.5px: the name of an entry of the sidebar */
+  --text-group-label-size: 0.6875rem; /* 11px: a group's heading in the sidebar, and the key hint of the search */
+  --text-group-label-line-height: 1rem;
+  --text-section-label-size: 0.71875rem; /* 11.5px: the label of a section in a menu of the top bar, and of the sections of My work */
+  --text-section-label-line-height: 1rem;
+  --sidebar-icon-size: 1.0625rem; /* 17px: the icon of an entry */
+  --sidebar-heading-space-before: 0.875rem; /* 14px above a group's heading */
+  --sidebar-heading-space-after: 0.375rem; /* 6px below it */
+  --hub-mark-size: 0.375rem; /* 6px: the crimson square of the hub switcher */
+
+  /*
+   * The sizes the kit of redesign step R5 sets outside the scales (task R5.2, 8 November 2026, recorded in section 5.2, 9 and 10): component tokens like the shell's
+   * above, each named for the component that uses it, in rem so that enlarged text enlarges them. The number is written here once, and no stylesheet of a component
+   * carries it (`test/component-sizes.test.ts` fails on one). `--motion-pulse` is left out of the reduced-motion rule below on purpose: the pulses run only where
+   * the stylesheet says motion is welcome, and a zero-length animation that repeats forever is worse than none.
+   */
+  --text-page-title-line-height: 1.875rem; /* 30px: the title of a page, 24px on 30px: the shell's page frame and the kit's PageHeader */
+  --text-record-title-size: 1.625rem; /* 26px: the code of a record in its header (on the 32px line of heading.lg) */
+  --text-stat-figure-size: 1.375rem; /* 22px: the figure of a stat tile */
+  --text-stat-figure-line-height: 1.75rem; /* 28px */
+  --density-row-two-line: 3.25rem; /* 52px: the row of a table that holds two lines, between the standard and the touch row */
+  --motion-pulse: 1.6s; /* the pulse of a skeleton bar and of a loading line: slow and quiet */
 
   /* The three sizes of an icon (section 24), in rem so that enlarged text enlarges the icon with it. */
   --icon-size-sm: 1rem;
   --icon-size-md: 1.25rem;
   --icon-size-lg: 1.5rem;
 
-  /* Layout: the width the frame has always given the main landmark, and the two widths of the side menu. Not design-system tokens (section 13.2). */
+  /*
+   * Layout: the width the frame gives the main landmark, the two widths of the sidebar (248px, and the 64px rail) and the height of the top bar (56px).
+   * Not design-system tokens (section 13.2).
+   */
   --layout-content-width: 72rem;
-  --sidebar-width: 16rem;
-  --sidebar-width-collapsed: 4.5rem;
+  --sidebar-width: 15.5rem;
+  --sidebar-width-collapsed: 4rem;
+  --topbar-height: 3.5rem;
+}
+
+/*
+ * The dark theme (section 31), by the operating system's setting. It does not apply when the root says data-theme="light", which is how
+ * a person's choice of light wins over a system that is dark. The next block is the same values for data-theme="dark", which is how a
+ * choice of dark wins over a system that is light: scripts/design-tokens.test.ts fails if the two differ.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --color-surface-page: #090d16;
+    --color-surface-default: #10151f;
+    --color-surface-raised: #141a26;
+    --color-surface-subtle: #0c111a;
+    --color-surface-inverse: #0c111a;
+    --color-surface-selected: #16202f;
+    --color-text-primary: #edf0f6;
+    --color-text-secondary: #a9b2c3;
+    --color-text-muted: #8e98ac;
+    --color-text-disabled: #667085;
+    --color-text-link: #edf0f6;
+    --color-border-subtle: #222a38;
+    --color-border-default: #333d4f;
+    --color-border-control: #667085;
+    --color-border-strong: #8e98ac;
+    --color-brand-default: #f04b59;
+    --color-action-primary: #edf0f6;
+    --color-action-primary-hover: #dde2ec;
+    --color-action-primary-pressed: #c3cad7;
+    --color-action-primary-text: #0e1525;
+    --color-action-disabled: #1b2230;
+    --color-action-disabled-text: #667085;
+    --color-action-new-hover: #f25f6b;
+    --color-action-new-pressed: #f5808a;
+    --color-action-new-text: #0e1525;
+    --focus-ring: #7aa7f0;
+    --focus-offset: #10151f;
+    --focus-offset-inverse: #0c111a;
+    --color-status-warning-foreground: #f0b45a;
+    --color-status-warning-background: #2e2210;
+    --color-status-warning-border: #72552a;
+    --color-status-success-foreground: #5ccb95;
+    --color-status-success-background: #0f2a1f;
+    --color-status-success-border: #2a6248;
+    --color-status-info-foreground: #86b1f4;
+    --color-status-info-background: #12223c;
+    --color-status-info-border: #3b547c;
+    --color-status-neutral-foreground: #a9b2c3;
+    --color-status-neutral-background: #1b2230;
+    --color-status-neutral-border: #4d5463;
+    --color-status-danger-foreground: #ff8a66;
+    --color-status-danger-background: #33170f;
+    --color-status-danger-border: #7a3f2d;
+    --button-pressed-background: #090d16;
+    --shadow-floating: 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-surface-page: #090d16;
+  --color-surface-default: #10151f;
+  --color-surface-raised: #141a26;
+  --color-surface-subtle: #0c111a;
+  --color-surface-inverse: #0c111a;
+  --color-surface-selected: #16202f;
+  --color-text-primary: #edf0f6;
+  --color-text-secondary: #a9b2c3;
+  --color-text-muted: #8e98ac;
+  --color-text-disabled: #667085;
+  --color-text-link: #edf0f6;
+  --color-border-subtle: #222a38;
+  --color-border-default: #333d4f;
+  --color-border-control: #667085;
+  --color-border-strong: #8e98ac;
+  --color-brand-default: #f04b59;
+  --color-action-primary: #edf0f6;
+  --color-action-primary-hover: #dde2ec;
+  --color-action-primary-pressed: #c3cad7;
+  --color-action-primary-text: #0e1525;
+  --color-action-disabled: #1b2230;
+  --color-action-disabled-text: #667085;
+  --color-action-new-hover: #f25f6b;
+  --color-action-new-pressed: #f5808a;
+  --color-action-new-text: #0e1525;
+  --focus-ring: #7aa7f0;
+  --focus-offset: #10151f;
+  --focus-offset-inverse: #0c111a;
+  --color-status-warning-foreground: #f0b45a;
+  --color-status-warning-background: #2e2210;
+  --color-status-warning-border: #72552a;
+  --color-status-success-foreground: #5ccb95;
+  --color-status-success-background: #0f2a1f;
+  --color-status-success-border: #2a6248;
+  --color-status-info-foreground: #86b1f4;
+  --color-status-info-background: #12223c;
+  --color-status-info-border: #3b547c;
+  --color-status-neutral-foreground: #a9b2c3;
+  --color-status-neutral-background: #1b2230;
+  --color-status-neutral-border: #4d5463;
+  --color-status-danger-foreground: #ff8a66;
+  --color-status-danger-background: #33170f;
+  --color-status-danger-border: #7a3f2d;
+  --button-pressed-background: #090d16;
+  --shadow-floating: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+/*
+ * Reduced motion (section 9): every duration is zero, so nothing that takes its duration from a token moves. The easings are not durations.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+    --motion-highlight: 0ms;
+  }
 }

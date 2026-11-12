@@ -1,0 +1,58 @@
+/*
+ * CardFacts (design/COMPONENT_PATTERNS.md, *CardFacts*): the facts of a card as a label and its value. The card's own width decides how they sit (a container query on the list of facts, so no
+ * width of the window is assumed and a card in a narrow panel does what a card on a phone does): one over the other in a room of less than 15rem, side by side from there, the label in a column of
+ * its own and the value taking the rest. The longest label of the portal ("Packages / booking type") wraps in its column and is never cut off.
+ */
+.ui-card-facts__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* A status never wraps in a card (the Product Owner, 10 November 2026): it keeps its width, and the head wraps it under the code where the two do not share a line. */
+.ui-card-facts__head > .ui-status-badge {
+  flex: none;
+}
+
+.ui-card-facts__lead {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+  overflow-wrap: anywhere;
+}
+
+.ui-card-facts {
+  container-type: inline-size;
+  margin: var(--space-3) 0 0;
+}
+
+.ui-card-facts__fact {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.ui-card-facts__fact + .ui-card-facts__fact {
+  margin-top: var(--space-2);
+}
+
+.ui-card-facts__fact dt {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-card-facts__fact dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@container (min-width: 15rem) {
+  .ui-card-facts__fact {
+    grid-template-columns: minmax(5rem, 7.5rem) minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+}

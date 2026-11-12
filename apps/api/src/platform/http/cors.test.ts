@@ -141,7 +141,10 @@ describe('an answer to a request that carries an Origin', () => {
     const probe = await fetch(`${app.baseUrl}/livez`, { headers: { origin: OPS } });
     expect(probe.headers.get('access-control-allow-origin')).toBe(OPS);
     expect(probe.headers.get('access-control-allow-credentials')).toBe('true');
-    expect(probe.headers.get('access-control-expose-headers')).toBe('X-Request-Id, ETag');
+    // A page of a configured origin reads the request id, the record version and the wait a 429 tells (A3.7 of the audit follow-up).
+    expect(probe.headers.get('access-control-expose-headers')).toBe(
+      'X-Request-Id, ETag, Retry-After',
+    );
 
     const refused = await fetch(`${app.baseUrl}/api/v1/orders`, { headers: { origin: VENDOR } });
     expect(refused.status).toBe(404);

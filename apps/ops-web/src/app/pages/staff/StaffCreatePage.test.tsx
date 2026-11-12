@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
+import { exceptSummary, installFakeApi, json, type FakeApi } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
@@ -23,6 +23,7 @@ import {
   staffIdentityFixture,
 } from '../../../test-support/staff-fixture';
 import { wcagViolations } from '../../../test-support/wcag';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -98,6 +99,66 @@ describe('the staff creation form: what it asks for', () => {
     expect(document.querySelector('input[type="password"]')).toBeNull();
   });
 
+  it('groups what it asks for in two sections, the person and the role and hub', async () => {
+    open();
+    await field(/Full name/);
+
+    const person = screen.getByRole('region', { name: 'The person' });
+    expect(within(person).getByRole('textbox', { name: /Full name/ })).toBeVisible();
+    expect(within(person).getByRole('textbox', { name: /Work email/ })).toBeVisible();
+    expect(within(person).getByRole('textbox', { name: /Phone/ })).toBeVisible();
+    const placing = screen.getByRole('region', { name: 'Role and hub' });
+    expect(within(placing).getByRole('combobox', { name: /Role/ })).toBeVisible();
+    expect(within(placing).getByRole('combobox', { name: /Primary hub/ })).toBeVisible();
+    // The sections are the form's own: the send and the way out are the form's actions, below them.
+    expect(
+      within(screen.getByRole('main')).getAllByRole('button', { name: 'Create profile' }),
+    ).toHaveLength(1);
+  });
+
+  it('names the way up to the staff list for a session that can read it, and none for one that cannot', async () => {
+    const reader = open();
+    await field(/Full name/);
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Staff',
+      }),
+    ).toHaveAttribute('href', '/admin/staff');
+    reader.unmount();
+    api.restore();
+
+    open(KEYS.maker);
+    await field(/Full name/);
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+  });
+
+  // Break caught (found in a real browser, kept from the earlier page): the heading replaced when the roles arrive, so that the focus the frame put on it falls to the top
+  // of the document and a screen reader says nothing about the form that has just appeared. Run 7, Stage 4.3: and not replaced at all: it is the same element.
+  it('keeps focus on the heading when the roles arrive and the form replaces the page that waited for them', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    open(KEYS.approver, {
+      [BUNDLES]: async () => {
+        await held;
+        return bundlesAnswer();
+      },
+    });
+    const loading = await screen.findByRole('heading', { level: 1, name: 'Add a staff profile' });
+    // The frame puts focus on a page's heading when the address changes; here the page is the first one, so the test does the same.
+    loading.focus();
+    expect(loading).toHaveFocus();
+
+    release();
+
+    await field(/Full name/);
+    const arrived = screen.getByRole('heading', { level: 1, name: 'Add a staff profile' });
+    expect(arrived).toBe(loading);
+    expect(loading).toBeInTheDocument();
+    expect(arrived).toHaveFocus();
+  });
+
   it('marks what is needed as required and what is not as optional by leaving it unmarked', async () => {
     open();
 
@@ -167,15 +228,15 @@ describe('the staff creation form: the roles', () => {
   it('asks nothing of the server and shows no form for a session that does not list the key to read roles', async () => {
     open(['staff.identity.create']);
 
-    expect(await screen.findByText('permission.assignable_bundle.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('permission.assignable_bundle.read'))).toBeVisible();
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(api.requests).toHaveLength(1);
+    expect(exceptSummary(api.requests)).toHaveLength(1);
   });
 
   it('names the key and shows no form when the server refuses the read', async () => {
     open(KEYS.approver, { [BUNDLES]: () => refusal(403, 'PERMISSION_DENIED') });
 
-    expect(await screen.findByText('permission.assignable_bundle.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('permission.assignable_bundle.read'))).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Create profile' })).toBeNull();
   });
 
@@ -618,7 +679,7 @@ describe('the staff creation form: a refusal', () => {
     await view.user.click(submit());
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Your session does not hold the permission to create profiles (staff.identity.create).',
+      'Your account can’t create profiles. Ask an administrator for access.',
     );
     expect(screen.getByText(/Reference: req-test-1/)).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
@@ -738,13 +799,109 @@ describe('the staff creation form: the session', () => {
       expect(creates()).toHaveLength(1);
     });
 
-    await view.user.click(screen.getByRole('button', { name: 'Sign out' }));
+    // The sign-out is an item of the account menu in the top bar: the menu is opened first.
+    await view.user.click(
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Account menu' }),
+    );
+    await view.user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
     await act(async () => {
       finish();
       await held;
     });
 
     expect(screen.queryByRole('heading', { name: 'Profile created' })).toBeNull();
+  });
+});
+
+describe('the staff creation form: leaving it with what was typed (Stage 4.9)', () => {
+  const leaveQuestion = () => screen.findByRole('alertdialog', { name: 'Leave this page?' });
+
+  // Break caught: a form that loses what was typed to a link or the browser's Back, without a word.
+  it('asks before the application leaves a form that holds what was typed, and the safe answer is to stay', async () => {
+    const { user, router } = open();
+    await user.type(await field(/Full name/), 'Kofi Boateng');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    const question = await leaveQuestion();
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(router.state.location.pathname).toBe('/admin/staff/new');
+    await user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/admin/staff/new');
+    expect(screen.getByRole('textbox', { name: /Full name/ })).toHaveValue('Kofi Boateng');
+  });
+
+  it('goes where the person was going when they choose to leave', async () => {
+    const { user, router } = open();
+    await user.type(await field(/Work email/), 'kofi.boateng@example.test');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+    await user.click(within(await leaveQuestion()).getByRole('button', { name: 'Leave the page' }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/');
+    });
+  });
+
+  // Break caught: a choice in a field that is not a text field (the role) taken for nothing, so that a form with only a role chosen is left without a word.
+  it('asks after a role was chosen and nothing else was typed', async () => {
+    const { user, router } = open();
+    await user.selectOptions(await role(), BUNDLE_ID);
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(await leaveQuestion()).toBeVisible();
+  });
+
+  // Break caught: a form that asks for what the session gave it: a person who acts in one hub is placed in it before they have typed anything.
+  it('asks nothing of a form that holds only what it began with, the hub of a session that acts in one among it', async () => {
+    const { router } = open();
+    await field(/Full name/);
+    expect(screen.getByRole('combobox', { name: /Primary hub/ })).toHaveValue(HUB_ID);
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
+
+  // Break caught: the form compared by the object that holds it and not by what it holds, so that a letter typed and taken back is still asked about.
+  it('asks nothing once what was typed has been taken back', async () => {
+    const { user, router } = open();
+    const name = await field(/Full name/);
+    await user.type(name, 'Kofi');
+    await user.clear(name);
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
+
+  // Break caught: the guard left on after the profile was made, so that the person is asked about a form that was sent.
+  it('asks nothing once the profile is created', async () => {
+    const view = open();
+    await fill(view);
+    await view.user.click(submit());
+    await screen.findByRole('heading', { name: 'Profile created' });
+
+    await act(async () => {
+      await view.router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(view.router.state.location.pathname).toBe('/');
   });
 });
 
@@ -827,7 +984,7 @@ describeInterfaceStates('The staff creation form', {
           name: 'You do not have access to this page',
         }),
       ).toBeVisible();
-      expect(screen.getByText('staff.identity.create')).toBeVisible();
+      expect(screen.getByText(cannotText('staff.identity.create'))).toBeVisible();
     },
   },
 });

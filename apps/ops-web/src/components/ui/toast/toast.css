@@ -1,0 +1,140 @@
+/*
+ * Toast (design/COMPONENT_PATTERNS.md section 21, *Toast*; brief section 8): a raised surface with the one floating shadow (a toast floats), the default border
+ * and 12px corners. A disc of 22px carries the tone's pair and its icon, the message is the primary text, the actions (up to two: a primary one and a secondary
+ * one) are text buttons under the message, and the dismiss control is a 24px icon button. Sonner places and stacks the toasts and handles swiping, the hotkey
+ * and the live region; this draws what is inside one. Sonner's own animations stop under reduced motion in its stylesheet.
+ */
+.ui-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  /* Sonner gives each toast its own width (356px, and the screen's width less its offsets on a phone): the toast fills it. */
+  width: 100%;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-floating);
+  font-family: var(--font-family-sans);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-toast__disc {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin-top: 0.0625rem;
+  border: 1px solid;
+  border-radius: var(--radius-full);
+}
+
+.ui-toast__disc[data-tone='success'] {
+  border-color: var(--color-status-success-border);
+  background: var(--color-status-success-background);
+  color: var(--color-status-success-foreground);
+}
+
+.ui-toast__disc[data-tone='info'] {
+  border-color: var(--color-status-info-border);
+  background: var(--color-status-info-background);
+  color: var(--color-status-info-foreground);
+}
+
+.ui-toast__disc[data-tone='warning'] {
+  border-color: var(--color-status-warning-border);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+}
+
+.ui-toast__disc[data-tone='danger'] {
+  border-color: var(--color-status-danger-border);
+  background: var(--color-status-danger-background);
+  color: var(--color-status-danger-foreground);
+}
+
+/* The icon of the disc is a small one: it sits inside the 22px circle with room around it. */
+.ui-toast__disc svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+/* The message, and under it the actions, in one column between the disc and the dismiss control. */
+.ui-toast__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ui-toast__message {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The actions, under the message, the primary one first. Each text starts where the message's does (a button's own padding on the start side is taken out of the
+ * row), and the row does not make the toast taller than its buttons need (the buttons are 36px, a dense control, and the toast's own padding is under them).
+ */
+.ui-toast__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-1);
+  margin: 0 0 calc(-1 * var(--space-2)) calc(-1 * var(--space-3));
+}
+
+/* An action: a text button in the link colours, as tall as a dense control. */
+.ui-toast__action {
+  flex: none;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-link);
+  font: inherit;
+  font-weight: var(--text-label-md-weight);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ui-toast__action:hover {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-link-hover);
+}
+
+/* The secondary action is the quieter one: the secondary text, at the weight of the message (6.38:1 on the raised surface in the light theme). */
+.ui-toast__action[data-action='secondary'] {
+  color: var(--color-text-secondary);
+  font-weight: var(--text-body-md-weight);
+}
+
+.ui-toast__action[data-action='secondary']:hover {
+  color: var(--color-text-primary);
+}
+
+/* The dismiss control is the kit's IconButton, made 24px square here: a toast's line is not the 36px that an IconButton keeps (the target is above the 24px of WCAG 2.5.8). */
+.ui-toast .ui-icon-button {
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  margin-top: -0.0625rem;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+@media (forced-colors: active) {
+  .ui-toast {
+    border-color: CanvasText;
+  }
+
+  .ui-toast__disc {
+    border-color: CanvasText;
+  }
+}

@@ -10,6 +10,7 @@ import {
   MANIFEST_ID,
   STOP_TWO_ID,
 } from '../../../test-support/manifest-fixture';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
@@ -56,6 +57,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 function open(list: Handler = twoPages, path = LISTED, record?: Handler) {
@@ -73,9 +75,23 @@ function open(list: Handler = twoPages, path = LISTED, record?: Handler) {
 const listed = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/pickup-manifests');
 const queryOf = () => new URL(listed().at(-1)?.url ?? 'http://x/').searchParams;
-const manifestTable = () => screen.findByRole('table', { name: 'Manifests' });
-const backLink = () => screen.findByRole('link', { name: 'Back to manifests' });
-const stateSelect = () => screen.getByRole('combobox', { name: 'State' });
+/** The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited. */
+const manifestTable = async (): Promise<HTMLElement> => {
+  const table = await screen.findByRole('table', { name: 'Pickup runs' });
+  await waitFor(() => {
+    expect(table).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return table;
+};
+const backLink = () => screen.findByRole('link', { name: 'Back to pickup runs' });
+const stateTab = (name: string) => screen.getByRole('tab', { name });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
 
 type View = ReturnType<typeof open>;
 
@@ -103,7 +119,7 @@ describe('the manifests, coming back from a manifest: the browser’s Back', () 
     expect(await screen.findByText(/on page 2/)).toBeVisible();
     expect(queryOf().get('page_token')).toBe('next-1');
     expect(queryOf().get('state')).toBe('DRAFT');
-    expect(stateSelect()).toHaveValue('DRAFT');
+    expect(stateTab('Draft')).toHaveAttribute('aria-selected', 'true');
     expect(view.router.state.location.pathname + view.router.state.location.search).toBe(LISTED);
     expect(
       within(await manifestTable()).getByRole('link', { name: 'ACC-MF-Q92422' }),
@@ -140,8 +156,8 @@ describe('the manifests, coming back from a manifest: the browser’s Back', () 
 
     await goBack(view);
 
-    expect(await screen.findByText('Loading the manifests…')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(await screen.findByText('Loading pickup runs')).toBeVisible();
+    expect(screen.queryByRole('link', { name: /^ACC-MF-/ })).toBeNull();
     expect(screen.queryByText('ACC-MF-Q92422')).toBeNull();
     expect(screen.queryByText('ACC-MF-K7M4PX')).toBeNull();
     expect(queryOf().get('page_token')).toBe('next-1');
@@ -163,10 +179,10 @@ describe('the manifests, coming back from a manifest: the browser’s Back', () 
 
     await goBack(view);
 
-    expect(await screen.findByText('Loading the manifests…')).toBeVisible();
-    expect(screen.queryByText(/Last checked/)).toBeNull();
+    expect(await screen.findByText('Loading pickup runs')).toBeVisible();
+    expect(screen.queryByText(/^Updated /)).toBeNull();
     await reads.answer(page([late]));
-    expect(await screen.findByText(/Last checked /)).toBeVisible();
+    expect(await screen.findByText(/^Updated /)).toBeVisible();
   });
 });
 
@@ -191,11 +207,12 @@ describe('the manifests, coming back from a manifest: the link back', () => {
 
   // Break caught: the card's link left without the mark of its manifest, so that opening a manifest from a card (a narrow screen) leaves no place.
   it('is the same when the manifest is opened from its card', async () => {
+    narrowRoom();
     const view = open();
-    await manifestTable();
+    await screen.findByRole('list', { name: 'Pickup runs' });
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
-    const cards = await screen.findByRole('list', { name: 'Manifests' });
+    const cards = await screen.findByRole('list', { name: 'Pickup runs' });
     await view.user.click(within(cards).getByRole('link', { name: 'ACC-MF-Q92422' }));
     await backLink();
 
@@ -237,7 +254,7 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
 
     await goBack(view);
 
-    const results = (await manifestTable()).closest('.ui-queue-table__results');
+    const results = (await manifestTable()).closest('.ui-data-table__scroller');
     await waitFor(() => {
       expect(results).toHaveFocus();
     });
@@ -246,11 +263,15 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
 
   // Break caught: a page that comes back with nothing to draw, or with a failure, left with focus on the heading above it.
   it.each([
-    ['a failure', () => refusal(500, 'INTERNAL_ERROR'), () => screen.findByRole('alert')],
+    [
+      'a failure',
+      () => refusal(500, 'INTERNAL_ERROR'),
+      () => alertSaying('The pickup runs could not be loaded.'),
+    ],
     [
       'nothing',
       () => page([]),
-      () => screen.findByRole('heading', { name: 'No manifests on this page' }),
+      () => screen.findByRole('heading', { name: 'No pickup runs on this page' }),
     ],
   ])(
     'gives focus to the message when the page the officer comes back to comes back with %s',
@@ -265,7 +286,8 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
 
       await goBack(view);
 
-      const region = (await message()).closest('.ui-read-state');
+      await message();
+      const region = (await manifestTable()).closest('.ui-data-table__scroller');
       await waitFor(() => {
         expect(region).toHaveFocus();
       });
@@ -280,8 +302,8 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
     );
     await toTheRecord(view);
     await goBack(view);
-    await screen.findByText('Loading the manifests…');
-    const state = stateSelect();
+    await screen.findByText('Loading pickup runs');
+    const state = stateTab('Draft');
 
     act(() => {
       state.focus();
@@ -309,8 +331,8 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
       expect(scrollTo).toHaveBeenCalledTimes(1);
     });
 
-    await view.user.click(screen.getByRole('button', { name: 'Refresh page' }));
-    expect(await screen.findByText('Loading the manifests…')).toBeVisible();
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByText('Loading pickup runs')).toBeVisible();
     await refresh.answer(page([late]));
     await manifestTable();
     await act(async () => {
@@ -328,19 +350,19 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
     );
     await toTheRecord(view);
     await goBack(view);
-    await screen.findByText('Loading the manifests…');
+    await screen.findByText('Loading pickup runs');
     scrollTo.mockClear();
     act(() => {
-      stateSelect().focus();
+      stateTab('Draft').focus();
     });
 
-    await view.user.selectOptions(stateSelect(), 'COMPLETED');
+    await view.user.click(stateTab('Completed'));
     await reads.answer(page([late]));
     await reads.answer(page([first]));
     await manifestTable();
 
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(stateSelect()).toHaveFocus();
+    expect(stateTab('Completed')).toHaveFocus();
   });
 
   it('restores the position on the page after the rows are drawn, and not before', async () => {
@@ -359,7 +381,7 @@ describe('the manifests, coming back from a manifest: focus and position', () =>
     scrollTo.mockClear();
 
     await goBack(view);
-    await screen.findByText('Loading the manifests…');
+    await screen.findByText('Loading pickup runs');
     expect(scrollTo).not.toHaveBeenCalled();
     await reads.answer(page([late]));
     await manifestTable();
@@ -389,7 +411,7 @@ describe('the manifests, coming to the list any other way', () => {
 
     await view.user.click(
       within(screen.getByRole('complementary', { name: 'Main menu' })).getByRole('link', {
-        name: 'Manifests',
+        name: 'Pickup runs',
       }),
     );
 
@@ -454,8 +476,8 @@ describe('the manifests: a place left, and then the filters or the page change',
     await leaveWithoutGoing(view.user);
     expect(view.router.state.location.pathname).toBe('/manifests');
 
-    await view.user.selectOptions(stateSelect(), 'COMPLETED');
-    await view.user.selectOptions(stateSelect(), 'DRAFT');
+    await view.user.click(stateTab('Completed'));
+    await view.user.click(stateTab('Draft'));
     await manifestTable();
     await act(async () => {
       await view.router.navigate(RECORD_PATH);
@@ -479,8 +501,8 @@ describe('the manifests: a place left, and then the filters or the page change',
     await manifestTable();
     vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640);
     await leaveWithoutGoing(view.user);
-    await view.user.click(screen.getByRole('button', { name: 'Refresh page' }));
-    await view.user.click(await screen.findByRole('button', { name: 'Show every manifest' }));
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await view.user.click(await screen.findByRole('button', { name: 'Show every pickup run' }));
     await manifestTable();
     await act(async () => {
       await view.router.navigate(LISTED);
@@ -509,7 +531,7 @@ describe('the manifests: a place left, and then the filters or the page change',
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
     await leaveWithoutGoing(view.user);
-    await view.user.click(screen.getByRole('button', { name: 'Refresh page' }));
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
     await view.user.click(await screen.findByRole('button', { name: 'Back to first page' }));
     await manifestTable();
 
@@ -542,7 +564,9 @@ describe('the manifests: a later page that holds nothing', () => {
 
     await goBack(view);
 
-    expect(await screen.findByRole('heading', { name: 'No manifests on this page' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'No pickup runs on this page' }),
+    ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
     expect(listed()).toHaveLength(3);
   });
@@ -563,7 +587,7 @@ describe('the manifests: a later page that holds nothing', () => {
     expect(queryOf().has('page_token')).toBe(false);
     expect(within(table).getByRole('link', { name: 'ACC-MF-K7M4PX' })).toBeVisible();
     await waitFor(() => {
-      expect(table.closest('.ui-queue-table__results')).toHaveFocus();
+      expect(table.closest('.ui-data-table__scroller')).toHaveFocus();
     });
   });
 
@@ -573,8 +597,10 @@ describe('the manifests: a later page that holds nothing', () => {
 
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
 
-    expect(await screen.findByRole('heading', { name: 'No manifests on this page' })).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'No manifests yet' })).toBeNull();
+    expect(
+      await screen.findByRole('heading', { name: 'No pickup runs on this page' }),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'No pickup runs yet' })).toBeNull();
   });
 });
 
@@ -595,13 +621,13 @@ describe('the manifests: a page the server will not open', () => {
 
     await goBack(view);
 
-    expect(await screen.findByText(/That page of the manifests could not be opened/)).toBeVisible();
+    await alertSaying('That page of the pickup runs could not be opened');
     expect(screen.queryByText(/That filter was not accepted/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('link', { name: /^ACC-MF-/ })).toBeNull();
     expect(view.router.state.location.search).toBe('?state=DRAFT');
-    expect(stateSelect()).toHaveValue('DRAFT');
+    expect(stateTab('Draft')).toHaveAttribute('aria-selected', 'true');
   });
 
   // Break caught: the first page offered by a refused page without letting go of the place, so that the next return carries the officer back to
@@ -616,7 +642,7 @@ describe('the manifests: a page the server will not open', () => {
     await view.user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
     await leaveWithoutGoing(view.user);
-    await view.user.click(screen.getByRole('button', { name: 'Refresh page' }));
+    await view.user.click(screen.getByRole('button', { name: 'Refresh' }));
     await view.user.click(await screen.findByRole('button', { name: 'Back to first page' }));
     await manifestTable();
 
@@ -646,7 +672,7 @@ describe('the manifests: a page the server will not open', () => {
 
     await goBack(view);
 
-    expect(await screen.findByText(/That page of the manifests could not be opened/)).toBeVisible();
+    await alertSaying('That page of the pickup runs could not be opened');
     expect(screen.getByRole('button', { name: 'Back to first page' })).toBeVisible();
   });
 
@@ -683,11 +709,7 @@ describe('the manifests: a page the server will not open', () => {
 
     await goBack(view);
 
-    expect(
-      await screen.findByText(
-        'That filter was not accepted. Choose a state from the list and a whole date.',
-      ),
-    ).toBeVisible();
+    await alertSaying('That filter was not accepted. Choose a state and a whole date.');
     expect(screen.queryByRole('button', { name: 'Back to first page' })).toBeNull();
   });
 });
@@ -699,7 +721,7 @@ describe('the manifests: a page the server will not open', () => {
  */
 describe('the manifests, coming back from a manifest that is not there', () => {
   const gone = () => refusal(404, 'NOT_FOUND');
-  const notFound = () => screen.findByRole('heading', { level: 1, name: 'Manifest not found' });
+  const notFound = () => screen.findByRole('heading', { level: 1, name: 'Pickup run not found' });
 
   /** The officer pages to the second page of the list and opens a manifest on it that the server then says is not there. */
   async function toTheMissingRecord() {
@@ -848,6 +870,7 @@ describe('the manifests, coming back from a manifest the officer may not read', 
   it('offers the link by the key of the list’s own route', () => {
     const list = SIGNED_IN_ROUTES.find((route) => route.path === '/manifests');
 
-    expect(list?.access).toEqual({ permission: LIST_PERMISSION });
+    // The route asks for the key and says what its page reads with it (the guard refuses in the words of pickup runs): the key is what the link follows.
+    expect(list?.access).toEqual({ permission: LIST_PERMISSION, capability: 'see pickup runs' });
   });
 });

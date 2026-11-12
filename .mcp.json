@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["apps/ops-web/node_modules/shadcn/dist/index.js", "mcp", "--cwd", "apps/ops-web"]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { byHand } from '../../../test-support/by-hand';
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import {
   describeInterfaceStates,
@@ -13,14 +14,17 @@ import {
   pickupRequestFixture,
   REQUEST_ID,
 } from '../../../test-support/pickup-fixture';
+import { pagerRegion } from '../../../test-support/queue-pager';
 import { renderApp } from '../../../test-support/render-app';
-import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests` (`listPickupRequests`; S1.19). The queue of the requests at the session's hubs, filtered by state and service date, and
  * an empty queue told apart from a filter that hides everything.
  */
 const LIST = 'GET /pickup-requests';
+const RECORD = `GET /pickup-requests/${REQUEST_ID}`;
 const READER = ['pickup.read'];
 const DIAGNOSTIC = /Diagnostic text that must never reach a screen\./;
 
@@ -45,6 +49,8 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth');
 });
 
 function open(
@@ -57,7 +63,8 @@ function open(
       sessionWith(keys, {
         authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
       }),
-      { [LIST]: handler },
+      // The panel beside the queue reads a request when it is opened.
+      { [LIST]: handler, [RECORD]: () => json(200, pending, etag('v1')) },
     ),
   );
   return renderApp(path);
@@ -68,15 +75,49 @@ const listRequests = () =>
 const queryOf = (index = -1) => new URL(listRequests().at(index)?.url ?? 'http://x/').searchParams;
 
 /**
- * The queue draws every request twice, as a row of a table and as a card, and the stylesheet shows the one that fits the room (jsdom applies
- * no CSS, so both are here; the browser spec proves that only one is ever exposed). Each test therefore says which of the two it reads.
+ * The queue draws every request as a row of a table or, in a room under 40rem, as a card: the table measures its own box, and jsdom measures nothing, so a test that reads cards tells
+ * the table that the room is narrow (`narrowRoom`). Each test therefore says which of the two it reads.
  */
-const queueTable = () => screen.findByRole('table', { name: 'Pickup requests' });
+const queueTable = async (): Promise<HTMLElement> => {
+  const table = await screen.findByRole('table', { name: 'Pickup requests' });
+  // The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited.
+  await waitFor(() => {
+    expect(table).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return table;
+};
 const queueCards = () => screen.findByRole('list', { name: 'Pickup requests' });
+
+const LAYOUTS = ['row', 'card'] as const;
+type Layout = (typeof LAYOUTS)[number];
+
+/** The table is told that its room is narrow, which is how it comes to draw cards. Undone after each test. */
+function narrowRoom(): void {
+  class Observer {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(): void {
+      this.callback([], this);
+    }
+    unobserve(): void {
+      // Nothing is watched: the room was told, once, when the table began to observe.
+    }
+    disconnect(): void {
+      // As above.
+    }
+  }
+  vi.stubGlobal('ResizeObserver', Observer);
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 300,
+  });
+}
+
+/** The button that opens a request, named by its code and its sender: the table draws one in each row, and it is the row's one control that opens it. */
+const openButton = (code: string) => new RegExp(`^Open ${code}, `);
 
 async function rowOf(code: string): Promise<HTMLElement> {
   const row = within(await queueTable())
-    .getByRole('link', { name: code })
+    .getByRole('button', { name: openButton(code) })
     .closest('tr');
   if (row === null) throw new Error(`no row for ${code}`);
   return row;
@@ -84,11 +125,15 @@ async function rowOf(code: string): Promise<HTMLElement> {
 
 async function cardOf(code: string): Promise<HTMLElement> {
   const card = within(await queueCards())
-    .getByRole('link', { name: code })
+    .getByRole('button', { name: openButton(code) })
     .closest('li');
   if (card === null) throw new Error(`no card for ${code}`);
   return card;
 }
+
+/** A request as the layout under test draws it. */
+const placeOf = (layout: Layout, code: string): Promise<HTMLElement> =>
+  layout === 'row' ? rowOf(code) : cardOf(code);
 
 /** The value a card gives for a label ("Service date"): the definition that follows its term. */
 function factOf(card: HTMLElement, label: string): HTMLElement {
@@ -98,7 +143,7 @@ function factOf(card: HTMLElement, label: string): HTMLElement {
 }
 
 describe('the queue: what it shows', () => {
-  it('shows each request by its code, state, date, kind, packages, place and hub, and links to it', async () => {
+  it('shows each request by its code, state, date, kind, packages, place and hub, and opens it from its row', async () => {
     open();
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Pickup requests' })).toBeVisible();
@@ -110,10 +155,10 @@ describe('the queue: what it shows', () => {
     expect(within(first).getByText('3 packages')).toBeVisible();
     expect(within(first).getByText('14 Demo Lane, Osu')).toBeVisible();
     expect(within(first).getByText('Accra Central')).toBeVisible();
-    expect(within(first).getByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toHaveAttribute(
-      'href',
-      `/pickup-requests/${REQUEST_ID}`,
-    );
+    // The row opens the request in the panel beside the queue (below); the link to its own page is the panel's.
+    expect(
+      within(first).getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+    ).toBeVisible();
   });
 
   // The queue makes pending work visible (ops-portal.md section 4): a late booking waiting for a decision says so in words.
@@ -153,31 +198,37 @@ describe('the queue: what it shows', () => {
   });
 
   // Break caught: an id shown where a person needs a code, or a hub the session does not act in named as if it were its own.
-  it('never shows a request’s id, and names another hub as that', async () => {
-    open(() =>
-      page([pickupRequestFixture({ responsible_hub_id: '9d0e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a' })]),
-    );
+  it.each(LAYOUTS)(
+    'never shows a request’s id, and names another hub as that, in the %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      open(() =>
+        page([
+          pickupRequestFixture({ responsible_hub_id: '9d0e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a' }),
+        ]),
+      );
 
-    const row = await rowOf('ACC-PR-7KQ2MZ');
-    expect(within(row).getByText('Another hub')).toBeVisible();
-    expect(within(await cardOf('ACC-PR-7KQ2MZ')).getByText('Another hub')).toBeVisible();
-    expect(document.body.textContent).not.toContain(REQUEST_ID);
-    expect(document.body.textContent).not.toContain('9d0e1f2a');
-  });
+      expect(within(await placeOf(layout, 'ACC-PR-7KQ2MZ')).getByText('Another hub')).toBeVisible();
+      expect(document.body.textContent).not.toContain(REQUEST_ID);
+      expect(document.body.textContent).not.toContain('9d0e1f2a');
+    },
+  );
 
   // Break caught: a queue that shows part of a page when one request in it is not one.
-  it('shows no queue at all when one request in it is not a request', async () => {
+  it('shows no request at all when one request in the page is not a request', async () => {
     open(() => page([pending, { ...late, code: 'not a code' }]));
 
-    expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
-    expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+    expect(await screen.findAllByText('The pickup requests could not be loaded.')).not.toHaveLength(
+      0,
+    );
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
+    expect(screen.queryByText('ACC-PR-7KQ2MZ')).toBeNull();
   });
 
   // The menu offers the booking too; this is the page's own action, in its main content.
   it('offers a booking to a holder of pickup.request.create', async () => {
     open(undefined, ['pickup.read', 'pickup.request.create']);
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
     expect(
       within(screen.getByRole('main')).getByRole('link', { name: 'Book a pickup' }),
     ).toHaveAttribute('href', '/pickup-requests/new');
@@ -185,7 +236,7 @@ describe('the queue: what it shows', () => {
 
   it('offers no booking to a session that may only read the queue', async () => {
     open();
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
     expect(screen.queryByRole('link', { name: 'Book a pickup' })).toBeNull();
   });
 });
@@ -260,31 +311,28 @@ describe('the queue: six columns, and the same facts as cards', () => {
     expect(needs).toHaveTextContent(/^Late booking to decide$/);
   });
 
-  it('tells every fact of a request in its row and in its card', async () => {
+  it.each(LAYOUTS)('tells every fact of a request in its %s', async (layout) => {
+    if (layout === 'card') narrowRoom();
     open();
 
     for (const facts of [FACTS_OF_PENDING, FACTS_OF_LATE]) {
       const code = facts[0] ?? '';
-      const row = await rowOf(code);
-      const card = await cardOf(code);
+      const place = await placeOf(layout, code);
       for (const fact of facts) {
-        expect(within(row).getByText(fact), `${fact} in the row of ${code}`).toBeInTheDocument();
-        expect(within(card).getByText(fact), `${fact} in the card of ${code}`).toBeInTheDocument();
+        expect(
+          within(place).getByText(fact),
+          `${fact} in the ${layout} of ${code}`,
+        ).toBeInTheDocument();
       }
     }
   });
 
   it('draws a card as the code over the state, then the sender, then the facts, in the order a person reads them', async () => {
+    narrowRoom();
     open();
 
-    const card = await cardOf('ACC-PR-9WXH4T');
+    const card = await placeOf('card', 'ACC-PR-9WXH4T');
 
-    const heading = within(card).getByRole('heading', { level: 2 });
-    expect(heading).toHaveTextContent('ACC-PR-9WXH4T');
-    expect(within(heading).getByRole('link', { name: 'ACC-PR-9WXH4T' })).toHaveAttribute(
-      'href',
-      `/pickup-requests/${EARLIER_REQUEST_ID}`,
-    );
     expect(factOf(card, 'Service date')).toHaveTextContent('Sat 7 Nov 2026');
     expect(factOf(card, 'Pickup address / hub')).toHaveTextContent(
       /^2 Demo Close, Labone\s*Accra Central$/,
@@ -298,115 +346,135 @@ describe('the queue: six columns, and the same facts as cards', () => {
     );
   });
 
-  // Break caught: a request opened by a click beside its code, which a keyboard cannot do and a modifier-click cannot send to a new tab.
-  it('makes the code the one link of a request, and the row and the card no link at all', async () => {
-    const { user, router } = open();
-    const row = await rowOf('ACC-PR-7KQ2MZ');
-    const card = await cardOf('ACC-PR-7KQ2MZ');
+  // Break caught: a request opened by a click beside its code, which a keyboard cannot do. The row and the card have one control that opens the request, the button the table
+  // draws over the whole of it, and no link: the link to the request's own page is the panel's.
+  it.each(LAYOUTS)(
+    'gives a request one button that opens it, and no link, in its %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      const { user, router } = open();
+      const place = await placeOf(layout, 'ACC-PR-7KQ2MZ');
 
-    expect(within(row).getAllByRole('link')).toHaveLength(1);
-    expect(within(card).getAllByRole('link')).toHaveLength(1);
-    await user.click(within(row).getByText('Demo Fabrics Ltd'));
-    await user.click(within(card).getByText('Service date'));
+      expect(within(place).queryAllByRole('link')).toHaveLength(0);
+      expect(within(place).getAllByRole('button')).toHaveLength(1);
+      // The row's words are inside its button; a card's are outside it (its facts are read, which a button's content is not), so a press on them reaches the button by the reach the button is
+      // stretched to, which jsdom does not draw (`pickup.spec.ts` presses them in a real browser).
+      await user.click(
+        layout === 'card'
+          ? within(place).getByRole('button')
+          : within(place).getByText('Demo Fabrics Ltd'),
+      );
 
-    expect(router.state.location.pathname).toBe('/pickup-requests');
-  });
+      // The press opened the request in the panel beside the queue, and the page stayed where it was.
+      expect(router.state.location.pathname).toBe('/pickup-requests');
+      expect(await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeInTheDocument();
+    },
+  );
 
   // Break caught: a fact the record lacks drawn as nothing, or as a made-up value, so that a missing count would pass for none.
-  it('says a fact is not recorded where the record lacks it, in the row and in the card', async () => {
-    open(() =>
-      page([
-        pickupRequestFixture({
-          sender_name: null,
-          pickup_intent: undefined,
-          declared_package_count: undefined,
-          resolved_pickup_location: undefined,
-        }),
-      ]),
-    );
+  it.each(LAYOUTS)(
+    'says a fact is not recorded where the record lacks it, in the %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      open(() =>
+        page([
+          pickupRequestFixture({
+            sender_name: null,
+            pickup_intent: undefined,
+            declared_package_count: undefined,
+            resolved_pickup_location: undefined,
+          }),
+        ]),
+      );
 
-    const row = await rowOf('ACC-PR-7KQ2MZ');
-    const card = await cardOf('ACC-PR-7KQ2MZ');
+      const place = await placeOf(layout, 'ACC-PR-7KQ2MZ');
 
-    // The sender, the address, the packages and the booking type: four facts, each told as missing and none as a count of zero.
-    expect(within(row).getAllByText('Not recorded')).toHaveLength(4);
-    expect(within(card).getAllByText('Not recorded')).toHaveLength(4);
-    expect(within(row).queryByText(/^\d+ packages?$/)).toBeNull();
-    expect(within(card).queryByText(/^\d+ packages?$/)).toBeNull();
-  });
+      // The sender, the address, the packages and the booking type: four facts, each told as missing and none as a count of zero.
+      expect(within(place).getAllByText('Not recorded')).toHaveLength(4);
+      expect(within(place).queryByText(/^\d+ packages?$/)).toBeNull();
+    },
+  );
 
   // The pickup address is the server's resolved one, never another address on the record (a recipient's, here) in its place.
-  it('shows the address the server resolved for the pickup, and no other address of the record', async () => {
-    open(() => page([pickupRequestFixture({ one_package_exception: exceptionFixture() })]));
+  it.each(LAYOUTS)(
+    'shows the address the server resolved for the pickup, and no other address of the record, in the %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      open(() => page([pickupRequestFixture({ one_package_exception: exceptionFixture() })]));
 
-    const row = await rowOf('ACC-PR-7KQ2MZ');
-    const card = await cardOf('ACC-PR-7KQ2MZ');
+      const place = await placeOf(layout, 'ACC-PR-7KQ2MZ');
 
-    for (const place of [row, card]) {
       expect(within(place).getByText('14 Demo Lane, Osu')).toBeVisible();
       expect(place).not.toHaveTextContent('9 Demo Street, Tema');
-    }
-  });
+    },
+  );
 
   // Break caught: a request that needs nothing drawn as an empty cell, which says nothing to a screen reader, or as a claim that nothing
   // blocks it (the dash is neutral: it does not say the request may be confirmed).
-  it('draws a dash that a screen reader reads as "No additional note" when a request needs nothing', async () => {
-    open();
+  it.each(LAYOUTS)(
+    'draws a dash that a screen reader reads as "No additional note" when a request needs nothing, in the %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      open();
 
-    const row = await rowOf('ACC-PR-7KQ2MZ');
-    const card = await cardOf('ACC-PR-7KQ2MZ');
+      const place = await placeOf(layout, 'ACC-PR-7KQ2MZ');
 
-    for (const place of [row, card]) {
       expect(within(place).getByText('No additional note')).toBeInTheDocument();
       expect(within(place).getByText('—')).toHaveAttribute('aria-hidden', 'true');
       expect(place).not.toHaveTextContent(/blocker|nothing to do|ready/i);
-    }
-  });
+    },
+  );
 
-  it('keeps a long address and a long note whole, for the stylesheet to wrap', async () => {
-    const address =
-      'Plot 14, Block C, off the Independence Avenue service road beside the old demo bakery, Ridge, Accra, Greater Accra Region';
-    const sender = 'Demo Fabrics and Household Linen Wholesale Trading Company Limited';
-    open(() =>
-      page([
-        pickupRequestFixture({
-          declared_package_count: 1,
-          sender_name: sender,
-          resolved_pickup_location: { address },
-        }),
-      ]),
-    );
+  it.each(LAYOUTS)(
+    'keeps a long address and a long note whole, for the stylesheet to wrap, in the %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      const address =
+        'Plot 14, Block C, off the Independence Avenue service road beside the old demo bakery, Ridge, Accra, Greater Accra Region';
+      const sender = 'Demo Fabrics and Household Linen Wholesale Trading Company Limited';
+      open(() =>
+        page([
+          pickupRequestFixture({
+            declared_package_count: 1,
+            sender_name: sender,
+            resolved_pickup_location: { address },
+          }),
+        ]),
+      );
 
-    for (const place of [await rowOf('ACC-PR-7KQ2MZ'), await cardOf('ACC-PR-7KQ2MZ')]) {
+      const place = await placeOf(layout, 'ACC-PR-7KQ2MZ');
+
       expect(within(place).getByText(address)).toBeVisible();
       expect(within(place).getByText(sender)).toBeVisible();
       expect(within(place).getByText('One-package exception to request')).toBeVisible();
       expect(place.querySelector('[title]')).toBeNull();
-    }
-  });
+    },
+  );
 });
 
 /**
- * The filters, the count, the rows and the pager of the queue sit in one panel, and so does whatever stands in the place of the rows: the
- * loading, the empty state, a failure and a refusal. The stylesheet draws the surface (jsdom applies no CSS; the browser spec holds how it looks),
- * so the person never meets a state outside the surface the rows would have been drawn on.
+ * The views, the filters, the count, the rows and the pager of the queue sit in one page card, and so does whatever stands in the place of the rows: the loading, the empty
+ * state, a failure and a refusal. The stylesheet draws the surface (jsdom applies no CSS; the browser spec holds how it looks), so the person never meets a state outside the
+ * surface the rows would have been drawn on.
  */
 describe('the queue: one panel', () => {
   const filters = () => screen.getByRole('group', { name: 'Filter the pickup requests' });
-  const panelOf = (element: HTMLElement) => element.closest('.ui-queue-panel');
+  const panelOf = (element: HTMLElement) => element.closest('.ui-queue-workspace__main');
 
-  it('holds the filters, the count, the rows as a table and as cards, and the pager', async () => {
+  it('holds the views, the filters, the count, the rows and the pager', async () => {
     open(() => page([pending, late], 'next-1'));
 
     const panel = panelOf(await queueTable());
 
     expect(panel).not.toBeNull();
+    expect(panel).toContainElement(
+      screen.getByRole('tablist', { name: 'Views of the pickup requests' }),
+    );
     expect(panel).toContainElement(filters());
-    // The count is found by its words: the refresh keeps a status of its own, for its announcement, in the same panel.
+    // The count is found by its words: the header keeps a status of its own, for the time of the check.
     expect(panel).toContainElement(screen.getByText(/^Showing 2 requests/));
-    expect(panel).toContainElement(await queueCards());
     expect(panel).toContainElement(screen.getByRole('button', { name: 'Next page' }));
-    expect(document.querySelectorAll('.ui-queue-panel')).toHaveLength(1);
+    expect(document.querySelectorAll('.ui-queue-workspace__main')).toHaveLength(1);
   });
 
   it('holds the filters and the loading', async () => {
@@ -416,7 +484,7 @@ describe('the queue: one panel', () => {
     });
     open(() => gate);
 
-    const loading = await screen.findByText('Loading the pickup requests…');
+    const loading = await screen.findByText('Loading pickup requests');
 
     expect(panelOf(loading)).toContainElement(filters());
     await act(async () => {
@@ -445,42 +513,61 @@ describe('the queue: one panel', () => {
   it('holds the filters, the failure and its retry', async () => {
     open(() => refusal(500, 'INTERNAL_ERROR'));
 
-    const failure = await screen.findByText('The pickup requests could not be loaded.');
-
+    const failure = await alertSaying('The pickup requests could not be loaded.');
     expect(panelOf(failure)).toContainElement(filters());
-    expect(panelOf(failure)).toContainElement(screen.getByRole('button', { name: 'Try again' }));
+    expect(panelOf(failure)).toContainElement(screen.getByRole('button', { name: 'Retry' }));
   });
 
-  // The server's refusal of the read. A session that does not hold the key at all never reaches the page: the route's guard names the key instead.
-  it('holds the filters and the refusal that names the permission', async () => {
+  // The server's refusal of the read, in the words of the screen: a session that does not hold the key at all never reaches the page (the route's guard answers), and the
+  // refusal here names what the person lacks as a capability and never as a key or a role (PRODUCT_DESIGN_DIRECTION section 6.5).
+  it('holds the filters and the refusal, in plain words', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    const refused = await screen.findByText(/pickup\.read/);
-
+    const refused = await alertSaying('Your account can’t see pickup requests.');
     expect(panelOf(refused)).toContainElement(filters());
+    // Break caught: a refusal that names the key (it once checked that another sentence was absent, which no page draws, so it could never fail).
+    expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.read/);
   });
 });
+
+/** The date filter lives in the popover of the filter row: opened with the Filter button, and its field is the date field of the kit. */
+async function openDateFilter(view: ReturnType<typeof open>): Promise<HTMLElement> {
+  await view.user.click(screen.getByRole('button', { name: 'Filter' }));
+  return screen.findByRole('group', { name: 'Service date' });
+}
+const viewTab = (name: string) => screen.getByRole('tab', { name });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+const LATE_CHIP = 'Only late bookings waiting for a cut-off decision';
+const removeChip = (label: string) =>
+  screen.getByRole('button', { name: `Remove filter: ${label}` });
 
 describe('the queue: filtering', () => {
   it('asks for every state and date by default, and offers each state the contract has', async () => {
     open();
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
 
     expect(queryOf(0).has('state')).toBe(false);
     expect(queryOf(0).has('service_date')).toBe(false);
-    const filter = screen.getByRole('combobox', { name: 'State' });
+    const views = screen.getByRole('tablist', { name: 'Views of the pickup requests' });
     expect(
-      within(filter)
-        .getAllByRole('option')
-        .map((option) => option.textContent),
-    ).toEqual(['Every state', 'Waiting for confirmation', 'Confirmed', 'Declined', 'Cancelled']);
+      within(views)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent),
+    ).toEqual(['All', 'Waiting for confirmation', 'Confirmed', 'Declined', 'Cancelled']);
+    expect(viewTab('All')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('asks for the state that is chosen, and puts it in the address', async () => {
     const { user, router } = open();
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'CONFIRMED');
+    await user.click(viewTab('Confirmed'));
 
     await waitFor(() => {
       expect(queryOf().get('state')).toBe('CONFIRMED');
@@ -491,12 +578,12 @@ describe('the queue: filtering', () => {
   it('reads the state and the date out of the address', async () => {
     open(undefined, READER, '/pickup-requests?state=PENDING&date=2026-11-03');
 
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
 
     expect(queryOf(0).get('state')).toBe('PENDING');
     expect(queryOf(0).get('service_date')).toBe('2026-11-03');
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('PENDING');
-    expect(screen.getByRole('button', { name: 'Every service date' })).toBeVisible();
+    expect(viewTab('Waiting for confirmation')).toHaveAttribute('aria-selected', 'true');
+    expect(removeChip('Service date: Tue 3 Nov 2026')).toBeVisible();
   });
 
   // Break caught: a made-up value in the address sent to the server as a made-up filter.
@@ -506,30 +593,159 @@ describe('the queue: filtering', () => {
     'date=2026-02-30',
     'date=tomorrow',
     'date=2026-11-03T00:00:00Z',
+    'cutoff=everything',
+    'cutoff=pending_ops_review',
   ])('takes %s for no filter', async (query) => {
     open(undefined, READER, `/pickup-requests?${query}`);
 
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
 
     expect(queryOf(0).has('state')).toBe(false);
     expect(queryOf(0).has('service_date')).toBe(false);
+    expect(queryOf(0).has('cutoff_exception_state')).toBe(false);
   });
 
-  it('asks for the date that is typed, once it is a whole date, and keeps the state', async () => {
-    const { user, router } = open(undefined, READER, '/pickup-requests?state=PENDING');
-    await screen.findByRole('table', { name: 'Pickup requests' });
-    const group = screen.getByRole('group', { name: 'Service date' });
-    const [day] = within(group).getAllByRole('spinbutton');
-    if (day === undefined) throw new Error('no day');
+  // Task C1.1, AC-QSUM-11: the landing's link for the late bookings opens this page with the cut-off decision as a filter. Break caught: the
+  // address read and not sent (the officer sees every confirmed request under a link that said "late bookings"), or sent and not said (a
+  // filter the page applies without telling).
+  it('reads the late bookings out of the address, asks for them, says so in words, and takes them off with their own chip', async () => {
+    const { user, router } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    await queueTable();
 
-    await user.click(day);
-    await user.keyboard('04112026');
+    expect(queryOf(0).get('state')).toBe('CONFIRMED');
+    expect(queryOf(0).get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+    expect(screen.getByText(LATE_CHIP)).toBeVisible();
+
+    await user.click(removeChip(LATE_CHIP));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?state=CONFIRMED');
+    });
+    expect(queryOf().has('cutoff_exception_state')).toBe(false);
+    expect(queryOf().get('state')).toBe('CONFIRMED');
+    expect(screen.queryByText(LATE_CHIP)).not.toBeInTheDocument();
+  });
+
+  // The review of C1.1 (5 November 2026): the late bookings are the confirmed requests waiting for a cut-off decision, which is what the landing
+  // counted. A request cancelled after it was raised keeps the decision it had, so the filter alone would list it under "Every state", beneath
+  // words that do not fit it. The filter is therefore a refinement of the Confirmed state: another state takes it off. Break caught: the
+  // filter kept under another state, with its chip.
+  it('takes the late bookings off when the state is changed, which they are a refinement of', async () => {
+    const { user, router } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    await queueTable();
+
+    await user.click(viewTab('Waiting for confirmation'));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?state=PENDING');
+    });
+    expect(queryOf().get('state')).toBe('PENDING');
+    expect(queryOf().has('cutoff_exception_state')).toBe(false);
+    expect(screen.queryByText(LATE_CHIP)).not.toBeInTheDocument();
+  });
+
+  it('keeps the late bookings when only the service date changes', async () => {
+    const { user, router } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW&date=2026-11-07',
+    );
+    await queueTable();
+
+    await user.click(removeChip('Service date: Sat 7 Nov 2026'));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW');
+    });
+    expect(queryOf().get('cutoff_exception_state')).toBe('PENDING_OPS_REVIEW');
+  });
+
+  // An address is the person's to edit: a late-bookings filter without the Confirmed state is not one the page offers, and is no filter, as a
+  // value that is no cut-off decision is none. Break caught: the filter sent for a state it does not fit.
+  it.each([
+    ['names no state', '/pickup-requests?cutoff=PENDING_OPS_REVIEW'],
+    ['names another state', '/pickup-requests?state=CANCELLED&cutoff=PENDING_OPS_REVIEW'],
+  ])('applies no late-bookings filter to an address that %s', async (_why, path) => {
+    open(() => page([pending]), READER, path);
+    await queueTable();
+
+    expect(queryOf(0).has('cutoff_exception_state')).toBe(false);
+    expect(screen.queryByText(LATE_CHIP)).not.toBeInTheDocument();
+  });
+
+  // A chip that takes a filter off is gone once it has: focus goes to what stays in the filter row (the next chip's remove button, else the Filter button), and not to the top
+  // of the page where it would fall.
+  it('puts focus on the Filter button once the late bookings are taken off', async () => {
+    const { user } = open(
+      () => page([late]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    await queueTable();
+
+    await user.click(removeChip(LATE_CHIP));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Filter' })).toHaveFocus();
+    });
+  });
+
+  it('puts focus on the Filter button once the date is taken off', async () => {
+    const { user } = open(() => page([pending]), READER, '/pickup-requests?date=2026-11-03');
+    await queueTable();
+
+    await user.click(removeChip('Service date: Tue 3 Nov 2026'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Filter' })).toHaveFocus();
+    });
+  });
+
+  // The review of C1.1: a request cancelled after its late booking was raised keeps the cut-off decision it had, and nothing is left to decide
+  // on it. Break caught: the row of a cancelled request asking the officer to decide.
+  it.each(LAYOUTS)(
+    'does not ask for a decision on a late booking that was cancelled since, in the %s',
+    async (layout) => {
+      if (layout === 'card') narrowRoom();
+      open(() =>
+        page([
+          pickupRequestFixture({
+            id: EARLIER_REQUEST_ID,
+            code: 'ACC-PR-9WXH4T',
+            state: 'CANCELLED',
+            cutoff_exception_state: 'PENDING_OPS_REVIEW',
+          }),
+        ]),
+      );
+
+      const place = await placeOf(layout, 'ACC-PR-9WXH4T');
+
+      expect(within(place).getByText('Cancelled')).toBeVisible();
+      expect(within(place).queryByText('Late booking to decide')).toBeNull();
+    },
+  );
+
+  it('asks for the date that is typed, once it is a whole date, and keeps the state', async () => {
+    const view = open(undefined, READER, '/pickup-requests?state=PENDING');
+    await queueTable();
+    const group = await openDateFilter(view);
+
+    await view.user.click(within(group).getByRole('textbox'));
+    await view.user.keyboard('04112026');
 
     await waitFor(() => {
       expect(queryOf().get('service_date')).toBe('2026-11-04');
     });
     expect(queryOf().get('state')).toBe('PENDING');
-    expect(router.state.location.search).toBe('?state=PENDING&date=2026-11-04');
+    expect(view.router.state.location.search).toBe('?state=PENDING&date=2026-11-04');
     // A year still being typed (2, 20, 202) is never asked of the server.
     for (const request of listRequests()) {
       const date = new URL(request.url).searchParams.get('service_date');
@@ -537,11 +753,11 @@ describe('the queue: filtering', () => {
     }
   });
 
-  it('takes the date off with its own button', async () => {
+  it('takes the date off with its own chip', async () => {
     const { user, router } = open(undefined, READER, '/pickup-requests?date=2026-11-03');
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
 
-    await user.click(screen.getByRole('button', { name: 'Every service date' }));
+    await user.click(removeChip('Service date: Tue 3 Nov 2026'));
 
     await waitFor(() => {
       expect(router.state.location.search).toBe('');
@@ -560,7 +776,7 @@ describe('the queue: counting and paging', () => {
 
   it('goes to the next page with the token the server gave, and back', async () => {
     const { user } = open(() => page([pending], 'next-1'));
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
 
     await user.click(screen.getByRole('button', { name: 'Next page' }));
 
@@ -575,14 +791,41 @@ describe('the queue: counting and paging', () => {
     });
   });
 
+  // Break caught (the review of 499399c): a pager taken out of the page while the next page is read and made anew with its words, which most screen readers do not announce: the status
+  // region is the same element through the read, empty while the page is read.
+  it('keeps the pager’s status region while the next page is read', async () => {
+    const reads = byHand();
+    let calls = 0;
+    const { user } = open((request) => {
+      calls += 1;
+      return calls === 1 ? page([pending], 'next-1') : reads.handler(request);
+    });
+    await screen.findByText('Showing 1 request. More follow on the next page.', undefined, {
+      timeout: 5000,
+    });
+    const region = pagerRegion();
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() => {
+      expect(region).toBeEmptyDOMElement();
+    });
+    expect(pagerRegion()).toBe(region);
+
+    await reads.answer(page([late]));
+    await waitFor(() => {
+      expect(region).toHaveTextContent('Showing 1 request on page 2.');
+    });
+    expect(pagerRegion()).toBe(region);
+  });
+
   // Break caught: the next page of one filter asked for under another.
   it('starts again at the first page when the filter changes', async () => {
     const { user } = open(() => page([pending], 'next-1'));
-    await screen.findByRole('table', { name: 'Pickup requests' });
+    await queueTable();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await screen.findByText(/on page 2/);
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'PENDING');
+    await user.click(viewTab('Waiting for confirmation'));
 
     await waitFor(() => {
       expect(queryOf().get('state')).toBe('PENDING');
@@ -596,7 +839,7 @@ describe('the queue: nothing to show', () => {
     open(() => page([]));
 
     expect(await screen.findByRole('heading', { name: 'No pickup requests yet' })).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
   });
 
   // Break caught (ops-portal.md section 7): "no requests" and "filtered to nothing" told as one, which sends Ops hunting for a bug.
@@ -614,24 +857,631 @@ describe('the queue: nothing to show', () => {
     await waitFor(() => {
       expect(router.state.location.search).toBe('');
     });
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('');
+    expect(viewTab('All')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  // Task C1.1: when the late bookings are the only filter and none waits, the page says the filter hid them, and "Show every request" takes
+  // that filter off too. Break caught: "every request" leaving the cut-off decision set, so that the button shows the same empty page again.
+  it('tells the late bookings that hide everything, in words that fit, and takes them off with every other filter', async () => {
+    const { user, router } = open(
+      () => page([]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+    expect(await screen.findByRole('heading', { name: 'No pickup requests match' })).toBeVisible();
+    expect(screen.getByText(/Nothing fits these filters/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Show every request' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('');
+    });
+    expect(queryOf().has('cutoff_exception_state')).toBe(false);
   });
 });
 
 describe('the queue: when it cannot be had', () => {
+  // Filtered by the cut-off decision, every request of the page carries it: a page that does not is not this query's answer (the server ignored
+  // the filter, or answered another). Break caught: a page drawn under "late bookings" that holds requests which are not, which would ask the
+  // officer to decide what is not theirs to decide. The filters stay on the page, so the officer can take them off.
+  it('refuses a page whose requests are not all the late bookings that were asked for', async () => {
+    open(
+      () => page([late, pending]),
+      READER,
+      '/pickup-requests?state=CONFIRMED&cutoff=PENDING_OPS_REVIEW',
+    );
+
+    await alertSaying('The pickup requests could not be loaded.');
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
+    expect(removeChip(LATE_CHIP)).toBeVisible();
+  });
+
   it('says so in approved words with a retry, and never the server’s text', async () => {
     open(() => refusal(500, 'INTERNAL_ERROR'));
 
-    expect(await screen.findByText('The pickup requests could not be loaded.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await alertSaying('The pickup requests could not be loaded.');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
     expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
   });
 
-  it('names the key a session without it lacks, and no role', async () => {
+  it('says what a session without access lacks in plain words, and names no key and no role', async () => {
     open(() => refusal(403, 'PERMISSION_DENIED'));
 
-    expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+    await alertSaying('Your account can’t see pickup requests. Ask an administrator for access.');
+    expect(screen.getByRole('main').textContent).not.toMatch(/pickup\.read/);
     expect(document.body.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
+  });
+});
+
+/**
+ * What the panel beside the queue holds (redesign step R6): a request opens in it from its row, with its summary read as the request's own page reads it, its state in words, the
+ * link to its own page, and, for a session that may confirm it, the one act the queue offers. The panel never takes the queue's place: the rows stay.
+ */
+const CONFIRMER = ['pickup.read', 'pickup.request.confirm'];
+const CONFIRM = `POST /pickup-requests/${REQUEST_ID}/confirm`;
+
+/**
+ * A session that may confirm. The request is read as often as the panel reads it, and **each read is a new version** ("v1", then "v2"): a screen that confirmed at a version it read
+ * just before, instead of the one the panel shows, would send the second.
+ */
+function openConfirmer(
+  confirm: Handler = () => json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer')),
+  record?: Handler,
+  list: Handler = () => page([pending, late]),
+) {
+  let reads = 0;
+  api = installFakeApi(
+    staffApi(
+      sessionWith(CONFIRMER, {
+        authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+      }),
+      {
+        [LIST]: list,
+        [RECORD]:
+          record ??
+          (() => {
+            reads += 1;
+            return json(200, pending, etag(`v${String(reads)}`));
+          }),
+        [CONFIRM]: confirm,
+      },
+    ),
+  );
+  return renderApp('/pickup-requests');
+}
+
+describe('the queue: the request beside it', () => {
+  it('opens a request in a panel beside the queue, with its summary and the link to its page', async () => {
+    const { user } = open();
+    await queueTable();
+
+    await user.click(screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }));
+
+    const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+    // The panel fades in (it is drawn at once, with its opacity on its way): what it holds is in it, whether or not the first frames are over.
+    expect(
+      await within(panel).findByText('It waits for an Ops officer to confirm it.'),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText('14 Demo Lane, Osu')).toBeInTheDocument();
+    // Break caught (the Product Owner, 9 November 2026): the state told twice, by the header's badge and by a fact of the panel's list. It is told once, by the badge.
+    expect(within(panel).getAllByText('Waiting for confirmation')).toHaveLength(1);
+    expect(within(panel).queryByText('State')).toBeNull();
+    expect(within(panel).getByRole('link', { name: 'Open full page' })).toHaveAttribute(
+      'href',
+      `/pickup-requests/${REQUEST_ID}`,
+    );
+    // The queue stays beside it.
+    expect(screen.getByRole('table', { name: 'Pickup requests' })).toBeVisible();
+    // A session that may only read offers no act in it.
+    expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+  });
+
+  it('closes with Escape and gives focus back to the row it came from', async () => {
+    const { user } = open();
+    await queueTable();
+    const opener = screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' });
+    await user.click(opener);
+    await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeNull();
+    });
+    expect(opener).toHaveFocus();
+  });
+
+  it('says in the panel that the request could not be read, and leaves the queue as it was', async () => {
+    api = installFakeApi(
+      staffApi(
+        sessionWith(READER, {
+          authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+        }),
+        { [LIST]: () => page([pending]), [RECORD]: () => refusal(404, 'NOT_FOUND') },
+      ),
+    );
+    const { user } = renderApp('/pickup-requests');
+    await queueTable();
+
+    await user.click(await screen.findByRole('button', { name: /^Open ACC-PR-7KQ2MZ, / }));
+
+    const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+    expect(await within(panel).findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Pickup requests' })).toBeVisible();
+  });
+
+  // Break caught (the review of 5edada2): the panel's header drawing the state of the list's row, which is older than the panel's own read, so that a request that moved on since the
+  // list was read shows one state in the header and another in the body.
+  it('draws the state in the panel’s header from the panel’s own read, and none until that has answered', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const held = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    api = installFakeApi(
+      staffApi(
+        sessionWith(READER, {
+          authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+        }),
+        { [LIST]: () => page([pending]), [RECORD]: () => held },
+      ),
+    );
+    const { user } = renderApp('/pickup-requests');
+    await queueTable();
+    await user.click(await screen.findByRole('button', { name: /^Open ACC-PR-7KQ2MZ, / }));
+    const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+    // The header is the heading's parent: it holds the code, the state and the way to the full page.
+    const header = within(panel).getByRole('heading', {
+      level: 2,
+      name: 'ACC-PR-7KQ2MZ',
+    }).parentElement;
+    expect(header).not.toBeNull();
+
+    // The row says the request waits for confirmation; the header says nothing of its state until the panel's own read has answered.
+    expect(header).not.toHaveTextContent(/Waiting for confirmation|Confirmed/);
+
+    answer(json(200, { ...pending, state: 'CONFIRMED' }, etag('v9')));
+
+    await waitFor(() => {
+      expect(header).toHaveTextContent('Confirmed');
+    });
+    expect(within(panel).queryByText('Waiting for confirmation')).toBeNull();
+  });
+
+  describe('confirming', () => {
+    it('offers the act on the row of a request that waits, and not on one that is confirmed already', async () => {
+      openConfirmer();
+
+      expect(
+        await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }),
+      ).toBeInTheDocument();
+      await queueTable();
+      expect(screen.queryByRole('button', { name: 'Confirm ACC-PR-9WXH4T' })).toBeNull();
+    });
+
+    it('offers it to a session that holds the key and to no other', async () => {
+      open();
+      await queueTable();
+
+      expect(screen.queryByRole('button', { name: /^Confirm ACC-PR/ })).toBeNull();
+    });
+
+    it('does not offer the act on a single package whose exception is not approved', async () => {
+      api = installFakeApi(
+        staffApi(
+          sessionWith(CONFIRMER, {
+            authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+          }),
+          { [LIST]: () => page([pickupRequestFixture({ declared_package_count: 1 })]) },
+        ),
+      );
+      renderApp('/pickup-requests');
+      await queueTable();
+
+      expect(screen.queryByRole('button', { name: /^Confirm ACC-PR/ })).toBeNull();
+    });
+
+    // Break caught (the review of 5edada2): the queue's Confirm that read the request again just before it confirmed, so that a request changed in the meantime (its date, its hub, its
+    // packages) was confirmed at a version the officer never saw. The row's Confirm opens the panel; the panel confirms with the version of the read it shows.
+    it('opens the panel on the row’s Confirm with focus on the panel’s, asks first, and confirms with the version of the read the panel shows', async () => {
+      const view = openConfirmer();
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      const confirm = await within(panel).findByRole('button', { name: 'Confirm pickup' });
+      await waitFor(() => {
+        expect(confirm).toHaveFocus();
+      });
+      // Nothing was sent by pressing the row's act: the question comes first.
+      expect(api.requests.some((request) => request.method === 'POST')).toBe(false);
+      await view.user.click(confirm);
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      expect(within(question).getByRole('button', { name: 'Cancel' })).toBeVisible();
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      await waitFor(() => {
+        expect(api.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
+      });
+      const confirmation = api.requests.find((request) => request.method === 'POST');
+      // The panel read the request once, at "v1": that is the version the act carries, and the request was not read again for it.
+      expect(confirmation?.headers.get('If-Match')).toBe('"v1"');
+      expect(
+        api.requests.filter(
+          (request) =>
+            request.url.endsWith(`/pickup-requests/${REQUEST_ID}`) && request.method === 'GET',
+        ),
+      ).toHaveLength(1);
+      expect(await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/)).toBeVisible();
+    });
+
+    // Break caught (the review of 499399c): a panel that kept the answer of a confirmation for ever, so that the request, opened again after it had changed, was drawn as "Confirmed" whatever
+    // the server said. The answer is written into the panel's own read, which goes with the panel, and the request is read again when it is opened.
+    it('shows the answer of the confirmation at once, and reads the request again when it is opened later', async () => {
+      let server = pending;
+      let reads = 0;
+      const view = openConfirmer(
+        () => {
+          server = pickupRequestFixture({ state: 'CONFIRMED' });
+          return json(200, server, etag('v-answer'));
+        },
+        () => {
+          reads += 1;
+          return json(200, server, etag(`v${String(reads)}`));
+        },
+      );
+      const headerOf = (panel: HTMLElement) =>
+        within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' }).parentElement;
+
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      // The panel shows what the server answered, without a second read of the request.
+      await waitFor(() => {
+        expect(headerOf(panel)).toHaveTextContent('Confirmed');
+      });
+      expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+      expect(reads).toBe(1);
+
+      // The request changes at the server (it is cancelled) and is opened again: the panel draws what the server says now, and not the answer of the confirmation. (Focus went back to the
+      // row when the queue was read again, so the panel is closed by its own button.)
+      await view.user.click(within(panel).getByRole('button', { name: 'Close the panel' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'ACC-PR-7KQ2MZ' })).toBeNull();
+      });
+      server = pickupRequestFixture({ state: 'CANCELLED' });
+      await view.user.click(
+        await screen.findByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      );
+      const reopened = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await waitFor(() => {
+        expect(headerOf(reopened)).toHaveTextContent('Cancelled');
+      });
+      expect(headerOf(reopened)).not.toHaveTextContent('Confirmed');
+      expect(reads).toBe(2);
+    });
+
+    // Break caught (the review of f6cf02b): the panel wrote the confirmed request into the shared cache with the version of the read BEFORE the act, and the request's own page draws from that same
+    // entry, so "Open full page" could act on a version that was not the record's. The answer is kept with its own version: the page's read is held here, as it is in the moment after the click,
+    // so that the act is made on what the entry holds, and it carries the version of the confirmation's answer and not the panel's.
+    it('keeps the answer of the confirmation with its own version, so that an act on the request’s own page carries it', async () => {
+      let reads = 0;
+      api = installFakeApi(
+        staffApi(
+          sessionWith([...CONFIRMER, 'pickup.failure.resolve'], {
+            authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+          }),
+          {
+            [LIST]: () => page([pending, late]),
+            // The panel's read is "v1"; the page's own read, a moment later, is held.
+            [RECORD]: () => {
+              reads += 1;
+              return reads === 1
+                ? json(200, pending, etag('v1'))
+                : new Promise<Response>(() => undefined);
+            },
+            [CONFIRM]: () => json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer')),
+            [`POST /pickup-requests/${REQUEST_ID}/escalate`]: () =>
+              json(200, { ...pending, state: 'CONFIRMED' }, etag('v-escalated')),
+          },
+        ),
+      );
+      const view = renderApp('/pickup-requests');
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
+
+      await view.user.click(within(panel).getByRole('link', { name: 'Open full page' }));
+      expect(await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
+      await view.user.click(await screen.findByRole('button', { name: /^More actions for / }));
+      await view.user.click(await screen.findByRole('menuitem', { name: 'Escalate the request' }));
+      const dialog = await screen.findByRole('alertdialog', { name: 'Escalate this request?' });
+      await view.user.type(
+        within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
+        'Refused at the door twice',
+      );
+      await view.user.click(within(dialog).getByRole('button', { name: 'Escalate the request' }));
+
+      await waitFor(() => {
+        expect(
+          api.requests.filter((request) =>
+            request.url.endsWith(`/pickup-requests/${REQUEST_ID}/escalate`),
+          ),
+        ).toHaveLength(1);
+      });
+      const escalation = api.requests.find((request) => request.url.endsWith('/escalate'));
+      expect(escalation?.headers.get('If-Match')).toBe('"v-answer"');
+      expect(escalation?.headers.get('If-Match')).not.toBe('"v1"');
+    });
+
+    // Break caught (run 7, Stage 2.2; the Product Owner's review of 198e5be): the answer of an act written into the cache while a read of the same request was already on its way. That read
+    // was sent before the act and is answered after it, with the request as it was, so it put the version before the act back, and the next act was refused with 412. Here the read is the
+    // panel's "Reload", held open across the confirmation: when it is answered, the panel still shows what the confirmation said, with the version the confirmation gave.
+    it('keeps the answer of the confirmation when a read of the request that was already on its way is answered after it', async () => {
+      let posts = 0;
+      let reads = 0;
+      let answerTheRead: (response: Response) => void = () => undefined;
+      const view = openConfirmer(
+        () => {
+          posts += 1;
+          return posts === 1
+            ? refusal(412, 'STATE_CONFLICT')
+            : json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer'));
+        },
+        () => {
+          reads += 1;
+          return reads === 2
+            ? new Promise<Response>((resolve) => {
+                answerTheRead = resolve;
+              })
+            : json(200, pending, etag(`v${String(reads)}`));
+        },
+      );
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const first = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(first).getByRole('button', { name: 'Confirm the pickup' }));
+      await within(first).findByRole('alert');
+      await view.user.click(within(first).getByRole('button', { name: 'Cancel' }));
+
+      // The officer reads the request again (the read is held), and confirms it while that read is on its way.
+      await view.user.click(await within(panel).findByRole('button', { name: 'Reload' }));
+      await waitFor(() => {
+        expect(reads).toBe(2);
+      });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const second = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(second).getByRole('button', { name: 'Confirm the pickup' }));
+      await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
+      const headerOf = () =>
+        within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' }).parentElement;
+      await waitFor(() => {
+        expect(headerOf()).toHaveTextContent('Confirmed');
+      });
+
+      // The read that was sent before the confirmation is answered now, with the request as it was.
+      await act(async () => {
+        answerTheRead(json(200, pending, etag('v2')));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(headerOf()).toHaveTextContent('Confirmed');
+      expect(headerOf()).not.toHaveTextContent('Waiting for confirmation');
+      expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+    });
+
+    // Break caught (the review of 499399c): a queue that cannot be read again after a confirmation, drawn as a failure that takes away the rows the officer was working on, or as if nothing were wrong:
+    // the rows stay, under a line that says they may be out of date, with the way to read them again.
+    it('keeps the rows, with a line that says so, when the queue cannot be read again after a confirmation', async () => {
+      let reads = 0;
+      const view = openConfirmer(undefined, undefined, () => {
+        reads += 1;
+        return reads === 2 ? refusal(500, 'INTERNAL_ERROR') : page([pending, late]);
+      });
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      const line = (await screen.findByText(/could not be read again/)).parentElement;
+      if (line === null) throw new Error('no stale line');
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).toBeVisible();
+      expect(screen.getByRole('button', { name: /^Open ACC-PR-9WXH4T, / })).toBeVisible();
+      expect(screen.queryByText('The pickup requests could not be loaded.')).toBeNull();
+
+      await view.user.click(within(line).getByRole('button', { name: 'Refresh' }));
+      await waitFor(() => {
+        expect(screen.queryByText(/could not be read again/)).toBeNull();
+      });
+      expect(reads).toBe(3);
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).toBeVisible();
+    });
+
+    // Break caught (the review of 499399c): focus taken back to the row that changed from a person who has moved on while the queue was read again.
+    it('does not take focus from a person who has moved it while the queue was read again after a confirmation', async () => {
+      const reads = byHand();
+      let calls = 0;
+      const view = openConfirmer(undefined, undefined, (request) => {
+        calls += 1;
+        return calls === 1 ? page([pending, late]) : reads.handler(request);
+      });
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      await screen.findByText(/ACC-PR-7KQ2MZ is confirmed/);
+
+      // The queue is being read again; the person moves to the filter.
+      const filter = screen.getByRole('button', { name: 'Filter' });
+      filter.focus();
+      await reads.answer(page([pending, late]));
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+          'aria-busy',
+          'true',
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(filter).toHaveFocus();
+    });
+
+    it('opens the same panel, with focus on the panel’s heading and not on its act, from the button that opens the request', async () => {
+      const view = openConfirmer();
+      await queueTable();
+      await view.user.click(
+        await screen.findByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      );
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      const confirm = await within(panel).findByRole('button', { name: 'Confirm pickup' });
+
+      await waitFor(() => {
+        expect(
+          within(panel).getByRole('heading', { level: 2, name: 'ACC-PR-7KQ2MZ' }),
+        ).toHaveFocus();
+      });
+      expect(confirm).not.toHaveFocus();
+    });
+
+    // Break caught: a refusal drawn nowhere, or in the API's words.
+    it('tells a refusal in the question, in approved words, and keeps the question', async () => {
+      const view = openConfirmer(() => refusal(403, 'PERMISSION_DENIED'));
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      expect(await within(question).findByRole('alert')).toBeVisible();
+      expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
+    });
+
+    // Break caught (the review of 5edada2): a request that changed since the panel read it, told nowhere but in the question the person may dismiss, or confirmed at a newer version.
+    it('tells a request that changed since it was read as changed, in the panel, with the way to read it again, and confirms nothing', async () => {
+      const view = openConfirmer(() => refusal(412, 'STATE_CONFLICT'));
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      expect(await within(question).findByRole('alert')).toBeVisible();
+
+      // The person dismisses the question: the panel says the record changed, and offers to read it again.
+      await view.user.click(within(question).getByRole('button', { name: 'Cancel' }));
+      expect(await within(panel).findByRole('alert')).toHaveTextContent(/changed/i);
+      expect(api.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
+
+      const reads = api.requests.filter(
+        (request) =>
+          request.method === 'GET' && request.url.endsWith(`/pickup-requests/${REQUEST_ID}`),
+      ).length;
+      await view.user.click(within(panel).getByRole('button', { name: 'Reload' }));
+
+      await waitFor(() => {
+        expect(
+          api.requests.filter(
+            (request) =>
+              request.method === 'GET' && request.url.endsWith(`/pickup-requests/${REQUEST_ID}`),
+          ),
+        ).toHaveLength(reads + 1);
+      });
+      await waitFor(() => {
+        expect(within(panel).queryByRole('alert')).toBeNull();
+      });
+      // A new question over the new version, which is the second read's.
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      await view.user.click(
+        within(await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' })).getByRole(
+          'button',
+          { name: 'Confirm the pickup' },
+        ),
+      );
+      await waitFor(() => {
+        expect(api.requests.filter((request) => request.method === 'POST')).toHaveLength(2);
+      });
+      expect(
+        api.requests.filter((request) => request.method === 'POST')[1]?.headers.get('If-Match'),
+      ).toBe('"v2"');
+    });
+
+    // Break caught (the review of 5edada2): rows that turn into loading rows after an act, so that the officer loses their place and the row that changed; a changed row that is not marked;
+    // focus left on nothing; a panel that goes on showing the state it had before the act.
+    it('keeps the rows, marks the row that changed, returns focus to it and shows the state from the answer', async () => {
+      let confirmed = false;
+      let release: (response: Response) => void = () => undefined;
+      const view = openConfirmer(
+        () => {
+          confirmed = true;
+          return json(200, { ...pending, state: 'CONFIRMED' }, etag('v-answer'));
+        },
+        undefined,
+        () => {
+          // The read after the act is held, so that what the queue shows while it is under way can be seen.
+          if (!confirmed) return page([pending, late]);
+          return new Promise<Response>((resolve) => {
+            release = resolve;
+          });
+        },
+      );
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      await view.user.click(
+        within(await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' })).getByRole(
+          'button',
+          { name: 'Confirm the pickup' },
+        ),
+      );
+
+      // While the page is read again after the act, the rows stay and the table says it is busy; the panel already shows the state from the answer.
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Pickup requests' })).toHaveAttribute(
+          'aria-busy',
+          'true',
+        );
+      });
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).toBeVisible();
+      expect(screen.queryByText('Loading pickup requests')).toBeNull();
+      const header = within(panel).getByRole('heading', {
+        level: 2,
+        name: 'ACC-PR-7KQ2MZ',
+      }).parentElement;
+      expect(header).not.toBeNull();
+      expect(header).toHaveTextContent('Confirmed');
+      expect(within(panel).queryByRole('button', { name: 'Confirm pickup' })).toBeNull();
+
+      await act(async () => {
+        release(page([{ ...pending, state: 'CONFIRMED' }, late]));
+        await Promise.resolve();
+      });
+
+      // The row that changed is told in words and focus is on its button.
+      const row = await screen.findByRole('button', {
+        name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd',
+      });
+      await waitFor(() => {
+        expect(row).toHaveFocus();
+      });
+      expect(row).toHaveAccessibleDescription('Updated');
+      expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+        'aria-busy',
+      );
+    });
   });
 });
 
@@ -643,7 +1493,7 @@ describeInterfaceStates('The pickup queue', {
         release = resolve;
       });
       open(() => gate);
-      expect(await screen.findByText('Loading the pickup requests…')).toBeInTheDocument();
+      expect(await screen.findByText('Loading pickup requests')).toBeInTheDocument();
       // A count is never shown while the queue loads (ops-portal.md section 8).
       expect(screen.queryByText(/Showing/)).toBeNull();
       await act(async () => {
@@ -671,17 +1521,13 @@ describeInterfaceStates('The pickup queue', {
         READER,
         '/pickup-requests?date=2026-11-03',
       );
-      expect(
-        await screen.findByText(
-          'That filter was not accepted. Choose a state from the list and a whole date.',
-        ),
-      ).toBeVisible();
+      await alertSaying('That filter was not accepted. Choose a state and a whole date.');
     },
   },
   error: {
     test: async () => {
       open(() => refusal(500, 'INTERNAL'));
-      expect(await screen.findByRole('alert')).toBeVisible();
+      await alertSaying('The pickup requests could not be loaded.');
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     },
   },
@@ -692,14 +1538,29 @@ describeInterfaceStates('The pickup queue', {
         attempts += 1;
         return attempts === 1 ? refusal(503, 'SETTING_MISSING') : page([pending]);
       });
-      await view.user.click(await screen.findByRole('button', { name: /Try again/ }));
+      await view.user.click(await screen.findByRole('button', { name: 'Retry' }));
       expect(await rowOf('ACC-PR-7KQ2MZ')).toBeVisible();
     },
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
   'stale / conflict': {
-    inapplicable:
-      'The queue changes nothing and carries no version; a request that moved is read again from its own page, where every act sends the version it read.',
+    test: async () => {
+      // The queue confirms with the version of the panel's own read: a request that changed since is told as changed, in the panel, with the way to read it again.
+      const view = openConfirmer(() => refusal(412, 'STATE_CONFLICT'));
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+      await view.user.click(
+        await within(question).findByRole('button', { name: 'Reload the record' }),
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+      });
+      expect(await within(panel).findByRole('button', { name: 'Confirm pickup' })).toBeVisible();
+    },
   },
   success: {
     test: async () => {
@@ -710,7 +1571,7 @@ describeInterfaceStates('The pickup queue', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['staff.read']);
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
       expect(screen.queryByRole('table')).toBeNull();
       expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
       expect(listRequests()).toHaveLength(0);

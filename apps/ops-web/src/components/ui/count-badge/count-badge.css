@@ -1,0 +1,108 @@
+/*
+ * CountBadge (design/COMPONENT_PATTERNS.md, count badge; DESIGN_SYSTEM sections 4.4 and 4.6): a pill with a number, drawn by the Badge primitive and
+ * restyled here through the tokens. The stylesheets of components/ui win over Tailwind's utilities (they are in no layer), so these rules need no
+ * `!important`.
+ *
+ * On the page it is the neutral status pair, with the number in the label size and tabular figures so that a column of them lines up. On the
+ * sidebar's Ink it is the shell's own: white on the pressed ground (13.1:1), and on the filled current entry it is white at 18% over the crimson,
+ * which keeps it apart from the entry's own hover ground (the darker crimson). A count of 0 that was read is drawn quiet: the border and
+ * the muted text without the fill, so a queue with nothing in it does not shout, and it is still a figure and still announced.
+ */
+.ui-count-badge {
+  position: relative;
+  min-width: var(--space-6);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number is drawn; the words that say what it counts are for whoever hears the page. */
+.ui-count-badge__meaning {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ui-count-badge[data-quiet='true'] {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+/* ---- On the sidebar ---- */
+
+.ui-count-badge[data-surface='shell'] {
+  border-color: var(--shell-border);
+  background: var(--shell-surface-pressed);
+  color: var(--shell-text);
+}
+
+.ui-count-badge[data-surface='shell'][data-quiet='true'] {
+  background: transparent;
+  color: var(--shell-text-subtle);
+}
+
+/*
+ * The current entry is filled with the brand crimson (redesign step R4): the badge on it is white at 18% over the fill, with the figure white (4.63:1
+ * on the fill, 5.31:1 on its hover fill, in both themes). The brief asked for 22%; at 22% the white figure measures 4.32:1, below the 4.5:1 that text of
+ * this size needs, so the strongest white that passes is used, and the Product Owner accepted that on 6 November 2026. The pairing is held by the test
+ * "the pill of a count on the current entry of the sidebar" in scripts/design-tokens.test.ts. The pill has no border of its own: it is a lighter patch of
+ * the entry's fill with the figure on it, told from the entry by its shape and its figure and never by colour alone.
+ */
+.ui-sidebar__link[aria-current='page'] .ui-count-badge[data-surface='shell'] {
+  border-color: transparent;
+  background: var(--shell-active-badge);
+  color: var(--shell-active-text);
+}
+
+.ui-sidebar__link[aria-current='page'] .ui-count-badge[data-surface='shell'][data-quiet='true'] {
+  background: transparent;
+  border-color: var(--shell-active-text);
+  color: var(--shell-active-text);
+}
+
+/*
+ * The variants (the second half of redesign step R5). `subtle` is the neutral pair above and needs no rule. `strong` is Ink with the figure in white
+ * (the primary action's pair, 15.3:1 in the light theme): the count of the current tab. `on-crimson` is the sidebar's pill on the filled current entry (white at 18% over
+ * the crimson, 4.63:1: see above), for a count on a crimson ground anywhere. A count of 0 that was read stays quiet in each: the border and the text without the fill.
+ * They come after the shell's rules, so a variant that is asked for wins over the surface.
+ */
+.ui-count-badge[data-variant='strong'] {
+  border-color: var(--color-action-primary);
+  background: var(--color-action-primary);
+  color: var(--color-action-primary-text);
+}
+
+.ui-count-badge[data-variant='strong'][data-quiet='true'] {
+  border-color: var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.ui-count-badge[data-variant='on-crimson'] {
+  border-color: transparent;
+  background: var(--shell-active-badge);
+  color: var(--shell-active-text);
+}
+
+.ui-count-badge[data-variant='on-crimson'][data-quiet='true'] {
+  border-color: var(--shell-active-text);
+  background: transparent;
+  color: var(--shell-active-text);
+}
+
+/* Forced colours drop the fills and keep the figure and its border. */
+@media (forced-colors: active) {
+  .ui-count-badge,
+  .ui-count-badge[data-surface='shell'] {
+    border-color: currentColor;
+    background: Canvas;
+    color: CanvasText;
+  }
+}

@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { PageHeader } from '../components/PageHeader';
 import { Alert } from '../components/ui/alert/Alert';
 import { AlertDialog } from '../components/ui/dialog/AlertDialog';
 import { Dialog, DialogActions } from '../components/ui/dialog/Dialog';
-import { SideMenu } from '../components/side-menu/SideMenu';
 import { Button } from '../components/ui/button/Button';
 import { Checkbox } from '../components/ui/checkbox/Checkbox';
 import { CodeInput } from '../components/ui/code-input/CodeInput';
@@ -25,17 +23,16 @@ import { LoadingIndicator } from '../components/ui/loading/LoadingIndicator';
 import { MoneyAmount } from '../components/ui/money/MoneyAmount';
 import { OneTimeSecret } from '../components/ui/one-time-secret/OneTimeSecret';
 import { PasswordInput } from '../components/ui/password-input/PasswordInput';
+import { PageHeader } from '../components/ui/page-header/PageHeader';
 import { Picker, type PickerOption } from '../components/ui/picker/Picker';
+import { CountBadge } from '../components/ui/count-badge/CountBadge';
 import { QrCode } from '../components/ui/qr-code/QrCode';
-import { QueueFilters, QueueTable } from '../components/ui/queue-table/QueueTable';
-import { useQueuePaging } from '../components/ui/queue-table/use-queue-paging';
 import { RadioGroup } from '../components/ui/radio/RadioGroup';
 import { ReorderList, type ReorderItem } from '../components/ui/reorder-list/ReorderList';
 import { ReasonConfirmationDialog } from '../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { Select } from '../components/ui/select/Select';
 import { Skeleton } from '../components/ui/skeleton/Skeleton';
 import { StatusBadge, type StatusMap } from '../components/ui/status-badge/StatusBadge';
-import { Table, type SortDirection, type TableColumn } from '../components/ui/table/Table';
 import { Textarea } from '../components/ui/textarea/Textarea';
 import { Timeline } from '../components/ui/timeline/Timeline';
 import { useApiClient } from '../platform/api/api-client';
@@ -381,6 +378,34 @@ function StatusBadges() {
   );
 }
 
+/** The count of a queue, as the sidebar and My work draw it (task C1): on the page, and on the dark ground of the sidebar. */
+function CountBadges() {
+  return (
+    <Section title="Count badges">
+      <div className="showcase-row">
+        <span>
+          Pickup requests <CountBadge count={5} meaning="waiting for confirmation" />
+        </span>
+        <span>
+          Manifests <CountBadge count={0} meaning="in progress" />
+        </span>
+        <span>
+          Staff <CountBadge count={12480} meaning="waiting for approval" />
+        </span>
+      </div>
+      <div className="showcase-ink">
+        <span className="showcase-ink__entry">
+          Pickup requests{' '}
+          <CountBadge count={5} meaning="waiting for confirmation" surface="shell" />
+        </span>
+        <span className="showcase-ink__entry">
+          Manifests <CountBadge count={0} meaning="in progress" surface="shell" />
+        </span>
+      </div>
+    </Section>
+  );
+}
+
 const FORBIDDEN_KINDS: readonly ForbiddenKind[] = [
   'permission-missing',
   'insufficient-authority',
@@ -394,7 +419,7 @@ function ForbiddenStates() {
     <Section title="Forbidden states">
       <div className="showcase-stack">
         {FORBIDDEN_KINDS.map((kind) => (
-          <ForbiddenState key={kind} kind={kind} permission="demo.permission.read" />
+          <ForbiddenState key={kind} kind={kind} permission="pickup.read" />
         ))}
       </div>
     </Section>
@@ -432,79 +457,6 @@ function EmptyStates() {
           </Alert>
         ) : null}
       </div>
-    </Section>
-  );
-}
-
-interface DemoRow {
-  readonly id: string;
-  readonly name: string;
-  readonly state: DemoState;
-  readonly parcels: number;
-  readonly note: string;
-}
-
-const DEMO_ROWS: readonly DemoRow[] = [
-  {
-    id: '1',
-    name: 'Demo row alpha',
-    state: 'OPEN',
-    parcels: 12,
-    note: 'A synthetic note that is long enough to make the row wider than a narrow screen.',
-  },
-  { id: '2', name: 'Demo row beta', state: 'HELD', parcels: 3, note: 'Synthetic.' },
-  { id: '3', name: 'Demo row gamma', state: 'DONE', parcels: 140, note: 'Synthetic.' },
-  { id: '4', name: 'Demo row delta', state: 'LOST', parcels: 27, note: 'Synthetic.' },
-  { id: '5', name: 'Demo row epsilon', state: 'IDLE', parcels: 0, note: 'Synthetic.' },
-];
-
-function DemoTable() {
-  const [sort, setSort] = useState<{ column: string; direction: SortDirection } | undefined>(
-    undefined,
-  );
-  const rows = useMemo(() => {
-    if (sort === undefined) return DEMO_ROWS;
-    const sign = sort.direction === 'ascending' ? 1 : -1;
-    return DEMO_ROWS.toSorted((a, b) =>
-      sort.column === 'parcels'
-        ? sign * (a.parcels - b.parcels)
-        : sign * a.name.localeCompare(b.name),
-    );
-  }, [sort]);
-  const columns: readonly TableColumn<DemoRow>[] = [
-    { key: 'name', header: 'Name', cell: (row) => row.name, rowHeader: true, sortable: true },
-    {
-      key: 'state',
-      header: 'State',
-      cell: (row) => <StatusBadge status={row.state} map={DEMO_STATES} />,
-    },
-    {
-      key: 'parcels',
-      header: 'Parcels',
-      cell: (row) => String(row.parcels),
-      numeric: true,
-      sortable: true,
-    },
-    { key: 'note', header: 'Note', cell: (row) => row.note },
-  ];
-  return (
-    <Section title="Table">
-      <Table
-        caption="Demo table"
-        columns={columns}
-        rows={rows}
-        rowKey={(row) => row.id}
-        sort={{
-          ...(sort === undefined ? {} : { current: sort }),
-          onChange: (column, direction) => {
-            setSort({ column, direction });
-          },
-        }}
-      />
-      <p>
-        Demo order:{' '}
-        <span>{sort === undefined ? 'as given' : `${sort.column} ${sort.direction}`}</span>
-      </p>
     </Section>
   );
 }
@@ -603,113 +555,6 @@ function PickerDemo() {
       <p>
         The demo page holds: <span>{chosen?.label ?? 'no shop'}</span>
       </p>
-    </Section>
-  );
-}
-
-const DEMO_QUEUE_PAGE = 2;
-
-/** A paged, filtered queue over the demo rows, two to a page, with the pages held by token as a server would (S1.19). */
-function QueueDemo() {
-  const [state, setState] = useState<DemoState | ''>('');
-  // Row selection (S1.25): off until the person asks for it, so that the queue is drawn as it always was; the choice is kept by the row's key,
-  // so it survives a move to another page.
-  const [choosing, setChoosing] = useState(false);
-  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
-  const paging = useQueuePaging(state);
-  const rows = DEMO_ROWS.filter((row) => state === '' || row.state === state);
-  const start = (paging.page - 1) * DEMO_QUEUE_PAGE;
-  const shown = rows.slice(start, start + DEMO_QUEUE_PAGE);
-  const next = start + DEMO_QUEUE_PAGE < rows.length ? `demo-${String(paging.page + 1)}` : null;
-  const columns: readonly TableColumn<DemoRow>[] = [
-    { key: 'name', header: 'Name', cell: (row) => row.name, rowHeader: true },
-    {
-      key: 'state',
-      header: 'State',
-      cell: (row) => <StatusBadge status={row.state} map={DEMO_STATES} />,
-    },
-    { key: 'parcels', header: 'Parcels', cell: (row) => String(row.parcels), numeric: true },
-  ];
-  return (
-    <Section title="Queue table">
-      <QueueFilters label="Filter the demo queue">
-        <Field label="Demo state">
-          <Select
-            value={state}
-            onChange={(event) => {
-              const value = (Object.keys(DEMO_STATES) as DemoState[]).find(
-                (key) => key === event.target.value,
-              );
-              setState(value ?? '');
-            }}
-          >
-            <option value="">Every demo state</option>
-            {(Object.keys(DEMO_STATES) as DemoState[]).map((key) => (
-              <option key={key} value={key}>
-                {DEMO_STATES[key].label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </QueueFilters>
-      <Checkbox
-        label="Choose demo rows"
-        help="Turns on a box for each demo row; the choice is kept as you move between pages."
-        checked={choosing}
-        onChange={(event) => {
-          setChoosing(event.target.checked);
-        }}
-      />
-      {choosing ? (
-        <p role="status">
-          {`${String(chosen.size)} demo ${chosen.size === 1 ? 'row' : 'rows'} chosen.`}
-        </p>
-      ) : null}
-      {shown.length === 0 ? (
-        <EmptyState
-          kind="filtered"
-          heading="Nothing matches the demo state"
-          action={
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setState('');
-              }}
-            >
-              Show every demo row
-            </Button>
-          }
-        >
-          The demo filter hides every demo row.
-        </EmptyState>
-      ) : (
-        <QueueTable
-          caption="Demo queue"
-          columns={columns}
-          rows={shown}
-          rowKey={(row) => row.id}
-          noun={{ one: 'demo row', other: 'demo rows' }}
-          paging={paging}
-          nextPageToken={next}
-          {...(choosing
-            ? {
-                selection: {
-                  selected: chosen,
-                  rowLabel: (row: DemoRow) => `Choose ${row.name}`,
-                  onToggle: (row: DemoRow, ticked: boolean) => {
-                    setChosen((current) => {
-                      const next2 = new Set(current);
-                      if (ticked) next2.add(row.id);
-                      else next2.delete(row.id);
-                      return next2;
-                    });
-                  },
-                },
-              }
-            : {})}
-        />
-      )}
     </Section>
   );
 }
@@ -996,39 +841,6 @@ function DialogDemos() {
   );
 }
 
-/** Made-up entries for the side menu, so that it can be looked at, collapsed and slid in: they go nowhere. */
-const DEMO_MENU_ITEMS = [
-  ['Demo overview', 'overview'],
-  ['Demo staff', 'staff'],
-  ['Demo add a profile', 'add-staff'],
-  ['Demo sessions', 'sessions'],
-] as const;
-
-const DEMO_MENU = DEMO_MENU_ITEMS.map(([label, icon], index) => ({
-  to: index === 0 ? '/__showcase' : `/__showcase/demo-${String(index)}`,
-  label,
-  icon,
-}));
-
-function SideMenuDemo() {
-  return (
-    <Section title="Side menu">
-      <p>
-        The menu of the authenticated shell, with entries that go nowhere. It collapses to its
-        icons, and slides in on a narrow screen.
-      </p>
-      <div className="showcase-side-menu">
-        <SideMenu
-          items={DEMO_MENU}
-          account={{ name: 'Demo Person', detail: 'Demo hub' }}
-          signingOut={false}
-          onSignOut={() => undefined}
-        />
-      </div>
-    </Section>
-  );
-}
-
 /** Every icon of the one family, by the meaning it has in the application, at the three sizes it has. */
 function IconsDemo() {
   return (
@@ -1116,10 +928,9 @@ export function ShowcasePage() {
         <Skeleton lines={4} />
       </Section>
       <StatusBadges />
+      <CountBadges />
       <EmptyStates />
       <ForbiddenStates />
-      <DemoTable />
-      <QueueDemo />
       <RadioDemo />
       <MoneyDemo />
       <PickerDemo />
@@ -1127,7 +938,6 @@ export function ShowcasePage() {
       <ReorderDemo />
       <TimelineDemo />
       <DialogDemos />
-      <SideMenuDemo />
       <IconsDemo />
       <Section title="Surfaces">
         <div className="showcase-surfaces">

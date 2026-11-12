@@ -1092,11 +1092,13 @@ describe('I22: the review corrections of 8 October 2026', () => {
     );
   });
 
-  // Break caught: replacement being widened to match first registration, or the difference being left unstated.
-  it('states that replacement is narrower than first registration and is not widened', () => {
+  // Break caught: replacement held at the Platform Admin's own hub again (the decision of 6 November 2026 made it the grant's: every hub for the
+  // Platform Admin), Senior Ops's limit left unstated, or the in-person rule dropped from the text.
+  it('states that replacement is Senior Ops’s own hub and the Platform Admin’s every hub, in person', () => {
     expect(description('reregisterRiderDevice')).toMatch(
-      /deliberately narrower than first registration's and is not widened.*own hub.*both tiers/,
+      /scope is the grant's.*6 November 2026.*Senior Ops replace at their own hub.*Platform Admin at every hub.*in person/,
     );
+    expect(description('reregisterRiderDevice')).not.toMatch(/deliberately narrower/);
     expect(description('registerRiderDevice')).toMatch(
       /Platform Admin who holds an explicit grant of the key that reaches the rider's hub/,
     );

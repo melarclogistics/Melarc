@@ -2,6 +2,12 @@
  * Dialog and AlertDialog (design/COMPONENT_PATTERNS.md section 20): the platform's <dialog> opened as a modal. The top layer, the inert page
  * behind it and the backdrop belong to the browser; this styles the panel. The scrim is the Ink surface at part of its strength, by
  * opacity, so it is no new colour.
+ *
+ * The defaults that Melarc's overlays carry, and that a test reads in a browser (test/browser/dialogs.spec.ts): the surface is `surface.default` with the
+ * strong border, the corners are `radius.lg` (12px), the panel floats and so takes the one soft shadow (`shadow.floating`, DESIGN_SYSTEM section 8), and it
+ * comes in over `motion.normal` on `motion.easeEnter` (DESIGN_SYSTEM section 9), fading and growing from 95% as the dialog primitive's panel does, with its
+ * scrim fading in beside it. Under reduced motion nothing animates at all (the animation is switched off, not only shortened to nothing). A native dialog
+ * is closed by the platform at once, and so it has no exit: see COMPONENT_PATTERNS section 37.
  */
 .ui-dialog {
   box-sizing: border-box;
@@ -14,15 +20,54 @@
   border-radius: var(--radius-lg);
   background: var(--color-surface-default);
   color: var(--color-text-primary);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-floating);
   font-family: var(--font-family-sans);
   font-size: var(--text-body-md-size);
   line-height: var(--text-body-md-line-height);
 }
 
+/*
+ * Inside a modal dialog the overlays the kit draws (the date field's calendar, an action menu, a popover such as the filter bar's, a tooltip) are drawn into the dialog: the page
+ * behind it is inert and its top layer is above the body, so one drawn there would be unseen and out of reach (task R5.2, M8; before it, only the calendar was). The dialog scrolls,
+ * so one longer than the dialog would be cut off at its edge: while one is open, the dialog lets it overhang.
+ */
+.ui-dialog:has(.ui-date-picker__popover, .ui-popover, .ui-action-menu__content, .ui-tooltip) {
+  overflow: visible;
+}
+
 .ui-dialog::backdrop {
   background: var(--color-surface-inverse);
   opacity: 0.55;
+}
+
+/* The way in: the panel fades and grows from 95% over motion.normal on the enter easing, and the scrim fades in with it (to its own 0.55). */
+.ui-dialog[open] {
+  animation: ui-dialog-enter var(--motion-normal) var(--motion-ease-enter);
+}
+
+.ui-dialog[open]::backdrop {
+  animation: ui-dialog-scrim-enter var(--motion-normal) var(--motion-ease-enter);
+}
+
+@keyframes ui-dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+@keyframes ui-dialog-scrim-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Under reduced motion nothing moves, and nothing is animating at all: the animation is switched off, not only shortened to nothing (the durations are 0 too). */
+@media (prefers-reduced-motion: reduce) {
+  .ui-dialog[open],
+  .ui-dialog[open]::backdrop {
+    animation: none;
+  }
 }
 
 /* Room inside, so that a focus ring on a control at the panel's edge is not cut by the scrolling panel. */

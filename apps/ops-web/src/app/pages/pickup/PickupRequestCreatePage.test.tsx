@@ -22,6 +22,7 @@ import {
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 import { vendorAccountFixture } from '../../../test-support/vendor-fixture';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests/new` (`createPickupRequest`; S1.19; AC-SLICE-001-69 to 72, 81). The intent is chosen first and decides the rest; the
@@ -52,11 +53,19 @@ afterEach(() => {
 const booked = (estimate = estimateFixture()): Response =>
   json(201, pickupRequestFixture({ indicative_estimate: estimate }), etag('v1'));
 
-function open(keys: readonly string[] = CREATOR, handlers: Record<string, Handler> = {}) {
+const ACCRA = { id: PICKUP_HUB_ID, display_name: 'Accra Central' };
+const TEMA_HUB_ID = '7c3e1f2a-9b4d-4c6e-8a5f-1d2e3f4a5b6c';
+const TEMA = { id: TEMA_HUB_ID, display_name: 'Tema' };
+
+function open(
+  keys: readonly string[] = CREATOR,
+  handlers: Record<string, Handler> = {},
+  hubs: readonly { readonly id: string; readonly display_name: string }[] = [ACCRA],
+) {
   api = installFakeApi(
     staffApi(
       sessionWith(keys, {
-        authorized_hubs: [{ id: PICKUP_HUB_ID, display_name: 'Accra Central' }],
+        authorized_hubs: [...hubs],
       }),
       {
         [VENDORS]: () => json(200, { items: [vendorAccountFixture()], next_page_token: null }),
@@ -95,12 +104,10 @@ async function chooseVendor(user: User): Promise<void> {
   await user.click(await screen.findByRole('button', { name: 'Choose: Asante Fabrics Ltd' }));
 }
 
-/** Types a date into the date field, part by part: day, month and year. */
+/** Types a date into the date field: the digits of day, month and year, which the field puts its slashes into. */
 async function typeDate(user: User, digits: string): Promise<void> {
   const group = screen.getByRole('group', { name: /Service date/ });
-  const [day] = within(group).getAllByRole('spinbutton');
-  if (day === undefined) throw new Error('no day');
-  await user.click(day);
+  await user.click(within(group).getByRole('textbox'));
   await user.keyboard(digits);
 }
 
@@ -112,6 +119,26 @@ async function fillCommon(user: User): Promise<void> {
 }
 
 const send = (user: User) => user.click(screen.getByRole('button', { name: 'Book the pickup' }));
+
+/** A first-time walk-in sender and everything else of the booking, but for the hub: the person has still to say which hub, where one is asked. */
+async function fillNewWalkIn(user: User): Promise<void> {
+  await chooseIntent(user, 'A walk-in sender');
+  await user.click(screen.getByRole('radio', { name: 'No: this is their first time' }));
+  await user.type(screen.getByRole('textbox', { name: /Sender’s name/ }), 'Kojo Demo');
+  await user.type(screen.getByRole('textbox', { name: /Sender’s phone/ }), '+233245556666');
+  await user.type(
+    screen.getByRole('textbox', { name: /Address the parcel is collected from/ }),
+    '1 Demo Avenue',
+  );
+  await user.type(screen.getByRole('textbox', { name: /What is being sent today/ }), 'Books');
+  await user.type(
+    screen.getByRole('textbox', { name: /Contact phone for this pickup/ }),
+    '+233245556666',
+  );
+  await fillCommon(user);
+}
+
+const hubField = () => screen.getByRole('combobox', { name: /^Hub/ });
 
 describe('booking: the intent comes first', () => {
   // MSC-DEC-335: there is no universal form; the intent is chosen before anything else is asked, and nothing chooses it for the person.
@@ -188,6 +215,12 @@ describe('booking a vendor’s own packages', () => {
       'href',
       `/pickup-requests/${REQUEST_ID}`,
     );
+    // The page keeps the trail of its parents once the booking is made.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Pickup requests',
+      }),
+    ).toHaveAttribute('href', '/pickup-requests');
   });
 
   it('leaves the location out for the vendor’s default, and sends an override for this pickup only', async () => {
@@ -213,7 +246,7 @@ describe('booking a vendor’s own packages', () => {
     const { user } = open(['pickup.request.create']);
     await chooseIntent(user, 'A vendor’s own packages');
 
-    expect(await screen.findByText(/vendor\.read/)).toBeVisible();
+    expect(await screen.findByText(cannotText('vendor.read'))).toBeVisible();
     expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
@@ -225,7 +258,7 @@ describe('booking a vendor’s own packages', () => {
     expect(
       await screen.findByText('The request uses the vendor’s default saved location.'),
     ).toBeVisible();
-    expect(screen.getByText('vendor.pickup_location.manage')).toBeVisible();
+    expect(screen.getByText(cannotText('vendor.pickup_location.manage'))).toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Saved location' })).toBeNull();
   });
 });
@@ -357,6 +390,9 @@ describe('booking a walk-in sender', () => {
     await screen.findByRole('heading', { name: 'Pickup booked' });
     expect(await bodyOf(creates()[0])).toEqual({
       pickup_intent: 'ADHOC_SENDER',
+      // The one hub the session lists is the hub of the booking (task P1): the server asks the person to name it when its grant reaches more
+      // than one, and a form that always names it works for both.
+      hub_id: PICKUP_HUB_ID,
       new_ad_hoc_sender: {
         name: 'Kojo Demo',
         phone: '+233245556666',
@@ -430,6 +466,125 @@ describe('booking a walk-in sender', () => {
 
     expect(await screen.findByText('Say what is being sent today.')).toBeVisible();
     expect(creates()).toHaveLength(0);
+  });
+});
+
+describe('booking a walk-in sender: the hub', () => {
+  // AC-SLICE-001-82 (task P1): a grant that reaches more than one hub (a Platform Admin's reaches them all) makes the person name the hub the
+  // walk-in is booked into; the server never picks one for them, so the page asks, and sends what was chosen.
+  it('asks a session of several hubs to choose the hub, and books nothing until it has', async () => {
+    const { user } = open(CREATOR, {}, [ACCRA, TEMA]);
+    await fillNewWalkIn(user);
+    const hub = hubField();
+    expect(hub).toHaveValue('');
+    expect(within(hub).getAllByRole('option', { name: /Accra Central|Tema/ })).toHaveLength(2);
+
+    await send(user);
+
+    await waitFor(() => {
+      expect(hub).toHaveFocus();
+    });
+    expect(hub).toHaveAttribute('aria-invalid', 'true');
+    expect(hub).toHaveAccessibleDescription(
+      expect.stringContaining('Choose the hub this booking is made in.'),
+    );
+    expect(creates()).toHaveLength(0);
+  });
+
+  it('sends the hub the person chose, and only that', async () => {
+    const { user } = open(CREATOR, {}, [ACCRA, TEMA]);
+    await fillNewWalkIn(user);
+    await user.selectOptions(hubField(), 'Tema');
+
+    await send(user);
+
+    await screen.findByRole('heading', { name: 'Pickup booked' });
+    expect(creates()).toHaveLength(1);
+    expect(await bodyOf(creates()[0])).toMatchObject({
+      pickup_intent: 'ADHOC_SENDER',
+      hub_id: TEMA_HUB_ID,
+    });
+  });
+
+  // A session that lists one hub books into it without being asked; a form that always names it works whether the grant reaches one hub or
+  // more, so a second hub opened tomorrow does not stop it.
+  it('has the one hub of a session of one chosen already', async () => {
+    const { user } = open();
+    await chooseIntent(user, 'A walk-in sender');
+
+    expect(hubField()).toHaveValue(PICKUP_HUB_ID);
+    expect(screen.getByRole('option', { name: 'Accra Central' })).toBeInTheDocument();
+  });
+
+  it('offers no hub to choose when the session lists none, and sends none', async () => {
+    const { user } = open(CREATOR, {}, []);
+    await fillNewWalkIn(user);
+
+    expect(hubField()).toBeDisabled();
+    expect(hubField()).toHaveAccessibleDescription(
+      expect.stringContaining('Your session lists no hub to choose from.'),
+    );
+    await send(user);
+
+    await screen.findByRole('heading', { name: 'Pickup booked' });
+    expect(await bodyOf(creates()[0])).not.toHaveProperty('hub_id');
+  });
+
+  // A registered vendor's booking is in its organisation's hub, whoever makes it: the page neither asks for a hub nor names one, even one the
+  // person chose a moment ago for a walk-in and then left (the server refuses another hub than the organisation's).
+  it.each([['A vendor’s own packages'], ['A collection for a vendor']])(
+    'asks for no hub for %s, and sends none, whatever hub was chosen before',
+    async (intent) => {
+      const { user } = open(CREATOR, {}, [ACCRA, TEMA]);
+      await chooseIntent(user, 'A walk-in sender');
+      await user.selectOptions(hubField(), 'Tema');
+      await chooseIntent(user, intent);
+      await chooseVendor(user);
+
+      expect(screen.queryByRole('combobox', { name: /^Hub/ })).toBeNull();
+      await fillCommon(user);
+      if (intent === 'A collection for a vendor') {
+        await user.type(screen.getByRole('textbox', { name: /Person or business holding/ }), 'Ama');
+        await user.type(screen.getByRole('textbox', { name: /Their phone/ }), '+233245550000');
+        await user.type(screen.getByRole('textbox', { name: /Their address/ }), '5 Demo Lane');
+        await user.type(
+          screen.getByRole('textbox', { name: /Name the seller holds it under/ }),
+          'Ama',
+        );
+        await user.type(screen.getByRole('textbox', { name: /^Item/ }), 'Shoes');
+        await user.type(screen.getByRole('textbox', { name: /How many items/ }), '1');
+        await user.selectOptions(screen.getByRole('combobox', { name: /Destination/ }), 'DEFAULT');
+        await user.type(
+          screen.getByRole('textbox', { name: /Contact phone for this pickup/ }),
+          '+233245556666',
+        );
+      }
+      await send(user);
+
+      await screen.findByRole('heading', { name: 'Pickup booked' });
+      expect(await bodyOf(creates()[0])).not.toHaveProperty('hub_id');
+    },
+  );
+
+  it('puts the server’s words on the hub field when it refuses the hub', async () => {
+    const { user } = open(CREATOR, {
+      [CREATE]: () =>
+        refusal(400, 'VALIDATION_FAILED', {
+          violations: [{ in: 'body', pointer: '/hub_id', rule: 'enum' }],
+        }),
+    });
+    await fillNewWalkIn(user);
+
+    await send(user);
+
+    const hub = hubField();
+    await waitFor(() => {
+      expect(hub).toHaveFocus();
+    });
+    expect(hub).toHaveAccessibleDescription(
+      expect.stringContaining('Choose the hub this booking is made in.'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 
@@ -647,7 +802,7 @@ describeInterfaceStates('The booking', {
       expect(
         await screen.findByText('Pickups run from Monday to Saturday. Choose another date.'),
       ).toBeVisible();
-      expect(date.getAllByRole('spinbutton')[0]).toHaveAttribute('aria-invalid', 'true');
+      expect(date.getByRole('textbox')).toHaveAttribute('aria-invalid', 'true');
       expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
     },
   },
@@ -710,8 +865,111 @@ describeInterfaceStates('The booking', {
   'permission-restricted': {
     test: async () => {
       open(['pickup.read']);
-      expect(await screen.findByText(/pickup\.request\.create/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.request.create'))).toBeVisible();
       expect(screen.queryByRole('radio')).toBeNull();
     },
   },
+});
+
+// Task R5.2, H1: Enter in the date field must not book with the day the page still holds while the person has taken a part of it out.
+describe('Enter in the date field', () => {
+  // Break caught: the form sent by Enter from the field with the old day (the page keeps the day until the person leaves the field).
+  it('does not book while the day is half cleared, and says why', async () => {
+    const { user } = open();
+    await chooseIntent(user, 'A vendor’s own packages');
+    await chooseVendor(user);
+    await user.selectOptions(
+      await screen.findByRole('combobox', { name: 'Saved location' }),
+      OTHER_LOCATION_ID,
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: /What is being sent today/ }),
+      'Fabric rolls',
+    );
+    await fillCommon(user);
+
+    const group = screen.getByRole('group', { name: /Service date/ });
+    await user.click(within(group).getByRole('textbox'));
+    await user.keyboard('{End}{Backspace}{Enter}');
+
+    expect(creates()).toHaveLength(0);
+    expect(await screen.findByText('Enter the year in full, for example 2026')).toBeVisible();
+
+    // The control: the day typed in full is booked by Enter, as any field in a form sends it.
+    await user.keyboard('6{Enter}');
+    expect(await screen.findByRole('heading', { name: 'Pickup booked' })).toBeVisible();
+    expect(creates()).toHaveLength(1);
+  });
+});
+
+/**
+ * The booking is drawn by the task form template (redesign step R6): sections under headings of their own, a rail of what the server does with the booking, and a guard against
+ * leaving a form that holds what was entered. The booking's own rules are the tests above; these hold the frame.
+ */
+describe('booking: the task form', () => {
+  it('draws the sections of what was chosen under headings of their own, and a rail that says what happens next', async () => {
+    const { user } = open();
+    await chooseIntent(user, 'A walk-in sender');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Book a pickup' })).toBeVisible();
+    for (const heading of ['Where it is booked', 'The sender', 'When and how many', 'Who pays']) {
+      expect(screen.getByRole('heading', { level: 2, name: heading })).toBeVisible();
+    }
+    const rail = screen.getByRole('complementary', { name: 'After you book' });
+    expect(
+      within(rail).getByText('The booking waits for an Ops officer to confirm it.'),
+    ).toBeVisible();
+    // The booking states no price and the rail works none out: the estimate is the server's, once the booking is made.
+    expect(within(rail).getByText(/an estimate, not a price/)).toBeVisible();
+    expect(rail.textContent).not.toMatch(/GH₵|GHS|\d+\.\d\d/);
+  });
+
+  // Break caught (Stage 4.5): a task with no way back, or a link to a queue that would refuse the session. The way back is the breadcrumb of the parents, drawn for a session that can read the
+  // queue, and nothing beside it.
+  it('has the queue above it, as its way back, for a session that can read the queue, and no link for one that cannot', async () => {
+    const reader = open();
+    await screen.findByRole('heading', { level: 1, name: 'Book a pickup' });
+    expect(
+      within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', {
+        name: 'Pickup requests',
+      }),
+    ).toHaveAttribute('href', '/pickup-requests');
+    reader.unmount();
+    api.restore();
+
+    open(CREATOR.filter((key) => key !== 'pickup.read'));
+    await screen.findByRole('heading', { level: 1, name: 'Book a pickup' });
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+    expect(
+      within(screen.getByRole('main')).queryByRole('link', { name: 'Pickup requests' }),
+    ).toBeNull();
+  });
+
+  // Break caught: a form that loses what was typed to a link, without a word.
+  it('asks before the application leaves a form that holds what was entered, and the safe answer is to stay', async () => {
+    const { user, router } = open();
+    await chooseIntent(user, 'A walk-in sender');
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    const question = await screen.findByRole('alertdialog', { name: 'Leave this page?' });
+    expect(within(question).getByRole('button', { name: 'Stay here' })).toHaveFocus();
+    expect(router.state.location.pathname).toBe(PATH);
+    await user.click(within(question).getByRole('button', { name: 'Stay here' }));
+    expect(screen.getByRole('radio', { name: 'A walk-in sender' })).toBeChecked();
+  });
+
+  it('asks nothing of a form that holds nothing entered', async () => {
+    const { router } = open();
+    await screen.findByRole('radio', { name: 'A walk-in sender' });
+
+    await act(async () => {
+      await router.navigate('/');
+    });
+
+    expect(screen.queryByRole('alertdialog', { name: 'Leave this page?' })).toBeNull();
+    expect(router.state.location.pathname).toBe('/');
+  });
 });

@@ -45,7 +45,7 @@ export function EnrolmentCode({ grant, onFinish, onNew }: EnrolmentCodeProps) {
         The code works once{until === undefined ? '' : `, until ${until}`}. It is shown on this
         screen only and is not kept. Do not photograph it or send it to anyone.
       </p>
-      <div className="staff-action__buttons">
+      <div className="rider-buttons">
         <Button type="button" onClick={onFinish}>
           The rider has scanned it
         </Button>
@@ -74,7 +74,7 @@ export function LapsedCode({ onNew }: { readonly onNew: () => void }) {
       <Alert variant="danger" announce>
         <p>The QR code is no longer displayed. Make a new code when the rider is ready.</p>
       </Alert>
-      <div className="staff-action__buttons">
+      <div className="rider-buttons">
         <Button type="button" onClick={onNew}>
           Make a new code
         </Button>
@@ -95,8 +95,8 @@ export function WithdrawnCode() {
     notice.current?.focus();
   }, []);
   return (
-    <div ref={notice} tabIndex={-1} className="staff-notice">
-      <p className="staff-action__text">
+    <div ref={notice} tabIndex={-1} className="rider-notice">
+      <p className="rider-note">
         The earlier code is no longer shown. Taking it off the screen does not end it; making a new
         code does.
       </p>

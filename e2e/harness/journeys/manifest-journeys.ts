@@ -6,7 +6,7 @@ import { arrange } from '../database.ts';
 import { readMessages, readTexts } from '../messages.ts';
 import { signInAs } from './actions.ts';
 import { hubRunsOn, hubToday } from './hub-calendar.ts';
-import { expectHeading, fromPage } from './pages.ts';
+import { clearBrowser, expectHeading, fromPage } from './pages.ts';
 import { readEnrolmentCode, RiderHandset } from './rider-handset.ts';
 import type { JourneyContext } from './staff-journeys.ts';
 import { worldOf, type RiderState } from './world.ts';
@@ -38,13 +38,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** The code of the nth arranged request: the arrangement's own rule (`fixturePickupCode`), which a journey follows to name a request without reading it. */
 const codeOf = (at: number): string => `ACC-PR-HX${'ABCDEFGH'.charAt(at)}${String(at + 2)}MN`;
 
-/** The service date field takes the day first: `DDMMYYYY` typed into the day segment moves on by itself. */
+/** The service date field takes the day first: `DDMMYYYY` typed into the field has its slashes put in for it. */
 async function typeServiceDate(page: Page, day: string): Promise<void> {
   const [year = '', month = '', date = ''] = day.split('-');
-  const first = page
-    .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first();
+  const first = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await first.click();
   await page.keyboard.type(`${date}${month}${year}`);
 }
@@ -79,7 +76,7 @@ async function build(
   day: string,
 ): Promise<{ id: string; code: string }> {
   await page.goto('/manifests/new');
-  await expectHeading(page, 'Build a manifest');
+  await expectHeading(page, 'Build a pickup run');
   try {
     // The pool is drawn as a table where there is room and as cards where there is not (the browser here is 1280 px wide with the menu open,
     // which draws cards), and only the drawing that is shown is in the accessibility tree: the journey asks for the choice, not for a drawing.
@@ -98,8 +95,8 @@ async function build(
   }
   for (const code of codes) await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
   await typeServiceDate(page, day);
-  await page.getByRole('button', { name: 'Create the manifest' }).click();
-  await expect(page.getByText(/The manifest is made\./)).toBeVisible();
+  await page.getByRole('button', { name: 'Create the pickup run' }).click();
+  await expect(page.getByText(/The pickup run is made\./)).toBeVisible();
   const id = new URL(page.url()).pathname.split('/').at(-1) ?? '';
   expect(id).toMatch(UUID);
   const code = (await page.getByRole('heading', { level: 1 }).textContent()) ?? '';
@@ -113,12 +110,14 @@ async function assignAndDispatch(page: Page, riderName: string): Promise<void> {
   const assign = page.getByRole('alertdialog', { name: 'Assign this rider?' });
   await assign.getByRole('button', { name: `Choose: ${riderName}` }).click();
   await assign.getByRole('button', { name: 'Assign the rider' }).click();
-  await expect(page.getByText(/A rider is assigned\. The manifest is still a draft/)).toBeVisible();
+  await expect(
+    page.getByText(/A rider is assigned\. The pickup run is still a draft/),
+  ).toBeVisible();
 
-  await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
-  const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
-  await dispatch.getByRole('button', { name: 'Dispatch the manifest' }).click();
-  await expect(page.getByText(/The manifest is dispatched/)).toBeVisible();
+  await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
+  const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+  await dispatch.getByRole('button', { name: 'Dispatch the pickup run' }).click();
+  await expect(page.getByText(/The pickup run is dispatched/)).toBeVisible();
 }
 
 /** The rider starts the run from the handset: reads the run (its `ETag`), and sends it back. */
@@ -338,7 +337,13 @@ async function walk({ page, context, stack }: JourneyContext): Promise<void> {
   expect([closed.state, closed.assigned_rider_id]).toEqual(['COMPLETED', two.id]);
   expect(closed.completed_at).not.toBeNull();
 
-  // Step 4 (b) and (c), and step 5, on a second run held by the first demonstration rider.
+  // Step 4 (b) and (c), and step 5, on a second run held by the first demonstration rider, in a session of its own (run 7, Stage 3.5: the second session is back). A session's requests are
+  // limited to 120 a minute: a person never comes near it, but this journey goes at the speed of a machine and the pages read the run and the counts again after each act. In one session the whole
+  // journey made 107 requests in 40 seconds (24 reads of the menu's counts, 20 of the run, 11 of a rider, 9 of a handover, 8 of the session), thirteen under the limit, and CI runs it under
+  // HTTPS in three engines on every push to main, where one engine's extra read or one retried 503 would have turned main red for a reason that is the journey's. Two sessions halve the
+  // count of each, and the harness now counts every session's requests by operation and fails a journey that passes 100 in a minute (`request-count.ts`).
+  await clearBrowser(context);
+  await signInAs(page, ama);
   const second = await build(page, [codeOf(2), codeOf(3)], day);
   await assignAndDispatch(page, one.name);
   await startRun(one, tokenOne, second.id);

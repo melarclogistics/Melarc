@@ -1,5 +1,7 @@
 import { ApiError, apiErrorFromResponse } from '@melarc/api-client/browser';
 
+import { parseRetryAfter } from '../problem/rate-limit';
+
 /**
  * What a call to the API is, once it has been read: the data and the three things about the answer that a command
  * needs and `unwrap` does not keep (the status, the version in `ETag`, the request id), or an {@link OperationFailure}.
@@ -112,8 +114,18 @@ export class OperationFailure extends ApiError {
   readonly rule: string | undefined;
   /** The stops a refusal names (`details.stops`), as identifiers; none when it names none. */
   readonly stops: readonly string[];
+  /**
+   * The wait the API asked for in `Retry-After`, in whole seconds, as sent: only when it sent one that can be used (`parseRetryAfter`). It is
+   * read for a `429` and for nothing else, and is kept as the API said it; the wait the page keeps is `rateLimitWaitSeconds` of it.
+   */
+  readonly retryAfterSeconds: number | undefined;
 
-  constructor(base: ApiError, violations: readonly Violation[], conflict: ConflictDetail = {}) {
+  constructor(
+    base: ApiError,
+    violations: readonly Violation[],
+    conflict: ConflictDetail = {},
+    retryAfterSeconds?: number,
+  ) {
     super({
       kind: base.kind,
       ...(base.status === undefined ? {} : { status: base.status }),
@@ -123,6 +135,7 @@ export class OperationFailure extends ApiError {
     this.violations = violations;
     this.rule = conflict.rule;
     this.stops = conflict.stops ?? [];
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -151,6 +164,8 @@ export function answerOf<D>(result: {
       apiErrorFromResponse(response, result.error),
       violationsOf(result.error),
       conflictOf(result.error),
+      // Only a refusal for being too fast gives a wait, and only a usable one is kept.
+      response.status === 429 ? parseRetryAfter(response.headers.get('Retry-After')) : undefined,
     );
   }
   return {

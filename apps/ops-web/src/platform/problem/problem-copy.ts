@@ -3,11 +3,13 @@ import { ApiError } from '@melarc/api-client/browser';
 import type { ForbiddenKind } from '../../components/ui/forbidden-state/ForbiddenState';
 import { OperationFailure, type Violation } from '../api/api-response';
 import { StaleSessionError } from '../session/session-boundary';
+import { refusalText } from './capability-words';
 import { MANIFEST_COPY } from './manifest-copy';
 import { NOTIFICATION_COPY } from './notification-copy';
 import { PICKUP_COPY } from './pickup-copy';
 import { RIDER_COPY } from './rider-copy';
 import { STAFF_COPY } from './staff-copy';
+import { RATE_LIMITED_MESSAGE, rateLimitWaitSeconds } from './rate-limit';
 import { VENDOR_COPY } from './vendor-copy';
 
 /**
@@ -27,6 +29,12 @@ export type ProblemKind =
   | 'conflict'
   /** The request, or something in it, was not accepted: validation, or a reason. */
   | 'invalid'
+  /**
+   * The request was too fast (`RATE_LIMITED`, `429`): the one handling of `rate-limit.ts` beside this file. The words are the calm
+   * `RATE_LIMITED_MESSAGE` unless the table has words for the operation (the screens reached before sign-in), `waitSeconds` is the wait the
+   * page keeps its automatic reads still for (`platform/query/read-hold.ts`), and the command palette shows the words in its status line, not
+   * in an error alert.
+   */
   | 'rate-limited'
   /** The API answered and declined for some other reason. */
   | 'refused'
@@ -53,6 +61,11 @@ export interface Problem {
   readonly rule?: string;
   /** The stops a refusal names (`details.stops`), as identifiers. */
   readonly stops?: readonly string[];
+  /**
+   * For a `rate-limited` problem: the whole seconds the page keeps its automatic reads still, from one to a minute: what the API asked in
+   * `Retry-After`, or a few seconds when it asked for nothing usable (`rateLimitWaitSeconds`).
+   */
+  readonly waitSeconds?: number;
 }
 
 /** Where a call was made, so that the words can be the right ones for it. */
@@ -160,7 +173,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   {
     operation: 'completeStaffMfaSignIn',
     code: 'MFA_ENROLMENT_REQUIRED',
-    text: 'You cannot sign in until your authenticator is set up. Use the set-up link you were sent.',
+    text: 'You cannot sign in until your authenticator is set up. If your set-up link has expired or was already used, ask someone who can reset authenticators to reset yours: a new link will be sent to your work email.',
   },
   {
     operation: 'completeStaffMfaSignIn',
@@ -242,6 +255,8 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   },
   { operation: 'signOut', text: 'Sign-out did not finish, so you are still signed in.' },
   { operation: 'listReasonDefinitions', text: 'The reasons could not be loaded.' },
+  { operation: 'getQueueSummary', text: 'The summary of what is waiting could not be read.' },
+  { operation: 'lookupRecords', text: 'The search could not be completed.' },
   {
     context: 'note',
     code: 'VALIDATION_FAILED',
@@ -271,19 +286,20 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
   'not-found': 'This record could not be found.',
   conflict: 'This record changed after you opened it. Reload it to see its current state.',
   invalid: 'Some of what was entered was not accepted. Check it and try again.',
-  'rate-limited': 'Too many requests. Wait a minute, then try again.',
+  'rate-limited': RATE_LIMITED_MESSAGE,
   refused: 'The request was not accepted.',
   unavailable: 'The server could not be reached or could not finish this. Try again.',
   'session-ended': '',
   stale: '',
 };
 
+// What a refusal says is the table's (`capability-words.ts`), for every kind: the message a problem carries is the sentence the refusal components draw, one wording.
 const FORBIDDEN_MESSAGE: Readonly<Record<ForbiddenKind, string>> = {
-  'permission-missing': 'Your session does not hold the permission this needs.',
-  'insufficient-authority': 'This needs a higher authority than your session has.',
-  'outside-hubs': 'This record belongs to a hub your session does not act in.',
-  'approval-required': 'A different approver is required.',
-  'unavailable-here': 'This is not available here.',
+  'permission-missing': refusalText('permission-missing', undefined),
+  'insufficient-authority': refusalText('insufficient-authority', undefined),
+  'outside-hubs': refusalText('outside-hubs', undefined),
+  'approval-required': refusalText('approval-required', undefined),
+  'unavailable-here': refusalText('unavailable-here', undefined),
 };
 
 /** The refusals of authority, by the code that names them (errors-and-enums.md section 4). */
@@ -407,5 +423,12 @@ export function problemOf(error: unknown, place: ProblemPlace = {}): Problem {
       : {}),
     ...(error instanceof OperationFailure && error.rule !== undefined ? { rule: error.rule } : {}),
     ...(error instanceof OperationFailure && error.stops.length > 0 ? { stops: error.stops } : {}),
+    ...(kind === 'rate-limited'
+      ? {
+          waitSeconds: rateLimitWaitSeconds(
+            error instanceof OperationFailure ? error.retryAfterSeconds : undefined,
+          ),
+        }
+      : {}),
   };
 }

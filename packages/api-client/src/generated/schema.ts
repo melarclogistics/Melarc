@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.90.0-slice-001-review-closeout
- *   SHA-256 80f3283b98682ddf6f111d32ab8a1f98f8243ed678a90bdc4424b0ad83ca6e25 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.100.0
+ *   SHA-256 bbc3558d6135fae151f72dafbfd81eaeb634eaf59a6ff428b0e7c70f879c8e60 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -45,8 +45,13 @@ export interface paths {
         };
         /**
          * List pickup requests
-         * @description Scoped server-side to the actor's vendor ownership and hub (§37.6). Filters are
-         *     authorization-checked, never trusted (§42.4).
+         * @description **Not served to a Rider** (task A3.1 of the audit follow-up, the Product Owner, 7 November 2026): a rider works from the manifest and never the request
+         *     (`surfaces/rider-android.md`, "Not a rider act"; the data-scope registry gives a Rider no pickup request), so this operation names the browser session
+         *     alone and a Rider's bearer credential is `SESSION_INVALID`, as on every staff read.
+         *
+         *     Scoped server-side to the actor's vendor ownership and hub (§37.6). Filters are
+         *     authorization-checked, never trusted (§42.4). A page token is a position in the list and is used with the filters it was given: a client that
+         *     changes `hub_id` starts again at the first page.
          */
         get: operations["listPickupRequests"];
         put?: never;
@@ -92,6 +97,12 @@ export interface paths {
          *
          *     **Every intent resolves `resolved_pickup_location`**, which is what dispatch and the
          *     rider read. All three are creatable by Ops from WhatsApp intake.
+         *
+         *     **The hub of the booking** is the vendor organisation's for `OWN_PACKAGES` and
+         *     `COLLECT_FOR_VENDOR`, and the Ops member's for `ADHOC_SENDER`: their own hub when their grant
+         *     of `pickup.request.create` reaches exactly that one, and **the hub they name in `hub_id` when it
+         *     reaches more than one** (a grant of all hubs, as the Platform Admin's is, or of several hubs of
+         *     its own; `AC-SLICE-001-82`). The server never takes a hub the grant does not reach.
          */
         post: operations["createPickupRequest"];
         delete?: never;
@@ -110,6 +121,11 @@ export interface paths {
             };
             cookie?: never;
         };
+        /**
+         * @description **Not served to a Rider** (task A3.1 of the audit follow-up, the Product Owner, 7 November 2026): the request record behind a manifest stop is for Ops and
+         *     the Vendor, and the rider reads the stop (`surfaces/rider-android.md`, "Not a rider act"), so this operation names the browser session alone and a
+         *     Rider's bearer credential is `SESSION_INVALID`, as on every staff read.
+         */
         get: operations["getPickupRequest"];
         put?: never;
         post?: never;
@@ -374,7 +390,7 @@ export interface paths {
         put?: never;
         /**
          * Escalate a failed request out of the Ops decision context
-         * @description `pickup.failure.resolve` - Ops, Senior Ops, Platform Admin at own hub.
+         * @description `pickup.failure.resolve` - Ops and Senior Ops at own hub, Platform Admin at all hubs.
          *
          *     21.6 gives Ops three resolutions for a failed stop: reschedule, cancel, or **escalate**.
          *     The first two are `cancelPickupRequest` with and without `create_replacement`. This is
@@ -428,7 +444,7 @@ export interface paths {
         put?: never;
         /**
          * Force-extend the pickup attempt cap
-         * @description `pickup.attempt.extend` - **hub Senior Ops and Platform Admin only**, own hub
+         * @description `pickup.attempt.extend` - **hub Senior Ops and Platform Admin only**, Senior Ops at own hub and Platform Admin at all hubs
          *     (21.6, MSC-DEC-116). Not Ops Staff.
          *
          *     Raises the ceiling for **this request alone** past `MELARC_MAX_PICKUP_ATTEMPTS`. It does
@@ -568,7 +584,10 @@ export interface paths {
          *     VendorOperationalEligibility.requires_prepayment.
          *
          *     The approval links the exception to the request, which is what makes it confirmable. An exception
-         *     that is not waiting (none was asked for, or it is already decided) is `STATE_CONFLICT`. The
+         *     that is not waiting (none was asked for, or it is already decided) is `STATE_CONFLICT`; so is the
+         *     exception of a request that is no longer waiting for confirmation (a request that is not `PENDING`,
+         *     a cancelled one for example, whose exception stays `REQUESTED`): such a request is out of the
+         *     approver's queue, in the list and in the count alike (`AC-QSUM-12`). The
          *     maker-checker refusal is last, after the permission, the hub and the state. The fee is recorded
          *     on the exception as due, snapshotted with the setting key and version it was read from, and a fee
          *     that cannot be read never blocks the approval (the exception then shows no fee). Posting the fee
@@ -855,7 +874,7 @@ export interface paths {
         put?: never;
         /**
          * Ops authorises a skip, and the run can close
-         * @description `pickup.stop.skip` - **Ops Staff, Senior Ops or Platform Admin at own hub**.
+         * @description `pickup.stop.skip` - **Ops Staff and Senior Ops at own hub, Platform Admin at all hubs**.
          *     **Not the rider**: no rider bundle holds this key, and a rider who could skip a stop could
          *     choose which customers to serve.
          *
@@ -1295,9 +1314,9 @@ export interface paths {
          *     sees none.
          *
          *     Ordered by creation, oldest first, then by id, so that a page does not move under a
-         *     reader who is paging. **Two filters narrow what the reader is already shown and widen
-         *     nothing** (OB-S1-25, settled for the manifest screens): `state` and `service_date`, each
-         *     optional and each exact, combined as "and". A value that is not one (a state of another
+         *     reader who is paging. **Three filters narrow what the reader is already shown and widen
+         *     nothing** (OB-S1-25, settled for the manifest screens; `hub_id`, task C3): `state`,
+         *     `service_date` and `hub_id`, each optional and each exact, combined as "and". A value that is not one (a state of another
          *     case, an unknown state, a day that does not exist, an empty or repeated parameter) is
          *     `VALIDATION_FAILED` naming the parameter, and not an empty list. A page token is a
          *     position in this order and is used with the filters it was given. A list carries neither
@@ -1649,7 +1668,7 @@ export interface paths {
         put?: never;
         /**
          * Open a custody handover on a started run
-         * @description `fleet.custody.initiate` - Ops, Senior Ops, Platform Admin at own hub.
+         * @description `fleet.custody.initiate` - Ops and Senior Ops at own hub, Platform Admin at all hubs.
          *
          *     **Ops-held because the rider who needs it cannot use it.** The scenario is a rider stranded
          *     mid-run with collected parcels aboard: broken down, injured, or holding a destroyed handset.
@@ -1770,7 +1789,7 @@ export interface paths {
         /**
          * List the custody handovers this actor is a party to
          * @description `fleet.custody.read` - **a rider sees the handovers they are a party to**, as originating or
-         *     as named receiver; Ops, Senior Ops and Platform Admin see their own hub's.
+         *     as named receiver; Ops and Senior Ops see their own hub's, Platform Admin every hub's.
          *
          *     **Scoped server-side, never by filter** (37.6, 42.4). A rider does not pass their own id and
          *     cannot pass another's: the scope is `from_rider_id` or `to_rider_id` equal to the acting
@@ -2360,6 +2379,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ops/queue-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How much work is waiting in each queue the caller may read
+         * @description Task C1 (Product Owner, 5 November 2026; master specification section 17.4): one read that returns, for the calling session, a
+         *     count for each queue it may read, so that the navigation, the landing (*My work*) and the Decisions inbox can say how much is waiting
+         *     without reading a page of each queue. Each measure is defined in the reporting data dictionary (section 5.5), which also holds the
+         *     assessment that lets the existing keys serve it (the surface's P-1).
+         *
+         *     **No permission admits the call; each key admits its entries.** The operation is `self` (`x-permission: self`): any signed-in Ops
+         *     Portal staff session may ask. **An entry exists only for a queue the session may read, and a queue it may not read is absent, never
+         *     `0`.** A queue is the session's when it holds **the key of that queue's own list** and, for an approver's queue, **the decision key**
+         *     as well; the grant of the list's key is the one that scopes the count. No key is added.
+         *
+         *     **A count is what its list returns.** It is the number of records that the queue's own list operation returns for the same session
+         *     and the same filter, taken in the context that list's key gives (the grant's scope: the hubs of the grant, or every hub where the grant
+         *     is of all; row-level security does the rest). It never reaches a record the same grant's list would not, never widens to another key's
+         *     scope, and is exact: not capped, not estimated. **The queues, with the filter each is counted by** (a closed list, `QueueId`):
+         *
+         *     | `queue` | Records | The list and its filter | Keys | `oldest_at` is the least of |
+         *     |---|---|---|---|---|
+         *     | `PICKUP_AWAITING_CONFIRMATION` | pickup requests waiting for confirmation | `listPickupRequests` with `state=PENDING` | `pickup.read` | `created_at` of the request |
+         *     | `PICKUP_CUTOFF_REVIEW` | late bookings waiting for the cut-off decision | `listPickupRequests` with `state=CONFIRMED` and `cutoff_exception_state=PENDING_OPS_REVIEW` | `pickup.read` | `confirmed_at` of the request |
+         *     | `PICKUP_EXCEPTION_APPROVAL` | one-package exceptions waiting for approval | `listPickupRequests` with `one_package_exception_state=REQUESTED` (only a pending request is in it) | `pickup.read` and `pickup.exception.approve` | `requested_at` of that exception |
+         *     | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
+         *     | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
+         *     | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+         *
+         *     **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
+         *     breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
+         *     the read succeeded and no record matched. The entries are in the order of the table; the client orders them as it needs.
+         *
+         *     **It is a read and only a read.** It writes no audit event (it returns no record and no page of records, so the
+         *     `auth.hub_boundary.crossed` of a list is not written), changes nothing, and is `background` activity: it never extends the idle lifetime
+         *     of a session. One request, one answer: each count is one query, and the counts of one key are one snapshot. **Each count is bounded
+         *     at 3 seconds** (`AC-QSUM-13`, Product Owner, 6 November 2026): a count that cannot finish in that time ends the whole read as the
+         *     platform's failed read (`503`, no code), and the client shows its failure with a way to try again; a queue that is missing from a
+         *     failed read is never told as `0`. The answer is `Cache-Control: no-store`.
+         *
+         *     **`hub_id`** (optional; task C3, Product Owner, 6 November 2026) counts one hub's work: every count is the number of records that
+         *     the queue's own list returns for the same session and the same `hub_id`, in the context that list's key gives. It never widens: for a
+         *     hub outside the grant of a queue's list key, or that names no hub, every queue the session may read is present with `count` `0` and no
+         *     `oldest_at`, never absent and never an error, and a queue the session may not read stays absent whatever the hub. A value that is not
+         *     a UUID, or that is repeated, is `VALIDATION_FAILED` naming `hub_id`. The staff approver's queue counts profiles by their primary hub
+         *     (as `listStaffIdentities` does with `hub_id`), so a profile with no primary hub is in the count with no `hub_id` for a session whose `staff.read`
+         *     grant is of every hub, and in the count of no hub: the counts of the hubs are not added up to the count of all hubs, by the server or by a client. The answer has the same shape,
+         *     names no hub, and still writes no audit event (`features/operations/hub-filters.md`).
+         */
+        get: operations["getQueueSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Find a record by its code, a name or a phone number typed in full
+         * @description Task C2 (Product Owner, 5 November 2026; master specification section 17.4): the read behind the search field and the command
+         *     palette of the Ops Portal. The feature, with its acceptance criteria (`AC-LOOKUP-01` to `AC-LOOKUP-17`), is
+         *     features/operations/global-lookup.md; the scope is data-scope-registry.md section 7.3.
+         *
+         *     **It is a POST that changes nothing** (Product Owner, 6 November 2026): the text is the field `q` of the body and never part of the
+         *     address, because a phone number typed in full must not travel in a URL, which proxies and monitoring tools may keep. It is protected as
+         *     every staff POST is (the session cookie, the synchronizer token and the `Origin` of the Ops Portal: `CSRF_VALIDATION_FAILED`
+         *     otherwise), its answer is `Cache-Control: no-store`, and it takes no `Idempotency-Key` (no convention asks one of a read). There is no
+         *     `GET` of this path.
+         *
+         *     **The query `q` is one string of 2 to 64 characters as sent**; anything else (no body, no `q`, a `q` that is not a string, any other
+         *     field) is `VALIDATION_FAILED`, naming the field `q` (or the body itself, where there is none or it carries a field it should not: the
+         *     platform spells the body with an empty pointer). The server then
+         *     trims it and makes each run of white space inside it one space, and refuses a text of fewer than 2 characters after that, and a
+         *     text with a NUL character, the same way. **The server decides what it is, in this order, and asks only the question that kind of
+         *     query means.** (1) Text of the shape of an operational code (`HUB-TT-XXXXXX`, case does not matter) returns **at most the record that
+         *     carries it**: a pickup request (`PR`) or a pickup run (`MF`); a code that matches nothing the session may open is an empty answer,
+         *     never `403` or `404`. (2) A phone number **typed in full**, normalised as `findAdHocSender` normalises one, returns the pickup
+         *     requests whose own contact phone is that number and the riders whose phone it is; a partial or invalid number matches no phone and
+         *     is read as a name; the phone of an ad-hoc sender is never searched. (3) Anything else is a **case-insensitive word-prefix search**
+         *     of the names (a pickup request's sender, a vendor's legal and trading names, a rider's name, a staff member's name). **A pickup
+         *     request is searched by name only while it is current work** (Product Owner, 6 November 2026): its `state` is not terminal
+         *     (`DECLINED` and `CANCELLED` are) or its `scheduled_service_date` is on or after the hub's today minus 30 days; a code and a phone
+         *     number typed in full find a request whatever its age. (4) A vendor's
+         *     account identifier (eight characters) is matched exactly in addition to the name.
+         *
+         *     **No permission admits the call; each kind is admitted by the key of its own read**: `pickup.read` (requests and runs),
+         *     `vendor.read`, `dispatch.read` and `staff.read`. **A result is a record the same session could open through that kind's own read**:
+         *     each kind is searched in the transaction and under the grant of its own key, so the hubs of that grant, and row-level security, scope
+         *     it; a record of another hub is never returned. A kind whose key the session does not hold is absent from the answer, which tells
+         *     nothing about the records. No key is added.
+         *
+         *     **The answer is at most 8 results per kind and 20 in all**, in the fixed order of `RecordLookupKind` (a pickup request newest first,
+         *     the others by name then id). A result is `kind`, `id` (the account's for a vendor), `code` where the record has one, `title`, and
+         *     the facts that say where the record stands: its own `state`, its `hub` and, for a pickup request and a pickup run, its `service_date`,
+         *     and, **for a pickup request only, its `sender_name`** exactly as the request's own read shows it (Product Owner, 6 November 2026),
+         *     **and nothing else**. **A result names no page and carries no wording** (Product Owner, 6 November 2026): the Ops Portal maps the
+         *     `kind` and the `id` to its own route and writes its own line from the facts. **A phone number appears in a result only when the person
+         *     searched by it, and then only masked**, as `phone_hint` (`+233******567`: the country part and the last three digits).
+         *
+         *     **It is a read and only a read.** It writes one `auth.hub_boundary.crossed` for each hub other than the actor's own that the
+         *     returned results represent, as the lists do (audit.md section 5.4), and nothing else. **The events are written together, in one
+         *     transaction, after every search has succeeded** (Product Owner, 7 November 2026, A4 of the audit): a lookup that fails writes none. It
+         *     is `qualifying` activity: a typed search is the person's own act. The answer is `Cache-Control: no-store`.
+         *
+         *     **It is counted and it is bounded** (Product Owner, 7 November 2026, A5 of the audit). Every request is counted in the session's one
+         *     bucket of authenticated API requests (`rate_limit_authenticated_api`, settings.md section 7.7; the limit is that setting's), as it
+         *     counts every operation the session may ask, by the authentication step before the CSRF check; the request past the limit is
+         *     `RATE_LIMITED` (429), reads nothing and writes no event. **Every statement of the lookup is bounded at 3 seconds**
+         *     (`AC-LOOKUP-15`, as a count of `getQueueSummary` is by `AC-QSUM-13`): a search that cannot finish in that time ends the whole read
+         *     as the platform's failed read (`503`, no code, nothing of the answer), and a client shows its failure with a way to try again.
+         *
+         *     **A session has one lookup in flight, and the whole lookup has one budget** (Product Owner, 7 November 2026, A3.2 of the audit follow-up). A
+         *     second lookup sent while the session's first is still running is refused at once with `RATE_LIMITED` (429) and `Retry-After: 1`: it reads
+         *     nothing and writes no event, and a text that is not valid is still `VALIDATION_FAILED` first (`AC-LOOKUP-16`). The refusal is judged in the
+         *     memory of the API process, so with several instances a session may have one in flight on each. **All of the lookup, every key's
+         *     transaction and the step that writes the events, shares one budget of 3 seconds** (`AC-LOOKUP-17`), and the 3 seconds a statement may take
+         *     are what is left of it when that is less: the lookup is never 3 seconds for each key, and one that cannot finish in its budget is the
+         *     platform's failed read (`503`, no code).
+         */
+        post: operations["lookupRecords"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/staff/{id}/trusted-browsers": {
         parameters: {
             query?: never;
@@ -2774,7 +2933,7 @@ export interface paths {
         put?: never;
         /**
          * Revoke a rider's device binding on report of loss or theft
-         * @description Held by `staff.device.revoke` - **Ops Staff, Senior Ops and Platform Admin at own hub**.
+         * @description Held by `staff.device.revoke` - **Ops Staff and Senior Ops at own hub, Platform Admin at all hubs**.
          *
          *
          *     An existing rider outside the actor's hubs is `HUB_SCOPE_VIOLATION`; one that does not exist is `NOT_FOUND`. Revocation stays unverified and unconditional inside the actor's hubs.
@@ -2912,7 +3071,7 @@ export interface paths {
         put?: never;
         /**
          * Ops escalates an order as contact-exhausted, by judgement and never by count
-         * @description `dispatch.recipient_confirmation.work` - **Ops, Senior Ops or Platform Admin at own hub**.
+         * @description `dispatch.recipient_confirmation.work` - **Ops and Senior Ops at own hub, Platform Admin at all hubs**.
          *     The key is also held by the assigned Rider on assigned parcels, and **a Rider
          *     is refused here with INSUFFICIENT_AUTHORITY**: escalation is an Ops judgement,
          *     and a rider may make the call, record it, and ask for help - never decide that the avenues
@@ -3019,7 +3178,7 @@ export interface paths {
         get?: never;
         /**
          * Set the manual stop sequence
-         * @description Permission `dispatch.run.sequence` - **A S P, own hub, confirmed at MSC-DEC-232** (OQ-075
+         * @description Permission `dispatch.run.sequence` - **A S at own hub and P at all hubs (permissions.md), confirmed at MSC-DEC-232** (OQ-075
          *     closed 21 August 2026).
          *
          *     Manual ordering only. Version 1 has **no route optimisation** and none may be inferred.
@@ -3051,7 +3210,7 @@ export interface paths {
         put?: never;
         /**
          * Assign a rider to the run
-         * @description Permission `dispatch.run.assign` - **A S P, own hub, confirmed at MSC-DEC-232** (OQ-075
+         * @description Permission `dispatch.run.assign` - **A S at own hub and P at all hubs (permissions.md), confirmed at MSC-DEC-232** (OQ-075
          *     closed 21 August 2026).
          *
          *     A distinct permissioned act, not a step inside dispatch (MSC-DEC-222 applied
@@ -3211,7 +3370,7 @@ export interface paths {
         put?: never;
         /**
          * Create a staff profile, awaiting approval
-         * @description `staff.identity.create` - Ops Staff, Senior Ops, Platform Admin at own hub (30.8, MSC-DEC-247).
+         * @description `staff.identity.create` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs (30.8, MSC-DEC-247).
          *
          *     A `primary_hub_id` outside the actor's hubs is `HUB_SCOPE_VIOLATION`; the maker cannot place a profile in a hub they do not act in.
          *
@@ -3898,7 +4057,7 @@ export interface paths {
         put?: never;
         /**
          * Ops records a covered-mode handoff's outcome
-         * @description `delivery.handoff.outcome` - Ops Staff, Senior Ops and Platform Admin at own hub
+         * @description `delivery.handoff.outcome` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs
          *     (MSC-DEC-417, closing OQ-135). **Covered mode only**: a Station Drop is complete at handoff,
          *     and TERMINAL_FOR_STATION_DROP refuses it.
          *
@@ -3937,7 +4096,7 @@ export interface paths {
         put?: never;
         /**
          * Ops clears a paid outbound order for dispatch, first time or after a failed or returned handoff
-         * @description `dispatch.outbound.clear` - Ops Staff, Senior Ops and Platform Admin at own hub.
+         * @description `dispatch.outbound.clear` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs.
          *     **The operation state-machines.md 9's third-party `-> READY_FOR_DISPATCH` row
          *     never had**: it names Ops, and nothing performed it, so no outbound order could be
          *     dispatched at all.
@@ -4058,7 +4217,7 @@ export interface paths {
         put?: never;
         /**
          * Hub Senior Ops approves an informal driver or agent
-         * @description `courier.agent.approve` - **hub Senior Ops and Platform Admin, own hub** (MSC-DEC-417,
+         * @description `courier.agent.approve` - **hub Senior Ops at own hub and Platform Admin at all hubs** (MSC-DEC-417,
          *     closing OQ-133's second half). In advance, or **on the spot while the rider waits** - agents
          *     *"cannot all be pre-registered"*.
          *
@@ -4221,7 +4380,7 @@ export interface paths {
         put?: never;
         /**
          * Hub records its own confirmed total
-         * @description `payment.cash.confirm` - Ops, Senior Ops or Platform Admin at own hub. **Held by no rider
+         * @description `payment.cash.confirm` - Ops and Senior Ops at own hub, Platform Admin at all hubs. **Held by no rider
          *     bundle**: 26.3 names rider-declared and hub-confirmed as two figures, and one actor supplying
          *     both is not a comparison.
          *
@@ -4259,7 +4418,7 @@ export interface paths {
         put?: never;
         /**
          * Senior Ops dispositions a cash shortage or overage
-         * @description `payment.variance.resolve` - **Senior Ops or Platform Admin**, own hub. Ops Staff cannot:
+         * @description `payment.variance.resolve` - **Senior Ops (own hub) or Platform Admin (all hubs)**. Ops Staff cannot:
          *     this is the act that releases a financial hold on the run.
          *
          *     **A shortage and an overage are one state, deliberately.** 26.5 requires both to be
@@ -4494,7 +4653,7 @@ export interface paths {
         };
         /**
          * List riders, so an officer can find the rider a device operation targets
-         * @description `dispatch.read` at the actor's hub scope (Ops Staff, Senior Ops and Platform Admin). The roster
+         * @description `dispatch.read` at the actor's hub scope (Ops Staff and Senior Ops at their own hub, Platform Admin at all hubs). The roster
          *     returns **identity and readiness only** (RiderSummary): name, phone, status, hub, whether a PIN is set
          *     and whether an `ACTIVE` device exists. It is the read `registerRiderDevice`, `reregisterRiderDevice` and
          *     `revokeRiderDevice` need to find their target, and it is the same rider list dispatch already
@@ -5098,7 +5257,7 @@ export interface paths {
         put?: never;
         /**
          * Re-issue an expired or lost initial VENDOR_CREDENTIAL_SETUP grant
-         * @description `vendor.organization.approve` - Senior Ops or Platform Admin, own hub (35.12.2). **MED-10
+         * @description `vendor.organization.approve` - Senior Ops at own hub or Platform Admin at all hubs (35.12.2). **MED-10
          *     audit remediation.**
          *
          *     An existing record outside the actor's hubs is `HUB_SCOPE_VIOLATION`; one that does not exist is `NOT_FOUND`.
@@ -5150,9 +5309,13 @@ export interface paths {
         put?: never;
         /**
          * Senior Ops initiates in-person replacement device binding
-         * @description `staff.device.reregister` - **Senior Ops** (or a Platform Admin) at the rider's hub, **in person**. **Its scope is
-         *     deliberately narrower than first registration's and is not widened** (Product decision, 8 October 2026): replacement stays at the
-         *     actor's **own hub** for both tiers, whereas `registerRiderDevice` may reach other hubs for a Platform Admin whose grant says so.
+         * @description `staff.device.reregister` - **Senior Ops** at the rider's hub, or a **Platform Admin** at any hub, **in person**. **The scope is the
+         *     grant's** (Product decision, 6 November 2026, replacing that of 8 October 2026 for the Platform Admin): Senior Ops replace at their own
+         *     hub and a Platform Admin at every hub, as `registerRiderDevice` does. The rider still attends in person and the identity is still
+         *     verified (`MSC-DEC-235`), and the reason, the verification note and the audit stay mandatory. **Attendance in person and the check of the
+         *     identity are the administrator's duty and an operating rule that the system cannot see** (the note is free text). What it enforces is the held key
+         *     and its scope, the mandatory reason and note, and an audit event that names the administrator, the rider and the rider's hub, so that a replacement
+         *     outside the administrator's own hub is a recorded act.
          *
          *     Split out of performOpsRecovery in R1, and connected to the cryptographic lifecycle it was
          *     never wired to: it issues a `RIDER_DEVICE_REREGISTRATION` grant which the NEW handset
@@ -5893,7 +6056,7 @@ export interface paths {
         put?: never;
         /**
          * Send the return OTP to the recorded vendor/sender contact
-         * @description `returns.close` - **R** on their own assigned return, A S P on own hub. Mirrors
+         * @description `returns.close` - **R** on their own assigned return, A S at own hub and P at all hubs. Mirrors
          *     `requestDeliveryOtp` exactly, redirected to a different contact (28.4).
          *
          *     **The request body is empty, and that is the guard**, the identical reasoning
@@ -5933,7 +6096,7 @@ export interface paths {
         put?: never;
         /**
          * Close physical return custody against a valid OTP
-         * @description `returns.close` - **R** on their own assigned return, A S P on own hub. The signed
+         * @description `returns.close` - **R** on their own assigned return, A S at own hub and P at all hubs. The signed
          *     fulfilment machine names the actor as "Rider or Ops" (state-machines.md Sec9,
          *     `RETURN_TO_VENDOR_IN_PROGRESS -> RETURNED_TO_VENDOR`) - a rider executes a physical
          *     drop-off; Ops closes a return the vendor collects in person at the hub counter. **Both
@@ -6176,7 +6339,7 @@ export interface paths {
         };
         /**
          * List road expenses
-         * @description `payment.run_position.read` - **R only on their own run**, A S P on own hub.
+         * @description `payment.run_position.read` - **R only on their own run**, A S at own hub and P at all hubs.
          *     A rider sees their own; Ops sees their hub's. The scope is the registry's,
          *     not this operation's.
          *
@@ -6257,7 +6420,7 @@ export interface paths {
         };
         /**
          * The calculated cash position for a run
-         * @description `payment.run_position.read` - **R only on their own run**, A S P on own hub.
+         * @description `payment.run_position.read` - **R only on their own run**, A S at own hub and P at all hubs.
          *     A rider reads their OWN run: expected collections, confirmed digital,
          *     gross cash, applied collection-cash expenses, expected handover, the hub's counted
          *     result and their own variance. **It reaches no other rider's position, no hub-wide
@@ -6409,7 +6572,7 @@ export interface paths {
         put?: never;
         /**
          * Create a vendor record and its shared portal account, awaiting approval
-         * @description `vendor.organization.create` - Ops Staff, Senior Ops, Platform Admin at own hub
+         * @description `vendor.organization.create` - Ops Staff and Senior Ops at own hub, Platform Admin at all hubs
          *     (18.2, 29.2.1, 35.12.1).
          *
          *     **A business cannot self-register.** There is no anonymous creation path and every
@@ -6452,7 +6615,7 @@ export interface paths {
         put?: never;
         /**
          * Approve or reject operational activation
-         * @description `vendor.organization.approve` - hub Senior Ops or Platform Admin, **own hub** (18.2,
+         * @description `vendor.organization.approve` - hub Senior Ops at **own hub** or Platform Admin at **all hubs** (18.2,
          *     29.2.2). **One key carries both halves**, because 18.2 words the act as "approves or
          *     rejects" - the same shape `approveStaffIdentity` uses, and the reason no
          *     `vendor.organization.reject` key exists.
@@ -7157,7 +7320,7 @@ export interface paths {
         };
         /**
          * One parcel custody return, with its lines
-         * @description `fleet.custody.read` - **Hub Ops, Senior Ops and Platform Admin at their own hub**, and **the
+         * @description `fleet.custody.read` - **Hub Ops and Senior Ops at their own hub and Platform Admin at all hubs**, and **the
          *     rider on their own return**. Scoped server-side (37.6), never by a filter the caller
          *     supplies (42.4).
          *
@@ -8265,6 +8428,11 @@ export interface components {
              * @enum {string}
              */
             pickup_intent: "OWN_PACKAGES" | "COLLECT_FOR_VENDOR" | "ADHOC_SENDER";
+            /**
+             * Format: uuid
+             * @description The hub a walk-in booking (`ADHOC_SENDER`) is made in. Optional while the session's grant of `pickup.request.create` reaches exactly one hub (the booking is then in that hub), and **required when it reaches more than one**: a grant of all hubs, or of several hubs of its own. A hub the grant does not reach is `HUB_SCOPE_VIOLATION`, judged before the hub is read: an id that names no hub is `HUB_SCOPE_VIOLATION` for a grant of fewer than all hubs, and `VALIDATION_FAILED` for a grant of all hubs. For a registered vendor's booking (`OWN_PACKAGES`, `COLLECT_FOR_VENDOR`) the hub is the vendor organisation's: naming another hub is `VALIDATION_FAILED`, and a vendor session names none that is not its organisation's.
+             */
+            hub_id?: string;
             /** Format: uuid */
             vendor_organization_id?: string;
             /**
@@ -9229,6 +9397,11 @@ export interface components {
             stops?: components["schemas"]["PickupStop"][];
             /** Format: date-time */
             completed_at?: string | null;
+            /**
+             * Format: date-time
+             * @description The moment the run was made (contract 5.100.0). It is the table's own column, set once and never changed, so it is on every read, on every item of a list and on every answer that carries a run. It is not part of the run's `ETag`, which is the one a build that does not state it computes for the same run. The moment a run was cancelled is not stored and is not stated here (OB-S1-79).
+             */
+            created_at: string;
         };
         /**
          * @description The complete sequence, not a delta. Manual ordering only — Version 1 has no route
@@ -9464,6 +9637,116 @@ export interface components {
         };
         TrustedBrowsersRevoked: {
             revoked: number;
+        };
+        /**
+         * @description A queue of the Ops Portal that has a count (reporting data dictionary, section 5.5). **A closed list: a value is never renamed or
+         *     reused**, and a queue that is built later is added here with its own entry in the dictionary. `getQueueSummary` lists, for each,
+         *     the records it counts and the keys that admit it.
+         * @enum {string}
+         */
+        QueueId: "PICKUP_AWAITING_CONFIRMATION" | "PICKUP_CUTOFF_REVIEW" | "PICKUP_EXCEPTION_APPROVAL" | "PICKUP_UNMANIFESTED_POOL" | "PICKUP_RUNS_IN_PROGRESS" | "STAFF_AWAITING_APPROVAL";
+        /** @description One queue's count and the moment its oldest record entered it, and nothing else: no record, code, name, hub, vendor or breakdown. */
+        QueueSummaryEntry: {
+            queue: components["schemas"]["QueueId"];
+            /**
+             * @description How many records the queue holds now, as its own list would return them to this session. Exact. `0` means the read succeeded and
+             *     found none; a queue the session may not read has no entry at all.
+             */
+            count: number;
+            /**
+             * Format: date-time
+             * @description The moment the oldest record entered the queue (the column each queue is counted from is in the description of `getQueueSummary`).
+             *     **Absent when `count` is 0.**
+             */
+            oldest_at?: string;
+        };
+        /** @description The answer of `getQueueSummary`. */
+        QueueSummary: {
+            /**
+             * @description One entry for each queue the session may read, in the order of `QueueId`, and only those. **Empty for a session that may read
+             *     none, which is not the same as every queue being empty.**
+             */
+            queues: components["schemas"]["QueueSummaryEntry"][];
+        };
+        /**
+         * @description The kinds of record a lookup can return, **in the order an answer lists them**: a closed list. A value is never renamed or reused, and a
+         *     kind built later is added here, in the feature and in the registry together.
+         * @enum {string}
+         */
+        RecordLookupKind: "PICKUP_REQUEST" | "PICKUP_MANIFEST" | "VENDOR_ACCOUNT" | "RIDER" | "STAFF_IDENTITY";
+        /**
+         * @description The body of `lookupRecords`. The text is here and never in the address: a phone number typed in full must not travel in a URL
+         *     (Product Owner, 6 November 2026).
+         */
+        RecordLookupRequest: {
+            /**
+             * @description What to find: a code, a name or a phone number typed in full, of 2 to 64 characters as sent. The server trims it and folds each run
+             *     of white space into one space, and refuses a text of fewer than 2 characters after that and a text with a NUL character.
+             */
+            q: string;
+        };
+        /**
+         * @description A pointer to one record found and the facts that say where it stands, and nothing else: no route and no wording (the Ops Portal gives a
+         *     kind and an id its own page and writes its own line), no email, address or credential, and no number in clear (but for what the sender's
+         *     name says, as the request's own read shows it).
+         */
+        RecordLookupResult: {
+            kind: components["schemas"]["RecordLookupKind"];
+            /**
+             * Format: uuid
+             * @description The record's id, which its own read addresses. For a vendor it is the account's.
+             */
+            id: string;
+            /**
+             * @description The operational code of a pickup request or a pickup run, or a vendor account's identifier. **Absent for a rider and a staff member**, who
+             *     have none.
+             */
+            code?: string;
+            /** @description What the record is called, a code or a name. */
+            title: string;
+            /**
+             * @description The record's own state **as the value of its own enumeration, unchanged and not reworded**: the `state` of a pickup request
+             *     (`PickupRequest`) or of a pickup run (`PickupManifest`), the `status` of a vendor account (`VendorAccountSummary`), of a rider
+             *     (`RiderSummary`) or of a staff profile (`StaffIdentity`). Which enumeration a value belongs to follows `kind`. A client words it
+             *     itself, and a value it has no words for is shown as it is. Absent only for a kind that has none (every kind built so far has one).
+             */
+            state?: string;
+            /**
+             * @description The hub the record belongs to, by id and display name, as `authorized_hubs` of the session names a hub: the responsible hub of a
+             *     pickup request, a pickup run and a vendor account, the primary hub of a rider and a staff profile. **Absent for a staff profile
+             *     with no primary hub.** A label for the interface; it grants nothing.
+             */
+            hub?: {
+                /** Format: uuid */
+                id: string;
+                display_name: string;
+            };
+            /**
+             * Format: date
+             * @description The day a pickup request was promised (`scheduled_service_date`) or a pickup run is to be worked (`service_date`). **Absent for
+             *     every other kind.**
+             */
+            service_date?: string;
+            /**
+             * @description **A pickup request only**: the sender's name exactly as `PickupRequest.sender_name` shows it on the request's own read (the registered
+             *     vendor's trading name, its legal name when it has none, or the ad-hoc sender's name), so that a request found by a name or a number
+             *     says whose it is. A label, never an identifier and never an authority. **Absent for every other kind.**
+             */
+            sender_name?: string;
+            /**
+             * @description The phone number the person searched by, masked as the platform masks a destination it shows (`destination_hint`:
+             *     `+233******567`, the country part and the last three digits). **Present only on a record that the number found**, never any other
+             *     number and never in clear.
+             */
+            phone_hint?: string;
+        };
+        /** @description The answer of `lookupRecords`. */
+        RecordLookupPage: {
+            /**
+             * @description At most 8 for each kind and 20 in all, in the order of `RecordLookupKind`. **Empty when nothing matched or the session may search none
+             *     of the kinds**; it does not say which.
+             */
+            items: components["schemas"]["RecordLookupResult"][];
         };
         SessionRevoke: {
             /**
@@ -12402,7 +12685,34 @@ export interface components {
             };
         };
         /**
-         * @description 429 - rate limited. Per credential, tightest on the shared vendor login and
+         * @description `429` `RATE_LIMITED` - **the one response of every operation the authenticated limiter covers**,
+         *     which is every operation that needs a session (Product Owner, 7 November 2026, A2 of the audit;
+         *     `AC-SLICE-000-131`). The request was counted in the session's one bucket of authenticated API
+         *     requests (`rate_limit_authenticated_api`, settings.md 7.7: the limit is that setting's and is not
+         *     restated here) or, for the five operations that cause a text, in the tighter ceiling inside it
+         *     (`provider_initiating_operation_ceiling_per_minute`), and the operation did not run.
+         *
+         *     **`Retry-After` says when to try again**: whole seconds, from 1 to 60, the time until the
+         *     limiter's 60-second window admits this session again, rounded up, never zero. It is sent on every
+         *     such answer. A refused request changes nothing, so asking again early is refused again and does
+         *     not make the wait longer. **Two operations have a window of another bucket, and their `Retry-After` is that bucket's**
+         *     (Product Owner, 7 November 2026, A3.8 of the audit follow-up): `requestAdditionalDeviceGrant`, which is limited per
+         *     authenticated vendor account in `rate_limit_recovery` (settings.md 7.7), and `lookupRecords`, whose second lookup in flight
+         *     for a session is refused with `Retry-After: 1` whatever the bucket says (`AC-LOOKUP-16`). The operations reached before a session exists declare
+         *     `RateLimitedAnonymous` instead, whose answer carries no wait.
+         */
+        RateLimited: {
+            headers: {
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description 429 - rate limited, **before a session exists**: the sign-in, second-step, recovery and rider-challenge
+         *     buckets and the redemption of a grant. Per credential, tightest on the shared vendor login and
          *     the rider device. The figures were set at MSC-DEC-371 (OQ-067 closed 5 September 2026)
          *     onto the six buckets and eight keys MSC-DEC-285 created at settings.md 7.7 (OQ-077
          *     closed); the RESPONSE was declarable before either landed, which is why it was
@@ -12411,8 +12721,12 @@ export interface components {
          *     **It is also the answer when bounded hash work has no free slot** (Product decision, 8 October
          *     2026): the request is refused at once, without verification and without moving any credential
          *     counter, so overload cannot be turned into a lockout.
+         *
+         *     **It carries no `Retry-After`** (errors-and-enums.md 4): a wait told to a caller who is not signed
+         *     in tells an attacker how long to wait. An operation that needs a session declares `RateLimited`,
+         *     whose answer does carry one (Product Owner, 7 November 2026).
          */
-        RateLimited: {
+        RateLimitedAnonymous: {
             headers: {
                 [name: string]: unknown;
             };
@@ -12631,7 +12945,7 @@ export interface components {
         CacheControlNoStore: "no-store";
         /** @description Opaque record version. Send back as `If-Match` on the next mutation. */
         ETag: string;
-        /** @description Whole seconds the client should wait before it tries again (`TrustDataUnavailable`). */
+        /** @description Whole seconds the client should wait before it tries again (`TrustDataUnavailable`, and `RateLimited`, which is the answer to a caller who has a session and says from 1 to 60). */
         RetryAfter: number;
     };
     pathItems: never;
@@ -12646,6 +12960,8 @@ export interface operations {
                 channel?: "SMS" | "FEED";
                 /** @description Only the messages raised about this record (the pickup request they announce). Authorization-checked like every filter: an id outside the caller's hubs matches nothing. */
                 subject_id?: string;
+                /** @description Only the messages of this hub: the hub the record answered to when the act was done, which a message keeps (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: string;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };
@@ -12670,6 +12986,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listPickupRequests: {
@@ -12677,10 +12994,14 @@ export interface operations {
             query?: {
                 state?: string;
                 service_date?: string;
-                /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop, a Rider no request) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
+                /** @description `false` with `state=CONFIRMED` is the manifest pool (§21.2): confirmed requests no manifest has claimed, less any whose booking cutoff review is still pending (`cutoff_exception_state` `PENDING_OPS_REVIEW`), which the plain list of confirmed requests still shows. `true` lists those on a manifest: a request is on one while a stop holds its claim, until the claim is explicitly released. **Staff only**: any other caller (a Vendor reads no stop) is refused `PERMISSION_DENIED`. Authorization-checked like every filter. */
                 manifested?: boolean;
-                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). Authorization-checked like every filter. */
+                /** @description Only requests whose one-package exception is in this state. `REQUESTED` is the approver's queue: the requests waiting for a holder of `pickup.exception.approve` (section 35.2.4). **Only a pending request is in it** (a cancelled, a confirmed or a declined request is not): the exception of a request that is not `PENDING` can no longer be decided (`approveOnePackageException` answers `STATE_CONFLICT`), so it is not the approver's work. Authorization-checked like every filter. */
                 one_package_exception_state?: "REQUESTED" | "APPROVED" | "REJECTED";
+                /** @description Only requests whose booking-cutoff decision (`cutoff_exception_state`) is in this state. With `state=CONFIRMED`, `PENDING_OPS_REVIEW` is the late bookings waiting for Ops's decision (`resolveCutoffException`): the set `getQueueSummary` counts as `PICKUP_CUTOFF_REVIEW`. Authorization-checked like every filter. */
+                cutoff_exception_state?: "PENDING_OPS_REVIEW" | "SAME_DAY_APPROVED" | "RESCHEDULED";
+                /** @description Only the requests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It is a filter that can narrow what the caller may see and never widens it: it is authorization-checked and never trusted, and one outside the caller's grant, or that names no hub, yields an empty page and never `HUB_SCOPE_VIOLATION` (list endpoints never probe, SECURITY_DESIGN 14.4b). It combines with the other filters as "and", and without it the list is what it was. A Vendor is shown its own organisation's requests across hubs, and with `hub_id` those of that hub. A Rider is not served this operation at all (see the description), so it has no `hub_id`. */
+                hub_id?: string;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };
@@ -12705,6 +13026,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createPickupRequest: {
@@ -12767,6 +13089,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPickupRequest: {
@@ -12795,6 +13118,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmPickupRequest: {
@@ -12949,6 +13273,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reassignPickupRequestHub: {
@@ -13019,6 +13344,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveCutoffException: {
@@ -13090,6 +13416,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     amendPickupRequest: {
@@ -13160,6 +13487,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     escalatePickupRequest: {
@@ -13231,6 +13559,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     extendPickupAttempts: {
@@ -13302,6 +13631,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     waiveCancellationCharge: {
@@ -13342,6 +13672,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestOnePackageException: {
@@ -13375,6 +13706,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveOnePackageException: {
@@ -13404,6 +13736,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPickupStop: {
@@ -13432,6 +13765,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     arriveAtPickupStop: {
@@ -13493,6 +13827,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordCollection: {
@@ -13562,6 +13897,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reportPickupFailure: {
@@ -13647,6 +13983,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     skipPickupStop: {
@@ -13754,6 +14091,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getHubIntake: {
@@ -13780,6 +14118,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     acquireIntakeLock: {
@@ -13805,6 +14144,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     submitBlindCount: {
@@ -13885,6 +14225,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     recordIntakeCondition: {
@@ -13955,6 +14296,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getIntakeSummary: {
@@ -13981,6 +14323,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     itemizeOrder: {
@@ -14063,6 +14406,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     getOrder: {
@@ -14090,6 +14434,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestPayerCorrection: {
@@ -14161,6 +14506,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approvePayerCorrection: {
@@ -14230,6 +14576,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     closeHubIntake: {
@@ -14300,6 +14647,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listPickupManifests: {
@@ -14311,6 +14659,8 @@ export interface operations {
                 state?: "DRAFT" | "DISPATCHED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
                 /** @description Only the manifests worked on this day: their `service_date`, a day of the hub's calendar (`YYYY-MM-DD`). */
                 service_date?: string;
+                /** @description Only the manifests of this hub: their `responsible_hub_id` (task C3, Product Owner, 6 November 2026). It narrows what the reader is already shown and widens nothing; a hub outside the caller's grant, or that names no hub, is an empty page and never `HUB_SCOPE_VIOLATION`. A Rider is shown its assigned and dispatched manifests, and with `hub_id` those of that hub. */
+                hub_id?: string;
             };
             header?: never;
             path?: never;
@@ -14333,6 +14683,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createPickupManifest: {
@@ -14395,6 +14746,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPickupManifest: {
@@ -14423,6 +14775,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelPickupManifest: {
@@ -14494,6 +14847,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     setManifestStopOrder: {
@@ -14564,6 +14918,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     assignRider: {
@@ -14604,6 +14959,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     dispatchManifest: {
@@ -14676,6 +15032,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateRunCustodyHandover: {
@@ -14716,6 +15073,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     acceptRunCustodyHandover: {
@@ -14787,6 +15145,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     failRunCustodyHandover: {
@@ -14858,6 +15217,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRunCustodyHandovers: {
@@ -14891,6 +15251,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRunCustodyHandover: {
@@ -14919,6 +15280,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveHandshake: {
@@ -14984,6 +15346,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     disputeCollection: {
@@ -15049,6 +15412,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     submitHubHandover: {
@@ -15118,6 +15482,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateHandshake: {
@@ -15212,6 +15577,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestSmsHandshakeFallback: {
@@ -15342,6 +15708,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     adjudicateDiscrepancy: {
@@ -15380,6 +15747,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     staffSignIn: {
@@ -15436,7 +15804,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeStaffMfaSignIn: {
@@ -15483,7 +15851,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     listTrustedBrowsers: {
@@ -15514,6 +15882,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeTrustedBrowser: {
@@ -15550,6 +15919,62 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getQueueSummary: {
+        parameters: {
+            query?: {
+                /** @description Only this hub's work (task C3): every count as the list of its queue gives it with this `hub_id`. Absent: every hub the session's grant of each queue's list key reaches, as before. */
+                hub_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueSummary"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    lookupRecords: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordLookupRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordLookupPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listStaffTrustedBrowsers: {
@@ -15576,6 +16001,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeStaffTrustedBrowsers: {
@@ -15641,6 +16067,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     riderSignIn: {
@@ -15668,7 +16095,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     vendorSignIn: {
@@ -15701,7 +16128,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     getCurrentSession: {
@@ -15723,6 +16150,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     signOut: {
@@ -15747,6 +16175,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listSessions: {
@@ -15776,6 +16205,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeSession: {
@@ -15808,6 +16238,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestCredentialRecovery: {
@@ -15836,7 +16267,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeCredentialRecovery: {
@@ -15869,7 +16300,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     revokeRiderDevice: {
@@ -15899,6 +16330,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRecipientConfirmation: {
@@ -15923,6 +16355,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordConfirmationAttempt: {
@@ -15986,6 +16419,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     escalateRecipientConfirmation: {
@@ -16049,6 +16483,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listDeliveryRuns: {
@@ -16076,6 +16511,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createDeliveryRun: {
@@ -16137,6 +16573,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getDeliveryRun: {
@@ -16161,6 +16598,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     setDeliveryStopOrder: {
@@ -16199,6 +16637,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     assignDeliveryRider: {
@@ -16236,6 +16675,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     dispatchDeliveryRun: {
@@ -16281,6 +16721,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     startDeliveryRun: {
@@ -16314,6 +16755,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listAssignableStaffRoleBundles: {
@@ -16338,6 +16780,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listStaffIdentities: {
@@ -16371,6 +16814,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createStaffIdentity: {
@@ -16433,6 +16877,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getStaffIdentity: {
@@ -16460,6 +16905,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveStaffIdentity: {
@@ -16500,6 +16946,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     proposeBundleChange: {
@@ -16539,6 +16986,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveBundleChange: {
@@ -16571,6 +17019,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createEvidence: {
@@ -16634,6 +17083,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     completeEvidenceUpload: {
@@ -16669,6 +17119,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createEvidenceRetrievalAuthorization: {
@@ -16698,6 +17149,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     arriveAtDeliveryStop: {
@@ -16756,6 +17208,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordRecipientCashPayment: {
@@ -16819,6 +17272,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestDeliveryOtp: {
@@ -16844,6 +17298,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     closeDeliveryStopDelivered: {
@@ -16912,6 +17367,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     authoriseDeliveryWithoutOtp: {
@@ -16949,6 +17405,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getCarrierHandoff: {
@@ -16975,6 +17432,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordCarrierHandoff: {
@@ -17056,6 +17514,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listCarrierHandoffs: {
@@ -17088,6 +17547,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordHandoffOutcome: {
@@ -17157,6 +17617,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     clearOutboundForDispatch: {
@@ -17222,6 +17683,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listCourierProviders: {
@@ -17252,6 +17714,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     registerCourierProvider: {
@@ -17313,6 +17776,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deactivateCourierProvider: {
@@ -17347,6 +17811,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reactivateCourierProvider: {
@@ -17381,6 +17846,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listApprovedAgents: {
@@ -17411,6 +17877,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     approveAgent: {
@@ -17472,6 +17939,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     withdrawAgentApproval: {
@@ -17506,6 +17974,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     failDeliveryStop: {
@@ -17570,6 +18039,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     openCashHandover: {
@@ -17631,6 +18101,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmCashHandover: {
@@ -17669,6 +18140,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveCashVariance: {
@@ -17706,6 +18178,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     completeStaffCredentialSetup: {
@@ -17734,7 +18207,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeMfaEnrolment: {
@@ -17762,7 +18235,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     resetStaffMfa: {
@@ -17806,6 +18279,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reissueStaffCredentialSetup: {
@@ -17845,6 +18319,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRiders: {
@@ -17878,6 +18353,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRider: {
@@ -17904,6 +18380,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     registerRiderDevice: {
@@ -17968,6 +18445,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     completeRiderDeviceEnrolment: {
@@ -17994,7 +18472,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
             503: components["responses"]["TrustDataUnavailable"];
         };
     };
@@ -18021,7 +18499,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     completeVendorCredentialSetup: {
@@ -18051,7 +18529,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     requestAdditionalDeviceGrant: {
@@ -18141,7 +18619,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     listVendorDevices: {
@@ -18165,6 +18643,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     revokeVendorDevice: {
@@ -18199,6 +18678,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     beginMfaReenrolment: {
@@ -18227,7 +18707,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             403: components["responses"]["OriginRefused"];
             422: components["responses"]["RuleViolation"];
-            429: components["responses"]["RateLimited"];
+            429: components["responses"]["RateLimitedAnonymous"];
         };
     };
     recoverStaffCredential: {
@@ -18271,6 +18751,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listVendorAccounts: {
@@ -18304,6 +18785,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getVendorAccount: {
@@ -18331,6 +18813,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recoverVendorCredential: {
@@ -18373,6 +18856,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reissueVendorCredentialSetup: {
@@ -18412,6 +18896,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reregisterRiderDevice: {
@@ -18454,6 +18939,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reviseDeliveryCommitment: {
@@ -18522,6 +19008,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listDeliveryCommitments: {
@@ -18553,6 +19040,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     overrideServiceWindow: {
@@ -18616,6 +19104,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     assessParcelHandling: {
@@ -18646,6 +19135,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestVerificationFallback: {
@@ -18708,6 +19198,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordNextStopContact: {
@@ -18771,6 +19262,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordDoorstepContact: {
@@ -18834,6 +19326,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getStopPaymentDemand: {
@@ -18859,6 +19352,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listOperationalPaymentDemands: {
@@ -18890,6 +19384,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiatePaymentCollection: {
@@ -18950,6 +19445,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     authorizePaymentFallbackWhileUnresolved: {
@@ -19013,6 +19509,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getPaymentCollection: {
@@ -19038,6 +19535,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     receiveHubtelPaymentCallback: {
@@ -19091,6 +19589,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
         };
     };
     scheduleRedelivery: {
@@ -19154,6 +19653,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     cancelRedelivery: {
@@ -19217,6 +19717,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateReturn: {
@@ -19277,6 +19778,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestReturnOtp: {
@@ -19302,6 +19804,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     closeReturnHandover: {
@@ -19365,6 +19868,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     proposeAdjustmentResolution: {
@@ -19429,6 +19933,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideAdjustmentResolution: {
@@ -19493,6 +19998,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     submitVendorContactAssistance: {
@@ -19554,6 +20060,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideDeliveryLocationChange: {
@@ -19578,6 +20085,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestDeliveryLocationChange: {
@@ -19639,6 +20147,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmManualPayment: {
@@ -19702,6 +20211,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listRoadExpenses: {
@@ -19730,6 +20240,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createRoadExpense: {
@@ -19791,6 +20302,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideRoadExpense: {
@@ -19822,6 +20334,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getRunCashSummary: {
@@ -19847,6 +20360,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listHubCashReconciliations: {
@@ -19878,6 +20392,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordHubCashCount: {
@@ -19941,6 +20456,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveHubCashVariance: {
@@ -19972,6 +20488,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     recordCashDisposition: {
@@ -20036,6 +20553,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createVendorOrganization: {
@@ -20097,6 +20615,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideVendorOrganization: {
@@ -20135,6 +20654,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     enableVendorAllowance: {
@@ -20172,6 +20692,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     disableVendorAllowance: {
@@ -20209,6 +20730,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     suspendVendor: {
@@ -20247,6 +20769,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     reactivateVendor: {
@@ -20284,6 +20807,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     terminateVendor: {
@@ -20321,6 +20845,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     decideHeldParcelDisposition: {
@@ -20358,6 +20883,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     escalateHeldParcel: {
@@ -20395,6 +20921,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listSecurityRiskHolds: {
@@ -20427,6 +20954,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     openSecurityRiskHold: {
@@ -20494,6 +21022,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     clearSecurityRiskHold: {
@@ -20560,6 +21089,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     findAdHocSender: {
@@ -20588,6 +21118,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listVendorPickupLocations: {
@@ -20617,6 +21148,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createVendorPickupLocation: {
@@ -20681,6 +21213,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     updateVendorPickupLocation: {
@@ -20719,6 +21252,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     setDefaultVendorPickupLocation: {
@@ -20752,6 +21286,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     deactivateVendorPickupLocation: {
@@ -20785,6 +21320,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getVendorOperationalEligibility: {
@@ -20810,6 +21346,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getDailyOperationsCashReport: {
@@ -20838,6 +21375,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listParcelCustodyReturns: {
@@ -20869,6 +21407,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     openParcelCustodyReturn: {
@@ -20930,6 +21469,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getParcelCustodyReturn: {
@@ -20956,6 +21496,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     confirmParcelCustodyReturn: {
@@ -21026,6 +21567,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     resolveParcelCustodyVariance: {
@@ -21090,6 +21632,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listReasonDefinitions: {
@@ -21122,6 +21665,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     upsertReasonDefinition: {
@@ -21153,6 +21697,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listAccountingExports: {
@@ -21190,6 +21735,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     requestAccountingExport: {
@@ -21221,6 +21767,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getAccountingExport: {
@@ -21249,6 +21796,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     createAccountingExportRetrievalAuthorization: {
@@ -21278,6 +21826,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
         };
     };
 }

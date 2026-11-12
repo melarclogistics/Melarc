@@ -11,6 +11,7 @@ import {
   parseVendorPickupLocations,
   type AdHocSenderView,
   type AttributedReason,
+  type CutoffExceptionState,
   type ExceptionState,
   type PickupReasonDomain,
   type PickupRequestPageView,
@@ -38,21 +39,40 @@ export interface PickupListParams {
   /** Only the requests whose one-package exception is in this state: `REQUESTED` is the approver's queue. */
   readonly exceptionState?: ExceptionState;
   /**
+   * Only the requests whose booking-cutoff decision is in this state: with `state: 'CONFIRMED'`, `PENDING_OPS_REVIEW` is the late bookings
+   * waiting for Ops (task C1.1; the set the queue summary counts).
+   */
+  readonly cutoffExceptionState?: CutoffExceptionState;
+  /**
    * `false` with `state: 'CONFIRMED'` is the manifest pool: the confirmed requests no manifest holds, less any whose booking cutoff is still to be
    * reviewed (the server's reading, S1.20). It is staff's alone; a page that sends it is a staff page.
    */
   readonly manifested?: boolean;
+  /**
+   * Only the requests of this hub (task C3; the hub chosen in the switcher, `useActiveHub`): a filter that narrows and never widens what the grant
+   * reaches. Left out for *All hubs*. A page token belongs to the filters it was made with, and the hub is one of them.
+   */
+  readonly hubId?: string;
   readonly pageToken?: string;
   readonly enabled?: boolean;
 }
 
 /**
- * `listPickupRequests`: a page of the requests the session's grant reaches (`pickup.read`), scoped by the server, filtered by state, date and
- * the state of the one-package exception.
+ * `listPickupRequests`: a page of the requests the session's grant reaches (`pickup.read`), scoped by the server, filtered by state, date, the
+ * state of the one-package exception and, since task C3, the hub.
  */
 export function usePickupRequests(params: PickupListParams): UseQueryResult<PickupRequestPageView> {
   const client = useApiClient();
-  const { state, serviceDate, exceptionState, manifested, pageToken, enabled = true } = params;
+  const {
+    state,
+    serviceDate,
+    exceptionState,
+    cutoffExceptionState,
+    manifested,
+    hubId,
+    pageToken,
+    enabled = true,
+  } = params;
   return useQuery({
     queryKey: [
       'pickup-requests',
@@ -60,7 +80,9 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
       state ?? null,
       serviceDate ?? null,
       exceptionState ?? null,
+      cutoffExceptionState ?? null,
       manifested ?? null,
+      hubId ?? null,
       pageToken ?? null,
     ],
     enabled,
@@ -75,7 +97,11 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
               ...(exceptionState === undefined
                 ? {}
                 : { one_package_exception_state: exceptionState }),
+              ...(cutoffExceptionState === undefined
+                ? {}
+                : { cutoff_exception_state: cutoffExceptionState }),
               ...(manifested === undefined ? {} : { manifested }),
+              ...(hubId === undefined ? {} : { hub_id: hubId }),
               ...(pageToken === undefined ? {} : { page_token: pageToken }),
             },
           },
@@ -83,10 +109,13 @@ export function usePickupRequests(params: PickupListParams): UseQueryResult<Pick
       );
       const page = parsePickupRequestPage(answer.data);
       // Filtered by the state of the exception, every request carries an exception in that state: a page that does not is not this query's.
+      // The same for the cut-off decision: every request of the page carries the state that was asked for.
       if (
         page === undefined ||
         (exceptionState !== undefined &&
-          page.items.some((request) => request.one_package_exception?.state !== exceptionState))
+          page.items.some((request) => request.one_package_exception?.state !== exceptionState)) ||
+        (cutoffExceptionState !== undefined &&
+          page.items.some((request) => request.cutoff_exception_state !== cutoffExceptionState))
       ) {
         throw unexpectedResponse(answer.status);
       }
@@ -101,23 +130,30 @@ export interface PickupRecord {
   readonly etag: string;
 }
 
-/** `getPickupRequest`. A request with no version cannot be acted on, and another request than the one asked for is not the answer. */
-export function usePickupRequest(id: string, enabled = true): UseQueryResult<PickupRecord> {
+/** `getPickupRequest`, read once: a request with no version cannot be acted on, and another request than the one asked for is not the answer. */
+export async function readPickupRequest(client: ApiClient, id: string): Promise<PickupRecord> {
+  const answer = answerOf(await client.GET('/pickup-requests/{id}', { params: { path: { id } } }));
+  const request = parsePickupRequest(answer.data);
+  if (request?.id.toLowerCase() !== id.toLowerCase() || answer.etag === undefined) {
+    throw unexpectedResponse(answer.status);
+  }
+  return { request, etag: answer.etag };
+}
+
+/** `getPickupRequest` as a read of a screen. */
+/** The read of one request, as a hook gives it: a page that shows the request in more than one place reads it once and hands the read to each. */
+export type PickupRecordRead = UseQueryResult<PickupRecord>;
+
+/** The key of the read of one request: a screen that holds the server's answer to an act on the request writes it under this key, and the read is the one place the screen draws the request from. */
+export const pickupRequestKey = (id: string) => ['pickup-requests', 'request', id] as const;
+
+export function usePickupRequest(id: string, enabled = true): PickupRecordRead {
   const client = useApiClient();
   return useQuery({
-    queryKey: ['pickup-requests', 'request', id],
+    queryKey: pickupRequestKey(id),
     enabled,
     ...NOT_KEPT,
-    queryFn: async () => {
-      const answer = answerOf(
-        await client.GET('/pickup-requests/{id}', { params: { path: { id } } }),
-      );
-      const request = parsePickupRequest(answer.data);
-      if (request?.id.toLowerCase() !== id.toLowerCase() || answer.etag === undefined) {
-        throw unexpectedResponse(answer.status);
-      }
-      return { request, etag: answer.etag };
-    },
+    queryFn: () => readPickupRequest(client, id),
   });
 }
 

@@ -91,7 +91,7 @@ describe('the words of deciding a profile', () => {
       'This role needs a higher authority to decide. Ask a Platform Admin.',
     );
     expect(said('PERMISSION_DENIED')).toBe(
-      'Your session does not hold the permission to approve or reject profiles (staff.identity.approve).',
+      'Your account can’t approve or reject profiles. Ask an administrator for access.',
     );
     expect(
       new Set([
@@ -139,8 +139,8 @@ describe('the words that are told whatever the act', () => {
   );
 
   it.each([
-    ['approveStaffIdentity', 'This profile belongs to a hub your session does not act in.'],
-    ['reissueStaffCredentialSetup', 'This profile belongs to a hub your session does not act in.'],
+    ['approveStaffIdentity', 'This profile belongs to a hub your account does not work in.'],
+    ['reissueStaffCredentialSetup', 'This profile belongs to a hub your account does not work in.'],
   ])('says a profile in another hub is in another hub for %s', (operation, message) => {
     expect(problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation }).message).toBe(message);
   });
@@ -163,9 +163,7 @@ describe('the words of sending a setup link again', () => {
     expect(
       problemOf(refused('PERMISSION_DENIED', 403), { operation: 'reissueStaffCredentialSetup' })
         .message,
-    ).toBe(
-      'Your session does not hold the permission to send setup links (staff.identity.approve).',
-    );
+    ).toBe('Your account can’t send setup links. Ask an administrator for access.');
   });
 });
 
@@ -185,7 +183,7 @@ describe('the words of resetting an authenticator', () => {
   it('names the permission when it is missing', () => {
     expect(
       problemOf(refused('PERMISSION_DENIED', 403), { operation: 'resetStaffMfa' }).message,
-    ).toBe('Your session does not hold the permission to reset authenticators (staff.mfa.reset).');
+    ).toBe('Your account can’t reset authenticators. Ask an administrator for access.');
   });
 });
 
@@ -212,7 +210,7 @@ describe('the words of ending a session', () => {
   it('names the permission when it is missing', () => {
     expect(
       problemOf(refused('PERMISSION_DENIED', 403), { operation: 'revokeSession' }).message,
-    ).toBe('Your session does not hold the permission to end sessions (staff.session.revoke).');
+    ).toBe('Your account can’t end sessions. Ask an administrator for access.');
   });
 });
 

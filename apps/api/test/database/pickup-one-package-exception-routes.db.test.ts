@@ -515,9 +515,10 @@ describe('requestOnePackageException: Ops raises an exception for a request of o
 });
 
 describe('approveOnePackageException: any holder of the approval decides it (AC-SLICE-001-03)', () => {
-  // Break caught: an exception approved on a request that has been cancelled since it was asked for (it stays REQUESTED, so the approver's
-  // queue still lists it): the approval is answered STATE_CONFLICT, as the contract declares, and not as a server error from the guard of a
-  // cancelled request. Nothing is decided: the exception stays asked for, the request is unlinked, and no approval is recorded.
+  // Break caught: an exception approved on a request that has been cancelled since it was asked for (it stays REQUESTED, and the request
+  // leaves the approver's queue for that reason, AC-QSUM-12): the approval is answered STATE_CONFLICT, as the contract declares, and not as
+  // a server error from the guard of a cancelled request. Nothing is decided: the exception stays asked for, the request is unlinked, and no
+  // approval is recorded.
   it('is STATE_CONFLICT for a request that is not pending any more, and decides nothing', async () => {
     const id = await single();
     const raised = approvalOf(await ask(ops, id));

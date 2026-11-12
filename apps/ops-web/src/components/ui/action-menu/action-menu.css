@@ -1,0 +1,42 @@
+/*
+ * ActionMenu (design/COMPONENT_PATTERNS.md, *ActionMenu*): the menu primitive on the tokens. An item is as tall as a dense control (36px) and takes the primitive's
+ * focus fill; a destructive item is the vermilion of danger (the primitive's `destructive` variant), set apart below a separator and last. An item that cannot be
+ * taken stays focusable, is dimmed (and its reason, said in words, is not only a colour), and shows its reason on hover, on focus and when it is chosen.
+ */
+.ui-action-menu__content {
+  /* Never wider than the screen, whatever the size of the text: min-width wins over max-width, so it is bounded here (task R5.2, M9: 14rem was 448px at 200% on a 320px screen). */
+  min-width: min(14rem, calc(100vw - 1rem));
+  max-width: min(22rem, calc(100vw - 1rem));
+}
+
+.ui-action-menu__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The reason of an item that cannot be taken: hidden until the item is hovered, focused (Radix marks it highlighted) or chosen. It is still its description. */
+.ui-action-menu__reason {
+  display: none;
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+  white-space: normal;
+}
+
+.ui-action-menu__item[data-unavailable='true'] {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.ui-action-menu__item[data-unavailable='true'][data-highlighted] .ui-action-menu__reason,
+.ui-action-menu__item[data-unavailable='true'][data-revealed='true'] .ui-action-menu__reason {
+  display: block;
+}
+
+/* A highlighted item that cannot be taken keeps its dimmed label: the reason, below it, is the secondary text. */
+.ui-action-menu__item[data-unavailable='true'][data-highlighted] {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}

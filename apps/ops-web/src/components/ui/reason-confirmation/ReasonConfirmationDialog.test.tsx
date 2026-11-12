@@ -13,6 +13,7 @@ import { reasonFixture } from '../../../test-support/reason-fixture';
 import { renderWithProviders } from '../../../test-support/render-providers';
 import { wcagViolations } from '../../../test-support/wcag';
 import { ReasonConfirmationDialog } from './ReasonConfirmationDialog';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 let api: FakeApi;
 
@@ -315,7 +316,7 @@ describe('ReasonConfirmationDialog: the reasons cannot be had', () => {
   it('names settings.reason.read when the session lacks it, and the act cannot be confirmed', async () => {
     const { send } = setup({}, () => errorResponse(403, 'PERMISSION_DENIED'));
 
-    expect(await screen.findByText('settings.reason.read')).toBeVisible();
+    expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
     expect(confirm()).toBeDisabled();
     expect(send).not.toHaveBeenCalled();
   });
@@ -720,7 +721,7 @@ describeInterfaceStates('ReasonConfirmationDialog', {
     test: async () => {
       setup({}, () => errorResponse(403, 'PERMISSION_DENIED'));
 
-      expect(await screen.findByText('settings.reason.read')).toBeVisible();
+      expect(await screen.findByText(cannotText('settings.reason.read'))).toBeVisible();
       expect(confirm()).toBeDisabled();
     },
   },
@@ -746,5 +747,47 @@ describe('ReasonConfirmationDialog: accessibility', () => {
     expect(within(screen.getByRole('alertdialog')).getAllByRole('button').length).toBeGreaterThan(
       0,
     );
+  });
+});
+
+describe('ReasonConfirmationDialog: inside a form (task R5.2, M3)', () => {
+  // Break caught: the dialog's submit bubbling to a form that holds it: confirming the question sends the form too.
+  it('never submits a form that holds it', async () => {
+    api.on(`GET ${LIST}`, answerWithCatalogue);
+    const submitted = vi.fn();
+    const send = vi.fn<(command: unknown, key: string) => Promise<string>>(() =>
+      Promise.resolve('done'),
+    );
+    const view = renderWithProviders(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitted();
+        }}
+      >
+        <ReasonConfirmationDialog<string>
+          open
+          title="Reset this demo person’s second factor?"
+          consequence={<p>Every session of this demo person ends. This cannot be undone.</p>}
+          confirmLabel="Reset the second factor"
+          operation="resetStaffMfa"
+          branch="FACTOR_ACTIVE"
+          version={'"v1"'}
+          send={send}
+          onDone={vi.fn()}
+          onCancel={vi.fn()}
+          onReload={vi.fn()}
+        />
+      </form>,
+      { signedIn: true },
+    );
+
+    await view.user.selectOptions(await reasonField(), 'DEMO_ONE');
+    await view.user.click(confirm());
+
+    await waitFor(() => {
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+    expect(submitted).not.toHaveBeenCalled();
   });
 });

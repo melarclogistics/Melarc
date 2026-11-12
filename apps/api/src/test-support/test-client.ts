@@ -136,6 +136,8 @@ export interface RequestOptions {
   readonly csrf?: 'auto' | 'omit' | (string & {});
   /** `undefined` sends the client's origin; `null` sends none; text sends that origin. Unsafe browser requests only. */
   readonly origin?: string | null;
+  /** Aborting it makes the client leave: the request is abandoned and the connection closed, as a browser tab that goes away does. */
+  readonly signal?: AbortSignal;
 }
 
 export class TestClient {
@@ -252,6 +254,7 @@ export class TestClient {
       headers,
       redirect: 'manual',
       ...(body === undefined ? {} : { body }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     const result = new TestResponse(response.status, response.headers, await response.text());
     if (this.options.bearer === undefined) this.store(result.setCookies, url);

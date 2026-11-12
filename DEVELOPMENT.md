@@ -66,20 +66,38 @@ the identity slice needs, with Firefox and WebKit, is `pnpm run test:e2e:https`:
 and on a machine cleared for key material, and it refuses on this workstation (Windows has no disposable trust store for Chromium or
 Edge). On a machine cleared for key material WebKit's proofs fail to trust, because WebKit's only trust is the system store, which the run
 changes only on a GitHub-hosted runner. What exists, what is blocked and the steps for a clean machine are in [e2e/README.md](e2e/README.md).
-It is three runs, and CI makes it as two jobs, a shard of the runs in each: `MELARC_HTTPS_SHARD=1/2` makes Chromium's run, with
-WebKit's refusal, and WebKit's other proofs, in that order (they stay in one job: the refusal is a control only while the CA is not in the
-system store), and `MELARC_HTTPS_SHARD=2/2` makes Firefox's. Without the variable it makes all three; a value that is not a shard of the
-harness (`e2e/harness/https-shards.ts`) is refused before anything is made.
+It is four runs (Chromium; Firefox; WebKit's refusal; WebKit's proofs), and CI makes it as three jobs, a shard of the runs in each:
+`MELARC_HTTPS_SHARD=1/3` makes Chromium's run, `2/3` Firefox's, and `3/3` WebKit's refusal and then its proofs, in that order (they
+stay in one job: the refusal is a control only while the CA is not in the system store, which the proofs need it in). Without the
+variable it makes all four; a value that is not a shard of the harness (`e2e/harness/https-shards.ts`) is refused before anything is made.
+
+### In a Git worktree
+
+A worktree (`git worktree add`) is a second working copy and gets **its own** `pnpm install --frozen-lockfile --offline`. **Never link `node_modules` into it, with a junction (`mklink /J`) or a symlink:**
+removing the worktree (`git worktree remove --force`, or a plain delete) follows the link and deletes the packages of the tree it pointed at (run 3 of the redesign lost
+26 packages of the main tree this way, and restored them with `pnpm install --frozen-lockfile --offline`), and pnpm 11 tries to reinstall a linked tree before `pnpm exec`
+unless `npm_config_verify_deps_before_run=false`. If a junction already exists, remove it first with `cmd /c rmdir <path>`, which removes the link and nothing it points at,
+and only then delete anything near it.
 
 ### What CI runs when
 
-[ci.yml](.github/workflows/ci.yml) (the Product Owner's decision of 7 November 2026): a **pull request** runs every job but the
-Firefox and WebKit shards of the browser tests, which is the Chromium shards, the HTTPS journeys in both shards and every other
-check; a **push to main**, the **nightly run** (02:17 UTC, every day) and a **manual run** run all of it, so Firefox and WebKit
-are tested on every commit that reaches main and every night. The one skip that "CI result" accepts is that job's, on a pull
-request and nowhere else. The browser tests of each engine are cut into shards that are jobs of their own, and the
-shards of an engine together run every test of it once; `scripts/browser-shards.test.ts` proves it for each kind of run from
-Playwright's own list of the tests. Nothing here can be tried on a machine without a push, which the owner authorizes.
+[ci.yml](.github/workflows/ci.yml) (the Product Owner's decisions of 7 November 2026): a **pull request** runs every job but the
+Firefox and WebKit shards of the browser tests, which is the Chromium shards, the HTTPS journeys in all three shards and every other
+check, and it leaves out of the database tests the files whose assertions are wall-clock time and nothing else of the tests
+([apps/api/test/timing-sensitive-tests.ts](apps/api/test/timing-sensitive-tests.ts): `MELARC_SKIP_TIMING_TESTS=1`, set by the
+database step of a pull request and of a push to main, which run every other test; the nightly run and a manual run run those files too);
+a **push to main**, the **nightly run** (02:17 UTC, Monday to Friday) and a **manual run** run all of the rest, so Firefox and WebKit are tested on every commit that reaches main and every weekday night. A first job, `plan`
+([scripts/ci-plan.ts](scripts/ci-plan.ts)), lets the nightly run stand down: when the last successful nightly run tested the commit
+main is at, every other job but the dependency audit is skipped and the run is a success (a push, a pull request and a manual run are
+never skipped, and the plan answers "run" whenever it cannot tell; the audit is not the plan's to decide, because an advisory is published
+with no commit, so it runs every night). "CI result" accepts two skips and no other: the Firefox and WebKit job's on a pull
+request, and every job's but the audit's on a nightly run whose plan said so. The browser tests of each engine, the HTTPS journeys and the database
+tests are cut into shards that are jobs of their own, and the shards together run every test once (`scripts/browser-shards.test.ts`
+proves it for the browser tests from Playwright's own list of them, `scripts/db-shards.test.ts` for the database test files from
+Vitest's); `MELARC_DB_SHARD=<shard>/<shards>` runs one shard of the database tests locally too, and the gate and the affected run
+never set it. Every step that runs tests has a timeout of its own below its job's, the diagnostics are kept when a job fails and when
+it is cancelled, and the Playwright browsers are cached by the lockfile. Nothing here can be tried on a machine without a push,
+which the owner authorizes.
 
 ## 2. Create the local settings
 
@@ -296,15 +314,15 @@ These are the checks CI runs ([ci.yml](.github/workflows/ci.yml)), which also ru
 `pnpm --filter @melarc/api run db:check` and `pnpm audit --audit-level high`. The order to run them in, and the commands
 that run all of them once, are in [The development loop and the gate](#the-development-loop-and-the-gate) below.
 
-| Command                                                        | Needs                           | Proves                                                                                                                                                                                               |
-| -------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint (ESLint runs with a 6 GB heap: the type-aware lint of the whole repository needs about 5 GB, more than Node's default 4 GB), strict types                                           |
-| `pnpm test`                                                    | nothing running                 | unit, component and process tests of every workspace, and the repository's tooling tests                                                                                                             |
-| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first  | the implemented operations (none yet) match the contract; the generated client is current                                                                                                            |
-| `pnpm run test:db`                                             | the database (step 3), a JDK 21 | migrations, roles, row-level security and connection handling against a real server; the attested rider enrolment and the alert rehearsal against the real verifier service (built on its first run) |
-| `pnpm run test:browser`                                        | Chromium (step 1)               | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit)                                                                                                            |
-| `pnpm run test:e2e`                                            | the database, Chromium, builds  | a real browser, the API and a disposable database together                                                                                                                                           |
-| `pnpm run verifier:test`                                       | a JDK 21                        | the attestation verifier: its vendored library, its build and every one of its tests                                                                                                                 |
+| Command                                                        | Needs                           | Proves                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck` | nothing                         | formatting, lint (one ESLint run for each workspace through Turborepo, cached, then one for the files the root owns: the type-aware lint of the whole repository in one process needed 6 GB, and each workspace needs less than 4 GB, the largest, `apps/api`, about 3.8 GB), strict types |
+| `pnpm test`                                                    | nothing running                 | unit, component and process tests of every workspace, and the repository's tooling tests                                                                                                                                                                                                   |
+| `pnpm run contract:check`, `pnpm run api-client:check`         | a build (step 4) for the first  | the implemented operations (none yet) match the contract; the generated client is current                                                                                                                                                                                                  |
+| `pnpm run test:db`                                             | the database (step 3), a JDK 21 | migrations, roles, row-level security and connection handling against a real server; the attested rider enrolment and the alert rehearsal against the real verifier service (built on its first run)                                                                                       |
+| `pnpm run test:browser`                                        | Chromium (step 1)               | the Ops shell and components in real browsers (Chromium; CI also runs Firefox and WebKit)                                                                                                                                                                                                  |
+| `pnpm run test:e2e`                                            | the database, Chromium, builds  | a real browser, the API and a disposable database together                                                                                                                                                                                                                                 |
+| `pnpm run verifier:test`                                       | a JDK 21                        | the attestation verifier: its vendored library, its build and every one of its tests                                                                                                                                                                                                       |
 
 ```text
 pnpm test
@@ -338,14 +356,36 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    [testing cadence](delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#3-rules-every-task-keeps) adds the end-to-end
    journeys for a task whose evidence names them.
 2. **After a change to a contract, a schema, a migration or a document, and before a task is handed over**, run
-   `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the generated client, formatting, types,
-   the build, the contract check and lint) and the dependency audit, which asks the package registry and so needs the
-   network, in parallel, with the content caches of the formatter and ESLint and turbo's
-   task cache switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
-   a few minutes on cold caches, and exits 0 only when every check passed. It is not a gate and says nothing about a
-   test, and it refuses to run while a gate runs. Its one weakness is ESLint's cache: a file already linted is not
-   linted again, so a type changed in another file can hide a finding that the gate's lint from scratch reports.
-   `pnpm run precheck --uncached` runs the real commands.
+   `pnpm run precheck`. It runs the cheap checks of CI (the migration journal, the migration files main has, the generated client, formatting, types,
+   the build, the contract check and lint), the dependency audit, which asks the package registry and so needs the
+   network, and the `guards` lane (the root tests that read only documents, styles and manifests: the design tokens, the lifecycle
+   words of the component patterns, the links between documents, the agent documents, `lint-coverage.test.ts` (is every tracked source file linted by something?) and the rest
+   of `ROOT_GUARDS` in `scripts/gate.ts`, which Node runs side by side and which take **about 8.5 seconds in all**, measured on 11 November 2026 (run 7, Stage 3.6) on the development
+   machine with the heavy lock held, three runs each: the fourteen guards 7.6 to 10.6 seconds (8.0 at the median), `lint-coverage.test.ts` alone 5.0 to 5.4, and the fifteen together
+   8.1 to 8.8 (8.5 at the median), so that it adds about half a second beside the other lanes, which take minutes when their caches are cold: the gate's unit stage runs them as every root test), in
+   parallel, with the content cache of the formatter and turbo's
+   task cache (which serves lint, one task for each workspace) switched on, and prints the end of the log of any that fails. It takes seconds when little has changed and
+   a few minutes on cold caches, and exits 0 when no check failed: every check passed, or the one that did not pass cleanly is a
+   migration check that could not tell (`warned`, below), which does not fail it. It is not a gate and says nothing about a
+   test, and it refuses to run while a gate runs. Its one weakness is turbo's cache of lint: a workspace whose files, and whose dependencies' files, did not
+   change is not linted again, so a rule that reads something else can hide a finding that the gate's lint from scratch reports.
+   `pnpm run precheck --uncached` runs the real commands. **The migration check** holds the migration files to the merge base of `HEAD` with main, and ends with one of three
+   exits, the same in CI and outside it: `0` held; `1` a migration main has was changed, renamed or removed, or the command was misused (an option it does not know, or a base
+   that was named and is empty or is not a commit this clone has); `2` it could not tell (a tree with no main, a shallow clone, a base with no migration in it). **What `2`
+   costs is for whoever runs it to say.** The precheck shows it as `warned`, with the script's words in its summary and the count (`No cheap check failed, and 1 warned
+(migrations)`), and exits 0, so that a source package or a clone that fetched no branch is not stopped but is told that nothing was held; **the gate and CI fail on it**, as
+   they fail on any exit but 0. `MELARC_MIGRATION_BASE=<revision>` (or `node scripts/migration-immutability.ts --base <revision>`) names a revision of this tree to hold the
+   migrations to, and then it can decide. A base that is **named and empty** (`MELARC_MIGRATION_BASE=` with nothing after it, a variable that was not filled in, `--base ""`)
+   or **mistyped** fails with exit `1` everywhere, and is never read as "none named"; the all-zero revision that a push event names for a new branch is none named. CI names
+   the revision a push to main came from in a step of its own before the guard (`node scripts/ci-migration-base.ts`), which writes `MELARC_MIGRATION_BASE` to the environment of
+   its later steps on a push only: an `env:` expression would be empty on a pull request, and a guard with no base compares the commit main is now at with itself and passes
+   whatever the push changed. **The workflow check (`scripts/ci-workflow.ts`) holds that step**: it must be there, before the guard in the same job, handed the event, the previous
+   revision, whether the push was forced and the job's token, and it refuses `MELARC_MIGRATION_BASE` in an `env:` and a step that sets `CI` to anything but `true` or takes it away (`unset CI`,
+   bare or quoted, `env -u CI`, `export -n CI`, `declare +x CI`, `env -i`); the step runs in the default shell and folder, and no step between it and the guard may write the base again. **After a force push** the revision the push replaced is no longer in the checkout: the step fetches it by name (`git fetch origin <revision>`, with the job's token: the checkout keeps none, and an anonymous fetch always fails in a private repository; the token reaches that fetch as an `http.extraheader` passed with `-c`, is written nowhere and printed nowhere), and if
+   it **could not be fetched the run fails, in words that name the force push** and say what git answered, with every credential removed; it never falls back to `origin/main`, which on a push is the revision under test. Refuse a force
+   push to main in the branch protection of the repository. **A push to main whose previous revision is all zeros created main** (it was deleted and created again): the step
+   fails, in words that name the recreation (run 7, Stage 3.3), because there is no earlier tip to hold the migrations to and the guard would compare the new main with itself and
+   pass an edited migration; only the guard run by a developer reads the all-zero revision as none named. For the very first push of a new repository, run the workflow by hand.
 3. **Regenerate derived files last.** The generated API client (`pnpm run api-client:generate`) is made after the final
    edit of what it derives from. One made earlier is stale, and `api-client:check` fails on it.
 4. **Before a task is handed over, run `pnpm run test:affected` once, on the final state,** after the precheck. It
@@ -368,6 +408,12 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
      configuration, shutdown, the logs, the probes, the command-line tools, or those tests and their helpers. The
      development-server project of a browser spec that also runs against the production build runs with
      `--with-dev-browser`. The browser target's record moves on the projects it ran.
+   - After a screen, a stylesheet or a journey's page changes (run 6, Stage 5.3, the finding of run 5). Run the affected root
+     and journey targets before the task is handed over, and not only the precheck:
+     `pnpm run test:affected --only root,e2e --with-e2e`. The precheck runs no test but its `guards` lane, so the root guards
+     that a stylesheet or a document breaks beyond that lane (the design tokens and the lifecycle words are in it; the rest of
+     the root tests are not) and the journeys of the integrated harness, which a change of a screen can break, are found only
+     by these: run 5 found five such breakages (two root guards and three steps of journeys) only in its final run.
    - The record. A target's record moves only when every test chosen for it passed on a tree that did not change while
      they ran, so a failing test keeps being chosen until it passes. It lives below `node_modules/.cache`, and
      `--forget` drops it.
@@ -418,8 +464,8 @@ no check, retries nothing, shards nothing and gives no timeout more time. Neithe
    is a diagnosis and not a gate: the parts that passed did so on another tree. Fix, run the precheck, run a new gate. A
    gate that ended `UNSETTLED`, was stopped or would not start has not run: say so, and run it again.
 8. **CI is the parallel gate.** [ci.yml](.github/workflows/ci.yml) runs the same commands as parallel jobs on clean
-   machines, the HTTPS run included (in two jobs, a shard of its runs in each, and the browser tests in a job for each shard
-   of each engine, which together run every test once), and is the quickest complete run. A pull request runs the Chromium
+   machines, the HTTPS run included (in three jobs, a shard of its runs in each), the database tests (in a job for each shard) and the
+   browser tests (in a job for each shard of each engine, which together run every test once), and is the quickest complete run. A pull request runs the Chromium
    shards of the browser tests and a push to main, the nightly run and a manual run run those of all three engines
    ([what CI runs when](#what-ci-runs-when)). It needs a push, which the owner authorizes: do not push to get a run unasked.
 

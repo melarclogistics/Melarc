@@ -1,48 +1,52 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { PageHeader } from '../../../components/PageHeader';
-import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
+import {
+  CellLines,
+  NoWrap,
+  RowTitle,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
-import { EmptyState } from '../../../components/ui/empty-state/EmptyState';
 import { Field } from '../../../components/ui/field/Field';
 import { Link } from '../../../components/ui/link/Link';
-import {
-  QueueFilters,
-  QueuePanel,
-  QueueTable,
-} from '../../../components/ui/queue-table/QueueTable';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
-import { Select } from '../../../components/ui/select/Select';
-import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import type { TableColumn } from '../../../components/ui/table/Table';
+import { QueuePager } from '../../../components/ui/templates/QueuePager';
+import {
+  QueueWorkspace,
+  type QueueEmptiness,
+  type QueueResult,
+  type QueueWorkspaceHandle,
+} from '../../../components/ui/templates/QueueWorkspace';
 import { OperationFailure } from '../../../platform/api/api-response';
+import { useActiveHub, useHubScope } from '../../../platform/hub/active-hub';
 import {
   MANIFEST_FILTER_STATES,
   type ManifestFilterState,
-  type ManifestPageView,
   type ManifestView,
 } from '../../../platform/manifest/manifest-shape';
 import { useManifests } from '../../../platform/manifest/use-manifest-queries';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
+import { refusalText } from '../../../platform/problem/capability-words';
+import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
+import { useRefreshQueueSummary } from '../../../platform/queue-summary/use-queue-summary';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { hubNameOf } from '../staff/staff-presentation';
 import { serviceDateText } from '../pickup/pickup-presentation';
-import { MANIFEST_LINKS, requestOfClick, restorePlace } from '../pickup/queue-return';
+import { requestOfClick, restoreQueuePlace } from '../pickup/queue-return';
 import { filtersOf, searchOf, stateOfText } from './manifest-list-filters';
 import { MANIFEST_STATE_MAP } from './manifest-presentation';
-import '../pickup/pickup-pages.css';
-import './manifests-pages.css';
 
 /**
- * What the queue tells of a manifest, made once from the record so that the row and the card cannot tell different things. A list of manifests
- * carries no stops and no rider's name (`listPickupManifests`): whether a rider is assigned is told, and who, on the manifest's own page.
+ * What the list tells of a pickup run, made once from the record so that the row and the card cannot tell different things. A list of manifests
+ * carries no stops and no rider's name (`listPickupManifests`): whether a rider is assigned is told, and who, on the run's own page.
  */
-interface ManifestFacts {
+interface RunFacts {
   readonly id: string;
   readonly code: string;
   readonly href: string;
@@ -69,7 +73,7 @@ function momentsOf(manifest: ManifestView): string {
 function factsOf(
   manifest: ManifestView,
   hubs: readonly { readonly id: string; readonly display_name: string }[],
-): ManifestFacts {
+): RunFacts {
   return {
     id: manifest.id,
     code: manifest.code,
@@ -82,75 +86,51 @@ function factsOf(
   };
 }
 
-const COLUMNS: readonly TableColumn<ManifestFacts>[] = [
+/** The state as a badge, on one line: the column takes its width. */
+function State({ state }: { readonly state: RunFacts['state'] }) {
+  return <StatusBadge status={state} map={MANIFEST_STATE_MAP} />;
+}
+
+/**
+ * The four facts of a pickup run in four columns: the code over the hub (the code is the row's header, and **a link to the run's own page**: a row opens a page and not a panel, so
+ * there is no button over the row, and a keyboard, a middle click and a new tab all use the link), where the run stands, the day it is for, and the rider and how far it has come. **The
+ * rider and how far the run has come are the lesser column** (the Product Owner, 10 November 2026: each list marks its own): where the table's own box is too narrow for the four it is what
+ * goes, and the table does not scroll sideways; a card, under 40rem, shows every fact.
+ */
+const COLUMNS: readonly DataColumn<RunFacts>[] = [
   {
-    key: 'manifest',
-    header: 'Manifest / hub',
+    id: 'run',
+    header: 'Pickup run / hub',
     rowHeader: true,
-    cell: (row) => (
-      <span className="manifest-lines">
-        <span className="manifest-nowrap">
-          <Link to={row.href} data-manifest-id={row.id}>
-            {row.code}
-          </Link>
-        </span>
-        <span className="manifest-support">{row.hub}</span>
-      </span>
-    ),
+    cell: (row) => <RowTitle code={row.code} name={row.hub} to={row.href} />,
   },
+  { id: 'state', header: 'State', cell: (row) => <State state={row.state} /> },
+  { id: 'date', header: 'Service date', cell: (row) => <NoWrap>{row.serviceDate}</NoWrap> },
   {
-    key: 'state',
-    header: 'State',
-    cell: (row) => <StatusBadge status={row.state} map={MANIFEST_STATE_MAP} />,
-  },
-  {
-    key: 'date',
-    header: 'Service date',
-    cell: (row) => <span className="manifest-nowrap">{row.serviceDate}</span>,
-  },
-  {
-    key: 'rider',
+    id: 'rider',
     header: 'Rider / progress',
-    cell: (row) => (
-      <span className="manifest-lines">
-        <span>{row.rider}</span>
-        <span className="manifest-support">{row.moments}</span>
-      </span>
-    ),
+    priority: 2,
+    cell: (row) => <CellLines first={row.rider} second={row.moments} />,
   },
 ];
 
-function ManifestCard({ facts }: { readonly facts: ManifestFacts }) {
+/**
+ * A pickup run as a card, for a room too narrow for the columns: the state, then the facts in the order a person reads them, each a label and its value (`CardFacts`). It holds **no control**:
+ * its code is the card's heading, outside the card, and the link to the run.
+ */
+function RunCard({ facts }: { readonly facts: RunFacts }) {
   return (
-    <>
-      <div className="manifest-card__head">
-        <h2 className="manifest-card__title">
-          <Link to={facts.href} data-manifest-id={facts.id}>
-            {facts.code}
-          </Link>
-        </h2>
-        <StatusBadge status={facts.state} map={MANIFEST_STATE_MAP} />
-      </div>
-      <dl className="manifest-card__facts">
-        <div className="manifest-card__fact">
-          <dt>Service date</dt>
-          <dd>{facts.serviceDate}</dd>
-        </div>
-        <div className="manifest-card__fact">
-          <dt>Hub</dt>
-          <dd>{facts.hub}</dd>
-        </div>
-        <div className="manifest-card__fact">
-          <dt>Rider / progress</dt>
-          <dd>
-            <span className="manifest-lines">
-              <span>{facts.rider}</span>
-              <span className="manifest-support">{facts.moments}</span>
-            </span>
-          </dd>
-        </div>
-      </dl>
-    </>
+    <CardFacts
+      head={<State state={facts.state} />}
+      facts={[
+        { label: 'Service date', value: facts.serviceDate },
+        { label: 'Hub', value: facts.hub },
+        {
+          label: 'Rider / progress',
+          value: <CellLines first={facts.rider} second={facts.moments} />,
+        },
+      ]}
+    />
   );
 }
 
@@ -177,41 +157,57 @@ const refusedParameter = (error: unknown, name: string): boolean =>
       violation.in === 'query' && (violation.pointer === `/${name}` || violation.pointer === name),
   );
 
+/** The view that shows every state. */
+const ALL_VIEW = 'all';
+
 /**
- * Manifests (surfaces/ops-portal.md section 7, `/manifests`; S1.25): the manifests of the session's hubs, **never filtered by vendor** (a
- * manifest spans vendors), as the server lists them: oldest first, narrowed by the two filters the operation has, `state` and `service_date`
- * (OB-S1-25), each exact and combined as "and". **The server filters**: the screen asks, in the address and in the request, and draws what comes
- * back whole, because the part of a page that matched would pass for the whole. A manifest is named by its operational code, never by its id;
- * its state is a labelled badge.
+ * A refusal in the words of the screen, never a permission key or a role (PRODUCT_DESIGN_DIRECTION section 6.5): what the account cannot do, or, for a hub it does not work in, that.
+ */
+function refusalWords(problem: Problem): string {
+  return refusalText(problem.forbidden, 'pickup.read', {
+    doing: 'see pickup runs',
+    of: 'pickup runs',
+  });
+}
+
+/**
+ * Pickup runs (surfaces/ops-portal.md section 7, `/manifests`; S1.25; redesign step R7a): the manifests of the session's hubs, **never filtered by vendor** (a pickup run spans vendors), as the
+ * server lists them: oldest first, narrowed by the two filters the operation has, `state` and `service_date` (OB-S1-25), each exact and combined as "and", drawn by the queue workspace
+ * template. The views are the states a run moves through, the filter row holds the service date, and a run opens on a page of its own (its code is a link). **The server filters**: the screen
+ * asks, in the address and in the request, and draws what comes back whole, because the part of a page that matched would pass for the whole. A run is named by its operational code, never by
+ * its id; its state is a labelled badge.
  *
- * It adapts the pickup queue's filters (COMPONENT_PATTERNS section 22f): a named group of the screen's own controls above the rows, the chosen
- * values in the address (so that a reload keeps them), a change of filter starting again at the first page, and an empty list told apart: **no
- * manifests at all** is not **a filter that hides everything**, which says what was filtered and offers to take it off. A failed read stays a
- * failure, with the filters in place.
+ * It follows the pickup queue's filters (COMPONENT_PATTERNS section 22f): the chosen values are in the address (so that a reload keeps them), a change of filter starts again at the first page,
+ * and an empty list is told apart: **no pickup runs at all** is not **a filter that hides everything**, which says what was filtered and offers to take it off. A failed read stays a failure,
+ * with the filters in place.
  *
- * The page of results is **a place the officer can come back to**, for one visit to a manifest and no longer, **on the pickup queue's terms**
- * (the same memory, `platform/pickup/queue-continuity.ts`, held for this list apart from the queue's): opening a manifest leaves where they were
- * (the filters stay in the address; the cursors of the pages visited, the position and the manifest stay in the application's memory), and the
- * browser's Back or the manifest's link back brings them to that page, **read again** from the server, with focus on the manifest if it is still
- * there. Any other way to the list starts at its first page.
+ * The page of results is **a place the officer can come back to**, for one visit to a pickup run and no longer, **on the pickup queue's terms** (the same memory,
+ * `platform/pickup/queue-continuity.ts`, held for this list apart from the queue's): opening a run leaves where they were (the filters stay in the address; the cursors of the pages visited,
+ * the position and the run stay in the application's memory), and the browser's Back or the run's link back brings them to that page, **read again** from the server, with focus on the run if
+ * it is still there. Any other way to the list starts at its first page.
  */
 export function ManifestListPage() {
   const me = useSignedInSession();
   const [params, setParams] = useSearchParams();
   const { state, date } = filtersOf(params);
-  const signature = `${state ?? ''}|${date ?? ''}`;
+  // The hub the switcher chose (task C3) is a filter of the list like the other two, so it is part of the signature.
+  const hubId = useActiveHub();
+  const { hub, showAllHubs } = useHubScope();
+  const signature = `${state ?? ''}|${date ?? ''}|${hubId ?? ''}`;
   // Read once, as a state starts, from a memory that a render (or a render the development build runs twice) cannot use up.
   const continuity = useQueueContinuity('manifests');
   const [arrival] = useState(() => continuity.returningTo(signature));
-  // A page token belongs to the filters it was made with: a change of either starts again at the first page.
+  // A page token belongs to the filters it was made with: a change of any of them starts again at the first page.
   const paging = useQueuePaging(signature, arrival?.tokens);
   const list = useManifests({
     ...(state === undefined ? {} : { state }),
     ...(date === undefined ? {} : { serviceDate: date }),
+    ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
   });
-  const queue = useRef<HTMLDivElement>(null);
+  const refreshSummary = useRefreshQueueSummary();
+  const workspace = useRef<QueueWorkspaceHandle>(null);
   // What the date field holds while a date is being typed, for the filter it was typed over: the field must keep what the person typed even
   // when it is not yet a date worth asking for.
   const [typed, setTyped] = useState<{ over: string | undefined; value: string | null }>({
@@ -220,6 +216,7 @@ export function ManifestListPage() {
   });
   const dateShown = typed.over === date ? typed.value : (date ?? null);
   const [interacted, setInteracted] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   // A place is for one arrival at the list: whether this one used it or it was not for this one, it is let go of once the list is on screen.
   const { discard } = continuity;
@@ -228,7 +225,7 @@ export function ManifestListPage() {
   }, [discard]);
 
   // Once the page that was left has been read again and drawn, the officer gets their position back, and focus where nobody has put it (the
-  // manifest they opened, else the results). Only if the page is still the one they came back to: not after a change of filter or of page.
+  // run they opened, else the results). Only if the page is still the one they came back to: not after a change of filter or of page.
   const restored = useRef(arrival === undefined);
   const settled = !list.isFetching && (list.isSuccess || list.isError);
   const stillThere =
@@ -238,20 +235,34 @@ export function ManifestListPage() {
   useEffect(() => {
     if (arrival === undefined || restored.current || !settled) return;
     restored.current = true;
-    if (stillThere && queue.current !== null) restorePlace(queue.current, arrival, MANIFEST_LINKS);
+    if (stillThere && workspace.current !== null) restoreQueuePlace(workspace.current, arrival);
   }, [arrival, settled, stillThere]);
 
-  // A move to a page with nothing to draw leaves the pager button it was made from gone: focus goes to the message, once.
+  // A move to another page leaves the pager button it was made from gone (while the next page loads), and focus would fall to the top of the document: once the page has been
+  // read, whatever it holds (rows, nothing, a failure), focus goes to the results, once.
   const { takeFocus } = paging;
-  const hasRows = list.isSuccess && list.data.items.length > 0;
   useEffect(() => {
-    if (!settled || hasRows || !takeFocus()) return;
-    queue.current?.querySelector<HTMLElement>('.ui-read-state')?.focus({ preventScroll: true });
-  }, [settled, hasRows, takeFocus]);
+    if (!settled || !takeFocus()) return;
+    workspace.current?.focusResults();
+  }, [settled, list.dataUpdatedAt, takeFocus]);
 
-  /** Opening a manifest leaves where the officer was, for the visit: a plain click on its link, which is a move in this tab. */
+  const hubs = me?.session.authorized_hubs;
+  const rows = useMemo(
+    () =>
+      list.isSuccess && hubs !== undefined
+        ? list.data.items.map((manifest) => factsOf(manifest, hubs))
+        : [],
+    [list.isSuccess, list.data, hubs],
+  );
+
+  /** Opening a run leaves where the officer was, for the visit: a plain click on its link, which is a move in this tab. */
   function leavePlace(event: MouseEvent<HTMLDivElement>): void {
-    const manifestId = requestOfClick(event, MANIFEST_LINKS);
+    const manifestId = requestOfClick(event, {
+      selector: 'a[href]',
+      key: 'href',
+      // The link of a run is in its row or its card, which carry the run's id.
+      idOf: (link) => link.closest<HTMLElement>('[data-row-id]')?.dataset.rowId,
+    });
     if (manifestId === undefined) return;
     continuity.leave({
       signature,
@@ -271,8 +282,8 @@ export function ManifestListPage() {
     paging.toFirstPage();
   }
 
-  if (me === undefined) return null;
-  const checked =
+  if (me === undefined || hubs === undefined) return null;
+  const updatedAt =
     list.dataUpdatedAt > 0 ? formatInstant(new Date(list.dataUpdatedAt).toISOString()) : undefined;
   // The server will not open a saved page: told as that, in its own words, with the way out that works (a retry would fail alike).
   const cursorRefused = refusedParameter(list.error, 'page_token');
@@ -295,97 +306,123 @@ export function ManifestListPage() {
   }
 
   function clearEverything(): void {
-    continuity.discard();
     setTyped({ over: undefined, value: null });
-    setInteracted(true);
-    setParams(new URLSearchParams(), { replace: true });
+    change({ state: '', date: '' });
+  }
+
+  function refreshPage(): void {
+    // The counts beside the menu are read again with the page (task C1, `AC-QSUM-09`). One read at a time: a press while a read is under way is that read's.
+    void refreshSummary();
+    void list.refetch({ cancelRefetch: false });
   }
 
   const filtering = state !== undefined || date !== undefined;
-  // A page after the first can hold nothing without the list being empty (manifests move between reads): it says so, and does not go looking
-  // through the earlier pages on its own.
-  const empty =
-    paging.page > 1 ? (
-      <EmptyState
-        kind="filtered"
-        heading="No manifests on this page"
-        announce
-        action={
-          <Button type="button" variant="secondary" onClick={firstPage}>
-            Back to first page
-          </Button>
-        }
-      >
-        Page {paging.page} has no manifests now. Earlier pages may still have some.
-      </EmptyState>
-    ) : filtering ? (
-      <EmptyState
-        kind="filtered"
-        heading="No manifests match"
-        announce={interacted}
-        action={
-          <Button type="button" variant="secondary" onClick={clearEverything}>
-            Show every manifest
-          </Button>
-        }
-      >
-        {`Nothing fits ${describeFilters(state, date)}. Show every manifest to start again.`}
-      </EmptyState>
-    ) : (
-      <EmptyState kind="none" heading="No manifests yet" announce={interacted}>
-        A manifest is built from the pool of confirmed pickups. It appears here once it is made.
-      </EmptyState>
-    );
+
+  const result: QueueResult<RunFacts> = (() => {
+    // Any read of the page, a refresh asked for, a page or a filter, is not drawn as if the earlier rows answered it: the loading treatment takes their place, and a failure takes their place if it fails.
+    if (list.status === 'pending' || (list.isFetching && list.status === 'success')) {
+      return { status: 'loading' };
+    }
+    if (list.status === 'error') {
+      const problem = problemOf(list.error, {
+        operation: 'listPickupManifests',
+        ...(cursorRefused ? { context: 'cursor' } : {}),
+      });
+      // A session that has ended or an answer that is stale is the session boundary's, which has already taken the person away.
+      if (problem.kind === 'session-ended' || problem.kind === 'stale') {
+        return { status: 'loading' };
+      }
+      const message =
+        problem.kind === 'forbidden'
+          ? refusalWords(problem)
+          : problem.reference === undefined
+            ? problem.message
+            : `${problem.message} Reference: ${problem.reference}`;
+      if (cursorRefused) {
+        return { status: 'error', message, onRetry: firstPage, retryLabel: 'Back to first page' };
+      }
+      const retryable = problem.kind === 'unavailable' || problem.kind === 'rate-limited';
+      return {
+        status: 'error',
+        message,
+        ...(retryable
+          ? {
+              onRetry: () => {
+                void list.refetch();
+              },
+            }
+          : {}),
+      };
+    }
+    return { status: 'ready', rows };
+  })();
+
+  const emptiness = {
+    noun: 'pickup runs',
+    none: 'A pickup run is built from the pool of confirmed pickups. It appears here once it is made.',
+    announce: interacted,
+    // A page after the first can hold nothing without the list being empty (pickup runs move between reads): the template says so, as every list does, and does not go looking through the
+    // earlier pages on its own.
+    laterPage: { page: paging.page, onFirstPage: firstPage },
+    // A chosen hub is a filter too (audit B1): the list is empty at this hub, which says nothing of the others.
+    ...(hub === undefined ? {} : { hub: { name: hub.display_name, onShowAllHubs: showAllHubs } }),
+  };
+  const empty: QueueEmptiness = filtering
+    ? {
+        ...emptiness,
+        filtered: true,
+        onClearFilters: clearEverything,
+        clearLabel: 'Show every pickup run',
+        filteredText: `Nothing fits ${describeFilters(state, date)}. Show every pickup run to start again.`,
+      }
+    : emptiness;
 
   return (
     <>
-      <title>Manifests · Melarc Ops Portal</title>
-      <PageHeader
-        title="Manifests"
-        description="Pickup runs at your authorized hubs."
-        {...(me.holds('pickup.manifest.create')
-          ? { actions: <ButtonLink to="/manifests/new">Build a manifest</ButtonLink> }
-          : {})}
-      />
-      <div className="manifest-queue" ref={queue} onClickCapture={leavePlace}>
-        <QueuePanel>
-          <QueueFilters
-            label="Filter the manifests"
-            aside={
-              <div className="pickup-freshness">
-                <p className="pickup-freshness__text">
-                  Listed oldest first, as the server returns them.
-                  {checked === undefined ? '' : ` Last checked ${checked}.`}
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  loading={list.isFetching}
-                  onClick={() => {
-                    void list.refetch({ cancelRefetch: false });
-                  }}
-                >
-                  Refresh page
-                </Button>
-              </div>
-            }
-          >
-            <Field label="State">
-              <Select
-                value={state ?? ''}
-                onChange={(event) => {
-                  change({ state: event.target.value });
-                }}
-              >
-                <option value="">Every state</option>
-                {MANIFEST_FILTER_STATES.map((key) => (
-                  <option key={key} value={key}>
-                    {MANIFEST_STATE_MAP[key].label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="pickup-date-filter">
+      <title>Pickup runs · Melarc Ops Portal</title>
+      <div onClickCapture={leavePlace}>
+        <QueueWorkspace<RunFacts>
+          ref={workspace}
+          header={{
+            title: 'Pickup runs',
+            description: 'Runs built from confirmed pickups at your authorized hubs.',
+            freshness: {
+              state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
+              ...(updatedAt === undefined ? {} : { updatedAt }),
+              onRefresh: refreshPage,
+            },
+            ...(me.holds('pickup.manifest.create')
+              ? { actions: <ButtonLink to="/manifests/new">Build a pickup run</ButtonLink> }
+              : {}),
+          }}
+          views={{
+            label: 'Views of the pickup runs',
+            value: state ?? ALL_VIEW,
+            onValueChange: (id) => {
+              change({ state: stateOfText(id) ?? '' });
+            },
+            tabs: [
+              { id: ALL_VIEW, label: 'All' },
+              ...MANIFEST_FILTER_STATES.map((key) => ({
+                id: key,
+                label: MANIFEST_STATE_MAP[key].label,
+              })),
+            ],
+          }}
+          filters={{
+            label: 'Filter the pickup runs',
+            chips:
+              date === undefined
+                ? []
+                : [{ id: 'date', label: `Service date: ${serviceDateText(date)}` }],
+            onRemove: () => {
+              setTyped({ over: undefined, value: null });
+              change({ date: '' });
+            },
+            sortLabel: 'Oldest first',
+            filterOpen,
+            onFilterOpenChange: setFilterOpen,
+            filterPanel: (
               <Field label="Service date" help="Day, month and year.">
                 <DatePicker
                   value={dateShown}
@@ -395,69 +432,47 @@ export function ManifestListPage() {
                       if (date !== undefined) change({ date: '' });
                     } else if (isFinishedDate(next)) {
                       change({ date: next });
+                      setFilterOpen(false);
                     }
                   }}
                 />
               </Field>
-              {date === undefined ? null : (
-                <div className="pickup-date-filter__clear">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setTyped({ over: undefined, value: null });
-                      change({ date: '' });
-                    }}
-                  >
-                    Every service date
-                  </Button>
-                </div>
-              )}
-            </div>
-          </QueueFilters>
-          <ReadState<ManifestPageView>
-            query={
-              list.isFetching && list.status === 'success'
-                ? {
-                    status: 'pending',
-                    data: undefined,
-                    error: null,
-                    refetch: list.refetch,
-                    isFetching: true,
+            ),
+          }}
+          result={result}
+          empty={empty}
+          table={{
+            label: 'Pickup runs',
+            columns: COLUMNS,
+            rowId: (row) => row.id,
+            density: 'two-line',
+            card: (row) => <RunCard facts={row} />,
+            // The rows open the run's own page (the link of the first line), so the lesser columns may go: their facts are in the record.
+            opens: 'record',
+            // The code is the heading of each card, for heading navigation, and the link to the run.
+            cardTitle: (row) => (
+              <Link to={row.href}>
+                <OperationalCode>{row.code}</OperationalCode>
+              </Link>
+            ),
+            // The pager is in the page whatever the table is doing, so that its status region is the same one while a page is read (the review of 499399c).
+            footer: (
+              <QueuePager
+                label="Pages of pickup runs"
+                noun={{ one: 'pickup run', other: 'pickup runs' }}
+                shown={result.status === 'ready' && list.isSuccess ? rows.length : undefined}
+                page={paging.page}
+                hasNext={list.isSuccess && list.data.nextPageToken !== null}
+                onNext={() => {
+                  if (list.isSuccess && list.data.nextPageToken !== null) {
+                    paging.toNextPage(list.data.nextPageToken);
                   }
-                : list
-            }
-            isEmpty={(data) => data.items.length === 0}
-            empty={empty}
-            loadingLabel="Loading the manifests…"
-            skeleton={<Skeleton lines={5} />}
-            permission="pickup.read"
-            operation="listPickupManifests"
-            {...(cursorRefused
-              ? {
-                  context: 'cursor',
-                  recovery: (
-                    <Button type="button" variant="secondary" onClick={firstPage}>
-                      Back to first page
-                    </Button>
-                  ),
-                }
-              : {})}
-          >
-            {(data) => (
-              <QueueTable
-                caption="Manifests"
-                columns={COLUMNS}
-                rows={data.items.map((manifest) => factsOf(manifest, me.session.authorized_hubs))}
-                rowKey={(row) => row.id}
-                noun={{ one: 'manifest', other: 'manifests' }}
-                paging={paging}
-                nextPageToken={data.nextPageToken}
-                card={(row) => <ManifestCard facts={row} />}
+                }}
+                onPrevious={paging.toPreviousPage}
               />
-            )}
-          </ReadState>
-        </QueuePanel>
+            ),
+          }}
+        />
       </div>
     </>
   );

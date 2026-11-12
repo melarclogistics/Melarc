@@ -1,5 +1,8 @@
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
+import { freezeClock } from './clock';
+import { answerQueueSummary } from './queue-summary';
+
 /**
  * What the browser tests of the pickup screens (S1.19) put in place of the API: a small, stateful stand-in for the operations the five screens
  * use. A booking is created `PENDING` with an estimate; a confirmation needs the version read and moves the request; a cancellation needs a
@@ -284,10 +287,12 @@ function answer(route: Route, state: PickupApi, call: Call): Promise<void> {
     const stateFilter = url.searchParams.get('state');
     const date = url.searchParams.get('service_date');
     const exceptionState = url.searchParams.get('one_package_exception_state');
+    const cutoffState = url.searchParams.get('cutoff_exception_state');
     const matching = w.requests
       .filter((row) => stateFilter === null || row.state === stateFilter)
       .filter((row) => date === null || row.scheduled_service_date === date)
       .filter((row) => exceptionState === null || row.exception?.state === exceptionState)
+      .filter((row) => cutoffState === null || row.cutoff_exception_state === cutoffState)
       .map((row) => wire(row));
     const start = Number(url.searchParams.get('page_token') ?? '0');
     const size = w.pageSize ?? matching.length;
@@ -445,7 +450,10 @@ export async function stubPickupApi(
   initial: World = world(),
 ): Promise<PickupApi> {
   const state: PickupApi = { world: initial, calls: [], unexpected: [] };
+  // The clock of the world: "today or later" and "last checked" are the world's, whatever day the machine thinks it is.
+  await freezeClock(target);
   await target.route('**/api/v1/**', async (route) => {
+    if (await answerQueueSummary(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const headers = request.headers();

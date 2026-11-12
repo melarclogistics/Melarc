@@ -39,9 +39,16 @@ export interface PickupRequestRow {
   readonly attemptExtensionId?: string;
   /** The moment Ops escalated the request: only a request that was confirmed has one. */
   readonly escalatedAt?: Date;
+  /** The moment a confirmed request was confirmed (a fixed one when left out), for a test of which request has waited the longest. */
+  readonly confirmedAt?: Date;
   readonly onePackageExceptionId?: string;
   /** The request this one replaces (its chain), which must exist. */
   readonly replacesRequestId?: string;
+  /** Facts a search is arranged by (the global lookup); left out, 'Fixture Sender', +233200000001, no second phone, and the moment of the insert. */
+  readonly senderName?: string;
+  readonly primaryPhone?: string;
+  readonly secondaryPhone?: string;
+  readonly createdAt?: Date;
 }
 
 /** The actor of arranged rows: nobody a test signs in as. */
@@ -78,9 +85,10 @@ export async function insertPickupRequest(
     `insert into pickup_request (id, code, vendor_organization_id, ad_hoc_sender_id, sender_name, responsible_hub_id, pickup_intent, state,
                                  declared_package_count, resolved_pickup_location, primary_phone, scheduled_service_date,
                                  default_payer_intent, created_by, confirmed_at, confirmed_by, cancelled_at, cancelled_by,
-                                 cutoff_exception_state, attempt_number, one_package_exception_id, replaces_request_id, escalated_at)
-     values ($1, $2, $3, $4, 'Fixture Sender', $5, $6, $7, $8, '{"address":"Fixture shop"}'::jsonb, '+233200000001', $9, 'RECIPIENT_PAYS', $10,
-             $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+                                 cutoff_exception_state, attempt_number, one_package_exception_id, replaces_request_id, escalated_at,
+                                 secondary_phone, created_at)
+     values ($1, $2, $3, $4, $20, $5, $6, $7, $8, '{"address":"Fixture shop"}'::jsonb, $21, $9, 'RECIPIENT_PAYS', $10,
+             $11, $12, $13, $14, $15, $16, $17, $18, $19, $22, coalesce($23::timestamptz, now()))`,
     [
       row.id,
       row.code,
@@ -92,7 +100,7 @@ export async function insertPickupRequest(
       row.packages,
       row.serviceDate,
       row.createdBy,
-      confirmed || cancelled ? new Date('2026-11-02T09:00:00Z') : null,
+      confirmed || cancelled ? (row.confirmedAt ?? new Date('2026-11-02T09:00:00Z')) : null,
       confirmed || cancelled ? row.createdBy : null,
       cancelled ? new Date('2026-11-02T10:00:00Z') : null,
       cancelled ? row.createdBy : null,
@@ -101,6 +109,10 @@ export async function insertPickupRequest(
       row.onePackageExceptionId ?? null,
       row.replacesRequestId ?? null,
       row.escalatedAt ?? null,
+      row.senderName ?? 'Fixture Sender',
+      row.primaryPhone ?? '+233200000001',
+      row.secondaryPhone ?? null,
+      row.createdAt ?? null,
     ],
   );
   if (row.attemptExtensionId !== undefined) {
@@ -297,6 +309,8 @@ export interface ExceptionRow {
     readonly setting_key: string;
     readonly effective_version: string;
   } | null;
+  /** The moment it was asked for (the database's clock when left out): a test of the age of a queue arranges an old one. */
+  readonly requestedAt?: Date;
 }
 
 /** A requested one-package exception for the request, with a recipient (section 21.1) and the note the approver reads. */
@@ -330,8 +344,8 @@ export async function insertOnePackageException(
   const decided = row.state !== 'REQUESTED';
   await client.query(
     `insert into one_package_exception (id, pickup_request_id, state, requested_by, approved_by, decided_at, note, recipient_name,
-                                        recipient_phone, recipient_location, single_package_fee_snapshot)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)`,
+                                        recipient_phone, recipient_location, single_package_fee_snapshot, requested_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, coalesce($12::timestamptz, now()))`,
     [
       row.id,
       row.pickupRequestId,
@@ -344,6 +358,7 @@ export async function insertOnePackageException(
       row.recipientPhone,
       JSON.stringify(row.recipientLocation),
       row.feeSnapshot === null ? null : JSON.stringify(row.feeSnapshot),
+      row.requestedAt ?? null,
     ],
   );
   return row;

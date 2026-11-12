@@ -5,10 +5,11 @@
  * while it ran, costs the hour twice. This script holds the order and the conditions that avoid that, so that nobody has to remember them.
  *
  *   node scripts/gate.ts precheck [--uncached]
- *       The cheap checks of CI (migration journal, generated client, format, types, build, contract, lint) in parallel lanes, with the tool
- *       caches on: prettier and ESLint cache by content below node_modules/.cache/melarc-precheck, and turbo's task cache is used. Warm it
- *       takes seconds when little changed, and cold a few minutes. **ESLint's cache is the one place it can say less than the gate**: a file
- *       it has already read is not read again, so a type changed elsewhere can hide a finding until the gate's uncached lint. Run it after
+ *       The cheap checks of CI (migration journal, the migration files main has, generated client, format, types, build, contract, lint) in parallel lanes, with the tool
+ *       caches on: prettier caches by content below node_modules/.cache/melarc-precheck, and turbo's task cache is used (it serves lint, one task for each
+ *       workspace). Warm it takes seconds when little changed, and cold a few minutes. **Turbo's cache is the one place it can say less than the gate**: a
+ *       workspace whose files and whose dependencies' files did not change is not read again, so a rule that reads something else can hide a finding
+ *       until the gate's uncached lint. Run it after
  *       every change to a contract, a migration, a schema or a document, and before any gate. `--uncached` runs the real commands. It will
  *       not run while a gate runs: it would starve the gate and rebuild what the gate's stages read.
  *
@@ -75,6 +76,11 @@ export interface Stage {
   readonly command: string;
   /** A stage that must have passed for this one to mean anything (the contract check reads the build). */
   readonly needs?: string;
+  /**
+   * An exit of this check that says it could not decide (the migration guard with no main to compare with): **the precheck** shows it as warned, with the words of its log in
+   * the summary, and goes on. The gate never reads it: for the gate every exit but 0 is a failure, as it is in CI (run 5, Stage 1.4).
+   */
+  readonly warnOnExit?: number;
 }
 
 /** Where `precheck` keeps the caches of prettier and ESLint: below `node_modules`, which Git ignores and nothing ships. */
@@ -91,11 +97,21 @@ interface Check {
   readonly needs?: string;
   /** The lane of `precheck` it runs in: lanes run in parallel, the checks of one lane in order. */
   readonly lane: string;
+  /** The exit that means "could not decide", which `precheck` alone shows as warned (see `Stage`). */
+  readonly warnOnExit?: number;
 }
 
 /** Cheapest first. These are the commands of CI, word for word: the gate and the precheck add nothing to what they prove. */
 const CHECKS: readonly Check[] = [
   { name: 'dbcheck', command: 'pnpm --filter @melarc/api run db:check', lane: 'dbcheck' },
+  // A migration that main has is never changed (task A3.3 of the audit follow-up): the guard holds the working tree to the merge base with main. Its exit 2 means it could not
+  // decide (no main to compare with): the precheck shows it as warned and goes on, and the gate and CI fail on it (run 5, Stage 1.4).
+  {
+    name: 'migrations',
+    command: 'node scripts/migration-immutability.ts',
+    lane: 'dbcheck',
+    warnOnExit: 2,
+  },
   { name: 'client', command: 'pnpm run api-client:check', lane: 'client' },
   {
     name: 'format',
@@ -106,14 +122,52 @@ const CHECKS: readonly Check[] = [
   { name: 'typecheck', command: 'pnpm run typecheck', lane: 'build' },
   { name: 'build', command: 'pnpm run build', lane: 'build' },
   { name: 'contract', command: 'pnpm run contract:check', needs: 'build', lane: 'build' },
-  { name: 'lint', command: 'pnpm run lint', cache: CACHE_FLAGS('eslint'), lane: 'lint' },
+  // Lint is one task for each workspace through turbo (run 4, Stage 1, item 6): its cache is turbo's, and the precheck adds no ESLint flag.
+  { name: 'lint', command: 'pnpm run lint', lane: 'lint' },
 ];
 
 /** The dependency audit: a test stage of the gate, and a lane of the precheck, since it takes seconds (the owner's decision of 27 October 2026). */
 const AUDIT = 'pnpm audit --audit-level high';
 
-/** What CI runs that this script does not, and why: the HTTPS run makes a certificate authority and refuses to run on a developer machine. */
-export const CI_ONLY_COMMANDS: readonly string[] = ['pnpm run test:e2e:https'];
+/**
+ * The root guards that read only documents, styles and manifests (run 6, Stage 5.3): a lane of the precheck and no stage of the gate (the gate's unit stage runs every root test).
+ * They are the tests that a document, a stylesheet or a manifest breaks (the design tokens, the lifecycle words of the component patterns, the links between documents, the agent
+ * documents), which the precheck, running no test, did not see until the final run of a task: run 5 found two of them only there. Each reads files, takes seconds and starts no
+ * process but Git's; `gate.test.ts` holds the list to that (every file exists and is run by `test:root`) and to being the lane. A guard that needs a browser, a build, a database, a
+ * JDK, a walk of the whole tree or more than a few seconds is not in it; the affected run's root target is what runs those (DEVELOPMENT.md, step 4). **One exception, by the
+ * Product Owner (run 7, Stage 3.6): `lint-coverage.test.ts`**, which puts every tracked source file to ESLint's own API (is it linted by anything?) and is the guard that a
+ * new folder of code, a changed ignore or a workspace without a lint script breaks, none of which the precheck saw until the final run of a task. It takes about 5 seconds alone and
+ * adds about half a second to the lane, which Node runs side by side (measured on 11 November 2026: the lane 7.6 to 10.6 seconds, 8.0 at the median; with it 8.1 to 8.8, 8.5 at the median).
+ */
+export const ROOT_GUARDS: readonly string[] = [
+  'scripts/design-tokens.test.ts',
+  'scripts/design-lifecycle.test.ts',
+  'scripts/design-contrast.test.ts',
+  'scripts/markdown-links.test.ts',
+  'scripts/agent-docs.test.ts',
+  'scripts/local-setup.test.ts',
+  'scripts/dependency-policy.test.ts',
+  'scripts/workspace-pins.test.ts',
+  'scripts/turbo-config.test.ts',
+  'scripts/security-matrix-rows.test.ts',
+  'scripts/shadcn-wiring.test.ts',
+  'scripts/repository-shape.test.ts',
+  'scripts/test-inventory.test.ts',
+  'scripts/gitignore.test.ts',
+  'scripts/lint-coverage.test.ts',
+];
+
+/** The command of the lane: Node's own runner over the guards, as `test:root` runs them. */
+export const ROOT_GUARDS_COMMAND = `node --test ${ROOT_GUARDS.join(' ')}`;
+
+/**
+ * What CI runs that this script does not, and why: the HTTPS run makes a certificate authority and refuses to run on a developer machine, and the
+ * plan of the run (task CI.2) asks GitHub whether the nightly run has anything to test, which only a run of the workflow has to decide.
+ */
+export const CI_ONLY_COMMANDS: readonly string[] = [
+  'pnpm run test:e2e:https',
+  'node scripts/ci-plan.ts',
+];
 
 /** The stages of the gate, in order: every cheap check, then the tests. The unit stage is the profile's. */
 export function gateStages(profile: Profile): Stage[] {
@@ -146,10 +200,12 @@ export function precheckLanes(uncached: boolean): Stage[][] {
       kind: 'static',
       command,
       ...(check.needs === undefined ? {} : { needs: check.needs }),
+      ...(check.warnOnExit === undefined ? {} : { warnOnExit: check.warnOnExit }),
     };
     lanes.set(check.lane, [...(lanes.get(check.lane) ?? []), stage]);
   }
   lanes.set('audit', [{ name: 'audit', kind: 'static', command: AUDIT }]);
+  lanes.set('guards', [{ name: 'guards', kind: 'static', command: ROOT_GUARDS_COMMAND }]);
   return [...lanes.values()];
 }
 
@@ -167,12 +223,16 @@ export function childEnvironment(base: NodeJS.ProcessEnv, uncached: boolean): No
  * (`MELARC_TEST_WORKERS`, 4 when unset: at Vitest's default this 16 GB workstation ran out of memory and lost tests that pass alone),
  * and Vitest applies `VITEST_MAX_WORKERS` to every project after its configuration, which would run the API's one-at-a-time projects
  * several at a time (the API's configuration refuses it). Nor does it pass `MELARC_BROWSER_SHARD`, with which the Ops Portal's
- * configuration runs one shard of its browser tests (each job of CI runs one): a gate runs the whole of every stage.
+ * configuration runs one shard of its browser tests (each job of CI runs one): a gate runs the whole of every stage. The same for
+ * `MELARC_DB_SHARD` (one shard of the database tests) and `MELARC_SKIP_TIMING_TESTS` (the job of a pull request leaves out the tests
+ * whose bounds are wall-clock time): a gate runs every file, those included (task CI.2).
  */
 export function gateEnvironment(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = childEnvironment(base, true);
   delete env.VITEST_MAX_WORKERS;
   delete env.MELARC_BROWSER_SHARD;
+  delete env.MELARC_DB_SHARD;
+  delete env.MELARC_SKIP_TIMING_TESTS;
   return env;
 }
 
@@ -935,7 +995,8 @@ export function precheckRefusal(base: string): string | undefined {
 interface CheckResult {
   readonly name: string;
   readonly command: string;
-  readonly status: 'passed' | 'failed' | 'skipped';
+  /** `warned`: the check ended with the exit it marks as "could not decide" (`Stage.warnOnExit`). It does not fail the precheck, and it is not a pass. */
+  readonly status: 'passed' | 'warned' | 'failed' | 'skipped';
   readonly durationMs: number;
   readonly log: string;
   readonly note: string | null;
@@ -983,10 +1044,14 @@ export async function runPrecheck(options: PrecheckOptions): Promise<number> {
         sampleMs: 5000,
       }).result;
       const passed = outcome.spawnError === null && outcome.exitCode === 0;
+      const warned =
+        outcome.spawnError === null &&
+        stage.warnOnExit !== undefined &&
+        outcome.exitCode === stage.warnOnExit;
       results.push({
         name: stage.name,
         command: stage.command,
-        status: passed ? 'passed' : 'failed',
+        status: passed ? 'passed' : warned ? 'warned' : 'failed',
         durationMs: Date.now() - at,
         log,
         note:
@@ -994,7 +1059,9 @@ export async function runPrecheck(options: PrecheckOptions): Promise<number> {
             ? `could not start: ${outcome.spawnError}`
             : passed
               ? null
-              : `exit ${outcome.exitCode === null ? 'by a signal' : String(outcome.exitCode)}`,
+              : warned
+                ? `exit ${String(outcome.exitCode)}: could not decide`
+                : `exit ${outcome.exitCode === null ? 'by a signal' : String(outcome.exitCode)}`,
       });
     }
     return results;
@@ -1019,18 +1086,35 @@ export async function runPrecheck(options: PrecheckOptions): Promise<number> {
       tailOf(result.log, options.tailLines),
     );
   }
+  // A check that could not decide is not a failure of the precheck and is not a pass: its words are in the summary and not only in a log (run 5, Stage 1.4).
+  const warned = all.filter((result) => result.status === 'warned');
+  for (const result of warned) {
+    options.log(
+      '',
+      `--- ${result.name}: warned (${result.note?.split(':')[0] ?? 'it could not decide'}), the end of ${result.log}`,
+      tailOf(result.log, options.tailLines),
+    );
+  }
   if (!options.uncached) {
     options.log(
       '',
       'This was the cached precheck: the gate lints and formats from scratch. A finding hidden by the cache (a type changed in another file) appears there.',
     );
   }
-  options.log(
-    failed.length === 0 && all.every((result) => result.status === 'passed')
-      ? 'Every cheap check passed.'
-      : `${String(all.filter((result) => result.status !== 'passed').length)} of ${String(all.length)} cheap checks did not pass: fix them before a gate. Logs: ${options.dir}`,
+  const notPassed = all.filter(
+    (result) => result.status === 'failed' || result.status === 'skipped',
   );
-  return all.every((result) => result.status === 'passed') ? 0 : 1;
+  const warning = `${String(warned.length)} warned (${warned.map((result) => result.name).join(', ')}): a warning is not a pass, and the gate and CI fail on it`;
+  if (notPassed.length > 0) {
+    options.log(
+      `${String(notPassed.length)} of ${String(all.length)} cheap checks did not pass: fix them before a gate.${warned.length === 0 ? '' : ` ${warning}.`} Logs: ${options.dir}`,
+    );
+  } else if (warned.length > 0) {
+    options.log(`No cheap check failed, and ${warning}: read it above.`);
+  } else {
+    options.log('Every cheap check passed.');
+  }
+  return notPassed.length === 0 ? 0 : 1;
 }
 
 // ------------------------------------------------------------------------------------------------ the command line

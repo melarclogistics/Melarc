@@ -1,0 +1,207 @@
+/*
+ * Tailwind CSS v4 for the shadcn/ui primitives (src/components/primitives/; design/DESIGN_SYSTEM.md section 29). This file adds no colour, size or
+ * space of its own: every value is a reference to a token of tokens.css, which stays the one source (scripts/design-tokens.test.ts holds the
+ * rest of the application to it, and holds this file to the same scan).
+ *
+ * What is imported, and what is not. `@import 'tailwindcss'` is theme + preflight + utilities. The theme (the names of the utilities: the scale
+ * of spacing, the sizes of text) and the utilities are here. **Preflight is not**: it resets headings, lists, links and form controls for the
+ * whole document, and the screens that exist (and base.css, which has its own reset) rely on the browser's defaults for them, so importing it
+ * would change every one of them. The primitives need only part of it, so that part is written below, once, and applies inside a primitive alone.
+ *
+ * Layers. Tailwind's theme, base and utilities are layers, and a layered rule always loses to a rule that is in no layer: tokens.css, base.css and
+ * the stylesheets of components/ui win over a utility, whatever their order or specificity. So Tailwind's own default for `--radius-md` (6px) loses to
+ * the token (8px), and the focus ring of base.css (an outline, which forced-colours mode keeps) wins over the `ring` utilities of a primitive.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+@import 'tw-animate-css';
+
+/*
+ * Tailwind's own palette is cleared. The only colours a utility can name are the ones mapped below, which read the tokens (`transparent`, `current` and
+ * `inherit` are keywords and stay). A class of the palette (`bg-red-500`) then draws nothing and, as it is a typing mistake, is also found by
+ * test/primitives-tokens.test.ts, which says so in words.
+ */
+@theme {
+  --color-*: initial;
+}
+
+/* Only these folders may use a utility. Tailwind's own detection reads every file and turns an ordinary word of a comment or a test into a utility. */
+@source '../components';
+@source '../showcase';
+@source not '../**/*.test.{ts,tsx}';
+
+/*
+ * The dark variant follows the theme the way tokens.css does (design system section 31): by `data-theme="dark"`, or by the system setting unless the
+ * root says `data-theme="light"`. The tokens already switch themselves, so a primitive has almost no `dark:` class of its own; this is for the few that do.
+ */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
+
+/*
+ * The names shadcn's components read, defined as references to the tokens and never as colours. Defined on the root, so that what a reference means
+ * is what the token is in the theme that applies: a theme changes the token, and these follow.
+ */
+@layer base {
+  :root {
+    --background: var(--color-surface-page);
+    --foreground: var(--color-text-primary);
+    --card: var(--color-surface-default);
+    --card-foreground: var(--color-text-primary);
+    --popover: var(--color-surface-raised);
+    --popover-foreground: var(--color-text-primary);
+    --primary: var(--color-action-primary);
+    --primary-foreground: var(--color-action-primary-text);
+    --secondary: var(--color-action-secondary);
+    --secondary-foreground: var(--color-action-secondary-text);
+    --muted: var(--color-surface-subtle);
+    --muted-foreground: var(--color-text-muted);
+    --accent: var(--color-surface-subtle);
+    --accent-foreground: var(--color-text-primary);
+    /* The vermilion of danger, never the brand crimson (design system section 4.7). */
+    --destructive: var(--color-status-danger-foreground);
+    --border: var(--color-border-default);
+    /* The boundary of a control is the control boundary, which reaches 3:1 (design system section 4.6). */
+    --input: var(--color-border-control);
+    --ring: var(--focus-ring);
+    --radius: var(--radius-md);
+    /* The brand crimson: the New button and nothing else (design system section 4.7). */
+    --brand: var(--color-action-new);
+    --brand-foreground: var(--color-action-new-text);
+    /* The sidebar is the shell tokens; its current item is crimson. */
+    --sidebar: var(--color-surface-inverse);
+    --sidebar-foreground: var(--shell-text-muted);
+    --sidebar-primary: var(--shell-active);
+    --sidebar-primary-foreground: var(--shell-active-text);
+    --sidebar-accent: var(--shell-surface-hover);
+    --sidebar-accent-foreground: var(--shell-text);
+    --sidebar-border: var(--shell-border);
+    --sidebar-ring: var(--focus-ring-inverse);
+  }
+}
+
+/* What the utilities are named, and what they read. `inline` makes a utility read the value written here and not a variable of its own. */
+@theme inline {
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* One soft shadow, for what floats (design system section 8): the two sizes a primitive asks for are that one. */
+  --shadow-md: var(--shadow-floating);
+  --shadow-lg: var(--shadow-floating);
+}
+
+/*
+ * The part of Tailwind's preflight that the primitives need, and only where they are. A primitive is a native element (a button, a field, a table,
+ * a list) whose browser style would otherwise show through, and the screens that exist rely on the browser's own style for those same elements, so
+ * the rules below are scoped to what carries a `data-slot` (every primitive does, and so does each part Radix puts in a portal) and to what is
+ * inside it. They are in the base layer, so a utility of a primitive wins over them, and so does every stylesheet of components/ui, which is in no layer.
+ *
+ * Kept from preflight: the border colour of the border token (a `border` with no colour would be the text colour), the neutral button and field
+ * (no border, no fill, the font and colour of the page, no padding), the pointer on a button that can be pressed, an opaque placeholder, a textarea
+ * that grows down, no markers or margins on the list and headings a primitive renders, the link that takes its text's colour, the table that
+ * collapses its borders. Not kept: the reset of every element on the page, the media rules (images and svg stay inline, and an icon in a line of
+ * text stays in the line), the document's font and line height, and the rest of the browser-specific form rules.
+ */
+@layer base {
+  [data-slot],
+  [data-slot] * {
+    border-color: var(--border);
+  }
+
+  :is(button, input, textarea, select)[data-slot],
+  [data-slot] :is(button, input, textarea, select) {
+    margin: 0;
+    padding: 0;
+    border-style: solid;
+    border-width: 0;
+    border-radius: 0;
+    background-color: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    opacity: 1;
+  }
+
+  button[data-slot]:not(:disabled),
+  [data-slot] button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :is(input, textarea)[data-slot]::placeholder,
+  [data-slot] :is(input, textarea)::placeholder {
+    opacity: 1;
+  }
+
+  textarea[data-slot],
+  [data-slot] textarea {
+    resize: vertical;
+  }
+
+  :is(ol, ul, menu)[data-slot] {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  :is(h1, h2, h3, h4, h5, h6)[data-slot] {
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+
+  a[data-slot] {
+    color: inherit;
+    text-decoration: inherit;
+  }
+
+  table[data-slot] {
+    border-collapse: collapse;
+    text-indent: 0;
+  }
+}
+
+/*
+ * base.css gives every paragraph a bottom margin, and a rule that is in no layer beats any rule that is in one, so the base layer above cannot take
+ * it away. The paragraph of a primitive (the description of a dialog, a sheet or a popover) is set back to none here, in no layer.
+ */
+p[data-slot] {
+  margin: 0;
+}

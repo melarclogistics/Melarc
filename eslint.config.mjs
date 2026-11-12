@@ -4,9 +4,10 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
-// What the Ops Portal's application code may not import. The API client is the one door to the API, the icon registry the one door to the
-// icon library, and `components/ui/` the one door to React Aria Components and the date library it uses (DESIGN_SYSTEM section 24a).
-const OPS_RESTRICTED_PATHS = [
+// What the Ops Portal's application code may not import. The API client is the one door to the API, the icon registry (and the shadcn/ui
+// primitives, which are generated source that imports its icons) the door to the icon library, `components/ui/` the one door to Motion, and
+// `components/primitives/` the one door to Radix UI and the libraries beside it (DESIGN_SYSTEM section 24a).
+const API_RESTRICTED_PATHS = [
   'axios',
   'ky',
   'superagent',
@@ -15,48 +16,140 @@ const OPS_RESTRICTED_PATHS = [
   'got',
   'undici',
   'isomorphic-fetch',
-]
-  .map((name) => ({
-    name,
-    message:
-      'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
-  }))
-  .concat([
-    {
-      name: 'lucide-react',
-      message:
-        'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
-    },
-  ]);
-
-const ARIA_MESSAGE =
-  'Behaviour a native element does not give (a calendar, a menu, a combobox) comes from React Aria Components through the components of components/ui only (DESIGN_SYSTEM section 24a): use or add a component there, and take a date as text from <DatePicker>.';
-const ARIA_PATHS = ['react-aria-components', 'react-aria', 'react-stately'].map((name) => ({
+].map((name) => ({
   name,
-  message: ARIA_MESSAGE,
+  message:
+    'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser).',
 }));
+
+const ICON_RESTRICTED_PATH = {
+  name: 'lucide-react',
+  message:
+    'Icons come from the one registry of the design system (components/ui/icon/icons.ts): name an icon by its meaning with <Icon name=... />.',
+};
+const OPS_RESTRICTED_PATHS = [...API_RESTRICTED_PATHS, ICON_RESTRICTED_PATH];
+
+// Radix UI and the libraries beside it under the shadcn/ui primitives: imported by `components/primitives/` and nowhere else. And a primitive is
+// imported by the components of `components/ui/` (and the dev-only showcase) and by nothing else: a page uses the Melarc component.
+const PRIMITIVE_LIBRARIES_MESSAGE =
+  'Radix UI, cmdk, vaul, sonner and react-day-picker are imported by components/primitives only (DESIGN_SYSTEM section 24a): use a component of components/ui, or add the primitive from the official shadcn registry into components/primitives and compose it in components/ui.';
+const PRIMITIVE_LIBRARY_PATHS = ['radix-ui', 'cmdk', 'vaul', 'sonner', 'react-day-picker'].map(
+  (name) => ({ name, message: PRIMITIVE_LIBRARIES_MESSAGE }),
+);
+const PRIMITIVE_LIBRARY_PATTERNS = [
+  {
+    group: ['radix-ui/*', '@radix-ui/*', 'cmdk/*', 'vaul/*', 'sonner/*', 'react-day-picker/*'],
+    message: PRIMITIVE_LIBRARIES_MESSAGE,
+  },
+];
+const PRIMITIVE_FILES_PATTERNS = [
+  {
+    group: [
+      '**/components/primitives',
+      '**/components/primitives/*',
+      '@/components/primitives',
+      '@/components/primitives/*',
+      '**/primitives/*',
+    ],
+    message:
+      'A primitive (components/primitives) is generated source over Radix UI: the components of components/ui import it, and the dev-only showcase. A page uses the Melarc component, never the primitive (DESIGN_SYSTEM section 24a).',
+  },
+];
+
+// Motion (the `motion` package: layout, presence and counted numbers) is imported by the components of `components/ui/` and nowhere else, through
+// `components/ui/motion/motion.ts`, so that a duration and an easing are always the motion tokens and nothing moves under reduced motion
+// (DESIGN_SYSTEM section 9 and 24a).
+const MOTION_MESSAGE =
+  'Motion is imported by the components of components/ui only, through components/ui/motion/motion.ts (DESIGN_SYSTEM section 24a): a page names a component, and a duration or an easing is a motion token.';
+const MOTION_PATHS = ['motion', 'framer-motion', 'motion-dom', 'motion-utils'].map((name) => ({
+  name,
+  message: MOTION_MESSAGE,
+}));
+const MOTION_PATTERNS = [
+  {
+    group: ['motion/*', 'framer-motion/*', 'motion-dom/*', 'motion-utils/*'],
+    message: MOTION_MESSAGE,
+  },
+];
+
+// TanStack Table is imported by the kit's `DataTable` (`components/ui/data-table/`) and nowhere else (task R5.2, M12; COMPONENT_PATTERNS section 37): a screen
+// hands the table its rows and columns, and the table keeps the row model, so that a second, hand-built grid cannot appear beside it.
+const TANSTACK_MESSAGE =
+  'TanStack Table is imported by the DataTable of components/ui/data-table only (COMPONENT_PATTERNS section 37): a screen gives the DataTable its columns and rows and never builds a grid of its own.';
+const TANSTACK_PATHS = ['@tanstack/react-table', '@tanstack/table-core'].map((name) => ({
+  name,
+  message: TANSTACK_MESSAGE,
+}));
+const TANSTACK_PATTERNS = [
+  {
+    group: ['@tanstack/react-table/*', '@tanstack/table-core/*'],
+    message: TANSTACK_MESSAGE,
+  },
+];
+
 // The packages that only the components of the design system (and the icon registry, for lucide-react) may name, by any way of naming them.
 // (A slash cannot be written inside the selector's regular expression, so it is written as its code.)
 const DOOR_PACKAGES =
-  '^(react-aria-components|react-aria|react-stately|@react-aria|@react-stately|@react-types|@internationalized|lucide-react)(\\x2f|$)';
+  '^(motion|framer-motion|motion-dom|motion-utils|lucide-react|radix-ui|@radix-ui|cmdk|vaul|sonner|react-day-picker|@tanstack\\x2f(?:react-table|table-core))(\\x2f|$)';
 const DATE_HELPERS_MESSAGE =
-  'The date helpers of the DatePicker hand out objects of the date library. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
-const ARIA_PATTERNS = [
-  {
-    group: ['**/date-picker/date-value', '**/date-picker/date-value.ts'],
-    message: DATE_HELPERS_MESSAGE,
-  },
+  'The date helpers of the DatePicker read and write the date as the control types it. A page holds a date as text (YYYY-MM-DD); today in Accra as text is todayText in platform/time.';
+const DATE_PATTERNS = [
   {
     group: [
-      'react-aria-components/*',
-      'react-aria/*',
-      'react-stately/*',
-      '@react-aria/*',
-      '@react-stately/*',
-      '@react-types/*',
-      '@internationalized/*',
+      '**/date-picker/date-value',
+      '**/date-picker/date-value.ts',
+      '**/date-picker/day-first',
+      '**/date-picker/day-first.ts',
     ],
-    message: ARIA_MESSAGE,
+    message: DATE_HELPERS_MESSAGE,
+  },
+];
+
+// What the Ops Portal's application code may not name, in lists, so that the one module that keeps the person's choice of theme can be given
+// `localStorage` and nothing else (the block for it, below the Ops Portal's own): a flat-config rule is replaced, not merged, by a later block,
+// so that block states the same rule again, from these lists, with the one name taken out.
+const TRANSPORT_GLOBALS = ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'];
+const STORAGE_GLOBALS = ['localStorage', 'sessionStorage', 'indexedDB'];
+const WINDOW_OBJECTS = ['window', 'globalThis', 'self'];
+const WINDOW_PROPERTIES = [
+  'fetch',
+  'open',
+  'localStorage',
+  'sessionStorage',
+  'indexedDB',
+  'XMLHttpRequest',
+  'WebSocket',
+  'EventSource',
+];
+const restrictedGlobals = (names) =>
+  names.map((name) => ({
+    name,
+    message:
+      'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser), and keeps nothing in the browser storage: a session is an HttpOnly cookie.',
+  }));
+const restrictedWindowProperties = (properties) =>
+  WINDOW_OBJECTS.flatMap((object) =>
+    properties.map((property) => ({
+      object,
+      property,
+      message: `${object}.${property} is not for application code: requests go through the generated client, and nothing is kept in browser storage.`,
+    })),
+  );
+const OTHER_RESTRICTED_PROPERTIES = [
+  {
+    object: 'navigator',
+    property: 'sendBeacon',
+    message: 'navigator.sendBeacon sends a request that skips the generated client.',
+  },
+  {
+    object: 'document',
+    property: 'write',
+    message: 'document.write puts text into the page as HTML.',
+  },
+  {
+    object: 'document',
+    property: 'cookie',
+    message: 'The session and CSRF cookies are read by the client and by nothing else.',
   },
 ];
 
@@ -137,57 +230,30 @@ export default defineConfig(
     rules: {
       'no-restricted-globals': [
         'error',
-        ...[
-          'fetch',
-          'XMLHttpRequest',
-          'WebSocket',
-          'EventSource',
-          'localStorage',
-          'sessionStorage',
-          'indexedDB',
-        ].map((name) => ({
-          name,
-          message:
-            'The Ops Portal reaches the API only through the generated client (@melarc/api-client/browser), and keeps nothing in the browser storage: a session is an HttpOnly cookie.',
-        })),
+        ...restrictedGlobals([...TRANSPORT_GLOBALS, ...STORAGE_GLOBALS]),
       ],
       'no-restricted-properties': [
         'error',
-        ...['window', 'globalThis', 'self'].flatMap((object) =>
-          [
-            'fetch',
-            'open',
-            'localStorage',
-            'sessionStorage',
-            'indexedDB',
-            'XMLHttpRequest',
-            'WebSocket',
-            'EventSource',
-          ].map((property) => ({
-            object,
-            property,
-            message: `${object}.${property} is not for application code: requests go through the generated client, and nothing is kept in browser storage.`,
-          })),
-        ),
-        {
-          object: 'navigator',
-          property: 'sendBeacon',
-          message: 'navigator.sendBeacon sends a request that skips the generated client.',
-        },
-        {
-          object: 'document',
-          property: 'write',
-          message: 'document.write puts text into the page as HTML.',
-        },
-        {
-          object: 'document',
-          property: 'cookie',
-          message: 'The session and CSRF cookies are read by the client and by nothing else.',
-        },
+        ...restrictedWindowProperties(WINDOW_PROPERTIES),
+        ...OTHER_RESTRICTED_PROPERTIES,
       ],
       'no-restricted-imports': [
         'error',
-        { paths: [...OPS_RESTRICTED_PATHS, ...ARIA_PATHS], patterns: ARIA_PATTERNS },
+        {
+          paths: [
+            ...OPS_RESTRICTED_PATHS,
+            ...MOTION_PATHS,
+            ...PRIMITIVE_LIBRARY_PATHS,
+            ...TANSTACK_PATHS,
+          ],
+          patterns: [
+            ...DATE_PATTERNS,
+            ...MOTION_PATTERNS,
+            ...PRIMITIVE_LIBRARY_PATTERNS,
+            ...PRIMITIVE_FILES_PATTERNS,
+            ...TANSTACK_PATTERNS,
+          ],
+        },
       ],
       'no-restricted-syntax': [
         'error',
@@ -207,11 +273,11 @@ export default defineConfig(
         {
           // `no-restricted-imports` looks at import declarations only; a dynamic import is a door of its own.
           selector: `ImportExpression[source.value=/${DOOR_PACKAGES}/]`,
-          message: `${ARIA_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
+          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} ${TANSTACK_MESSAGE} A dynamic import is a second door; the icon library is reached through the registry.`,
         },
         {
           selector: `CallExpression[callee.name='require'][arguments.0.value=/${DOOR_PACKAGES}/]`,
-          message: `${ARIA_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
+          message: `${MOTION_MESSAGE} ${PRIMITIVE_LIBRARIES_MESSAGE} ${TANSTACK_MESSAGE} A require is a second door; the icon library is reached through the registry.`,
         },
       ],
       'no-eval': 'error',
@@ -220,11 +286,93 @@ export default defineConfig(
     },
   },
   {
-    // The one place that may import React Aria Components and the date library: the components of the design system, which give a page a
-    // calendar, a menu or a combobox in the portal's own look and API. Everything else above still applies to them.
+    // **The one exception to the ban on web storage** (PRODUCT_DESIGN_DIRECTION section 7; the Product Owner, 5 November 2026, and 6 November 2026, A11):
+    // the person's choice of theme, `light` or `dark`, a non-sensitive preference under one key of `localStorage`. It is for this one module and for
+    // the bare name `localStorage` alone (the module uses no other form: `window.localStorage`, `globalThis.localStorage` and `self.localStorage`
+    // stay refused in it, so the rule it relaxes is the one rule, `no-restricted-globals`, and no other): `sessionStorage`, `indexedDB`, the cookie,
+    // every transport and every other rule above still apply to it, and every other file of the application is refused as before
+    // (`scripts/eslint-rules.test.ts` holds both). A session, a token or anything about a person is never stored there.
+    files: ['apps/ops-web/src/platform/theme/theme-choice.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...restrictedGlobals([
+          ...TRANSPORT_GLOBALS,
+          ...STORAGE_GLOBALS.filter((name) => name !== 'localStorage'),
+        ]),
+      ],
+    },
+  },
+  {
+    // The one place that may import Motion: the components of the design system, which give a page a panel, a list or a figure that moves in the
+    // portal's own times and easings. Everything else above still applies to them.
     files: ['apps/ops-web/src/components/ui/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
-    rules: { 'no-restricted-imports': ['error', { paths: OPS_RESTRICTED_PATHS }] },
+    rules: {
+      // They may import a primitive, but not the libraries under it: a component composes the primitive and never names Radix.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS, ...TANSTACK_PATHS],
+          patterns: [...PRIMITIVE_LIBRARY_PATTERNS, ...TANSTACK_PATTERNS],
+        },
+      ],
+    },
+  },
+  {
+    // The one place that may import TanStack Table: the DataTable. It is a component of `components/ui`, so it states that block's rule again (a later block
+    // replaces the rule, it does not merge) with TanStack taken out.
+    files: ['apps/ops-web/src/components/ui/data-table/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [...OPS_RESTRICTED_PATHS, ...PRIMITIVE_LIBRARY_PATHS],
+          patterns: [...PRIMITIVE_LIBRARY_PATTERNS],
+        },
+      ],
+    },
+  },
+  {
+    // The dev-only showcase draws every primitive beside the Melarc components, so it may import a primitive; it names no library under one.
+    files: ['apps/ops-web/src/showcase/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            ...OPS_RESTRICTED_PATHS,
+            ...MOTION_PATHS,
+            ...PRIMITIVE_LIBRARY_PATHS,
+            ...TANSTACK_PATHS,
+          ],
+          patterns: [
+            ...DATE_PATTERNS,
+            ...MOTION_PATTERNS,
+            ...PRIMITIVE_LIBRARY_PATTERNS,
+            ...TANSTACK_PATTERNS,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The one place that may import Radix UI and the libraries beside it (cmdk, vaul, sonner, react-day-picker): the shadcn/ui primitives, which
+    // are generated source from the official registry, restyled through the tokens. They import their icons from the icon library directly
+    // (the generated code does), which no other file may; Motion and the API client stay out of them.
+    files: ['apps/ops-web/src/components/primitives/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [...API_RESTRICTED_PATHS, ...MOTION_PATHS, ...TANSTACK_PATHS],
+          patterns: [...MOTION_PATTERNS, ...TANSTACK_PATTERNS],
+        },
+      ],
+    },
   },
   {
     // The one file that may import the icon library: the registry that names every icon of the application by its meaning.

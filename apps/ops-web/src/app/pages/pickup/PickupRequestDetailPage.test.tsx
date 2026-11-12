@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
+import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
@@ -22,6 +23,7 @@ import {
 } from '../../../test-support/pickup-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/pickup-requests/{id}` (`getPickupRequest` and the acts on one request; S1.19). Every act sends the version the page read and, where its
@@ -85,12 +87,14 @@ const acts = () => api.requests.filter((request) => request.method === 'POST');
 const bodyOf = async (request: Request | undefined): Promise<unknown> =>
   request === undefined ? undefined : request.clone().json();
 
-const actions = () => {
-  const heading = screen.getByRole('heading', { level: 2, name: 'What you can do' });
-  const section = heading.closest('section');
-  if (section === null) throw new Error('no actions');
-  return section;
-};
+/** The record's own page, for what its header and its notices say: the acts are in its header and its menu, and the person is told what stands in the way in words beside them. */
+const actions = () => screen.getByRole('main');
+
+/** The heavier acts are in the menu of the record's header: it is opened, and the act is chosen. Each brings its own question or form. */
+async function chooseAct(user: UserEvent, name: string): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+  await user.click(await screen.findByRole('menuitem', { name }));
+}
 
 describe('the request: what it shows', () => {
   it('shows the request by its code, its state and its facts', async () => {
@@ -98,7 +102,14 @@ describe('the request: what it shows', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' })).toBeVisible();
     expect(document.title).toBe('ACC-PR-7KQ2MZ · Melarc Ops Portal');
-    expect(screen.getByText('Waiting for confirmation')).toBeVisible();
+    // The state is told by the badge and by the tracker (one forward path: waiting, then confirmed), and the sentence says what it means.
+    expect(screen.getAllByText('Waiting for confirmation').length).toBeGreaterThanOrEqual(2);
+    const tracker = screen.getByRole('list', { name: 'Progress of the pickup request' });
+    expect(within(tracker).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(tracker).getByText('Waiting for confirmation').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
     expect(screen.getByText('A vendor’s own packages')).toBeVisible();
     expect(screen.getByText('Tue 3 Nov 2026')).toBeVisible();
     expect(screen.getByText('3 packages')).toBeVisible();
@@ -109,7 +120,16 @@ describe('the request: what it shows', () => {
     // The account card of the menu names the hub too; this is the request's own.
     expect(within(screen.getByRole('main')).getByText('Accra Central')).toBeVisible();
     // 24-hour time in Accra, whatever the machine's zone.
-    expect(screen.getByText('29 Oct, 08:15')).toBeVisible();
+    // The record's own dated facts are its history, as a timeline in the side column; the people are in the side column too.
+    const history = screen.getByRole('list', { name: 'History of this request, oldest first' });
+    expect(within(history).getByText('Booked')).toBeVisible();
+    expect(within(history).getByText('29 Oct, 08:15')).toBeVisible();
+    const side = within(screen.getByRole('main'));
+    expect(
+      side.getByRole('heading', { level: 2, name: 'Who to reach, and who pays' }),
+    ).toBeVisible();
+    expect(side.getByRole('heading', { level: 2, name: 'History' })).toBeVisible();
+    expect(side.getByRole('heading', { level: 3, name: 'Pickup' })).toBeVisible();
     expect(document.body.textContent).not.toContain(REQUEST_ID);
   });
 
@@ -230,7 +250,11 @@ describe('the request: what it shows', () => {
     );
 
     expect(await screen.findByText('Cancelled by Melarc Ops.')).toBeVisible();
-    expect(screen.getByText('On 30 Oct, 09:00.')).toBeVisible();
+    // The cancellation is the latest step of the history, with its date, its reason and the charge as applied.
+    const history = screen.getByRole('list', { name: 'History of this request, oldest first' });
+    const cancelled = within(history).getByText('Cancelled').closest('li') as HTMLElement;
+    expect(cancelled).toHaveAttribute('aria-current', 'step');
+    expect(within(cancelled).getByText('30 Oct, 09:00')).toBeVisible();
     expect(screen.getByText('Reason: Demo: the customer changed their mind')).toBeVisible();
     // The code is the server's, and never drawn.
     expect(document.body.textContent).not.toContain('DEMO_CUSTOMER_CHANGED_MIND');
@@ -269,9 +293,11 @@ describe('the request: what it shows', () => {
 
     const facts = (await screen.findByText('One-package exception')).nextElementSibling;
     if (!(facts instanceof HTMLElement)) throw new Error('no exception facts');
-    expect(within(facts).getByText(/Waiting for a holder of/)).toHaveTextContent(
-      'Waiting for a holder of pickup.exception.approve to approve it.',
+    expect(within(facts).getByText(/Waiting for an approver/)).toHaveTextContent(
+      'Waiting for an approver to approve it.',
     );
+    // A refusal or a wait names the capability in plain words, never a permission key.
+    expect(document.body.textContent).not.toContain('pickup.exception.approve');
     expect(
       within(facts).getByText('Requested by another member of staff on 29 Oct, 08:20.'),
     ).toBeVisible();
@@ -349,7 +375,7 @@ describe('the request: when it cannot be had', () => {
 
     expect(await screen.findByRole('alert')).toBeVisible();
     expect(screen.queryByText(/Requested by/)).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^More actions for / })).toBeNull();
   });
 
   // Break caught: a request with no version acted on, which would send an If-Match the server never gave.
@@ -357,7 +383,7 @@ describe('the request: when it cannot be had', () => {
     open(() => json(200, pickupRequestFixture()));
 
     expect(await screen.findByRole('alert')).toBeVisible();
-    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^More actions for / })).toBeNull();
   });
 });
 
@@ -394,7 +420,98 @@ describe('confirming', () => {
     await waitFor(() => {
       expect(reads()).toHaveLength(2);
     });
-    expect(await screen.findByText('Confirmed')).toBeVisible();
+    // The state is told by the badge, by the tracker (now at "Confirmed") and by the history's new step.
+    await waitFor(() => {
+      expect(screen.getAllByText('Confirmed').length).toBeGreaterThanOrEqual(2);
+    });
+    const tracker = screen.getByRole('list', { name: 'Progress of the pickup request' });
+    expect(within(tracker).getByText('Confirmed').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+  });
+
+  // Break caught (the Product Owner, 9 November 2026, over the review of 5edada2 which had them beside the acts): paragraphs of rules above the content. A rule lives in the confirmation of
+  // the act, where the choice is made, and a rule that changes whether to act now is one short line under the acts. These two (an escalation is recorded once; a rider's run makes a
+  // cancellation a decision about the charge) are told in the dialogs of their acts, and nowhere else on the page.
+  describe('the rules where the choice is made', () => {
+    const ESCALATION = /recorded once, with your note, and is not taken back/;
+    const CHARGE = /records a decision on the hub’s cancellation charge/;
+    const reasons = (list: unknown[]) => () => json(200, list);
+
+    it('tells an escalation is recorded once in the question of the act, and says nothing of it above the content', async () => {
+      const { user } = open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), OFFICER);
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+      expect(screen.queryByText(ESCALATION)).toBeNull();
+      expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+
+      await chooseAct(user, 'Escalate the request');
+
+      expect(
+        within(screen.getByRole('alertdialog', { name: 'Escalate this request?' })).getByText(
+          ESCALATION,
+        ),
+      ).toBeVisible();
+    });
+
+    it('offers no escalation to one who may not escalate', async () => {
+      const mayNot = OFFICER.filter((key) => key !== 'pickup.failure.resolve');
+      const { user } = open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), mayNot);
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+
+      await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+
+      expect(await screen.findByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+      expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
+    });
+
+    it('offers no escalation for a request that was escalated already', async () => {
+      const { user } = open(
+        () =>
+          answer(
+            pickupRequestFixture({ state: 'CONFIRMED', escalated_at: '2026-11-01T09:00:00Z' }),
+          ),
+        OFFICER,
+      );
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+
+      await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+
+      expect(await screen.findByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+      expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
+    });
+
+    it('tells a cancellation records a charge decision once a rider holds the request’s run, in the question of the act and not above the content', async () => {
+      const { user } = open(() => answer(pickupRequestFixture(ASSIGNED)), OFFICER, {
+        [REASONS]: reasons([cancellationReasonFixture()]),
+      });
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+      expect(screen.queryByText(CHARGE)).toBeNull();
+      expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+
+      await chooseAct(user, 'Cancel the request');
+
+      expect(
+        await within(
+          screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' }),
+        ).findByText(CHARGE),
+      ).toBeVisible();
+    });
+
+    it('does not say it in the question of the act for a request no rider holds', async () => {
+      const { user } = open(
+        () => answer(pickupRequestFixture({ state: 'CONFIRMED', rider_assigned: false })),
+        OFFICER,
+        { [REASONS]: reasons([cancellationReasonFixture()]) },
+      );
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+
+      await chooseAct(user, 'Cancel the request');
+
+      const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
+      expect(await within(dialog).findByRole('combobox', { name: /Reason/ })).toBeVisible();
+      expect(within(dialog).queryByText(CHARGE)).toBeNull();
+    });
   });
 
   // AC-SLICE-001-10: a concurrent confirmation is a STATE_CONFLICT that is explained and read again, never a silent overwrite.
@@ -435,13 +552,17 @@ describe('confirming', () => {
   it('offers the exception, and not the confirmation, for a single package with no approved exception', async () => {
     open(() => answer(pickupRequestFixture({ declared_package_count: 1 })));
 
-    await screen.findByRole('heading', { name: 'What you can do' });
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
     expect(within(actions()).queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
     expect(within(actions()).getByRole('link', { name: 'Request the exception' })).toHaveAttribute(
       'href',
       `/pickup-requests/${REQUEST_ID}/exception`,
     );
-    expect(within(actions()).getByText(/pickup\.exception\.approve/)).toBeVisible();
+    // What stands in the way is told in words, and names no key.
+    expect(within(actions()).getByText(/This request is for a single package/)).toHaveClass(
+      'ui-record-header__note',
+    );
+    expect(actions().textContent).not.toContain('pickup.exception.approve');
   });
 
   // An exception that was asked for waits for its checker: it is not asked for twice, and the page leads a checker to the queue.
@@ -457,10 +578,12 @@ describe('confirming', () => {
       [...OFFICER, 'pickup.exception.approve'],
     );
 
-    await screen.findByRole('heading', { name: 'What you can do' });
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
     expect(within(actions()).queryByRole('link', { name: 'Request the exception' })).toBeNull();
     expect(within(actions()).queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
-    expect(within(actions()).getByText(/The exception is requested and waits/)).toBeVisible();
+    expect(
+      within(actions()).getByText(/The one-package exception is requested and waits/),
+    ).toHaveClass('ui-record-header__note');
     expect(
       within(actions()).getByRole('link', { name: 'Go to the exceptions to approve' }),
     ).toHaveAttribute('href', '/approvals');
@@ -476,7 +599,9 @@ describe('confirming', () => {
       ),
     );
 
-    expect(await screen.findByText(/The exception is requested and waits/)).toBeVisible();
+    expect(
+      await screen.findByText(/The one-package exception is requested and waits/),
+    ).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Go to the exceptions to approve' })).toBeNull();
   });
 
@@ -495,43 +620,50 @@ describe('confirming', () => {
 });
 
 describe('the acts the session may not do', () => {
-  // Break caught: an act hidden without a word, or refused by a role: each names the key it needs.
-  it('names the key of each act the session does not hold, and no role', async () => {
+  // Break caught: an act drawn for a session that cannot take it (presentation is the only thing the page does about it), or a refusal worded as a key or a role.
+  it('draws no act the session does not hold, and names no key and no role', async () => {
     open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), ['pickup.read']);
 
-    await screen.findByRole('heading', { name: 'What you can do' });
-    const section = actions();
-    expect(within(section).queryAllByRole('button')).toEqual([]);
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+    expect(within(actions()).queryAllByRole('button')).toEqual([]);
+    expect(within(actions()).queryByRole('link', { name: 'Request the exception' })).toBeNull();
     for (const key of [
       'pickup.request.cancel',
       'pickup.failure.resolve',
       'pickup.attempt.extend',
+      'pickup.request.confirm',
     ]) {
-      expect(within(section).getAllByText(key).length).toBeGreaterThan(0);
+      expect(actions().textContent).not.toContain(key);
     }
-    expect(section.textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
+    expect(actions().textContent).not.toMatch(/Ops Staff|Senior Ops|Platform Admin/);
   });
 
-  it('names the key of the confirmation on a pending request', async () => {
+  it('draws no confirmation on a pending request for a session without the key', async () => {
     open(undefined, ['pickup.read']);
 
-    await screen.findByRole('heading', { name: 'What you can do' });
-    expect(within(actions()).getByText('pickup.request.confirm')).toBeVisible();
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+    expect(screen.queryByRole('button', { name: 'Confirm the pickup' })).toBeNull();
+    expect(actions().textContent).not.toContain('pickup.request.confirm');
   });
 
   // S1.18: an extension needs a confirmed request; a pending one is never offered it.
   it('offers no extension and no escalation on a pending request', async () => {
-    open(undefined, SENIOR);
+    const { user } = open(undefined, SENIOR);
 
-    await screen.findByRole('heading', { name: 'What you can do' });
-    expect(within(actions()).queryByRole('heading', { name: 'Extend the attempts' })).toBeNull();
-    expect(within(actions()).queryByRole('heading', { name: 'Escalate the request' })).toBeNull();
+    await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
+    await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: 'Extend the attempts' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
   });
 
   it('offers nothing to change on a declined request', async () => {
     open(() => answer(pickupRequestFixture({ state: 'DECLINED' })));
 
-    expect(await screen.findByText('A declined request is not changed again.')).toBeVisible();
+    // The header’s sentence says where it stands; no paragraph says it again, and nothing is offered.
+    expect(await screen.findByText('It was declined.')).toBeVisible();
+    expect(document.querySelectorAll('.pickup-act__text')).toHaveLength(0);
+    expect(document.querySelectorAll('.ui-record-header__note')).toHaveLength(0);
     expect(within(actions()).queryAllByRole('button')).toEqual([]);
   });
 });
@@ -591,13 +723,16 @@ describe('cancelling', () => {
   it('says plainly that no cancellation reason is configured, names who adds them, and cannot cancel', async () => {
     const { user } = open(undefined, OFFICER, { [REASONS]: reasons([]) });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
 
     expect(
       await within(dialog).findByText(/No cancellation reason is configured yet/),
     ).toBeVisible();
-    expect(within(dialog).getByText('settings.reason.manage')).toBeVisible();
+    expect(
+      within(dialog).getByText(/An administrator adds the reasons to the reason catalogue/),
+    ).toBeVisible();
+    expect(dialog.textContent).not.toContain('settings.reason.manage');
     expect(within(dialog).queryByRole('combobox')).toBeNull();
     const confirm = within(dialog).getByRole('button', { name: 'Cancel the request' });
     expect(confirm).toBeDisabled();
@@ -614,7 +749,7 @@ describe('cancelling', () => {
         answer(pickupRequestFixture({ state: 'CANCELLED', cancelled_by_actor_type: 'OPS' }), 'v2'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /Reason/ }),
@@ -646,8 +781,9 @@ describe('cancelling', () => {
       },
     );
 
-    expect(await screen.findByText(/Nothing is charged before a rider is assigned/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Cancel the request' }));
+    // The page tells that no rider holds the run; the cancellation then asks nothing about a charge.
+    expect(await screen.findByText('Not assigned yet')).toBeVisible();
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -669,8 +805,9 @@ describe('cancelling', () => {
       [REASONS]: reasons([cancellationReasonFixture()]),
     });
 
-    expect(await screen.findByText(/A rider is assigned to this request’s run/)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Cancel the request' }));
+    // The page tells that a rider holds the run; the cancellation then asks for the charge decision.
+    expect(await screen.findByText('Assigned to the pickup run')).toBeVisible();
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -698,7 +835,7 @@ describe('cancelling', () => {
         ),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -741,7 +878,7 @@ describe('cancelling', () => {
         ),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -787,7 +924,7 @@ describe('cancelling', () => {
       },
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -798,7 +935,7 @@ describe('cancelling', () => {
       within(charge).getByRole('radio', { name: 'Apply the cancellation charge' }),
     ).toBeDisabled();
     expect(within(charge).getByRole('radio', { name: 'Do not apply a charge' })).not.toBeChecked();
-    expect(within(charge).getByText(/pickup\.request\.cancel_chargeable/)).toBeVisible();
+    expect(within(charge).getByText(cannotText('pickup.request.cancel_chargeable'))).toBeVisible();
 
     await user.click(within(charge).getByRole('radio', { name: 'Do not apply a charge' }));
     await user.selectOptions(
@@ -831,7 +968,7 @@ describe('cancelling', () => {
       },
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Cancel the request' }));
+    await chooseAct(user, 'Cancel the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /Reason/ }),
@@ -869,7 +1006,7 @@ describe('cancelling', () => {
         ),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Reschedule the pickup' }));
+    await chooseAct(user, 'Reschedule the pickup');
     const dialog = screen.getByRole('alertdialog', { name: 'Reschedule this pickup?' });
     await user.selectOptions(
       await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -892,7 +1029,7 @@ describe('cancelling', () => {
   // S1.18: the next attempt past the cap is refused and nothing is cancelled; the way on is an extension, offered to the person who can make
   // it, and told by its key to the person who cannot, with what else they can do: never a dead end.
   it.each([
-    ['cannot extend', OFFICER, /a holder of pickup\.attempt\.extend/, /^Extend the attempts/],
+    ['cannot extend', OFFICER, /an extension that an approver gives/, /^Extend the attempts/],
     ['can extend', SENIOR, /^Extend the attempts on this page/, /a holder of/],
   ] as const)(
     'says nothing was cancelled when a reschedule passes the limit, to a person who %s',
@@ -907,7 +1044,7 @@ describe('cancelling', () => {
         },
       );
 
-      await user.click(await screen.findByRole('button', { name: 'Reschedule the pickup' }));
+      await chooseAct(user, 'Reschedule the pickup');
       const dialog = screen.getByRole('alertdialog', { name: 'Reschedule this pickup?' });
       await user.selectOptions(
         await within(dialog).findByRole('combobox', { name: /^Reason/ }),
@@ -935,7 +1072,7 @@ describe('the senior acts and the escalation', () => {
       },
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Extend the attempts' }));
+    await chooseAct(user, 'Extend the attempts');
     const dialog = screen.getByRole('alertdialog', {
       name: 'Extend the attempts of this request?',
     });
@@ -969,7 +1106,7 @@ describe('the senior acts and the escalation', () => {
         refusal(409, 'STATE_CONFLICT'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Extend the attempts' }));
+    await chooseAct(user, 'Extend the attempts');
     const dialog = screen.getByRole('alertdialog', {
       name: 'Extend the attempts of this request?',
     });
@@ -1006,18 +1143,17 @@ describe('the senior acts and the escalation', () => {
 
   // S1.18: an escalation is recorded once: once the read says when, the page tells it and offers it no more.
   it('tells an escalation by its date, and offers it no more', async () => {
-    open(() =>
+    const { user } = open(() =>
       answer(pickupRequestFixture({ state: 'CONFIRMED', escalated_at: '2026-10-30T08:00:00Z' })),
     );
 
     const status = (await screen.findByText(/It is confirmed/)).closest('p');
     expect(status).toHaveTextContent('Escalated on 30 Oct, 08:00.');
-    expect(screen.queryByRole('button', { name: 'Escalate the request' })).toBeNull();
-    expect(within(actions()).getByRole('heading', { name: 'Escalated' })).toBeVisible();
-    expect(within(actions()).getByText(/recorded once and is not taken back/)).toBeVisible();
-    // Nothing else changes: it can still be rescheduled and cancelled.
-    expect(within(actions()).getByRole('button', { name: 'Reschedule the pickup' })).toBeVisible();
-    expect(within(actions()).getByRole('button', { name: 'Cancel the request' })).toBeVisible();
+    // Nothing else changes: it can still be rescheduled and cancelled, and is offered no escalation.
+    await user.click(await screen.findByRole('button', { name: /^More actions for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Reschedule the pickup' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Cancel the request' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: 'Escalate the request' })).toBeNull();
   });
 
   it('escalates with a note, on the version read, with a fresh key', async () => {
@@ -1026,7 +1162,7 @@ describe('the senior acts and the escalation', () => {
         answer(pickupRequestFixture({ state: 'CONFIRMED' }), 'v2'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Escalate the request' }));
+    await chooseAct(user, 'Escalate the request');
     const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
     await user.type(
       within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
@@ -1105,7 +1241,7 @@ describe('the senior acts and the escalation', () => {
         SENIOR,
       );
 
-      await screen.findByRole('heading', { name: 'What you can do' });
+      await screen.findByRole('heading', { level: 1, name: 'ACC-PR-7KQ2MZ' });
       expect(screen.queryByRole('button', { name: 'Waive the charge' })).toBeNull();
     },
   );
@@ -1156,6 +1292,15 @@ describe('the attempt chain', () => {
       'Attempt 3: ACC-PR-3RTY8N',
     ]);
     expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    // In plain words, each attempt after the first says which one it replaces: the first replaces none, and says nothing of it.
+    const step = (index: number): HTMLElement => {
+      const found = steps[index];
+      if (found === undefined) throw new Error(`The chain has no step ${String(index)}.`);
+      return found;
+    };
+    expect(within(step(0)).queryByText(/^Replaces /)).toBeNull();
+    expect(within(step(1)).getByText('Replaces ACC-PR-9WXH4T.')).toBeVisible();
+    expect(within(step(2)).getByText('Replaces ACC-PR-7KQ2MZ.')).toBeVisible();
     expect(within(chain).getByRole('link', { name: 'Attempt 1: ACC-PR-9WXH4T' })).toHaveAttribute(
       'href',
       `/pickup-requests/${EARLIER_REQUEST_ID}`,
@@ -1179,7 +1324,9 @@ describe('the attempt chain', () => {
   it('says there is no other attempt for a request that is alone', async () => {
     open();
 
-    expect(await screen.findByText(/No other attempt is linked to this request/)).toBeVisible();
+    // In plain words: a request that is the first attempt says so, and does not describe what it replaced and what replaced it.
+    expect(await screen.findByText('This is the first attempt.')).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/it replaced none/);
   });
 });
 
@@ -1212,7 +1359,7 @@ describeInterfaceStates('The pickup request', {
             violations: [{ in: 'body', pointer: '/note', rule: 'pattern' }],
           }),
       });
-      await user.click(await screen.findByRole('button', { name: 'Escalate the request' }));
+      await chooseAct(user, 'Escalate the request');
       const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
       await user.type(
         within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
@@ -1257,7 +1404,7 @@ describeInterfaceStates('The pickup request', {
       const { user } = open(() => answer(pickupRequestFixture({ state: 'CONFIRMED' })), OFFICER, {
         [`POST /pickup-requests/${REQUEST_ID}/escalate`]: () => refusal(409, 'STATE_CONFLICT'),
       });
-      await user.click(await screen.findByRole('button', { name: 'Escalate the request' }));
+      await chooseAct(user, 'Escalate the request');
       const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
       await user.type(
         within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
@@ -1291,7 +1438,7 @@ describeInterfaceStates('The pickup request', {
   'permission-restricted': {
     test: async () => {
       open(undefined, ['staff.read']);
-      expect(await screen.findByText(/pickup\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('pickup.read'))).toBeVisible();
       expect(reads()).toHaveLength(0);
     },
   },

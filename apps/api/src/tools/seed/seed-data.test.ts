@@ -23,7 +23,15 @@ import {
   statedGrantableKeys,
 } from '../../test-support/seed-documents.js';
 import { BUILD_FIXED_POLICY } from '../../platform/auth/sessions/build-fixed-policy.js';
-import { BUNDLES, BUNDLE_IDS, FIXED_POLICIES, GRANTS } from './bundles.js';
+import {
+  BUNDLES,
+  BUNDLE_IDS,
+  FIXED_POLICIES,
+  GRANTS,
+  NOTIFICATION_READ_GRANTS,
+  SLICE_000_GRANTS,
+  SLICE_001_GRANTS,
+} from './bundles.js';
 import { HUBS } from './hubs.js';
 import { PERMISSION_KEYS } from './permission-keys.js';
 import { IDENTITY_REASONS } from './reasons.js';
@@ -281,9 +289,9 @@ describe('the bundles', () => {
       // staff.device.register: "S: own hub · P: all hubs, each by the scope of its own grant".
       expect(scopeOf('seniorOps', 'staff.device.register')).toBe('own');
       expect(scopeOf('platformAdmin', 'staff.device.register')).toBe('all');
-      // staff.device.reregister: "own hub" for S and P alike.
+      // staff.device.reregister: "S: own hub · P: all hubs" (Product Owner, 6 November 2026, replacing the 8 October decision for P).
       expect(scopeOf('seniorOps', 'staff.device.reregister')).toBe('own');
-      expect(scopeOf('platformAdmin', 'staff.device.reregister')).toBe('own');
+      expect(scopeOf('platformAdmin', 'staff.device.reregister')).toBe('all');
       // vendor.read: "own hub · all hubs": Platform Admin and Finance at all hubs, the other staff holders at their own.
       expect(scopeOf('opsStaff', 'vendor.read')).toBe('own');
       expect(scopeOf('seniorOps', 'vendor.read')).toBe('own');
@@ -293,20 +301,48 @@ describe('the bundles', () => {
       expect(scopeOf('opsStaff', 'pickup.exception.approve')).toBe('own');
       expect(scopeOf('seniorOps', 'pickup.exception.approve')).toBe('own');
       expect(scopeOf('platformAdmin', 'pickup.exception.approve')).toBe('all');
-      // pricing.read: "own hub" for staff and Finance's reach is all hubs (section 8); a Vendor reads the fee on its own orders.
+      // pricing.read: "own hub (P: all hubs)" for staff; Finance's reach is all hubs (section 8); a Vendor reads the fee on its own orders.
       expect(scopeOf('opsStaff', 'pricing.read')).toBe('own');
-      expect(scopeOf('platformAdmin', 'pricing.read')).toBe('own');
+      expect(scopeOf('seniorOps', 'pricing.read')).toBe('own');
+      expect(scopeOf('platformAdmin', 'pricing.read')).toBe('all');
       expect(scopeOf('finance', 'pricing.read')).toBe('all');
       expect(scopeOf('vendor', 'pricing.read')).toBe('none');
-      // Every other key of the slice is the own-hub reach of the staff who hold it (a Platform Admin without a primary hub reaches
-      // no hub by it: a finding for the Product Owner, not a widening made here).
+      // Every other key of the slice is the own-hub reach of Ops Staff and Senior Ops, and the Platform Admin's is all hubs (Product Owner,
+      // 5 November 2026: the Platform Admin holds every domain at every hub).
       for (const bundle of ['opsStaff', 'seniorOps', 'platformAdmin'] as const) {
         for (const key of SLICE_001_KEYS) {
           const scope = scopeOf(bundle, key);
           if (scope === undefined) continue;
-          const allHubs = bundle === 'platformAdmin' && key === 'pickup.exception.approve';
-          expect(scope, `${bundle} ${key}`).toBe(allHubs ? 'all' : 'own');
+          expect(scope, `${bundle} ${key}`).toBe(bundle === 'platformAdmin' ? 'all' : 'own');
         }
+      }
+    });
+
+    // Break caught (task P1, P1.1, AC-SLICE-001-83): the Platform Admin left at its own hub on any key (the device replacement among them since
+    // the decision of 6 November 2026), a grant of no hub given one, the tier or the ownership of a grant changed by the widening, or another
+    // bundle touched by it.
+    it('give the Platform Admin every key at all hubs but the one of no hub, and change nothing else', () => {
+      const ofAdmin = GRANTS.filter((grant) => grant.bundleId === BUNDLE_IDS.platformAdmin);
+      const keysAt = (scope: string) =>
+        ofAdmin.filter((grant) => grant.hubScope === scope).map((grant) => grant.permissionKey);
+      expect(keysAt('own')).toEqual([]);
+      expect(keysAt('none')).toEqual(['permission.assignable_bundle.read']);
+      expect(keysAt('all')).toHaveLength(ofAdmin.length - 1);
+      for (const grant of ofAdmin) {
+        expect(grant.tier, grant.permissionKey).toBe('P');
+        expect(grant.ownershipScope, grant.permissionKey).toBe('any');
+      }
+      // What it was before the decision, by the constants that stay as they were written (the migrations carry them): the same keys in the
+      // same order for the Platform Admin, and every other bundle exactly as it was.
+      const before = [...SLICE_000_GRANTS, ...SLICE_001_GRANTS, ...NOTIFICATION_READ_GRANTS];
+      expect(GRANTS.map((grant) => `${grant.bundleId}|${grant.permissionKey}`)).toEqual(
+        before.map((grant) => `${grant.bundleId}|${grant.permissionKey}`),
+      );
+      for (const bundle of Object.values(BUNDLE_IDS)) {
+        if (bundle === BUNDLE_IDS.platformAdmin) continue;
+        expect(GRANTS.filter((grant) => grant.bundleId === bundle)).toEqual(
+          before.filter((grant) => grant.bundleId === bundle),
+        );
       }
     });
 

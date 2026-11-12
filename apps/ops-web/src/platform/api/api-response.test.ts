@@ -336,3 +336,36 @@ describe('isNotFound', () => {
     expect(isNotFound(undefined)).toBe(false);
   });
 });
+
+describe('answerOf: the wait a 429 asks for (A2 of the audit)', () => {
+  const limited = (headers: Record<string, string> = {}) =>
+    respond(429, { code: 'RATE_LIMITED', message: 'm', request_id: 'r' }, headers);
+
+  // Break caught: the wait the API asked for dropped on its way to the screen, so that the page can only guess one.
+  it('keeps the Retry-After of a 429, in whole seconds, as sent', () => {
+    expect(failureOf(limited({ 'Retry-After': '30' })).retryAfterSeconds).toBe(30);
+    expect(failureOf(limited({ 'Retry-After': '3600' })).retryAfterSeconds).toBe(3600);
+  });
+
+  // Break caught: a header in a form the page cannot honour kept as a figure (an HTTP date, a fraction, nought), or one that is absent invented.
+  it.each<Record<string, string>>([
+    {},
+    { 'Retry-After': 'soon' },
+    { 'Retry-After': '0' },
+    { 'Retry-After': '1.5' },
+  ])('keeps no wait when the 429 gave none that can be used: %j', (headers) => {
+    expect(failureOf(limited(headers)).retryAfterSeconds).toBeUndefined();
+  });
+
+  // Break caught: a Retry-After of another answer (the 503 of an enrolment that is retryable) read as the wait of a request that was too fast.
+  it('reads the header for a 429 and for no other failure', () => {
+    const unavailable = respond(
+      503,
+      { code: 'TRUST_DATA_UNAVAILABLE', message: 'm', request_id: 'r' },
+      { 'Retry-After': '60' },
+    );
+
+    expect(failureOf(unavailable).retryAfterSeconds).toBeUndefined();
+    expect(failureOf(unavailable).status).toBe(503);
+  });
+});

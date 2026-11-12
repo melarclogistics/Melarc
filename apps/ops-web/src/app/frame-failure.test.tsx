@@ -57,9 +57,7 @@ describe('a failure of the frame itself', () => {
     fault.present = false;
     await user.click(retry);
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Melarc Ops Portal' }),
-    ).toBeVisible();
+    expect(await screen.findByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     expect(screen.getByRole('banner')).toBeVisible();
     expect(screen.queryByRole('alert')).toBeNull();
   });

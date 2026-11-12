@@ -6,6 +6,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { reasonFixture } from '../../../test-support/reason-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
@@ -15,6 +16,7 @@ import {
   vendorAccountFixture,
   vendorDeviceFixture,
 } from '../../../test-support/vendor-fixture';
+import { cannotText } from '../../../platform/problem/capability-words';
 
 /**
  * `/admin/vendors/{id}` (`getVendorAccount`, `reissueVendorCredentialSetup`, `recoverVendorCredential`; S0.52b; AC-SLICE-000-15). One account,
@@ -47,6 +49,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 function open(
@@ -71,17 +74,61 @@ function open(
 const posts = () => api.requests.filter((request) => request.method === 'POST');
 
 describe('the vendor account: what it shows', () => {
-  it('names the account and its organisation, and its authentication status in words', async () => {
+  it('names the account by its identifier, tells its status as a badge and in one sentence, and the way up', async () => {
     open();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'K7M2Q9X4' })).toBeVisible();
+    const heading = await screen.findByRole('heading', { level: 1, name: 'K7M2Q9X4' });
+    expect(heading).toBeVisible();
     expect(document.title).toBe('K7M2Q9X4 · Melarc Ops Portal');
-    expect(screen.getByText('This account can sign in.')).toBeVisible();
-    expect(screen.getByText('Its registered email')).toBeVisible();
+    // The record's header: the identifier, the status as a badge beside it, and one sentence of where the account stands.
+    const header = heading.closest('.ui-record-header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByText('Active')).toBeVisible();
+    expect(within(header as HTMLElement).getByText('This account can sign in.')).toBeVisible();
+    // A record page has one way back, a link to the list (Stage 4.5), and no breadcrumb.
     expect(screen.getByRole('link', { name: 'Back to vendors' })).toHaveAttribute(
       'href',
       '/admin/vendors',
     );
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+  });
+
+  it('tells a suspended account as that', async () => {
+    open(READER, {
+      [RECORD]: () => json(200, detail(vendorAccountFixture({ status: 'SUSPENDED' })), etag('v1')),
+    });
+
+    expect(await screen.findByText('Suspended')).toBeVisible();
+    expect(screen.getByText('This account cannot sign in while it is suspended.')).toBeVisible();
+    expect(screen.queryByText('SUSPENDED')).toBeNull();
+  });
+
+  it('shows the account’s facts under their names: organisation, hub, secret, where links go, browsers', async () => {
+    open();
+    await screen.findByRole('heading', { level: 1, name: 'K7M2Q9X4' });
+
+    const facts = {
+      Organisation: 'Asante Fabrics Ltd',
+      Hub: 'Accra Central',
+      'Shared secret': 'Set',
+      'Where links go': 'Its registered email',
+      'Active browsers': '1',
+    };
+    for (const [term, value] of Object.entries(facts)) {
+      const label = screen.getByText(term, { selector: 'dt' });
+      expect(label.nextElementSibling, term).toHaveTextContent(value);
+    }
+    // The identifier is the page's heading: it is not told a second time as a fact.
+    expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
+  });
+
+  // Break caught (the PO's decision of 9 November 2026): paragraphs of rules above the content. What an act does is told where the choice is made, in its dialog.
+  it('has no paragraph of rules about its acts: they are told in the question of each', async () => {
+    open(['vendor.read', 'vendor.credential.recover', 'settings.reason.read']);
+    await screen.findByRole('heading', { level: 1, name: 'K7M2Q9X4' });
+
+    expect(screen.queryByText(/If the vendor has lost its shared secret/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'What you can do' })).toBeNull();
   });
 
   // Break caught (AC-SLICE-000-15): a browser the shared account registered attributed to a person rather than to the organisation.
@@ -100,6 +147,27 @@ describe('the vendor account: what it shows', () => {
     const table = await screen.findByRole('table', { name: 'Browsers of the account' });
     expect(within(table).getAllByText('Asante Fabrics Ltd')).toHaveLength(2);
     expect(within(table).getByText('Revoked')).toBeVisible();
+  });
+
+  it('draws the browsers as cards with the same facts in a room too narrow for the columns', async () => {
+    narrowRoom();
+    open(READER, {
+      [RECORD]: () =>
+        json(
+          200,
+          detail(vendorAccountFixture(), [
+            vendorDeviceFixture({ registered_by: '4d5e6f7a-8b9c-4d0e-8f1a-2b3c4d5e6f7a' }),
+          ]),
+          etag('v1'),
+        ),
+    });
+
+    const cards = await screen.findByRole('list', { name: 'Browsers of the account' });
+    const card = within(cards).getByRole('listitem');
+    expect(within(card).getByText('Active')).toBeVisible();
+    expect(within(card).getByText('Melarc')).toBeVisible();
+    expect(within(card).getByText(/20 Oct, 09:00/)).toBeVisible();
+    expect(document.body.textContent).not.toContain('4d5e6f7a');
   });
 
   // Break caught: a credential, a hash or a recovery address that a server should never send drawn on the page.
@@ -125,7 +193,7 @@ describe('the vendor account: what it shows', () => {
 
   it('is a page of its own for an account outside the session’s hubs, and for one that does not exist', async () => {
     const view = open(READER, { [RECORD]: () => refusal(403, 'HUB_SCOPE_VIOLATION') });
-    expect(await screen.findByText(/hub your session does not act in/)).toBeVisible();
+    expect(await screen.findByText(/hub your account does not work in/)).toBeVisible();
     view.unmount();
     api.restore();
 
@@ -133,6 +201,10 @@ describe('the vendor account: what it shows', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Account not found' }),
     ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Back to vendors' })).toHaveAttribute(
+      'href',
+      '/admin/vendors',
+    );
   });
 });
 
@@ -241,11 +313,15 @@ describeInterfaceStates('The vendor account', {
       });
       open(READER, { [RECORD]: () => gate });
       expect(await screen.findByText('Loading the account…')).toBeInTheDocument();
+      // The way back is there while the account is read, and it is the same link once the page has replaced the loading state: a press on it is not lost to the page replacing it.
+      const back = screen.getByRole('link', { name: 'Back to vendors' });
+      expect(back).toHaveAttribute('href', '/admin/vendors');
       await act(async () => {
         release(json(200, detail(), etag('v1')));
         await gate;
       });
       await screen.findByText('This account can sign in.');
+      expect(screen.getByRole('link', { name: 'Back to vendors' })).toBe(back);
     },
   },
   empty: {
@@ -366,7 +442,7 @@ describeInterfaceStates('The vendor account', {
   'permission-restricted': {
     test: async () => {
       open(['staff.read']);
-      expect(await screen.findByText(/vendor\.read/)).toBeVisible();
+      expect(await screen.findByText(cannotText('vendor.read'))).toBeVisible();
       expect(screen.queryByRole('heading', { name: 'K7M2Q9X4' })).toBeNull();
     },
   },

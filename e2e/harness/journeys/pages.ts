@@ -110,15 +110,17 @@ export async function submitCode(page: Page, code: string): Promise<void> {
   await page.getByRole('button', { name: 'Verify and sign in' }).click();
 }
 
-/** The landing: the first screen of a signed-in person. */
+/** The landing, My work: the first screen of a signed-in person, which greets them by name. */
 export async function expectLanding(page: Page, name?: string): Promise<void> {
-  await expectHeading(page, 'Melarc Ops Portal');
+  await expectHeading(page, 'My work');
   await expect(page).toHaveURL(/\/$/);
-  if (name !== undefined) await expect(page.getByText(`Signed in as ${name}`)).toBeVisible();
+  if (name !== undefined) await expect(page.getByRole('main').getByText(name)).toBeVisible();
 }
 
+/** Signs out the way every signed-in screen offers: the account menu of the top bar, and its Sign out item. */
 export async function signOut(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
   await expectHeading(page, 'Sign in');
 }

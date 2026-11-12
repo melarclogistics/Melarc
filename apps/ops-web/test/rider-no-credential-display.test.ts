@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
+import { codeOf } from './support/code-of';
 import { moduleSpecifiers } from './support/wire-type-scan';
 
 /**
@@ -71,62 +71,6 @@ const NAMES_OF_WHAT_NEVER_ARRIVES = [
 
 /** A bare `pin` is the PIN itself; the string `'pin'` is a column of the roster that says whether one is set, and is no name. */
 const BARE_NAMES_OF_WHAT_NEVER_ARRIVES = ['pin'];
-
-/** What a source file says in code: its names, its strings, the elements it draws and the attributes it gives them. */
-interface Code {
-  readonly names: ReadonlySet<string>;
-  readonly strings: ReadonlySet<string>;
-  readonly elements: ReadonlySet<string>;
-  /** `Element.attribute=text` for an attribute given a string, `Element.attribute={expression}` for one given an expression, else `Element.attribute`. */
-  readonly attributes: ReadonlySet<string>;
-  /** The property of an object that a name is read from: `grant.enrolmentUri` is `grant.enrolmentUri`. */
-  readonly accesses: readonly string[];
-}
-
-function codeOf(text: string, fileName: string): Code {
-  const source = ts.createSourceFile(
-    fileName,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    fileName.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
-  const names = new Set<string>();
-  const strings = new Set<string>();
-  const elements = new Set<string>();
-  const attributes = new Set<string>();
-  const accesses: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node)) names.add(node.text);
-    if (ts.isStringLiteralLike(node)) strings.add(node.text);
-    if (ts.isTemplateExpression(node)) {
-      strings.add(node.head.text);
-      for (const span of node.templateSpans) strings.add(span.literal.text);
-    }
-    if (ts.isPropertyAccessExpression(node)) {
-      accesses.push(`${node.expression.getText(source)}.${node.name.text}`);
-    }
-    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      const tag = node.tagName.getText(source);
-      elements.add(tag);
-      for (const attribute of node.attributes.properties) {
-        if (!ts.isJsxAttribute(attribute)) continue;
-        const initializer = attribute.initializer;
-        const name = `${tag}.${attribute.name.getText(source)}`;
-        if (initializer !== undefined && ts.isStringLiteral(initializer)) {
-          attributes.add(`${name}=${initializer.text}`);
-        } else if (initializer !== undefined && ts.isJsxExpression(initializer)) {
-          attributes.add(`${name}={${initializer.expression?.getText(source) ?? ''}}`);
-        } else {
-          attributes.add(name);
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return { names, strings, elements, attributes, accesses };
-}
 
 function sourceFiles(path: string): string[] {
   const absolute = join(SRC, path);
@@ -288,12 +232,13 @@ describe('the rider screens and a credential', () => {
     expect(code.attributes.has('QrCode.payload={grant.enrolmentUri}')).toBe(true);
   });
 
-  // Break caught: a text field or a password field on a screen that is not a form for one.
-  it('draw a text field only on the roster search and the verification note, and never a password or a PIN field', () => {
+  // Break caught: a text field or a password field on a screen that is not a form for one. The roster search is a field of the filter bar since Stage 4.7 (the page hands the bar its search: a label,
+  // the text, what to do with it and the length it may have), so no rider screen draws an input of its own; the verification note is the one text area.
+  it('draw no text input of their own (the roster search is the filter bar’s, the note is a text area), and never a password or a PIN field', () => {
     const drawing = (element: string) =>
       files.filter((file) => file.code.elements.has(element)).map((file) => file.path);
 
-    expect(drawing('Input')).toEqual(['app/pages/riders/RiderListPage.tsx']);
+    expect(drawing('Input')).toEqual([]);
     expect(drawing('Textarea')).toEqual(['app/pages/riders/RiderDevicePage.tsx']);
     for (const file of files) {
       for (const element of file.code.elements) {

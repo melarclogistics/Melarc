@@ -1,4 +1,4 @@
-// Runs alone: it bounds a claim that must not wait behind a lock at 1.5 seconds of wall-clock time.
+// Runs alone: its workers claim and lease jobs of one queue table, which a server busy with other files would delay beyond the leases' own clocks.
 import { randomUUID } from 'node:crypto';
 
 import { sql } from 'drizzle-orm';
@@ -1169,12 +1169,11 @@ describe('the worker side: a claim, a lease and a fence', () => {
         locked.job.id,
       ]);
 
-      const started = Date.now();
       const claimed = await queue.claim('dw-nowait', 30_000);
 
-      // It took the other job, at once, and did not queue behind the lock.
+      // It took the other job and did not queue behind the lock: a claim that waited would never return, because the holder lets go only after it has. How
+      // long it took is asserted by credential-delivery-job.timing.db.test.ts.
       expect(claimed?.job.id).toBe(other.job.id);
-      expect(Date.now() - started).toBeLessThan(1_500);
       await holder.query('rollback');
     } finally {
       await holder.close();

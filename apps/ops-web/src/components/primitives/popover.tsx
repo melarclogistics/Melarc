@@ -1,0 +1,81 @@
+import * as React from 'react';
+import { Popover as PopoverPrimitive } from 'radix-ui';
+
+import { cn } from '@/lib/utils';
+
+function Popover({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  return <PopoverPrimitive.Root data-slot="popover" {...props} />;
+}
+
+function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
+  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />;
+}
+
+/*
+ * A popover floats, so it takes the one soft shadow (design/DESIGN_SYSTEM.md section 8), the raised surface and the default border. It opens in
+ * `motion.normal`, entering on the enter easing and leaving on the exit easing (section 9); under reduced motion the durations are zero.
+ *
+ * `container` is not in the registry's source (design/DESIGN_SYSTEM.md section 29.6): the element the popover is drawn into, the body unless one is given.
+ * A modal `<dialog>` is in the top layer and the page behind it is inert, so a popover opened from inside one (the date field's calendar) is drawn into
+ * the dialog, or it would open under it, unseen and out of reach.
+ */
+function PopoverContent({
+  className,
+  align = 'center',
+  sideOffset = 4,
+  container,
+  ...props
+}: React.ComponentProps<typeof PopoverPrimitive.Content> & { container?: HTMLElement | null }) {
+  return (
+    <PopoverPrimitive.Portal container={container}>
+      <PopoverPrimitive.Content
+        data-slot="popover-content"
+        align={align}
+        sideOffset={sideOffset}
+        className={cn(
+          'z-50 w-72 origin-(--radix-popover-content-transform-origin) rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md duration-(--motion-normal) ease-(--motion-ease-enter) data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:ease-(--motion-ease-exit) data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+          className,
+        )}
+        {...props}
+      />
+    </PopoverPrimitive.Portal>
+  );
+}
+
+function PopoverAnchor({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Anchor>) {
+  return <PopoverPrimitive.Anchor data-slot="popover-anchor" {...props} />;
+}
+
+function PopoverHeader({ className, ...props }: React.ComponentProps<'div'>) {
+  return (
+    <div
+      data-slot="popover-header"
+      className={cn('flex flex-col gap-1 text-sm', className)}
+      {...props}
+    />
+  );
+}
+
+function PopoverTitle({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div data-slot="popover-title" className={cn('font-medium', className)} {...props} />;
+}
+
+function PopoverDescription({ className, ...props }: React.ComponentProps<'p'>) {
+  return (
+    <p
+      data-slot="popover-description"
+      className={cn('text-muted-foreground', className)}
+      {...props}
+    />
+  );
+}
+
+export {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverAnchor,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverDescription,
+};

@@ -7,6 +7,7 @@ import { wcagViolations } from '../../test-support/wcag';
 import { RequirePermission } from './RequirePermission';
 import { SessionContext } from './session-context';
 import { SessionStore } from './session-store';
+import { cannotText } from '../problem/capability-words';
 
 function renderWith(store: SessionStore, permission: string) {
   return render(
@@ -51,11 +52,14 @@ describe('RequirePermission', () => {
 
   // Break caught: the refusal naming a role. Authority is the key; a role name is not a thing the client may know
   // or decide on (surfaces/ops-portal.md section 7).
-  it('names the permission the page needs, and no role', () => {
+  it('says what the account cannot do in plain words, and names no role and no key', () => {
     renderWith(signedInWith([]), 'staff.read');
 
-    expect(screen.getByText('staff.read')).toBeVisible();
-    expect(document.body.textContent).not.toMatch(/admin|senior ops|role|officer/i);
+    expect(screen.getByText(cannotText('staff.read'))).toBeVisible();
+    expect(document.body.textContent).not.toContain('staff.read');
+    expect(document.body.textContent).not.toMatch(
+      /senior ops|ops staff|platform admin|\brole\b|officer/i,
+    );
   });
 
   // Break caught: a key matched as a prefix or as a substring, so `staff.read` opens a page that needs `staff.read.all`
@@ -69,6 +73,26 @@ describe('RequirePermission', () => {
     renderWith(signedInWith(held), needed);
 
     expect(screen.queryByText('The protected content')).toBeNull();
+  });
+
+  // Break caught (the review of 499399c, over /manifests): a page of pickup runs refused in the words of pickup requests, because the key that reads one reads the other and the guard knew
+  // only the table's words. A page that reads something else with the key says what it is, and the sentence stays the table's.
+  it('says what the page reads, where that is not what the table says for the key', () => {
+    render(
+      <MemoryRouter>
+        <SessionContext value={signedInWith(['staff.read'])}>
+          <RequirePermission permission="pickup.read" capability="see pickup runs">
+            <p>The protected content</p>
+          </RequirePermission>
+        </SessionContext>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('The protected content')).toBeNull();
+    expect(
+      screen.getByText('Your account can’t see pickup runs. Ask an administrator for access.'),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('pickup.read');
   });
 
   // Break caught (ops-portal.md section 7, `/pickup-requests/{id}/exception`): a page whose request another person decides refused as "you lack
@@ -89,8 +113,11 @@ describe('RequirePermission', () => {
 
     expect(screen.queryByText('The protected content')).toBeNull();
     expect(screen.getByRole('heading', { level: 1, name: 'Approval is needed' })).toBeVisible();
-    expect(screen.getByText('pickup.exception.approve')).toBeVisible();
-    expect(document.body.textContent).not.toMatch(/do not have access|senior ops|admin|role/i);
+    expect(screen.getByText('A different approver decides this.')).toBeVisible();
+    expect(document.body.textContent).not.toContain('pickup.exception.approve');
+    expect(document.body.textContent).not.toMatch(
+      /do not have access|senior ops|ops staff|platform admin|\brole\b/i,
+    );
   });
 
   it('shows what it guards to a session that holds the key, whoever decides', () => {

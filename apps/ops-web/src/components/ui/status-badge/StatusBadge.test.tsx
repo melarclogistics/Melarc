@@ -2,7 +2,14 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { wcagViolations } from '../../../test-support/wcag';
-import { StatusBadge, STATUS_TONES, type StatusMap, type StatusTone } from './StatusBadge';
+import {
+  pairOf,
+  StatusBadge,
+  STATUS_PAIRS,
+  STATUS_TONES,
+  type StatusMap,
+  type StatusTone,
+} from './StatusBadge';
 
 /** A made-up domain enum: the badge knows no domain value, so the tests use none of the product's. */
 type DemoState = 'OPEN' | 'HELD' | 'DONE' | 'LOST' | 'IDLE';
@@ -83,6 +90,54 @@ describe('StatusBadge', () => {
     const tones: readonly StatusTone[] = STATUS_TONES;
 
     expect(tones).toHaveLength(5);
+  });
+
+  // Break caught: a badge that is a word and nothing else (the v2 badge has a 6px dot before the words, in the colour of the pair), or a dot that a screen reader finds and reads.
+  it('draws a dot before the words, and hides the dot from assistive technology', () => {
+    const { container } = render(<StatusBadge status="OPEN" map={DEMO_MAP} />);
+
+    const badge = container.firstElementChild;
+    const dot = badge?.querySelector('.ui-status-badge__dot');
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute('aria-hidden', 'true');
+    expect(badge?.firstElementChild).toBe(dot);
+    expect(badge?.textContent).toBe('Open');
+  });
+
+  // Break caught: the pairs of v2 (waiting, success, info, neutral, danger) renamed, reordered or one missing: the document and the stylesheet name these five.
+  it('has the five pairs of the v2 badge, waiting being the warning pair', () => {
+    expect(STATUS_PAIRS).toEqual(['waiting', 'success', 'info', 'neutral', 'danger']);
+    expect(pairOf('warning')).toBe('waiting');
+    for (const pair of STATUS_PAIRS) {
+      expect(pairOf(pair)).toBe(pair);
+    }
+    for (const tone of STATUS_TONES) {
+      expect(STATUS_PAIRS).toContain(pairOf(tone));
+    }
+  });
+
+  // Break caught: a page that says `warning` (every page does today) drawn in a class the stylesheet no longer has, so that the badge loses its colours; and a map that says `waiting`
+  // drawn differently from one that says `warning`.
+  it('draws the warning tone and the waiting pair the same', () => {
+    const warning = render(
+      <StatusBadge status="X" map={{ X: { tone: 'warning', label: 'Held' } }} />,
+    );
+    const warningClass = warning.container.firstElementChild?.className;
+    warning.unmount();
+    const waiting = render(
+      <StatusBadge status="X" map={{ X: { tone: 'waiting', label: 'Held' } }} />,
+    );
+
+    expect(waiting.container.firstElementChild?.className).toBe(warningClass);
+    expect(waiting.container.firstElementChild).toHaveClass('ui-status-badge--waiting');
+  });
+
+  // Break caught: an unknown value drawn with a dot in a colour that means something, or with no dot at all while the others have one.
+  it('draws the dot on an unknown value too, in the neutral pair', () => {
+    const { container } = render(<StatusBadge status="NEW_IN_A_NEWER_SERVER" map={DEMO_MAP} />);
+
+    expect(container.firstElementChild).toHaveClass('ui-status-badge--neutral');
+    expect(container.querySelector('.ui-status-badge__dot')).not.toBeNull();
   });
 
   it('has no WCAG 2.1 A or AA violations that can be checked without a layout engine', async () => {

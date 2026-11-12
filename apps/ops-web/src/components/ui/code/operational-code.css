@@ -1,0 +1,27 @@
+/*
+ * An operational code (design/DESIGN_SYSTEM.md section 5.1; COMPONENT_PATTERNS section 24.1): JetBrains Mono, weight 600, taken from the one token and
+ * never named here. It does not wrap or truncate, because a person must be able to quote the whole of it, and it keeps the case and the punctuation it was given.
+ */
+.ui-code {
+  font-family: var(--font-family-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/*
+ * Where a code is the content of a block that can be narrower than the code (a record's title, the value of a description list and a stop in a list, on a phone with the text
+ * at 200%: a 13-character code is 406px wide at the title's size), it breaks where it must, so that the page does not scroll sideways (WCAG 1.4.10; task R5.2, M9). It is an
+ * inline block, so that in a line of words it moves whole to the next line before it breaks, and it is never cut short: what is copied is the whole code. In a table cell, and
+ * everywhere else, it stays on one line.
+ */
+.ui-record-header__heading .ui-code,
+.ui-record-header .page-heading .ui-code,
+.ui-description-list__value .ui-code,
+.ui-reorder__content .ui-code {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -64,6 +64,7 @@ function written(): JsonObject {
             'INSUFFICIENT_AUTHORITY',
             'NOT_FOUND',
             'PERMISSION_DENIED',
+            'RATE_LIMITED',
             'SESSION_INVALID',
             'VALIDATION_FAILED',
           ],
@@ -96,6 +97,17 @@ function written(): JsonObject {
             '401': errorAnswer('No usable session'),
             '403': errorAnswer('Not permitted'),
             '404': errorAnswer('No such principal'),
+            // The authenticated limiter's 429, which the application states for every operation that needs a session (A2 of the audit).
+            '429': {
+              ...errorAnswer('Too many requests'),
+              headers: {
+                'Retry-After': {
+                  description: 'Whole seconds the client should wait before it tries again',
+                  required: false,
+                  schema: { type: 'integer', minimum: 1 },
+                },
+              },
+            },
           },
         },
       },
@@ -197,9 +209,9 @@ describe('a real read, written out by hand', () => {
       'query:principal_type',
     ]);
     expect(expected.parameters['query:principal_type']?.required).toBe(true);
-    expect(Object.keys(expected.responses)).toEqual(['200', '400', '401', '403', '404']);
+    expect(Object.keys(expected.responses)).toEqual(['200', '400', '401', '403', '404', '429']);
     expect(expected.permission).toBe('staff.read');
-    expect(expected.errorCodes).toHaveLength(6);
+    expect(expected.errorCodes).toHaveLength(7);
     expect(compareOperations(expected, actual)).toEqual([]);
   });
 
@@ -401,7 +413,7 @@ describe('a real read, written out wrongly', () => {
     });
 
     expect(summary(findings)).toEqual(
-      ['400', '401', '403', '404'].map(
+      ['400', '401', '403', '404', '429'].map(
         (status) => ['SCHEMA_REQUIRED', `${AT} > response ${status} > application/json`] as const,
       ),
     );

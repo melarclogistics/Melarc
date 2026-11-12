@@ -64,7 +64,8 @@ describe('the words of the table', () => {
 });
 
 describe('the words of the refusals of authority', () => {
-  // Break caught (ops-portal.md section 7): a refusal that names the wrong key, so an administrator is asked to grant the wrong permission.
+  // Break caught (ops-portal.md section 7, PRODUCT_DESIGN_DIRECTION section 6.5): a refusal that names a key (the review of 5edada2), or the wrong act, so that an administrator
+  // is asked to grant the wrong access.
   it.each([
     ['createPickupManifest', 'pickup.manifest.create'],
     ['setManifestStopOrder', 'pickup.manifest.create'],
@@ -75,12 +76,16 @@ describe('the words of the refusals of authority', () => {
     ['initiateRunCustodyHandover', 'fleet.custody.initiate'],
     ['acceptRunCustodyHandover', 'fleet.custody.accept'],
     ['failRunCustodyHandover', 'fleet.custody.initiate'],
-  ])('tells a refusal of %s as the lack of %s', (operation, key) => {
-    const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
+  ])(
+    'tells a refusal of %s as what the account cannot do, without the key %s',
+    (operation, key) => {
+      const problem = problemOf(refused('PERMISSION_DENIED', 403), { operation });
 
-    expect(problem.kind).toBe('forbidden');
-    expect(problem.message).toContain(key);
-  });
+      expect(problem.kind).toBe('forbidden');
+      expect(problem.message).toMatch(/Ask an administrator for access\.$|handover to a rider/);
+      expect(problem.message).not.toContain(key);
+    },
+  );
 
   // Break caught: Ops told that a handover to a rider is theirs to accept by a message that names the wrong rule.
   it('tells Ops that a handover to a rider is the rider’s to accept', () => {
@@ -103,7 +108,7 @@ describe('the words of the refusals of authority', () => {
     ]) {
       const problem = problemOf(refused('HUB_SCOPE_VIOLATION', 403), { operation });
       expect(problem.forbidden, operation).toBe('outside-hubs');
-      expect(problem.message, operation).toMatch(/hub your session does not act in/);
+      expect(problem.message, operation).toMatch(/hub your account does not work in/);
     }
   });
 });
@@ -118,7 +123,7 @@ describe('a refusal that declares its rule is worded by the rule', () => {
     expect(problem.kind).toBe('conflict');
     expect(problem.rule).toBe('service_date_passed');
     expect(problem.message).toMatch(/day of this run has passed/);
-    expect(problem.message).toMatch(/Cancel the manifest/);
+    expect(problem.message).toMatch(/Cancel the pickup run/);
   });
 
   it('tells a dispatch refused for a pickup that is no longer confirmed, and names the stops', () => {
@@ -234,10 +239,8 @@ describe('the words of the list that is filtered', () => {
       context: 'cursor',
     });
 
-    expect(filter.message).toBe(
-      'That filter was not accepted. Choose a state from the list and a whole date.',
-    );
-    expect(page.message).toMatch(/That page of the manifests could not be opened/);
+    expect(filter.message).toBe('That filter was not accepted. Choose a state and a whole date.');
+    expect(page.message).toMatch(/That page of the pickup runs could not be opened/);
     expect(page.message).toMatch(/Go back to the first page/);
     expect(page.message).not.toBe(filter.message);
   });
@@ -266,7 +269,7 @@ describe('the words of the rules', () => {
       operation: 'createPickupManifest',
     });
 
-    expect(problem.message).toMatch(/already on a manifest/);
+    expect(problem.message).toMatch(/already on a pickup run/);
     expect(problem.message).toMatch(/nothing was created/);
   });
 

@@ -42,6 +42,11 @@ export const AUDIT_OBJECT_TYPES = [
   'Order',
   'PayerCorrection',
   'Evidence',
+  // The role bundle (domain-model.md §6.9), the object of the event a widened bundle writes (audit.md §5.6; migration 0078, audit finding A3).
+  'RoleBundle',
+  // The compiled fixed policy of the Vendor or the Rider (SECURITY_DESIGN.md §13.10; the registry's `FixedPermissionPolicy`), the object of the event a release that
+  // widens it writes (audit.md §5.6; migration 0079, task A3.4). It has no identifier: the policy of an audience is keyed by the audience.
+  'FixedPermissionPolicy',
 ] as const;
 
 export type AuditObjectType = (typeof AUDIT_OBJECT_TYPES)[number];

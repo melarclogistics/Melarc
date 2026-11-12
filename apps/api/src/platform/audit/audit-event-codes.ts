@@ -176,6 +176,8 @@ export const AUDIT_EVENT_CODES = [
   'staff.identity.offboarded',
   'permission.bundle.assign_requested',
   'permission.bundle.assigned',
+  'permission.bundle.widened',
+  'permission.fixed_policy.widened',
   'vendor.organization.created',
   'vendor.organization.approved',
   'vendor.organization.rejected',

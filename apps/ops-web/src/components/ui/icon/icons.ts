@@ -14,19 +14,26 @@ import {
   CircleCheck,
   ClipboardList,
   ClipboardPlus,
+  Ellipsis,
   Eye,
   EyeOff,
   Funnel,
-  House,
+  Gavel,
+  Info,
   LaptopMinimalCheck,
+  ListChecks,
   LogOut,
   Menu,
   MessageSquareText,
+  Monitor,
   MonitorSmartphone,
+  Moon,
   Package,
-  PackageCheck,
   PackagePlus,
+  Plus,
+  Search,
   Store,
+  Sun,
   User,
   UserPlus,
   Users,
@@ -50,13 +57,14 @@ export const ICONS = {
   // Status: they supplement the words, never replace them (DESIGN_SYSTEM section 24).
   warning: CircleAlert,
   success: CircleCheck,
+  info: Info,
   filter: Funnel,
 
   // Navigation and the shell.
-  overview: House,
+  'my-work': ListChecks,
   'pickup-requests': Package,
   'book-pickup': PackagePlus,
-  'exception-approvals': PackageCheck,
+  'exception-approvals': Gavel,
   manifests: ClipboardList,
   'build-manifest': ClipboardPlus,
   messages: MessageSquareText,
@@ -72,6 +80,13 @@ export const ICONS = {
   'collapse-menu': ChevronsLeft,
   'expand-menu': ChevronsRight,
   'sign-out': LogOut,
+  search: Search,
+  plus: Plus,
+  // The chevron of a button that opens a menu below it (the hub switcher's): a single chevron down, named for what it says (task R5.2, M16).
+  'opens-menu': ChevronDown,
+  'theme-light': Sun,
+  'theme-dark': Moon,
+  'theme-system': Monitor,
 
   // Controls.
   'show-password': Eye,
@@ -84,6 +99,8 @@ export const ICONS = {
   previous: ChevronLeft,
   next: ChevronRight,
   calendar: Calendar,
+  // The kit (redesign step R5): the overflow menu of a record's acts. (The "+" of adding a filter is `plus`, the shell's.)
+  'more-actions': Ellipsis,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

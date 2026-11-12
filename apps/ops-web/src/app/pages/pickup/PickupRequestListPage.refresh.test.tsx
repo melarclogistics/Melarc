@@ -55,8 +55,23 @@ function open(handler: Handler, path = '/pickup-requests') {
 const listRequests = () =>
   api.requests.filter((request) => new URL(request.url).pathname === '/api/v1/pickup-requests');
 const queryOf = () => new URL(listRequests().at(-1)?.url ?? 'http://x/').searchParams;
-const refresh = () => screen.getByRole('button', { name: 'Refresh page' });
-const queueTable = () => screen.findByRole('table', { name: 'Pickup requests' });
+const refresh = () => screen.getByRole('button', { name: 'Refresh' });
+const viewTab = (name: string) => screen.getByRole('tab', { name });
+/** The table's region of failures is in the page before it has anything to say, so it is the words that are awaited, and not the region. */
+const alertSaying = async (text: string): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('alert')).toHaveTextContent(text);
+  });
+  return screen.getByRole('alert');
+};
+const queueTable = async (): Promise<HTMLElement> => {
+  const table = await screen.findByRole('table', { name: 'Pickup requests' });
+  // The table is drawn while the rows are on their way, as rows of its own shape and `aria-busy`: it is the rows that are awaited.
+  await waitFor(() => {
+    expect(table).not.toHaveAttribute('aria-busy', 'true');
+  });
+  return table;
+};
 
 /** Opens the queue and answers its first read. */
 async function openRead(items: unknown[] = [pending], next: string | null = null, path?: string) {
@@ -72,14 +87,14 @@ describe('the queue: Refresh page, and the time of the check', () => {
     const reads = byHand();
     open(reads.handler);
 
-    const button = await screen.findByRole('button', { name: 'Refresh page' });
+    const button = await screen.findByRole('button', { name: 'Refresh' });
     expect(button).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByText('Checking this page…')).toBeVisible();
-    expect(screen.queryByText(/Last checked/)).toBeNull();
+    expect(screen.getByText('Checking…')).toBeVisible();
+    expect(screen.queryByText(/Updated/)).toBeNull();
 
     await reads.answer(page([pending]));
 
-    expect(await screen.findByText('Last checked 3 Nov, 14:30')).toBeVisible();
+    expect(await screen.findByText('Updated 3 Nov, 14:30')).toBeVisible();
     expect(refresh()).toBe(button);
     expect(button).not.toHaveAttribute('aria-busy');
   });
@@ -92,8 +107,8 @@ describe('the queue: Refresh page, and the time of the check', () => {
 
     await reads.answer(page([pending]));
 
-    const text = await screen.findByText(/^Last checked /);
-    expect(text).toHaveTextContent('Last checked 3 Nov, 09:05');
+    const text = await screen.findByText(/^Updated /);
+    expect(text).toHaveTextContent('Updated 3 Nov, 09:05');
     expect(text.textContent).not.toMatch(/queue is|up to date|current|all pages/i);
   });
 
@@ -115,7 +130,7 @@ describe('the queue: Refresh page, and the time of the check', () => {
     expect(queryOf().get('state')).toBe('PENDING');
     expect(queryOf().get('page_token')).toBe('next-1');
     expect(router.state.location.search).toBe('?state=PENDING');
-    expect(screen.getByRole('combobox', { name: 'State' })).toHaveValue('PENDING');
+    expect(viewTab('Waiting for confirmation')).toHaveAttribute('aria-selected', 'true');
   });
 
   // Break caught: the old rows drawn as the answer to a read that is still under way, or beside the failure of one.
@@ -124,22 +139,22 @@ describe('the queue: Refresh page, and the time of the check', () => {
 
     await user.click(refresh());
 
-    expect(await screen.findByText('Loading the pickup requests…')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    expect(await screen.findByText('Loading pickup requests')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
     expect(screen.queryByText('ACC-PR-7KQ2MZ')).toBeNull();
     expect(screen.queryByText(/Showing/)).toBeNull();
     expect(refresh()).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByText('Checking this page…')).toBeVisible();
+    expect(screen.getByText('Checking…')).toBeVisible();
 
     vi.setSystemTime(SECOND_CHECK);
     await reads.answer(page([late]));
 
     const table = await queueTable();
-    expect(within(table).getByRole('link', { name: 'ACC-PR-9WXH4T' })).toBeVisible();
-    expect(within(table).queryByRole('link', { name: 'ACC-PR-7KQ2MZ' })).toBeNull();
-    expect(screen.getByText('Last checked 3 Nov, 14:41')).toBeVisible();
-    expect(screen.queryByText('Checking this page…')).toBeNull();
+    expect(within(table).getByRole('button', { name: /^Open ACC-PR-9WXH4T, / })).toBeVisible();
+    expect(within(table).queryByRole('button', { name: /^Open ACC-PR-7KQ2MZ, / })).toBeNull();
+    expect(screen.getByText('Updated 3 Nov, 14:41')).toBeVisible();
+    expect(screen.queryByText('Checking…')).toBeNull();
   });
 
   it('keeps focus on the button, and says once that the page was refreshed', async () => {
@@ -170,7 +185,7 @@ describe('the queue: Refresh page, and the time of the check', () => {
     await reads.answer(page([late], 'next-1'));
     expect(await screen.findByText('Page refreshed.')).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'CONFIRMED');
+    await user.click(viewTab('Confirmed'));
     await reads.answer(page([late]));
     await queueTable();
 
@@ -181,15 +196,15 @@ describe('the queue: Refresh page, and the time of the check', () => {
   it('leaves focus where the officer moved it during the read', async () => {
     const { user, reads } = await openRead();
     await user.click(refresh());
-    const state = screen.getByRole('combobox', { name: 'State' });
+    const filter = screen.getByRole('button', { name: 'Filter' });
 
     act(() => {
-      state.focus();
+      filter.focus();
     });
     await reads.answer(page([late]));
     await queueTable();
 
-    expect(state).toHaveFocus();
+    expect(filter).toHaveFocus();
   });
 
   it('counts a read that found nothing as a check, and says the page is empty', async () => {
@@ -200,7 +215,7 @@ describe('the queue: Refresh page, and the time of the check', () => {
     await reads.answer(page([]));
 
     expect(await screen.findByRole('heading', { name: 'No pickup requests yet' })).toBeVisible();
-    expect(screen.getByText('Last checked 3 Nov, 14:41')).toBeVisible();
+    expect(screen.getByText('Updated 3 Nov, 14:41')).toBeVisible();
     expect(screen.getByText('Page refreshed.')).toBeInTheDocument();
   });
 
@@ -212,8 +227,8 @@ describe('the queue: Refresh page, and the time of the check', () => {
     await user.click(refresh());
     await reads.answer(refusal(500, 'INTERNAL_ERROR'));
 
-    expect(await screen.findByText('The pickup requests could not be loaded.')).toBeVisible();
-    expect(screen.queryByRole('table')).toBeNull();
+    await alertSaying('The pickup requests could not be loaded.');
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
     expect(screen.queryByText('ACC-PR-7KQ2MZ')).toBeNull();
     expect(screen.queryByText(/Showing/)).toBeNull();
@@ -222,7 +237,7 @@ describe('the queue: Refresh page, and the time of the check', () => {
     expect(screen.queryByText('Page refreshed.')).toBeNull();
     // The control is still there and ready, and so is the ordinary retry.
     expect(refresh()).not.toHaveAttribute('aria-busy');
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
   });
 
   it('reads again from a failure, with the button or with Try again, and shows the new page', async () => {
@@ -236,7 +251,7 @@ describe('the queue: Refresh page, and the time of the check', () => {
     await reads.answer(page([late]));
 
     expect(await queueTable()).toBeVisible();
-    expect(screen.getByText('Last checked 3 Nov, 14:41')).toBeVisible();
+    expect(screen.getByText('Updated 3 Nov, 14:41')).toBeVisible();
     expect(screen.queryByText(/Refresh failed/)).toBeNull();
   });
 
@@ -265,25 +280,25 @@ describe('the queue: Refresh page, and the time of the check', () => {
   // Break caught: the time of the page before shown beside the page after, which would claim a check nobody made.
   it('shows no time for a filter, or for a page, until that read has been answered', async () => {
     const { user, reads } = await openRead([pending], 'next-1');
-    expect(screen.getByText('Last checked 3 Nov, 14:30')).toBeVisible();
+    expect(screen.getByText('Updated 3 Nov, 14:30')).toBeVisible();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'CONFIRMED');
+    await user.click(viewTab('Confirmed'));
     await waitFor(() => {
       expect(listRequests()).toHaveLength(2);
     });
-    expect(screen.queryByText(/Last checked/)).toBeNull();
+    expect(screen.queryByText(/Updated/)).toBeNull();
     vi.setSystemTime(SECOND_CHECK);
     await reads.answer(page([late], 'next-2'));
-    expect(await screen.findByText('Last checked 3 Nov, 14:41')).toBeVisible();
+    expect(await screen.findByText('Updated 3 Nov, 14:41')).toBeVisible();
 
     vi.setSystemTime(new Date('2026-11-03T14:52:00Z'));
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await waitFor(() => {
       expect(listRequests()).toHaveLength(3);
     });
-    expect(screen.queryByText(/Last checked/)).toBeNull();
+    expect(screen.queryByText(/Updated/)).toBeNull();
     await reads.answer(page([pending]));
-    expect(await screen.findByText('Last checked 3 Nov, 14:52')).toBeVisible();
+    expect(await screen.findByText('Updated 3 Nov, 14:52')).toBeVisible();
   });
 
   it('names no earlier check when the page that failed was never read', async () => {
@@ -292,15 +307,15 @@ describe('the queue: Refresh page, and the time of the check', () => {
     await user.click(screen.getByRole('button', { name: 'Next page' }));
     await reads.answer(refusal(500, 'INTERNAL_ERROR'));
 
-    expect(await screen.findByText('The pickup requests could not be loaded.')).toBeVisible();
-    expect(screen.queryByText(/Last checked/)).toBeNull();
+    await alertSaying('The pickup requests could not be loaded.');
+    expect(screen.queryByText(/Updated/)).toBeNull();
     expect(screen.queryByText(/Last successful check/)).toBeNull();
   });
 
   it('announces nothing for a read the officer did not ask for by the button', async () => {
     const { user, reads } = await openRead([pending], 'next-1');
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'State' }), 'CONFIRMED');
+    await user.click(viewTab('Confirmed'));
     await reads.answer(page([late]));
     await queueTable();
 
@@ -323,7 +338,7 @@ describe('the queue: Refresh page, and the time of the check', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     expect(listRequests()).toHaveLength(reads);
-    expect(screen.getByText('Last checked 3 Nov, 14:30')).toBeVisible();
+    expect(screen.getByText('Updated 3 Nov, 14:30')).toBeVisible();
   });
 });
 
@@ -333,7 +348,6 @@ describe('the queue: Refresh page, and the time of the check', () => {
  * another, whenever its answer arrives.
  */
 describe('the queue: Refresh page, and the visit it is said done for', () => {
-  const stateSelect = () => screen.getByRole('combobox', { name: 'State' });
   /** Time enough for what an answer sets going (a refresh's word is set a few turns after the answer) to have been set, if it is going to be. */
   const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
 
@@ -345,10 +359,10 @@ describe('the queue: Refresh page, and the visit it is said done for', () => {
     await reads.answer(page([late]));
     expect(await screen.findByText('Page refreshed.')).toBeInTheDocument();
 
-    await user.selectOptions(stateSelect(), 'CONFIRMED');
+    await user.click(viewTab('Confirmed'));
     await reads.answer(page([late]));
     await queueTable();
-    await user.selectOptions(stateSelect(), '');
+    await user.click(viewTab('All'));
     await waitFor(() => {
       expect(listRequests()).toHaveLength(4);
     });
@@ -394,9 +408,9 @@ describe('the queue: Refresh page, and the visit it is said done for', () => {
   // Break caught: a refresh that completes late, after the officer has been to another filter and come back, said done over the newer read.
   it('says nothing when a refresh completes after the officer has been to another filter and come back', async () => {
     const view = await withARefreshUnderWay();
-    await view.user.selectOptions(stateSelect(), 'CONFIRMED');
+    await view.user.click(viewTab('Confirmed'));
     await queueTable();
-    await view.user.selectOptions(stateSelect(), '');
+    await view.user.click(viewTab('All'));
     expect(screen.queryByText('Page refreshed.')).toBeNull();
 
     await view.finish(page([pending, late]));
@@ -409,13 +423,13 @@ describe('the queue: Refresh page, and the visit it is said done for', () => {
   // Break caught: a refresh that completes while the officer is on another filter, kept to be said when they come back to the one it was for.
   it('says nothing of a refresh that completes while the officer is on another filter, nor when they come back', async () => {
     const view = await withARefreshUnderWay();
-    await view.user.selectOptions(stateSelect(), 'CONFIRMED');
+    await view.user.click(viewTab('Confirmed'));
     await queueTable();
 
     await view.finish(page([pending, late]));
     await settle();
     expect(screen.queryByText('Page refreshed.')).toBeNull();
-    await view.user.selectOptions(stateSelect(), '');
+    await view.user.click(viewTab('All'));
     await queueTable();
     await settle();
 
@@ -424,13 +438,13 @@ describe('the queue: Refresh page, and the visit it is said done for', () => {
 
   it('says nothing over a failure that is the answer to the refresh the officer came back to', async () => {
     const view = await withARefreshUnderWay();
-    await view.user.selectOptions(stateSelect(), 'CONFIRMED');
+    await view.user.click(viewTab('Confirmed'));
     await queueTable();
-    await view.user.selectOptions(stateSelect(), '');
+    await view.user.click(viewTab('All'));
 
     await view.finish(refusal(500, 'INTERNAL_ERROR'));
 
-    expect(await screen.findByText('The pickup requests could not be loaded.')).toBeVisible();
+    await alertSaying('The pickup requests could not be loaded.');
     await settle();
     expect(screen.queryByText('Page refreshed.')).toBeNull();
   });

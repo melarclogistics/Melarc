@@ -31,6 +31,30 @@ function showcaseRoutes(): RouteObject[] {
         return { Component: ShowcasePage };
       },
     },
+    {
+      // The shadcn/ui primitives, beside the components (DESIGN_SYSTEM section 29): the same gate, so the production build holds no trace of it.
+      path: '__showcase/primitives',
+      lazy: async () => {
+        const { PrimitivesShowcasePage } = await import('../showcase/PrimitivesShowcase');
+        return { Component: PrimitivesShowcasePage };
+      },
+    },
+    {
+      // The shell of the signed-in screens (redesign step R4): the sidebar, the top bar and the command palette, with made-up entries. The same gate.
+      path: '__showcase/shell',
+      lazy: async () => {
+        const { ShellShowcasePage } = await import('../showcase/ShellShowcase');
+        return { Component: ShellShowcasePage };
+      },
+    },
+    {
+      // The Melarc component kit (redesign step R5), one page for each group of components and for the composed examples: the same gate.
+      path: '__showcase/kit/:group?',
+      lazy: async () => {
+        const { KitShowcasePage } = await import('../showcase/kit/KitShowcase');
+        return { Component: KitShowcasePage };
+      },
+    },
   ];
 }
 

@@ -2,7 +2,7 @@
 
 > **Status:** ACTIVE DESIGN BASELINE — grounded in the approved Melarc Brand Foundation; approved by the Product Owner on 6 October 2026  
 > **Version:** 1.2  
-> **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4.6, §11, §13.1, §14, §22, §24–§26, §29, §36)  
+> **Date:** 5 October 2026; revised 6 October 2026 to reconcile it with the [bootstrap and design audit](../delivery/planning/MELARC_BOOTSTRAP_AND_DESIGN_AUDIT_2026-10-05.md) (§4.6, §11, §13.1, §14, §22, §24–§26, §29, §36), and again on 5 November 2026 for the Ops Portal redesign: its direction (§4.7, §5.1, §5.2, §7 to §12, §13.1, §16, §17, §22 to §24a, §27, §31, §33, §36) and, in redesign step R2, its values, which replaced the palette, radii, heights, shadow and motion of 6 October 2026 (§2.5, §3 to §5, §7 to §11, §14, §29, §31, §36)  
 > **Repository path:** `design/DESIGN_SYSTEM.md`  
 > **Depends on:** `design/BRAND_FOUNDATION.md`  
 > **Owns:** semantic design tokens, accessibility rules, typography scale, spacing, radius, elevation, focus treatment, responsive behavior, density, UI state presentation, token naming, the web UI library policy (§23, §24a), and the initial UI-foundation implementation scope  
@@ -14,7 +14,9 @@
 "proposed" or "provisional" about a value (the inverse focus and link recipes, the interface crimson and ink, the palette,
 the spacing, breakpoints and focus ring), that approval settles it. What stays open is only what §36 shows as OPEN, NOT
 DECIDED, DEFERRED, NOT STARTED or NOT YET FINAL. A change to an approved value is a foundation change (§34) made here, in
-the same commit as the token file.
+the same commit as the token file. The values of 5 November 2026 (the palette of §4.3 and §4.4 for the light and the dark
+theme, the type of §5.1, the radii, the one shadow, the motion and the heights of §7 to §11) have been the values in force
+since redesign step R2, and replace those of 6 October 2026.
 
 ---
 
@@ -99,8 +101,8 @@ color.border.control
 rather than raw values such as:
 
 ```text
-#B4232E
-#172033
+#BE1E2D
+#0E1525
 ```
 
 ### 2.6 Platform conventions matter
@@ -132,13 +134,14 @@ Raw design values.
 Examples:
 
 ```text
-crimson.700
-ink.950
-gray.50
+white
+black
 space.4
 radius.md
-shadow.sm
+shadow.floating
 ```
+
+Colour has only two primitives, `white` and `black` (§4.2). Every other colour changes with the theme, so it is a semantic token with a light value and a dark value (§4.3), and no primitive stands behind it.
 
 Primitive tokens should rarely be consumed directly by feature code.
 
@@ -187,7 +190,9 @@ The current supplied logo uses approximately:
 
 These are **logo reference values** only until verified against the original vector artwork.
 
-The application interface uses a related but distinct Crimson + Ink palette.
+The application interface uses a Crimson + Ink palette.
+
+**Decided (Product Owner, 5 November 2026; in force since step R2).** The interface crimson is the logo red itself, `#BE1E2D` (it replaced `#B4232E`, approved on 6 October 2026), and crimson has a smaller job than the primary action did (§4.7). The supplied vector master fills its red with `#be1e2d`, the value sampled from the PNG; it remains a logo reference value until the owner confirms the master ([the brand README](assets/brand/README.md)).
 
 The logo must not be recolored merely to match interface tokens.
 
@@ -195,106 +200,93 @@ The logo must not be recolored merely to match interface tokens.
 
 ## 4.2 Primitive color palette
 
-### Crimson
+Two colors are the same in every theme, so they are primitives: they name a raw value that does not change.
 
 | Token | Value | Usage |
 |---|---:|---|
-| `crimson.50` | `#FFF4F5` | very soft brand tint |
-| `crimson.100` | `#FCEBED` | soft selected/accent surface |
-| `crimson.200` | `#F7CDD2` | decorative accent/border |
-| `crimson.300` | `#EDA3AC` | restrained accent |
-| `crimson.500` | `#C93D4A` | supporting brand emphasis |
-| `crimson.600` | `#B4232E` | primary brand/action |
-| `crimson.700` | `#971B26` | primary hover/pressed |
-| `crimson.800` | `#7D1720` | strong brand text where appropriate |
-| `crimson.900` | `#65131B` | darkest brand tone |
+| `white` | `#FFFFFF` | The tile behind the symbol in the product lockup (the symbol is black and red, so the tile stays white in both themes), and the background of a QR code. |
+| `black` | `#000000` | The modules of a QR code: a scanner reads dark on light in both themes. |
 
-### Ink / neutral
-
-| Token | Value |
-|---|---:|
-| `ink.950` | `#172033` |
-| `gray.900` | `#1F2937` |
-| `gray.800` | `#344054` |
-| `gray.700` | `#475467` |
-| `gray.600` | `#667085` |
-| `gray.550` | `#7C879B` |
-| `gray.500` | `#8A94A6` |
-| `gray.400` | `#98A2B3` |
-| `gray.300` | `#D0D5DD` |
-| `gray.200` | `#DDE1E7` |
-| `gray.100` | `#EAECF0` |
-| `gray.50` | `#F7F8FA` |
-| `white` | `#FFFFFF` |
-| `black` | `#000000` |
-
-### Supporting semantic hues
-
-| Role | Base | Strong text | Soft background |
-|---|---:|---:|---:|
-| Success | `#157A55` | `#0F5D42` | `#E8F6F0` |
-| Warning | `#B76E00` | `#8A5200` | `#FFF4E5` |
-| Danger | `#B4232E` | `#8F1D27` | `#FCEBED` |
-| Info | `#2563A6` | `#1F4F86` | `#EAF2FB` |
+Every other color of the interface changes with the theme (§31), so it is a semantic token with a light value and a dark value (§4.3, §4.4) and no primitive stands behind it. The crimson, ink and gray scales of 6 October 2026 (`crimson.50` to `crimson.900`, `ink.950`, `gray.50` to `gray.900`, with `gray.550`) and the table of supporting hues were replaced by the palette of 5 November 2026 in redesign step R2.
 
 ---
 
 ## 4.3 Core semantic color tokens
 
+Each token has a value for the light theme and a value for the dark theme ([§31](#31-dark-mode)), and a component consumes the token and never a value. The palette is the Product Owner's, given on 5 November 2026 and corrected for contrast the same day; the values it did not give were derived by step R2 and say so in the Role column, and the rule of each is at the end of this section.
+
 ### Surfaces
 
-| Token | Value |
-|---|---:|
-| `color.surface.page` | `#F7F8FA` |
-| `color.surface.default` | `#FFFFFF` |
-| `color.surface.subtle` | `#F2F4F7` |
-| `color.surface.inverse` | `#172033` |
-| `color.surface.selected` | `#FCEBED` |
-| `color.surface.disabled` | `#F2F4F7` |
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `color.surface.page` | `#F3F4F7` | `#090D16` | Canvas, the ground of every page. |
+| `color.surface.default` | `#FFFFFF` | `#10151F` | Surface: cards, forms, tables and panels. |
+| `color.surface.raised` | `#F8F9FB` | `#141A26` | Raised surface: menus, popovers, the record panel and toasts. |
+| `color.surface.subtle` | `#EEF0F4` | `#0C111A` | Sunken surface: recessed bands, read-only fields and hover fills. |
+| `color.surface.inverse` | `#0E1525` | `#0C111A` | Ink: the sidebar and the band of the split screen, a dark ground in both themes. |
+| `color.surface.selected` | `#E2E5EB` | `#16202F` | A selected row or day: an Ink tint, never crimson. Derived. |
+| `color.surface.disabled` | `#EEF0F4` | `#0C111A` | A disabled field: the sunken surface. |
 
 ### Text
 
-| Token | Value |
-|---|---:|
-| `color.text.primary` | `#172033` |
-| `color.text.secondary` | `#475467` |
-| `color.text.muted` | `#667085` |
-| `color.text.disabled` | `#98A2B3` |
-| `color.text.inverse` | `#FFFFFF` |
-| `color.text.link` | `#971B26` |
-| `color.text.linkHover` | `#7D1720` |
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `color.text.primary` | `#0E1525` | `#EDF0F6` | Primary text. |
+| `color.text.secondary` | `#475066` | `#A9B2C3` | Secondary text. |
+| `color.text.muted` | `#626B81` | `#8E98AC` | Tertiary text: supporting copy. |
+| `color.text.disabled` | `#8A94A8` | `#667085` | Text on a disabled control; exempt from contrast. Derived. |
+| `color.text.inverse` | `#FFFFFF` | `#FFFFFF` | Text on `surface.inverse`, the sidebar, in both themes. |
+| `color.text.link` | `#0E1525` | `#EDF0F6` | Links are Ink, not crimson. |
+| `color.text.linkHover` | `#BE1E2D` | `#F04B59` | A hovered link is the brand crimson. |
 
 ### Borders
 
-| Token | Value | Rule |
-|---|---:|---|
-| `color.border.subtle` | `#DDE1E7` | decorative separators only |
-| `color.border.default` | `#D0D5DD` | normal structural borders |
-| `color.border.control` | `#7C879B` | control boundary where border is visually required (`gray.550`; 3:1 on every light surface of §4.6) |
-| `color.border.strong` | `#667085` | high-emphasis boundary |
-| `color.border.disabled` | `#DDE1E7` | disabled treatment |
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `color.border.subtle` | `#E2E5EB` | `#222A38` | Decorative separators only. |
+| `color.border.default` | `#C9CED8` | `#333D4F` | Normal structural borders. |
+| `color.border.control` | `#7C859A` | `#667085` | Control boundary where a border is visually required: at least 3:1 on the surfaces §4.6 lists. |
+| `color.border.strong` | `#626B81` | `#8E98AC` | High-emphasis boundary: the value of `text.muted`. Derived. |
+| `color.border.disabled` | `#E2E5EB` | `#222A38` | Disabled treatment: the subtle border. |
 
 `color.border.subtle` must not be the sole required visual boundary of an input or interactive control.
 
+### Brand
+
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `color.brand.default` | `#BE1E2D` | `#F04B59` | The brand crimson: the small square that marks the active hub and the current step. |
+
 ### Actions
 
-| Token | Value |
-|---|---:|
-| `color.action.primary` | `#B4232E` |
-| `color.action.primaryHover` | `#971B26` |
-| `color.action.primaryPressed` | `#7D1720` |
-| `color.action.primaryText` | `#FFFFFF` |
-| `color.action.secondary` | `#FFFFFF` |
-| `color.action.secondaryText` | `#172033` |
-| `color.action.disabled` | `#EAECF0` |
-| `color.action.disabledText` | `#98A2B3` |
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `color.action.primary` | `#0E1525` | `#EDF0F6` | The primary action is Ink, near-white in the dark theme. |
+| `color.action.primaryHover` | `#1C2539` | `#DDE2EC` | Hovered Primary. Derived. |
+| `color.action.primaryPressed` | `#26304A` | `#C3CAD7` | Pressed Primary. Derived. |
+| `color.action.primaryText` | `#FFFFFF` | `#0E1525` | Text on Primary. |
+| `color.action.secondary` | `#FFFFFF` | `#10151F` | Secondary fill: the surface. |
+| `color.action.secondaryText` | `#0E1525` | `#EDF0F6` | Text on Secondary: the primary text. |
+| `color.action.disabled` | `#EEF0F4` | `#1B2230` | A disabled button. Derived. |
+| `color.action.disabledText` | `#8A94A8` | `#667085` | Text on a disabled button; exempt from contrast. Derived. |
+| `color.action.new` | `#BE1E2D` | `#F04B59` | The New button in the top bar: the brand crimson. |
+| `color.action.newHover` | `#A91A28` | `#F25F6B` | Hovered New. Dark value derived. |
+| `color.action.newPressed` | `#94151F` | `#F5808A` | Pressed New. Derived. |
+| `color.action.newText` | `#FFFFFF` | `#0E1525` | Text on New: white on the crimson, Ink on the lighter dark-theme crimson. Dark value derived. |
+
+Secondary and Danger have no fill token of their own for hover and pressed: hover is `surface.subtle` (a soft Danger fill for Danger) and pressed is `--button-pressed-background`, a recorded component token (§3.3) of `#E2E5EB` in the light theme and `#090D16` in the dark (§4.6).
 
 ### Focus
 
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `focus.ring` | `#2563A6` | `#7AA7F0` | The focus ring. |
+| `focus.offset` | `#FFFFFF` | `#10151F` | The band between the ring and the control: the surface. Dark value derived. |
+| `focus.ringInverse` | `#FFFFFF` | `#FFFFFF` | The ring on the sidebar. |
+| `focus.offsetInverse` | `#0E1525` | `#0C111A` | The band on the sidebar: the sidebar itself. |
+
 | Token | Value |
 |---|---:|
-| `focus.ring` | `#2563A6` |
-| `focus.offset` | `#FFFFFF` |
 | `focus.width` | `2px` |
 | `focus.offsetWidth` | `2px` |
 
@@ -302,73 +294,95 @@ Focus styling must be visible without depending on hover.
 
 Do not remove browser focus treatment unless an equal or stronger custom focus indicator replaces it.
 
+### Sidebar
+
+The sidebar is `surface.inverse`, an Ink ground in both themes, and these tokens are what is drawn on it (§4.6, §22). They keep the `shell` names they had as aliases of the old palette.
+
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `shell.text` | `#FFFFFF` | `#FFFFFF` | Hovered item text, the product name and the account name. |
+| `shell.textMuted` | `#C3CAD7` | `#C3CAD7` | Idle item text. |
+| `shell.textSubtle` | `#8A94A8` | `#8A94A8` | Secondary text: the application name, the account's hub. |
+| `shell.surfaceHover` | `#1C2539` | `#1C2539` | A hovered item. |
+| `shell.surfacePressed` | `#26304A` | `#26304A` | A pressed item and the account avatar. Derived. |
+| `shell.border` | `#1C2539` | `#1C2539` | Dividers on Ink; not a control boundary. |
+| `shell.active` | `#BE1E2D` | `#BE1E2D` | The active item: a solid crimson fill in both themes. |
+| `shell.activeText` | `#FFFFFF` | `#FFFFFF` | Text on the active item, set bold. |
+| `shell.activeHover` | `#A91A28` | `#A91A28` | The hovered active item. |
+| `shell.activeBadge` | `rgb(255 255 255 / 0.18)` | `rgb(255 255 255 / 0.18)` | The pill of a count on the active item: white at 18% over the crimson, with the figure in `shell.activeText` (4.63 on `shell.active`, 5.31 on `shell.activeHover`; at 22% the figure would be 4.32, below the 4.5 that text of its size needs, and the Product Owner accepted 18% on 6 November 2026). A component token, held to those numbers by the test "the pill of a count on the current entry of the sidebar" in `scripts/design-tokens.test.ts`. |
+
+### How the unlisted values were derived
+
+- **Hover and pressed fills** step away from the resting fill in the direction the text on it allows. Primary lightens toward the sidebar's tones in the light theme (`#1C2539`, `#26304A`) and dims toward the sidebar's text tone in the dark theme (`#DDE2EC`, `#C3CAD7`). New darkens in the light theme, from the Product Owner's active-item hover (`#A91A28`) to `#94151F`, and lightens in the dark theme, because its text is Ink there and white on `#F04B59` would be 3.59:1.
+- **Disabled** controls reuse palette values, and their text is exempt from contrast, as WCAG allows for an inactive control (§4.6).
+- **`surface.selected`** is an Ink tint, because crimson is not for selection (§4.7). The dark value is the lightest tint on which a hovered link (`text.linkHover`) still reaches 4.5:1.
+- **`border.strong`** is the value of `text.muted`, which is at least 3:1 on every surface that supports a boundary (§4.6).
+- **Status borders** (§4.4) are the foreground mixed into the background: 30% in the light theme, 35% in the dark. They are decoration; the text and the icon carry the meaning.
+- **`focus.offset`** in the dark theme is the dark surface, so that the band separates the ring from a control as it does in the light. **`shell.surfacePressed`** is the Primary pressed fill of the light theme, which is a step beyond `shell.surfaceHover`.
+
+**Approved as built (Product Owner, 5 November 2026, in the task of redesign step R3).** The values step R2 derived, as this section lists them, the 44px controls (§11), the 36px rows (§10) and the single floating shadow (§8).
+
 ---
 
 ## 4.4 Status tokens
 
-Status tokens must be semantic and independent of domain enum names.
+Status tokens must be semantic and independent of domain enum names. Each of the five has a foreground, a background and a border in each theme. The names are unchanged; the Product Owner's words for them are in the Role column.
 
-### Success
+| Token | Light | Dark | Role |
+|---|---:|---:|---|
+| `color.status.warning.foreground` | `#8A4F00` | `#F0B45A` | Waiting: text and icon. |
+| `color.status.warning.background` | `#FFF3E0` | `#2E2210` | Waiting: fill. |
+| `color.status.warning.border` | `#DCC29D` | `#72552A` | Waiting: edge. |
+| `color.status.success.foreground` | `#0B6B44` | `#5CCB95` | Done: text and icon. |
+| `color.status.success.background` | `#E7F6EF` | `#0F2A1F` | Done: fill. |
+| `color.status.success.border` | `#A5CCBC` | `#2A6248` | Done: edge. |
+| `color.status.info.foreground` | `#1F4E96` | `#86B1F4` | In progress: text and icon. |
+| `color.status.info.background` | `#EAF1FB` | `#12223C` | In progress: fill. |
+| `color.status.info.border` | `#ADC0DD` | `#3B547C` | In progress: edge. |
+| `color.status.neutral.foreground` | `#475066` | `#A9B2C3` | Neutral: text and icon. |
+| `color.status.neutral.background` | `#EEF0F4` | `#1B2230` | Neutral: fill. |
+| `color.status.neutral.border` | `#BCC0C9` | `#4D5463` | Neutral: edge. |
+| `color.status.danger.foreground` | `#A8320E` | `#FF8A66` | Danger: text and icon. |
+| `color.status.danger.background` | `#FDEDE7` | `#33170F` | Danger: fill. |
+| `color.status.danger.border` | `#E4B5A6` | `#7A3F2D` | Danger: edge. |
 
-```text
-color.status.success.foreground = #0F5D42
-color.status.success.background = #E8F6F0
-color.status.success.border     = #86CDB1
-```
-
-### Warning
-
-```text
-color.status.warning.foreground = #8A5200
-color.status.warning.background = #FFF4E5
-color.status.warning.border     = #E8B76A
-```
-
-### Danger
-
-```text
-color.status.danger.foreground = #8F1D27
-color.status.danger.background = #FCEBED
-color.status.danger.border     = #E8AAB1
-```
-
-### Info
-
-```text
-color.status.info.foreground = #1F4F86
-color.status.info.background = #EAF2FB
-color.status.info.border     = #9FC1E3
-```
-
-### Neutral
-
-```text
-color.status.neutral.foreground = #475467
-color.status.neutral.background = #F2F4F7
-color.status.neutral.border     = #D0D5DD
-```
-
-Status colors must always be accompanied by readable text and, where useful, icons or explicit labels.
+Status colors must always be accompanied by readable text and, where useful, icons or explicit labels. Danger is a separate vermilion and never crimson (§4.7).
 
 ---
 
 ## 4.5 Verified contrast baseline
 
-The following working combinations have suitable contrast for normal text:
+The following working combinations have suitable contrast for normal text, nine in each theme.
+
+### Light theme
 
 | Foreground | Background | Approx. contrast |
 |---|---|---:|
-| `#B4232E` | `#FFFFFF` | 6.52:1 |
-| `#971B26` | `#FFFFFF` | 8.40:1 |
-| `#172033` | `#FFFFFF` | 16.27:1 |
-| `#667085` | `#FFFFFF` | 4.97:1 |
-| `#0F5D42` | `#E8F6F0` | 7.08:1 |
-| `#8A5200` | `#FFF4E5` | 5.88:1 |
-| `#8F1D27` | `#FCEBED` | 7.69:1 |
-| `#1F4F86` | `#EAF2FB` | 7.38:1 |
-| `#475467` | `#F2F4F7` | 6.98:1 |
+| `#BE1E2D` | `#FFFFFF` | 6.15:1 |
+| `#0E1525` | `#FFFFFF` | 18.22:1 |
+| `#626B81` | `#FFFFFF` | 5.33:1 |
+| `#0B6B44` | `#E7F6EF` | 5.88:1 |
+| `#8A4F00` | `#FFF3E0` | 5.99:1 |
+| `#A8320E` | `#FDEDE7` | 5.90:1 |
+| `#1F4E96` | `#EAF1FB` | 7.14:1 |
+| `#475066` | `#EEF0F4` | 7.06:1 |
+| `#475066` | `#F3F4F7` | 7.32:1 |
 
-These nine pairs are individually verified. They do not make other combinations of the same tokens accessible:
+### Dark theme
+
+| Foreground | Background | Approx. contrast |
+|---|---|---:|
+| `#F04B59` | `#10151F` | 5.10:1 |
+| `#EDF0F6` | `#10151F` | 16.01:1 |
+| `#8E98AC` | `#10151F` | 6.30:1 |
+| `#5CCB95` | `#0F2A1F` | 7.61:1 |
+| `#F0B45A` | `#2E2210` | 8.42:1 |
+| `#FF8A66` | `#33170F` | 7.15:1 |
+| `#86B1F4` | `#12223C` | 7.28:1 |
+| `#A9B2C3` | `#1B2230` | 7.47:1 |
+| `#0E1525` | `#EDF0F6` | 15.96:1 |
+
+These pairs are individually verified. They do not make other combinations of the same tokens accessible:
 §4.6 lists the combinations the system supports. Ratios in this document are computed from the hex values with the
 WCAG 2.x relative-luminance formula and shown to two decimals; a ratio below its threshold is never rounded up to pass.
 The thresholds are 4.5:1 for normal text and 3:1 for large text and for the visual cues that identify a control or its
@@ -382,107 +396,172 @@ Every new color pairing introduced later must be checked independently and added
 
 Tokens are not freely combinable. A foreground, border or focus colour is supported only on the surfaces listed here;
 a combination that is not listed is not supported. `✗` is below the threshold for the use named, and `thin` passes by
-less than 0.25 and is supported only where the rule below says so.
+less than 0.25 and is supported only where the rule below says so. Every table is written once for each theme, and the
+same pairings are supported in both.
 
-### Text on surfaces
+### Text on surfaces, light theme
 
-| Foreground | `surface.default` `#FFFFFF` | `surface.page` `#F7F8FA` | `surface.subtle` `#F2F4F7` | `surface.selected` `#FCEBED` | `surface.inverse` `#172033` |
-|---|---:|---:|---:|---:|---:|
-| `text.primary` `#172033` | 16.27 | 15.31 | 14.76 | 14.13 | ✗ 1.00 |
-| `text.secondary` `#475467` | 7.69 | 7.23 | 6.98 | 6.68 | ✗ 2.12 |
-| `text.muted` `#667085` | 4.97 | 4.68 thin | 4.51 thin | ✗ 4.32 | ✗ 3.27 |
-| `text.link` `#971B26` | 8.40 | 7.90 | 7.62 | 7.30 | ✗ 1.94 |
-| `text.linkHover` `#7D1720` | 10.42 | 9.81 | 9.46 | 9.05 | ✗ 1.56 |
-| `text.inverse` `#FFFFFF` | ✗ 1.00 | ✗ 1.06 | ✗ 1.10 | ✗ 1.15 | 16.27 |
+| Foreground | `surface.default` `#FFFFFF` | `surface.page` `#F3F4F7` | `surface.raised` `#F8F9FB` | `surface.subtle` `#EEF0F4` | `surface.selected` `#E2E5EB` | `surface.inverse` `#0E1525` |
+|---|---:|---:|---:|---:|---:|---:|
+| `text.primary` `#0E1525` | 18.22 | 16.57 | 17.29 | 15.97 | 14.44 | ✗ 1.00 |
+| `text.secondary` `#475066` | 8.05 | 7.32 | 7.65 | 7.06 | 6.38 | ✗ 2.26 |
+| `text.muted` `#626B81` | 5.33 | 4.85 | 5.06 | 4.67 thin | ✗ 4.22 | ✗ 3.42 |
+| `text.link` `#0E1525` | 18.22 | 16.57 | 17.29 | 15.97 | 14.44 | ✗ 1.00 |
+| `text.linkHover` `#BE1E2D` | 6.15 | 5.59 | 5.84 | 5.39 | 4.88 | ✗ 2.96 |
+| `text.inverse` `#FFFFFF` | ✗ 1.00 | ✗ 1.10 | ✗ 1.05 | ✗ 1.14 | ✗ 1.26 | 18.22 |
 
-- `text.muted` is for supporting copy on `surface.default` and `surface.page`. On `surface.subtle` it passes by 0.01, so
-  do not use it there; on `surface.selected` it fails (4.32), so use `text.secondary` or `text.primary`.
-- `text.inverse` is for `surface.inverse` and for filled action colours, nowhere else.
-- `text.disabled` (`#98A2B3`) is 2.58:1 on white. WCAG exempts inactive controls from contrast, so it is allowed only on
-  a control that is really disabled (native `disabled`), and what it shows must be available elsewhere. A disabled
-  state is never conveyed by this colour alone.
-- Links are underlined in running text. `text.link` against `text.primary` is only 1.94:1, so colour does not
-  identify a link.
+- `text.muted` is for supporting copy on `surface.default`, `surface.page`, `surface.raised` and `surface.subtle`. On
+  `surface.subtle` it passes by 0.17, so it is the thinnest; on `surface.selected` it
+  fails (4.22), so use `text.secondary` or `text.primary` there.
+- `text.inverse` is for `surface.inverse`, nowhere else. A filled action has a text token of its own (`action.primaryText`, `action.newText`).
+- `text.disabled` (`#8A94A8`) is 3.05:1 on white. WCAG exempts inactive
+  controls from contrast, so it is allowed only on a control that is really disabled (native `disabled`), and what it shows
+  must be available elsewhere. A disabled state is never conveyed by this colour alone.
+- Links are underlined in running text. `text.link` is `text.primary`, so colour does not identify a link at all: the
+  underline does. A hovered link takes the brand crimson, `text.linkHover`, which reaches 4.5:1 on every light surface
+  (4.88 on `surface.selected`, the thinnest).
 
-### Control boundary
+### Text on surfaces, dark theme
+
+| Foreground | `surface.default` `#10151F` | `surface.page` `#090D16` | `surface.raised` `#141A26` | `surface.subtle` `#0C111A` | `surface.selected` `#16202F` | `surface.inverse` `#0C111A` |
+|---|---:|---:|---:|---:|---:|---:|
+| `text.primary` `#EDF0F6` | 16.01 | 17.02 | 15.26 | 16.56 | 14.35 | 16.56 |
+| `text.secondary` `#A9B2C3` | 8.57 | 9.11 | 8.17 | 8.86 | 7.68 | 8.86 |
+| `text.muted` `#8E98AC` | 6.30 | 6.70 | 6.00 | 6.52 | 5.65 | 6.52 |
+| `text.link` `#EDF0F6` | 16.01 | 17.02 | 15.26 | 16.56 | 14.35 | 16.56 |
+| `text.linkHover` `#F04B59` | 5.10 | 5.42 | 4.86 | 5.27 | 4.57 thin | 5.27 |
+| `text.inverse` `#FFFFFF` | 18.28 | 19.43 | 17.42 | 18.91 | 16.38 | 18.91 |
+
+- Every text token reaches 4.5:1 on every dark surface; `text.linkHover` on `surface.selected`
+  (4.57) is the thinnest, which is why the selected tint is no lighter.
+- `text.inverse` is white on every dark surface, as on the light theme's sidebar; it is still for `surface.inverse` only.
+  Primary's text is `action.primaryText`, which is Ink on the near-white fill.
+- `text.disabled` is exempt on a control that is really disabled, as in the light theme.
+
+### Control boundary, light theme
 
 A text field is identified by its boundary, so the boundary must reach 3:1 against the surface the control sits on
 (WCAG 1.4.11).
 
-| Border | `surface.default` | `surface.page` | `surface.subtle` | `surface.selected` |
-|---|---:|---:|---:|---:|
-| `border.control` `#7C879B` | 3.62 | 3.41 | 3.29 | 3.15 thin |
-| `border.strong` `#667085` | 4.97 | 4.68 | 4.51 | 4.32 |
-| `border.default` `#D0D5DD` | ✗ 1.47 | ✗ 1.39 | ✗ 1.34 | ✗ 1.28 |
-| `border.subtle` `#DDE1E7` | ✗ 1.31 | ✗ 1.24 | ✗ 1.19 | ✗ 1.14 |
-
-- `border.control` is supported on all four light surfaces. The Product Owner darkened it from `#8A94A6` (3.06 on white,
-  below 3:1 on every other surface) to `#7C879B` on 6 October 2026, so one token is the boundary of an input wherever it
-  sits. On `surface.selected` it passes by 0.15, the thinnest margin: prefer `border.strong` there. `border.strong` stays
-  the boundary where more emphasis is wanted, and `gray.500` is no longer used for a control boundary.
-- `border.default` and `border.subtle` are structural and decorative. They are never the only boundary of an input.
-  A button is identified by its label, so `border.default` on a Secondary button is allowed.
-
-### Focus
-
-| | `surface.default` | `surface.page` | `surface.subtle` | `surface.selected` | `surface.inverse` |
+| Foreground | `surface.default` `#FFFFFF` | `surface.page` `#F3F4F7` | `surface.raised` `#F8F9FB` | `surface.subtle` `#EEF0F4` | `surface.selected` `#E2E5EB` |
 |---|---:|---:|---:|---:|---:|
-| `focus.ring` `#2563A6` | 6.15 | 5.79 | 5.58 | 5.34 | ✗ 2.64 |
-| `focus.ringInverse` `#FFFFFF` (proposed) | ✗ 1.00 | ✗ 1.06 | ✗ 1.10 | ✗ 1.15 | 16.27 |
+| `border.control` `#7C859A` | 3.70 | 3.36 | 3.51 | 3.24 thin | ✗ 2.93 |
+| `border.strong` `#626B81` | 5.33 | 4.85 | 5.06 | 4.67 | 4.22 |
+| `border.default` `#C9CED8` | ✗ 1.58 | ✗ 1.44 | ✗ 1.50 | ✗ 1.38 | ✗ 1.25 |
+| `border.subtle` `#E2E5EB` | ✗ 1.26 | ✗ 1.15 | ✗ 1.20 | ✗ 1.11 | ✗ 1.00 |
+
+- `border.control` is supported on `surface.default`, `surface.page`, `surface.raised` and `surface.subtle`, where its
+  thinnest margin is 3.24. On `surface.selected` it fails
+  (2.93), so use `border.strong` there. `border.strong` stays the boundary where
+  more emphasis is wanted.
+- `border.default` and `border.subtle` are structural and decorative. They are never the only boundary of an input. A
+  button is identified by its label, so `border.default` on a Secondary button is allowed.
+
+### Control boundary, dark theme
+
+| Foreground | `surface.default` `#10151F` | `surface.page` `#090D16` | `surface.raised` `#141A26` | `surface.subtle` `#0C111A` | `surface.selected` `#16202F` |
+|---|---:|---:|---:|---:|---:|
+| `border.control` `#667085` | 3.67 | 3.91 | 3.50 | 3.80 | 3.29 |
+| `border.strong` `#8E98AC` | 6.30 | 6.70 | 6.00 | 6.52 | 5.65 |
+| `border.default` `#333D4F` | ✗ 1.67 | ✗ 1.78 | ✗ 1.59 | ✗ 1.73 | ✗ 1.50 |
+| `border.subtle` `#222A38` | ✗ 1.27 | ✗ 1.35 | ✗ 1.21 | ✗ 1.31 | ✗ 1.14 |
+
+- `border.control` is supported on all five dark surfaces; the thinnest is 3.29
+  on `surface.selected`. `border.default` and `border.subtle` are structural, as in the light theme.
+
+### Focus, light theme
+
+| Foreground | `surface.default` `#FFFFFF` | `surface.page` `#F3F4F7` | `surface.raised` `#F8F9FB` | `surface.subtle` `#EEF0F4` | `surface.selected` `#E2E5EB` | `surface.inverse` `#0E1525` |
+|---|---:|---:|---:|---:|---:|---:|
+| `focus.ring` `#2563A6` | 6.15 | 5.59 | 5.84 | 5.39 | 4.87 | ✗ 2.96 |
+| `focus.ringInverse` `#FFFFFF` | ✗ 1.00 | ✗ 1.10 | ✗ 1.05 | ✗ 1.14 | ✗ 1.26 | 18.22 |
 
 - **Default recipe**, on every light surface: a 2px `focus.ring` outside a 2px band of `focus.offset` (white), so the
-  indicator is also separated from a filled control such as Primary (white against `#B4232E` is 6.52:1).
-- **Inverse recipe**, on `surface.inverse`: a 2px `focus.ringInverse` outside a 2px band of `focus.offsetInverse`
-  (`#172033`). A blue ring on Ink is only 2.64:1, so the default recipe is not used there. Both inverse tokens are
-  proposed here and become active with the rest of this document.
+  indicator is also separated from a filled control such as Primary (white against Ink is 18.22:1).
+- **Inverse recipe**, on `surface.inverse`: a 2px `focus.ringInverse` outside a 2px band of `focus.offsetInverse` (the
+  sidebar itself). A blue ring on Ink is only 2.96:1, so the default recipe is not used there.
 - Draw the indicator with `outline` so that forced-colors mode keeps it (it drops `box-shadow`). Do not clip it with
   `overflow: hidden`, and do not let a sticky region hide the focused control entirely (§14).
+- **Two named exceptions, and no others** (the Product Owner's review of 5edada2, 8 November 2026; `FOCUS_EXCEPTIONS` in `scripts/design-tokens.ts`, held by its test). **A heading
+  given `tabindex="-1"`** so that focus lands on what is new (a page's title after a move, a record's code, a panel's heading) is not a control, and draws no ring. **The text of the date
+  field** draws none of its own: the field's box draws the one ring, and a second inside the first is what this rule avoids; the calendar button, a control of its own, keeps the
+  ring. Any other rule that removes a ring is reported.
+
+### Focus, dark theme
+
+| Foreground | `surface.default` `#10151F` | `surface.page` `#090D16` | `surface.raised` `#141A26` | `surface.subtle` `#0C111A` | `surface.selected` `#16202F` | `surface.inverse` `#0C111A` |
+|---|---:|---:|---:|---:|---:|---:|
+| `focus.ring` `#7AA7F0` | 7.50 | 7.97 | 7.15 | 7.75 | 6.72 | 7.75 |
+| `focus.ringInverse` `#FFFFFF` | 18.28 | 19.43 | 17.42 | 18.91 | 16.38 | 18.91 |
+
+- The default recipe in the dark theme is a 2px `focus.ring` outside a 2px band of `focus.offset`, the dark surface, so the
+  ring is separated from the near-white Primary fill. The inverse recipe is unchanged: the sidebar is a dark ground in both
+  themes.
 
 ### Selected, inverse and status
 
-- `surface.selected` supports `text.primary`, `text.secondary`, `text.link` and `status.danger.foreground` (7.69). A
-  selected row is marked by more than its tint: a leading `color.action.primary` bar (5.67 against the tint, which
-  exceeds the 3:1 a graphical cue needs) and the semantic state (`aria-current` or `aria-selected`).
-- **Ink shell (the authenticated Ops shell only, §13.1).** Item text is `text.inverse` (16.27) or `gray.300` `#D0D5DD`
-  (11.03). The active indicator cannot be `crimson.600`: `#B4232E` on Ink is 2.49:1, below 3:1. Use `crimson.300`
-  `#EDA3AC` (8.08) or `crimson.500` `#C93D4A` (3.29); the active item is also marked by `aria-current` and a
-  weight or text change, never by the colour alone. An inverse link is `text.inverse`, underlined (16.27), and its hover
-  uses `crimson.200` `#F7CDD2` (11.32). These inverse choices are proposed.
-- **The side menu on Ink (25 October 2026; the Product Owner's reference screenshot).** The menu is a vertical list, so the
-  current item is a **filled item** and not a bar: `color.action.primary` with `color.action.primaryText` (6.52), written in
-  weight 700 with `aria-current`, so the state is carried by the white text on the fill, the weight and the attribute, and the
-  fill supports them (its edge against Ink is 2.49, below 3:1, which is why it is never the only cue). Idle items are
-  `shell.text.muted` `gray.300` (11.03 on Ink); hovered, `shell.text` on `shell.surface.hover` `gray.900` `#1F2937`
-  (14.68); pressed, on `shell.surface.pressed` `gray.800` (10.46); secondary text (the application's name, the account's
-  hub) is `shell.text.subtle` `gray.400` (6.32 on Ink, 5.70 on hover); dividers are `shell.border` `gray.800`. Focus is the
-  inverse recipe and holds 3:1 on each of those fills. These are aliases of the palette: no new colour is introduced, and
-  every pairing is in `scripts/design-tokens.test.ts`.
-- Status text pairs (foreground on its own soft background, on white, on page): success 7.08, 7.88, 7.42; warning 5.88,
-  6.39, 6.01; danger 7.69, 8.85, 8.33; info 7.38, 8.33, 7.84; neutral 6.98, 7.69, 7.23. The base hues are not text
-  colours: warning `#B76E00` is 4.00:1 against white and white on it is 4.00:1. Status borders are 1.3–1.9:1
-  decoration; the text and the icon carry the meaning.
+- `surface.selected` supports `text.primary`, `text.secondary`, `text.link`, `text.linkHover` and
+  `status.danger.foreground` in both themes. A selected row is marked by more than its tint: a leading `color.action.primary`
+  bar (14.44 against the tint in the light theme, 14.35
+  in the dark, which exceeds the 3:1 a graphical cue needs) and the semantic state (`aria-current` or `aria-selected`).
+- **Ink sidebar (the authenticated Ops shell only, §13.1).** It is `surface.inverse`: Ink in the light theme and
+  `#0C111A` in the dark. Idle items are `shell.textMuted` (11.06 on Ink,
+  11.48 on the dark sidebar); hovered, `shell.text` on `shell.surfaceHover`
+  (15.29); pressed, on `shell.surfacePressed` (13.09);
+  secondary text (the application's name, the account's hub) is `shell.textSubtle` (5.97
+  on Ink, 6.20 on the dark sidebar, 5.01 on hover);
+  dividers are `shell.border`.
+- **A count beside an item of the sidebar** (the `CountBadge` on `surface="shell"`, task C1, 5 November 2026) takes the shell's own tokens: the number is `shell.text` on `shell.surfacePressed` (13.09), with `shell.border` for its edge; a count of `0` that was read is quiet, `shell.textSubtle` on Ink with no fill (5.97 on Ink, 6.20 on the dark sidebar). On the **current item** the badge is a pill of white at 18% over the crimson (`shell.activeBadge`, the one colour this badge adds), with the figure in `shell.activeText`: 4.63 on `shell.active` and 5.31 on `shell.activeHover`, in both themes, so that it stays apart from the item's own hovered ground (at 22% the figure measures 4.32, below the 4.5 that text of its size needs). A quiet `0` there is a ring of `shell.activeText` on `shell.active` (6.15). The words that say what the number counts are for a screen reader and are not drawn. On the page it is the neutral status pair of §4.4, and a quiet `0` is `text.secondary` without the fill; no screen draws it there yet (My work sets its figures in its own face).
+- **The current item** of the sidebar is a filled item and not a bar: `shell.active`, crimson, with `shell.activeText`, white
+  (6.15), and `shell.activeHover` when hovered (7.33).
+  It is written in weight 700 with `aria-current`, so the state is carried by the white text on the fill, the weight and the
+  attribute, and the fill supports them (its edge against Ink is 2.96, and
+  3.07 on the dark sidebar, which is why it is never the only cue). Focus is the inverse recipe and holds 3:1 on each of
+  those fills (18.22 on Ink, 15.29 hovered,
+  13.09 pressed, 6.15 active,
+  7.33 active and hovered).
+- Status text pairs (foreground on its own soft background, on `surface.default`, on `surface.page`), light theme: warning 5.99, 6.56, 5.97; success 5.88, 6.56, 5.97; info 7.14, 8.11, 7.38; neutral 7.06, 8.05, 7.32; danger 5.90, 6.71, 6.11.
+  Dark theme: warning 8.42, 9.90, 10.53; success 7.61, 9.08, 9.65; info 7.28, 8.36, 8.89; neutral 7.47, 8.57, 9.11; danger 7.15, 7.90, 8.40. Status borders are decoration, 1.5 to 1.9:1 in the light theme and 2.0 to 2.7:1 in
+  the dark; the text and the icon carry the meaning.
 
 ### State recipes for the initial components
 
-Tokens only (written without the `color.` prefix of §4.3); the ratio is the text against its fill.
+Tokens only (written without the `color.` prefix of §4.3); the ratio is the text against its fill, light theme then dark
+theme.
 
 | Component, state | Fill | Text | Boundary and notes |
 |---|---|---|---|
-| Primary: default, hover, pressed | `action.primary`, `primaryHover`, `primaryPressed` | `action.primaryText` (6.52, 8.40, 10.42) | focus: default recipe |
-| Primary: disabled | `action.disabled` | `text.disabled` (exempt, 2.18) | native `disabled`; loading keeps the label and the colours |
-| Secondary: default, hover, pressed | `surface.default`, `surface.subtle`, `#EAECF0` | `action.secondaryText` (16.27, 14.76, 13.75) | `border.default` (decorative) |
-| Tertiary: default, hover, pressed | none, `surface.subtle`, `#EAECF0` | `text.link`, `text.linkHover`, `text.linkHover` (8.40 on white, 9.46 and 8.81 on the hover and pressed fills) | no border |
-| Danger (outline; approved 24 October 2026) | `surface.default`, `status.danger.background`, `#EAECF0` | `status.danger.foreground` (8.85, 7.69, 7.48) | wording names the consequence; never a filled button, because a fill of `#8F1D27` would be almost the same colour as Primary hover `#971B26` |
+| Primary: default, hover, pressed | `action.primary`, `primaryHover`, `primaryPressed` | `action.primaryText` (18.22, 15.29, 13.09; dark 15.96, 14.02, 11.06) | focus: default recipe |
+| Primary: disabled | `action.disabled` | `action.disabledText` (exempt, 2.67; dark 3.20) | native `disabled`; loading keeps the label and the colours |
+| Secondary: default, hover, pressed | `action.secondary`, `surface.subtle`, `--button-pressed-background` | `action.secondaryText` (18.22, 15.97, 14.44; dark 16.01, 16.56, 17.02) | `border.default` (decorative) |
+| Tertiary: default, hover, pressed | none, `surface.subtle`, `--button-pressed-background` | `text.link`, `text.linkHover`, `text.linkHover` (18.22 on white, 5.39 and 4.88 on the hover and pressed fills; dark 16.01, 5.27, 5.42) | no border |
+| New: default, hover, pressed | `action.new`, `newHover`, `newPressed` | `action.newText` (6.15, 7.33, 8.80; dark 5.08, 5.75, 7.23) | the brand crimson, in the top bar; focus: default recipe |
+| Danger (outline; approved 24 October 2026) | `surface.default`, `status.danger.background`, `--button-pressed-background` | `status.danger.foreground` (6.71, 5.90, 5.32; dark 7.90, 7.15, 8.40) | wording names the consequence; the recipe is the outline and no filled Danger button is part of the system (§16.3) |
 | Link: default, hover | none | `text.link`, `text.linkHover` | underlined in running text; no separate visited colour until a screen needs one |
-| Input: default, hover | `surface.default` | `text.primary`; placeholder `text.muted` (4.97) | `border.control` (`border.strong` on `surface.selected`); hover `border.strong` |
-| Input: invalid | `surface.default` | `text.primary`; message `status.danger.foreground` (8.85) | 2px `status.danger.foreground` border and an icon and the message and `aria-invalid`; never the red border alone |
-| Input: read-only | `surface.subtle` | `text.primary` (14.76) | `border.strong` (4.51); value stays selectable; not styled as disabled |
+| Input: default, hover | `surface.default` | `text.primary`; placeholder `text.muted` (5.33; dark 6.30) | `border.control` (`border.strong` on `surface.selected`); hover `border.strong` |
+| Input: invalid | `surface.default` | `text.primary`; message `status.danger.foreground` (6.71; dark 7.90) | 2px `status.danger.foreground` border and an icon and the message and `aria-invalid`; never the red border alone |
+| Input: read-only | `surface.subtle` | `text.primary` (15.97; dark 16.56) | `border.strong` (4.67; dark 6.52); value stays selectable; not styled as disabled |
 | Input: disabled | `surface.disabled` | `text.disabled` (exempt) | `border.disabled`; native `disabled` |
 | Alert, all five variants | `status.<variant>.background` | `status.<variant>.foreground` | `status.<variant>.border`, an icon and the text; an action link uses the foreground, underlined |
 
-**Acceptance.** Examples on white, page, subtle, selected and inverse surfaces with the whole focus geometry visible
-(a screenshot is part of the evidence). A test reads the token source and asserts that every pairing listed in this
-section meets its threshold, so a later token change cannot silently break one. A failing ratio is never rounded up.
+**Acceptance.** Examples on default, page, raised, subtle, selected and inverse surfaces, in both themes, with the whole
+focus geometry visible (a screenshot is part of the evidence). A test reads the token source and asserts that every
+pairing listed in this section meets its threshold in both themes, so a later token change cannot silently break one. A
+failing ratio is never rounded up.
+
+---
+
+## 4.7 Colour roles
+
+**Ink carries the work, crimson carries the brand** ([BRAND_FOUNDATION §5.5](BRAND_FOUNDATION.md#55-color-usage-principle)). The values are in §4.3 and §4.4; this section says what each role is for.
+
+- The primary action is Ink, one per view. In the dark theme it is near-white with Ink text.
+- Crimson is the brand mark, the "New" button and the active sidebar item, a solid crimson fill with white bold text. A small crimson square, taken from the logo, marks the active hub and the current step. Nothing else is crimson: not a selected row, not a link, not an error.
+- Danger is a separate vermilion, never crimson, and is always placed last.
+- Links are Ink, not crimson. The underline tells a link (§4.6); a hovered link takes the brand crimson.
+- Neutrals are tinted toward Ink, not stock grays.
+- Crimson `#BE1E2D` is the logo red (§4.1). In the dark theme the brand crimson is the lighter `#F04B59`, while the sidebar's active fill stays `#BE1E2D` with white text, because the sidebar is the same Ink ground in both themes.
+- A theme is a second set of values for the same names (§31). A component never asks which theme is in force.
 
 ---
 
@@ -490,9 +569,9 @@ section meets its threshold, so a later token change cannot silently break one. 
 
 ## 5.1 Typeface
 
-The product UI typeface is **Inter**, approved by the Product Owner on 6 October 2026 and self-hosted by the Ops Portal.
+The product UI has two typefaces, both self-hosted by the Ops Portal. **Inter**, approved by the Product Owner on 6 October 2026, is the typeface of everything people read. **JetBrains Mono**, approved on 5 November 2026 and shipped since step R2, is for operational codes only (a code such as `HUB-TT-XXXXXX`), so that a code read aloud never blurs.
 
-The stack below shows while a font file loads and for any character Inter does not cover:
+The stack below shows while a font file loads and for any character Inter does not cover. It is the value of `--font-family-sans`:
 
 ```text
 Inter,
@@ -504,14 +583,30 @@ BlinkMacSystemFont,
 sans-serif
 ```
 
-How it is shipped (`apps/ops-web`; held by `test/fonts.test.ts`, `test/build.test.ts` and the browser tests):
+The stack for a code is the value of `--font-family-mono`:
 
-- the files are committed under `src/assets/fonts/`, never hot-linked from a CDN. `fonts.json` there records the version,
-  where the files came from and the SHA-256 of each file, and the SIL Open Font License 1.1 text ships with the build at
-  `/licenses/Inter-OFL.txt`;
+```text
+"JetBrains Mono",
+ui-monospace,
+"SFMono-Regular",
+Menlo,
+Consolas,
+"Liberation Mono",
+monospace
+```
+
+How they are shipped (`apps/ops-web`; held by `test/fonts.test.ts`, `test/build.test.ts` and the browser tests):
+
+- the files are committed under `src/assets/fonts/`, never hot-linked from a CDN. `fonts.json` there records, for each family, the
+  version, where the files came from and the SHA-256 of each file, and each family's SIL Open Font License 1.1 text ships with the
+  build, byte for byte, at `/licenses/Inter-OFL.txt` and `/licenses/JetBrainsMono-OFL.txt`;
 - Inter is a variable font. The Latin and Latin Extended subsets are shipped, one file each, and the browser fetches a
   subset only when the page holds a character of its `unicode-range`. They are declared for weights 400 to 600, the range
   of the type scale (§5.2). Other scripts use the stack above until a requirement names them;
+- JetBrains Mono is a variable font too, and only its Latin subset is shipped, declared for weights 500 and 600. A character
+  outside it shows in the next face of its stack;
+- a component takes the monospace face through `--font-family-mono` and never names it: `test/fonts.test.ts` fails on a
+  stylesheet, other than the token file and `fonts.css`, that does. Numbers are set in tabular figures everywhere (§5.2), in either face;
 - the files are never inlined into the stylesheet, because the Content-Security-Policy allows fonts from the app's own
   origin only (`font-src 'self'`) and refuses a `data:` address;
 - `font-display: swap` keeps text readable over the stack while a file loads;
@@ -541,7 +636,10 @@ How it is shipped (`apps/ops-web`; held by `test/fonts.test.ts`, `test/build.tes
 - Use semibold rather than bold for most hierarchy.
 - Do not use uppercase for long labels.
 - Uppercase may be used sparingly for compact metadata where readability remains high.
-- Operational numbers may use tabular numerals where available.
+- Numbers use tabular numerals everywhere (decided 5 November 2026): `font-variant-numeric: tabular-nums` is set in the base type (`base.css`), so that a column of counts, times and amounts lines up, and a test says so.
+- **Sizes the signed-in shell sets outside this scale** (the Product Owner's brief for redesign step R4, 6 November 2026; built on 7 November and awaiting acceptance, COMPONENT_PATTERNS §12.6). The title of a page inside the shell is 24px on a 30px line, weight 700 and 0.02em tighter, where `text.heading.xl` above is 28/36/600 (the title of the neutral frame and of the pre-sign-in pages keeps `text.heading.xl`). The sidebar's entries are 13.5px at weight 500, and 700 on the current entry. The headings of the sidebar's groups are 11px, weight 600, in capitals, 0.08em apart; the labels of the sections of My work and of the top bar's menus are 11.5px, weight 600, in capitals, 0.06em apart; the key hint of the search is 11px; the figure on a card of My work is 32px at weight 700. The three sizes under 12px depart from the first rule and the bold weights from the second: they are labels and hints that name a group or a shortcut and never carry the information themselves, and they are written here so that the departure is on record and does not spread. **Decided on 7 November 2026 (the audit of the redesign): they are tokens, and the number is written once.** The sizes that are not the scale's are component tokens of `tokens.css` (§3.3), each named for the one component that uses it and in `rem`: `--text-nav-entry-size` (the name of a sidebar entry), `--text-group-label-size` and its line height (a group's heading, and the key hint of the search), `--text-section-label-size` and its line height (the labels of the sections of the menus and of My work), `--sidebar-icon-size`, `--sidebar-heading-space-before` and `--sidebar-heading-space-after`, and `--hub-mark-size` (the hub switcher's square); the figure on a card of My work takes `text.display.sm`'s 32px on 40px at weight 700. `scripts/design-tokens.test.ts` records each as a component token with its reason, and no stylesheet of a component carries these numbers.
+
+- **Sizes the kit of redesign step R5 sets outside this scale** (task R5.2, 8 November 2026; the component stylesheets carried them as literals, against the rule above that the number is written once). Each is a component token (§3.3), in `tokens.css` and nowhere else, in rem so that enlarged text enlarges it, and named for the component that uses it: `--text-page-title-line-height` (30px: the title of a page, which the shell's page frame and the kit's PageHeader share, 24px on 30px), `--text-record-title-size` (26px: the code in a record's header, on the 32px line of `text.heading.lg`), `--text-stat-figure-size` and `--text-stat-figure-line-height` (22px on 28px: the figure of a stat tile). A size that already had a token takes it (the 11.5px label of a section is `--text-section-label-size`, the 18px caption line `--text-caption-line-height`, the 20px label line `--text-label-md-line-height`), and `apps/ops-web/test/component-sizes.test.ts` fails on a font size, a line height or an animation length written in a component's stylesheet, but for three it names with their reasons (the avatar's 11px initials, a spinner's turn, the earlier Skeleton's pulse). The two rows of §9 and §10 below have one token each, recorded in the same way.
 
 ---
 
@@ -575,28 +673,28 @@ Use modest radii.
 | Token | Value | Use |
 |---|---:|---|
 | `radius.none` | `0` | strict structural edges |
-| `radius.sm` | `4px` | compact controls |
-| `radius.md` | `6px` | default inputs/buttons |
-| `radius.lg` | `8px` | cards/panels/dialog surfaces |
-| `radius.xl` | `12px` | rare larger surfaces |
+| `radius.sm` | `4px` | compact marks: status badges, calendar days, skeletons |
+| `radius.md` | `8px` | controls: inputs and buttons |
+| `radius.lg` | `12px` | panels: cards, dialogs, popovers, the record panel |
+| `radius.xl` | `16px` | page cards |
 | `radius.full` | `9999px` | avatars/status dots/pills only where appropriate |
 
 Avoid applying `radius.full` to ordinary controls merely for decoration.
+
+Decided by the Product Owner on 5 November 2026: 8px for controls, 12px for panels and 16px for page cards.
 
 ---
 
 ## 8. Elevation
 
-Prefer borders and surface contrast before shadows.
+Prefer borders and surface contrast before shadows. There is one soft shadow, and it is only for things that float: menus, popovers, dialogs, the record panel and toasts (Product Owner, 5 November 2026). Everything else is flat.
 
-| Token | Definition | Use |
-|---|---|---|
-| `shadow.none` | none | normal flat structure |
-| `shadow.sm` | `0 1px 2px rgb(16 24 40 / 0.06)` | subtle raised control/card |
-| `shadow.md` | `0 4px 12px rgb(16 24 40 / 0.10)` | popover/dropdown |
-| `shadow.lg` | `0 12px 28px rgb(16 24 40 / 0.14)` | modal/dialog |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `shadow.none` | `none` | `none` | normal flat structure |
+| `shadow.floating` | `0 8px 24px rgb(14 21 37 / 0.12)` | `0 8px 24px rgb(0 0 0 / 0.5)` | floating surfaces only |
 
-Avoid deeper decorative shadows.
+The shadow tints toward Ink in the light theme. On a dark ground a light shadow cannot be seen, so the dark value is black and heavier. Avoid deeper decorative shadows.
 
 ---
 
@@ -604,13 +702,16 @@ Avoid deeper decorative shadows.
 
 Motion should explain state change rather than decorate.
 
-### Working durations
+### Working durations and easing
 
-| Token | Value |
-|---|---:|
-| `motion.fast` | `120ms` |
-| `motion.normal` | `180ms` |
-| `motion.slow` | `240ms` |
+| Token | Value | Use |
+|---|---:|---|
+| `motion.fast` | `120ms` | hover and press |
+| `motion.normal` | `200ms` | menus, popovers and the tab underline |
+| `motion.slow` | `280ms` | the record panel and sheets |
+| `motion.highlight` | `900ms` | a changed row, which highlights once |
+| `motion.easeEnter` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | to enter |
+| `motion.easeExit` | `cubic-bezier(0.4, 0, 1, 1)` | to leave, about 30% faster |
 
 ### Rules
 
@@ -630,11 +731,27 @@ Avoid:
 
 Respect reduced-motion preferences.
 
+Motion confirms what happened (Product Owner, 5 November 2026).
+
+- Success lands as a toast.
+- Under `prefers-reduced-motion: reduce` every duration token is `0ms`: the token file sets them to zero, so nothing that takes its duration from a token moves. The easings are not durations and are left alone. Motion whose length does not come from a token (a spinner, a keyframe with a length of its own) still needs its own reduced-motion rule.
+- **The pulse** of a skeleton bar and of a loading line is `--motion-pulse`, 1.6 seconds, recorded on 8 November 2026 (task R5.2): slow and quiet, an ease in and out that repeats while something loads. It is the one length here that is not a working duration, and it is **not** zeroed with the four durations above under reduced motion: the stylesheets run it only inside `@media (prefers-reduced-motion: no-preference)`, so under reduced motion it does not run at all, and a zero-length animation that repeats forever would be worse than none.
+
 ---
 
 ## 10. Density system
 
 Melarc uses three task-oriented density contexts.
+
+Rows and controls come in three heights (Product Owner, 5 November 2026). They are the control heights of §11 under the names a row is given, so that a queue row is not mistaken for a control:
+
+| Token | Value | Use |
+|---|---:|---|
+| `density.row.compact` | `36px` | desk queue rows |
+| `density.row.standard` | `44px` | form controls and list rows |
+| `density.row.touch` | `56px` | tablet rows (§12) |
+
+A fourth height, `density.row.two-line` (`--density-row-two-line`, **52px**, recorded on 8 November 2026 under task R5.2), is the row of a table that holds two lines of text in a row (a name over a detail), between the standard and the touch row. It is a height of the kit's DataTable only, set with the `data-density` of the table; a screen does not choose it for anything else.
 
 ### 10.1 Spacious
 
@@ -683,7 +800,7 @@ Use for:
 Typical spacing:
 
 ```text
-row height: approximately 40–44px where interaction allows
+row height: 36px at the desk (density.row.compact), 56px on a tablet (density.row.touch, §12)
 cell vertical padding: 8–10px
 dense body text: 13–14px
 ```
@@ -700,9 +817,9 @@ Interactive targets that require pointer/touch use must remain appropriately usa
 
 | Size | Height | Typical use |
 |---|---:|---|
-| `sm` | `32px` | dense desktop-only control |
-| `md` | `40px` | default web control |
-| `lg` | `48px` | prominent/touch-friendly action |
+| `sm` | `36px` | dense desktop-only control and desk queue row |
+| `md` | `44px` | default web control: forms |
+| `lg` | `56px` | touch: hub-floor tablet controls and rows (§12) |
 
 Default:
 
@@ -712,7 +829,9 @@ input  = md
 select = md
 ```
 
-Do not use 32px controls on touch-dominant screens.
+Do not use 36px controls on touch-dominant screens.
+
+The three heights are `density.row.compact`, `density.row.standard` and `density.row.touch` (§10).
 
 These heights are minimums. A control sets `min-height` in `rem`, so that enlarged text grows it, and its label wraps
 instead of being clipped. Check controls with text enlarged to 200% and at 320 CSS pixels wide (§14).
@@ -744,6 +863,10 @@ These are implementation baseline values and may be refined only with evidence f
 - navigation patterns may change by viewport;
 - do not assume desktop because the Ops Portal is operations-focused.
 
+### Devices (Product Owner, 5 November 2026)
+
+Desk work (queues, records, administration) is desktop-first ([surfaces/ops-portal.md](../surfaces/ops-portal.md#11-responsive-device-baseline-and-accessibility) §11). **Hub-floor tasks** (intake, blind count, itemization, discrepancies, cash and parcel handovers) are designed tablet-first at 768px: 56px touch rows and one task per screen. At 768px the record panel becomes a full-screen sheet and the sidebar collapses to icons.
+
 ---
 
 ## 13. Layout rules
@@ -757,7 +880,7 @@ parts, because a pre-authentication page must never be able to show a signed-in 
 | Layout | Route family | Contains | Never contains | In code |
 |---|---|---|---|---|
 | **Neutral frame** | any address that matches no route, and the development showcase | a skip link, a banner that names the product, the main landmark, the move of focus to the new page's heading after a navigation | navigation, a user menu, sign-out, session data, anything loaded for a signed-in user | `apps/ops-web/src/app/AppFrame.tsx` |
-| **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the skip link and the landmarks, an **Ink side menu** docked at the left (the primary navigation, and an account card with the sign-out control), collapsible to a rail of icons and sliding in over the page on a narrow screen; **no banner**, because the menu carries the product's name | content for a caller who has no session | the frame in its sidebar layout, the menu drawn into the place beside the main content (`apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `components/side-menu/`; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.6). It was a band across the top until 25 October 2026, when the Product Owner decided that the Ops Portal is an application and not a website |
+| **Authenticated Ops shell** | the signed-in routes (§7 of the Ops spec), and only those | the skip link and the landmarks, an **Ink sidebar** docked at the left (the primary navigation, in groups, and the person at its foot), the 64px rail below 1280px and on request and a sheet on a narrow screen, and over the page a **top bar of 56px**, which is the page's banner (the hub switcher, the search, the theme, the New menu and the account menu with the sign-out control); no banner above the page, because the sidebar carries the product's name | content for a caller who has no session | the frame in its sidebar layout, the sidebar and the top bar drawn into the frame's own places (`apps/ops-web/src/app/AuthenticatedOpsShell.tsx`, `app/shell/`, `components/ui/app-shell/`; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.6). It was a band across the top until 25 October 2026, when the Product Owner decided that the Ops Portal is an application and not a website, and a side menu with an account card until redesign step R4 |
 | **Split-screen layout** | the five pre-sign-in routes (`/sign-in`, `/sign-in/mfa`, `/setup/credential`, `/setup/mfa`, `/setup/mfa/complete`), and the two recovery routes when they are built; the setup routes are reached by a grant and carry no session | the skip link and the landmarks, the banner (the logo) above the main landmark that holds the form, and beside them a decorative panel of photography over a band of Ink with the mark and the name (§13.1a); under 64rem the panel is not drawn and the form is alone | the authenticated shell, navigation, anything loaded for a signed-in user | the frame in its split layout (`AuthSplitLayout`), its banner and main landmark unchanged; the five pre-sign-in screens (the sign-in pair and the three setup pages) are in `apps/ops-web/src/app/pages/pre-sign-in/` (S0.43; [COMPONENT_PATTERNS.md](COMPONENT_PATTERNS.md) §12.7) |
 
 - The route tree chooses the layout; a page never decides which frame it sits in.
@@ -768,6 +891,7 @@ parts, because a pre-authentication page must never be able to show a signed-in 
   to none, and uses the neutral frame, because that page cannot know whether a session exists.
 - A generic restyle does not wrap every route in the Ink shell.
 - The authenticated shell should feel spacious and stable; the neutral frame is quiet, with no Ink navigation.
+- **Approved direction (Product Owner, 5 November 2026), built in step R4 (7 November 2026; accepted by the Product Owner on 10 November 2026):** the signed-in shell gains a top bar over the main content (the hub switcher, a global search, the theme control, a New menu and the account menu; on a narrow screen the theme is chosen in the account menu instead), the sidebar shows seven groups, and the account menu says who is signed in and where they act, beside the sidebar's foot, which still names the person. The structure is [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); the table above is the shell as built.
 
 **Decided (Product Owner, 6 October 2026): the setup layout is the neutral frame.** The Ops spec says the setup routes
 render "no application shell" and must not render "the authenticated shell". The neutral frame is not the authenticated
@@ -833,6 +957,11 @@ Owner on 6 October 2026), and leave the formal conformance level to a later Prod
 
 ### Required defaults
 
+**A part of a page that sticks to the top of the window sits below the top bar.** The shell publishes the height the bar has now (`--topbar-measured-height`), and `base.css` derives two
+custom properties from it and the tokens (they give no new value): `--sticky-top`, the bar and a space, which a sticking part takes as its `top` (the panel beside a queue, the run of a
+builder, the rail of a form), and `--sticky-room`, the window below it, which bounds a part that can be taller than its room: it scrolls inside itself, under its own header, and is
+never cut at the foot of the window or left sliding under the bar.
+
 - visible keyboard focus;
 - semantic HTML before custom ARIA;
 - associated input labels;
@@ -868,14 +997,18 @@ Entry and 3.2.6 Consistent Help.
 - Vitest (jsdom), `apps/ops-web/src/test-support/wcag.ts`: axe with the `wcag2a`, `wcag2aa`, `wcag21a` and `wcag21aa`
   tags, and keyboard, label, description and state tests of each component. Colour contrast is off there, because jsdom
   has no layout.
-- The token test, `scripts/design-tokens.test.ts`: the token file equals this document, every pairing the components
-  use meets its threshold from the file's own values, no colour is written outside the file, and every focus rule draws
-  an outline.
+- The token test, `scripts/design-tokens.test.ts`: the token file equals this document in each theme, the two themes are
+  built as §31 says (the two dark blocks say the same, `color-scheme` follows the theme, reduced motion zeroes the
+  durations), every pairing the components use meets its threshold from the file's own values in both themes, no colour
+  is written outside the file, and every focus rule draws an outline. The contrast test, `scripts/design-contrast.test.ts`,
+  recomputes every figure of §4.5 and §4.6 for both themes.
 - The browser tests, `apps/ops-web/test/browser/`: `shell.spec.ts` against the production build and `components.spec.ts`
   against the development-only showcase. They run axe with the WCAG 2.2 tags, so contrast and `target-size` are checked
   with layout, at 1280, 768 and 320 px; no sideways scrolling at those widths; keyboard order, Enter and Space, and the
   focus ring on every stop; text enlarged to 200%; forced colours (not WebKit, which Playwright cannot emulate) and
-  reduced motion; and a failed submit that moves focus to the first invalid field.
+  reduced motion; and a failed submit that moves focus to the first invalid field. `components.spec.ts` also runs the
+  scan in the dark theme (by the system setting at 1280 and 320 px, and by `data-theme="dark"` on a light system) and
+  proves that the dark values reach the page as §31 says.
 - axe-core 4.13.0 has one WCAG 2.2 AA rule, `target-size`, which the browser tests enable. The other new 2.2 criteria
   (focus not obscured, accessible authentication, redundant entry, dragging, consistent help) have no automated rule and
   rest on the manual checks above.
@@ -959,7 +1092,7 @@ radius: radius.md
 
 Danger must be a separate semantic variant.
 
-Do not reuse the primary button token merely because both may initially use similar reds.
+Do not reuse the primary button token for it. The separation is complete: the primary action is Ink, and danger is a separate vermilion, never crimson, and is always placed last (§4.7).
 
 Danger actions require explicit destructive wording.
 
@@ -975,6 +1108,8 @@ Links should:
 - use normal link semantics for navigation rather than button semantics.
 
 Do not style every navigation action as a button.
+
+Links are Ink, not crimson (approved 5 November 2026, §4.7). The underline in running text, and not the color, tells a link (§4.6).
 
 ---
 
@@ -1072,13 +1207,17 @@ Exact mappings belong with implemented domain patterns.
 
 Navigation belongs to the authenticated Ops shell (§13.1). The neutral frame and the split screen carry none.
 
-**It is a side menu, not a band across the top** (Product Owner, 25 October 2026: the Ops Portal is an application and not a
-website). Docked at the left on a wide screen, full height, on Ink; a button at its head collapses it to a rail of icons and
-expands it again, and every entry keeps its name when collapsed (visually hidden, with the name as a tooltip). On a narrow screen
-(under 48rem) it is hidden, a slim bar with a menu button stands in its place, and the menu slides in over the page: the page
-behind it is inert, Escape, the scrim, the close button and following a link close it, and focus goes in on opening and back on
-closing. Its foot is the account card: the person's initials, name and where they act, and an icon button that signs out. The
-choice of collapsed or expanded is kept while the page lives and not longer (nothing is written to web storage).
+**It is a sidebar, not a band across the top** (Product Owner, 25 October 2026: the Ops Portal is an application and not a
+website; built in its present form in redesign step R4, 7 November 2026). Docked at the left, full height, on Ink, 248px wide with the
+all-white lockup at its head; a button at its head collapses it to the 64px rail of icons and expands it again, and every entry keeps its
+name on the rail (visually hidden in the entry, and shown in a tooltip on hover and on focus). It is the rail below 1280px and the full
+sidebar from there, unless the person asked for the other, and under 48rem it is a sheet: a modal dialog that slides in over the page when
+the top bar's menu button is pressed; the page behind it is hidden from assistive technology, Escape, the scrim, the close button and
+following a link close it, and focus goes in on opening and back on closing. **The current entry is a solid crimson fill with white bold
+text** and `aria-current="page"`. Its foot names the person and where they act. The choice of the rail or the full width is kept while the
+page lives and not longer (nothing is written to web storage).
+
+**Approved direction (Product Owner, 5 November 2026; built in step R4).** The sidebar shows seven groups in the order of the hub's day, each only when the session holds a key for one of its built pages, and a queue entry carries a live count where the server states one. What the account card held (the person's name and hubs, the trusted browsers, sign-out) is in an account menu in a top bar that also holds the hub switcher, a global search, the theme control and a New menu. The groups, the entries and the top bar are [the Ops surface's](../surfaces/ops-portal.md#4-navigation-model); how they are drawn is this document's and, for the components, [COMPONENT_PATTERNS §12.6](COMPONENT_PATTERNS.md#126-the-authenticated-ops-shell-as-built-s042-the-sidebar-and-the-top-bar-since-redesign-step-r4)'s.
 
 Navigation should communicate:
 
@@ -1107,8 +1246,9 @@ Recommended treatment:
 - selected item gains clear contrast;
 - Crimson is used as controlled accent rather than filling the whole shell.
 
-As built: the current entry is a filled item (§4.6) with an icon and its name; the icon is the one the landing gives the same
-place, so one meaning has one picture.
+As built: the current entry is a filled item (§4.6), crimson (`shell.active`) with white bold text, and an icon and its name;
+the icon is the one the landing gives the same place, so one meaning has one picture. The primary action is Ink, so the
+current item no longer uses it (§4.7).
 
 ---
 
@@ -1133,9 +1273,11 @@ The first design-system gate does **not** require a complete generic data-grid a
 **Advanced grid behavior is weighed against a screen before it is built by hand.** Selection, resizing, column pinning, virtualization
 and in-place editing are not built on speculation. When a concrete screen's requirements exceed this table, a specialist grid is
 evaluated against those requirements first, on the terms of §24a: one door behind a Melarc component, appearance from the portal's
-tokens alone, no inline style under the content-security policy, the accessibility baseline (§14) met, a licence that ships with the build. Only if no grid serves
+tokens alone, the content-security policy of §29.4 respected, the accessibility baseline (§14) met, a licence that ships with the build. Only if no grid serves
 the screen is the behavior built here. Either way it is a new pattern (COMPONENT_PATTERNS §37) and a change of technical foundation,
 surfaced before it is built ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)).
+
+**Decided (Product Owner, 5 November 2026) and adopted in redesign step R3: TanStack Table.** The specialist grid for the queue data model is TanStack Table (headless; 8.21.3, an exact pin: version 8 is the line the shadcn/ui data-table pattern is written for, and 9 is a new major that is not adopted), over the shadcn/ui `table` primitive (§29.2), behind a Melarc component (`DataTable`, §27) that step R5 builds, on the terms of §24a. Step R3 showed it under the content-security policy of §29.4: the showcase of the primitives draws a table that sorts from the keyboard, tells its order in `aria-sort` and counts the rows that are chosen (`apps/ops-web/test/browser/primitives.spec.ts`), under the strict policy with no violation (`primitives-policy.spec.ts`). Hand-built grid behavior stays out, as above.
 
 ---
 
@@ -1156,8 +1298,8 @@ ISC licence, the `lucide-react` package, bundled with the application and never 
 `licenses/Lucide-ISC.txt`). It was chosen with the first screens that needed icons: the side menu, the show-password control and
 the status pictures.
 
-- **One door.** `apps/ops-web/src/components/ui/icon/icons.ts` is the only file that imports the library (a test and a lint rule
-  say so). It names every icon by its **meaning** (`warning`, `success`, `sign-out`, `show-password`), never by the library's
+- **One door.** `apps/ops-web/src/components/ui/icon/icons.ts` is the only file that imports the library, apart from the shadcn/ui
+  primitives, whose generated source draws its own few icons (§29.2); a test and a lint rule say so. It names every icon by its **meaning** (`warning`, `success`, `sign-out`, `show-password`), never by the library's
   name for the picture, so the application can change a picture or the family in one place. An icon is added when a screen needs
   it, with its meaning; there is no catalogue of icons nobody uses (a test fails on one).
 - **One look.** `<Icon name="…" />` draws every icon with the same **2px stroke**, in the colour of the text around it
@@ -1176,43 +1318,17 @@ the status pictures.
 
 ## 24a. Interaction primitives
 
-Some behaviour has no native element that does it the same way in every browser: a calendar, a menu, a searchable list. For that, and
-for nothing a native element can do, the portal uses **React Aria Components** (Adobe's `react-aria-components`, Apache-2.0, an exact
-pin). It gives **behaviour** (keys, focus, names for assistive technology, positioning) and **no appearance**: the look is the portal's
-alone.
+**Current policy (Product Owner, 5 November 2026; built in redesign steps R3 and R5).** Some behaviour has no native element that does it the same way in every browser: a calendar, a menu, a searchable list. For that, and for nothing a native element can do, a component of the Ops Portal is composed from the **shadcn/ui primitives** (Radix UI under Tailwind CSS and the portal's tokens), through a door of its own ([§29.2](#292-the-component-foundation)). They give **behaviour** (keys, focus, names for assistive technology, positioning) and no appearance: the look is the portal's alone. React Aria Components, which the date field was built on from 28 October 2026, was **removed on 6 November 2026** (redesign step R5), when the date field moved to the calendar and popover primitives: nothing imports it, and it is not a dependency.
 
-**Decided (Product Owner, 28 October 2026).** It was chosen after the same screen was built with React Aria Components, Ant Design 6 and
-Mantine 9 and run under the portal's content-security policy (no inline style). The other two bring a look and a token system of their own,
-which BRAND_FOUNDATION §14 does not let a library impose; under that policy Ant Design drew nothing of its theme (it needs a nonce on every
-response of a static front, and three violations remained even then) and Mantine lost the portal's colours. Material UI was considered and
-not built. The two builds were scratch work and are not kept in the repository; [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026) records what each did.
+**Decided (Product Owner, 28 October 2026), and why no UI framework is adopted.** A library for behaviour was chosen after the same screen was built with React Aria Components, Ant Design 6 and Mantine 9 and run under the portal's content-security policy (no inline style). The other two bring a look and a token system of their own, which BRAND_FOUNDATION §14 does not let a library impose; under that policy Ant Design drew nothing of its theme (it needs a nonce on every response of a static front, and three violations remained even then) and Mantine lost the portal's colours. Material UI was considered and not built. The two builds were scratch work and are not kept in the repository; [the plan's §7.50](../delivery/planning/SLICE-000-IMPLEMENTATION-PLAN.md#750-the-date-field-library-and-the-review-of-stage-8-28-october-2026) records what each did.
 
-- **One door.** Only the components of `apps/ops-web/src/components/ui/` import the library, `react-aria`, `react-stately`, the
-  `@react-aria`, `@react-stately` and `@react-types` packages and `@internationalized/*` (a test and a lint rule say so). A page uses a
-  component of the portal, whose properties are the portal's own, and never a type, a date object or a styling hook of the library.
-- **Native first.** A native element is used wherever it does the job (button, input, select, `<dialog>`, table). The library is for what
-  none can do, and a component of it is built when a screen needs it (COMPONENT_PATTERNS §37), never as a catalogue.
-- **One look.** A component draws itself from `tokens.css` alone, as every component does (the token guard applies to it), takes the global
-  focus ring of `base.css` on every part that takes focus, keeps every part a pointer can press at least 24px (WCAG 2.2 target size; the
-  date field's buttons are 2rem, its parts 1.875rem) and its sizes in rem, and has forced-colours and reduced-motion rules of its own. The library's states reach the stylesheet as `data-*` attributes; the component's own states are classes.
-- **No inline style.** The first time a pressable thing mounts, the library inserts one `<style>` into the page, which a policy without
-  inline styles refuses. It does not when an element with its id exists: `index.html` has one, and the same rule is in `base.css`. A test
-  holds the rule to the installed library's, and a browser test serves a production build of the showcase under the strict policy and
-  requires no violation.
-- **Licences.** The licence of the library and of each package it brings that carries one ships with the build, byte for byte
-  (`public/licenses/`, held by a build test), and a test holds the list of those packages to the lockfile. Two carry none and are named in
-  the test: `client-only` (an empty module) and `tslib` (0BSD, which asks for no notice).
-- **Dates.** A date crosses into and out of a component as the text `YYYY-MM-DD`, as the API carries a calendar date. It is entered and
-  shown day, month, year, with the week from Monday and English month names, **fixed by the portal and not taken from the browser**
-  (decided 28 October 2026), for the reason `formatInstant` takes no words from a locale: a screen must not change with the machine, and
-  03/04 must never mean two different days. "Today" is the day in Accra, whatever the zone of the machine.
-- **No framework migration.** React Aria Components is a source of behaviour behind the portal's components, not a step towards a component
-  framework. The web applications are not migrated project-wide to Ant Design, MUI or another UI framework (decided 1 November 2026): each
-  brings a look and a token system of its own, which BRAND_FOUNDATION §14 does not let a library impose. The semantic tokens control
-  appearance. Proposing one is a foundation change (§34) and is surfaced first
-  ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)).
-- **Web only.** This policy is for the web applications, the Ops Portal and, when it is built, the Vendor PWA. It does not prescribe
-  Android implementation libraries: the Rider app maps the same semantic foundations to native Android (§30).
+- **Native first.** A native element is used wherever it does the job (button, input, select, `<dialog>`, table). A primitive is for what none can do, and a component is built when a screen needs it (COMPONENT_PATTERNS §37), never as a catalogue.
+- **One door.** Radix UI, cmdk, vaul, sonner and react-day-picker are imported only by the primitives, and only the components of `apps/ops-web/src/components/ui/` import a primitive (§29.2; a test and a lint rule say so). A page uses a component of the portal, whose properties are the portal's own, and never a type, a date object or a styling hook of a library.
+- **One look.** A component draws itself from `tokens.css` alone, as every component does (the token guard applies to it), takes the global focus ring of `base.css` on every part that takes focus, keeps every part a pointer can press at least 24px (WCAG 2.2 target size) and its sizes in rem, and has forced-colours and reduced-motion rules of its own.
+- **Dates.** A date crosses into and out of a component as the text `YYYY-MM-DD`, as the API carries a calendar date. It is typed and shown day, month, year (`DD/MM/YYYY`), with the week from Monday and English month names, **fixed by the portal and not taken from the browser** (decided 28 October 2026), for the reason `formatInstant` takes no words from a locale: a screen must not change with the machine, and 03/04 must never mean two different days. "Today" is the day in Accra, whatever the zone of the machine.
+- **TanStack Table and Motion (Product Owner, 5 and 6 November 2026).** **TanStack Table** is adopted (redesign step R3; §23, §29.5). **Motion** (motion.dev; animation, §9) is **adopted in redesign step R5**: an exact pin, its licences shipped with the build (§29.5). The components of `components/ui` import it through the one file `components/ui/motion/motion.ts`, and a page never does (an ESLint rule and `test/motion-door.test.ts`). It is for what a stylesheet cannot do: a layout that moves (the reordered list), something that comes and goes (the table's bar of acts, the side panel) and a number that counts (the stat tile). Its durations and easings are never written in a component: one hook reads them from the motion tokens of `tokens.css` (§9), and makes everything instant when `prefers-reduced-motion: reduce` is set. What a stylesheet can do on the same tokens (the tab underline, a changed row's highlight, a hover) is left to the stylesheet, where the reduced-motion rule is the token file's own.
+- **No framework migration.** The web applications are not migrated project-wide to Ant Design, MUI or another UI framework (decided 1 November 2026): each brings a look and a token system of its own, which BRAND_FOUNDATION §14 does not let a library impose. The semantic tokens control appearance. Proposing one is a foundation change (§34) and is surfaced first ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)). shadcn/ui is not that migration: its components are source in the repository, restyled to the tokens, and no theme of a library is adopted (§29.2).
+- **Web only.** This policy is for the web applications, the Ops Portal and, when it is built, the Vendor PWA. It does not prescribe Android implementation libraries: the Rider app maps the same semantic foundations to native Android (§30).
 
 ---
 
@@ -1301,20 +1417,50 @@ The first Melarc UI-foundation implementation should remain small, and each item
 - not-found/error presentation;
 - development-only visual showcase.
 
-### Explicitly deferred until demanded by real screens
+### The component foundation (Product Owner, 5 November 2026; redesign step R3)
 
-- comprehensive data grid;
-- dialog framework;
-- drawer system;
-- toast architecture;
-- dropdown/menu system;
-- tabs abstraction;
-- command palette;
-- charts;
-- complex navigation variants;
-- generic form engine.
+Step R3 (accepted by the Product Owner on 10 November 2026) built what the kit below is composed from. It adds no Melarc component and moves no screen:
 
-Add these when real product requirements need them.
+- Tailwind CSS v4 on the tokens, with no preflight (§29.3);
+- the 24 shadcn/ui primitives of `apps/ops-web/src/components/primitives/` (§29.2): alert dialog, avatar, badge, breadcrumb, button, calendar, card, checkbox, command, dialog, dropdown menu, input, label, popover, scroll area, select, separator, sheet, skeleton, sonner (the toast), table, tabs, textarea and tooltip;
+- TanStack Table for the data-table pattern (§23);
+- the pinned shadcn CLI and its MCP server, the official registry only (§29.2);
+- the content-security policy with inline style allowed and nothing else relaxed (§29.4);
+- the showcase of the primitives, in both themes (COMPONENT_PATTERNS §27);
+- the all-white lockup in the banner on a dark ground (§31).
+
+The dependencies and their licences are in §29.5.
+
+### The planned kit (Product Owner, 5 November 2026)
+
+The redesign replaces the list of components that were deferred until real screens demanded them with a planned kit. It is composed in `components/ui` from the shadcn/ui primitives (§29.2), to §28, and each component is recorded in `COMPONENT_PATTERNS.md` §37 as PROPOSED until it is built. Redesign step R4 built the first five below (7 November 2026) and task C1 built CountBadge, which the list further down names: those six are IMPLEMENTING and await the Product Owner's acceptance. The rest are built in redesign step R5.
+
+- AppShell v2 (the sidebar groups with counts, and the top bar), built in step R4;
+- CommandPalette and global search, built in step R4;
+- NewMenu, built in step R4;
+- AccountMenu, built in step R4;
+- HubSwitcher, built in step R4;
+- Tabs with counts;
+- FilterBar with chips;
+- DataTable (selection, a bulk-action bar and an inline row action);
+- SidePanel and Sheet;
+- RecordHeader with StageTracker;
+- ActionMenu (the overflow menu);
+- DescriptionList;
+- Panel and Card;
+- Toast;
+- Tooltip;
+- Popover;
+- StatTile;
+- CountBadge;
+- EmptyState v2;
+- Skeleton v2.
+
+**Built (redesign step R5, first half, 6 November 2026; COMPONENT_PATTERNS §37 records each as ACTIVE since 10 November 2026, except StatTile, which no screen draws and is IMPLEMENTING):** PageHeader, ViewTabs, FilterBar, DataTable, SidePanel, RecordHeader with StageTracker, ActionMenu, DescriptionList, Panel and Card, StatTile and Toast, the date field's new anatomy (§24a), and Motion.
+
+**Built (redesign step R5, second half, 7 November 2026; COMPONENT_PATTERNS §37 records each as ACTIVE since 10 November 2026, except Avatar and Tooltip, which no screen draws and are IMPLEMENTING, and CountBadge's variants, which are accepted with the shell):** StatusBadge v2 (the five status pairs of §4.4, a 6px dot, and one table of every state of the portal), CountBadge's variants (`subtle`, `strong`, `on-crimson`), EmptyState v2, Skeleton v2 with LoadingRow, Avatar, and the Tooltip and Popover wrappers (300ms and 8px, on the floating shadow of §8). The Dialog wrapper is the Dialog and AlertDialog of COMPONENT_PATTERNS §20, which gained the default motion on 7 November 2026 (afternoon); the Toast gained its second action then, and the one toaster is drawn by the signed-in shell.
+
+A component that is not in the kit is added when a real screen needs it (§28).
 
 ---
 
@@ -1343,24 +1489,30 @@ If CSS custom properties are used, semantic tokens should map cleanly:
 
 ```css
 :root {
-  --color-surface-page: #f7f8fa;
+  --color-surface-page: #f3f4f7;
   --color-surface-default: #ffffff;
 
-  --color-text-primary: #172033;
-  --color-text-secondary: #475467;
+  --color-text-primary: #0e1525;
+  --color-text-secondary: #475066;
 
-  --color-action-primary: #b4232e;
-  --color-action-primary-hover: #971b26;
+  --color-action-primary: #0e1525;
+  --color-action-primary-hover: #1c2539;
 
-  --color-border-control: #7c879b;
+  --color-border-control: #7c859a;
 
   --focus-ring: #2563a6;
+}
+
+:root[data-theme='dark'] {
+  --color-surface-page: #090d16;
+  --color-surface-default: #10151f;
+  /* … the same names with the dark values; the real file also applies them by the system setting (§31). */
 }
 ```
 
 This example describes token intent, not a requirement to use plain CSS.
 
-If Tailwind, CSS Modules, vanilla CSS, or another system is selected, it must consume the same semantic design model.
+If Tailwind, CSS Modules, vanilla CSS, or another system is selected, it must consume the same semantic design model. Tailwind CSS v4 is selected for the shadcn/ui primitives since redesign step R3 (§29.2), and §29.3 says how it consumes the model.
 
 ### 29.1 Token source, names and units
 
@@ -1377,6 +1529,110 @@ If Tailwind, CSS Modules, vanilla CSS, or another system is selected, it must co
 - **Scope.** Application-local tokens and components first. A shared package is created when a second real consumer
   exists.
 - **Checks.** The pairing test of §4.6 reads this file, so the contrast table cannot drift from the tokens.
+
+### 29.2 The component foundation
+
+**Decided (Product Owner, 5 November 2026; built in redesign step R3).** New components of the Ops Portal are built on **shadcn/ui** (the `new-york` style, over **Radix UI**) and **Tailwind CSS v4**, on the semantic tokens of this document. This supersedes, for new components, the plan of steps R1 and R2 that put them on React Aria Components with TanStack Table; what is built on React Aria stays until it moves ([§24a](#24a-interaction-primitives)).
+
+shadcn/ui is not a package the portal depends on. It is **source copied into the repository**, from the official shadcn registry and from no other, by the pinned CLI (`shadcn`, a development dependency) or by its MCP server: `.mcp.json` at the root of the repository runs the pinned package that is installed in `apps/ops-web`, and `components.json` names no registry of its own. Each file the tool writes is reviewed and restyled through the tokens before anything uses it ([the Ops Portal's rules](../apps/ops-web/CLAUDE.md) say how). `scripts/shadcn-wiring.test.ts` holds the tool, the server and the registry.
+
+There are three layers, and a file imports from the layer below it and from no other:
+
+```text
+pages (src/app/)  →  components/ui  →  components/primitives  →  Radix UI, cmdk, sonner, react-day-picker
+                     the Melarc         generated shadcn/ui
+                     components         source, on the tokens
+```
+
+- **A page imports a Melarc component and nothing else.** It never imports a primitive, or a library under one. A primitive is imported only by a component of `components/ui`, by the development-only showcase and by another primitive.
+- **One door to the libraries.** Radix UI (`radix-ui` and `@radix-ui/*`), cmdk, vaul, sonner and react-day-picker are imported only from `components/primitives/`, by import, dynamic import or require. An ESLint block of `eslint.config.mjs`, `scripts/eslint-rules.test.ts` and `apps/ops-web/test/primitives-door.test.ts` say so, and the last also fails on a library that is installed and that no primitive uses.
+- **Icons.** `lucide-react` stays behind the icon registry (§24) for every file but the primitives, whose generated source draws its own few icons.
+- **Class names** are joined by `cn` of `src/lib/utils.ts` (clsx and tailwind-merge). The CLI leaves an `import { cn } from "cn"`, which is another package and is wrong.
+- **Proof.** `apps/ops-web/test/browser/primitives.spec.ts` scans the showcase of the primitives with axe (WCAG 2.2 A and AA) in both themes, with each overlay open, and drives every overlay from the keyboard: open it, move in it, close it with Escape, find focus where it was. `primitives-policy.spec.ts` serves it as a production build under the strict policy (§29.4).
+
+### 29.3 How the primitives take the tokens
+
+Tailwind consumes the model and adds no colour, size or space of its own. `apps/ops-web/src/styles/tailwind.css` defines the names the shadcn/ui components read, each **only as a reference to a token**, and Tailwind reads them through `@theme inline`, so a theme that changes a token changes everything that reads it:
+
+| shadcn/ui name | Reads | Note |
+|---|---|---|
+| `background`, `foreground` | `surface.page`, `text.primary` | |
+| `card`, `popover` (each with its `-foreground`) | `surface.default`, `surface.raised`; `text.primary` | the raised surface is what floats: menus, popovers, toasts |
+| `primary` (and `-foreground`) | `action.primary`, `action.primaryText` | Ink |
+| `secondary` (and `-foreground`) | `action.secondary`, `action.secondaryText` | |
+| `muted`, `accent` (each with its `-foreground`) | `surface.subtle`; `text.muted` and `text.primary` | `accent` is the hover fill |
+| `destructive` | `status.danger.foreground` | the vermilion of danger, never the crimson (§4.7) |
+| `border`, `input` | `border.default`, `border.control` | `input` is the control boundary of §4.6 |
+| `ring` | `focus.ring` | |
+| `brand` (and `-foreground`) | `action.new`, `action.newText` | the crimson of the New button, and nothing else |
+| `sidebar`, `sidebar-foreground` | `surface.inverse`, `shell.textMuted` | |
+| `sidebar-primary` (and `-foreground`) | `shell.active`, `shell.activeText` | the current item is crimson |
+| `sidebar-accent` (and `-foreground`) | `shell.surfaceHover`, `shell.text` | |
+| `sidebar-border`, `sidebar-ring` | `shell.border`, `focus.ringInverse` | |
+| `radius` | `radius.md` | Tailwind's `rounded-sm`, `-md` and `-lg` read `radius.sm`, `md` and `lg` of §7 |
+| `font-sans`, `font-mono` | Inter, JetBrains Mono (§5.1) | |
+| `shadow-md`, `shadow-lg` | `shadow.floating` | the one shadow (§8); there is no other |
+
+- **No colour of Tailwind's own palette is used** (`bg-red-500`, `text-white`), none is written out in a class, and no shadow but the one. The palette is cleared from the theme (`--color-*: initial`, before the names above are mapped), so a class of it draws nothing, and the scan below finds it as the mistake it is. A class string uses the names above, or an arbitrary value that reads a token (`bg-(color:--color-status-warning-background)`, `min-h-(--control-height-md)`, `duration-(--motion-normal)`). `apps/ops-web/test/primitives-tokens.test.ts` scans the primitives and their showcase for it, and `scripts/design-tokens.test.ts` holds `tailwind.css` to the rules of every stylesheet.
+- **The `dark` variant** follows the theme as the token file does (§31): by `data-theme="dark"`, or by the system's setting unless the root says `data-theme="light"`. A primitive seldom needs one, because the tokens switch themselves.
+- **Preflight is not imported.** `tailwind.css` takes Tailwind's theme and utilities and nothing of its base, with `source(none)` and explicit `@source` folders (`components/` and `showcase/`, no tests), so that a word in a comment is not made into a utility. Preflight resets headings, lists, links and form controls for the whole document, and the screens that exist, with `base.css`, rely on the browser's defaults for them. A reset scoped to what carries a `data-slot`, and to what is inside it, replaces the part the primitives need. *Kept:* the border colour of the border token, the neutral button and field (no border, fill or padding, the page's font and colour), the pointer on an enabled button, an opaque placeholder, a textarea that grows downward, no markers or margins on the lists and headings a primitive renders, the link that takes its text's colour, the collapsed table. *Dropped:* the reset of every element, the media rules (images and icons stay inline), the document's font and line height, and the rules for the form controls of particular browsers.
+- **Layers.** Tailwind's theme, base and utilities are CSS layers, and a rule in a layer always loses to a rule in none. `tokens.css`, `base.css` and the stylesheets of `components/ui` are in no layer, so they win over any utility: the token radius (8px) over Tailwind's own default, and the focus ring of `base.css` (an outline, which forced-colours mode keeps) over the `ring` utilities. A primitive takes the global focus ring and draws none of its own.
+- **Motion.** The primitives animate with `tw-animate-css` on the motion tokens (§9): `motion.fast`, `normal` and `slow` (120, 200 and 280ms) and the enter and exit easings; what a stylesheet cannot do in the components of the kit is Motion's, reading the same tokens (§24a). Under `prefers-reduced-motion: reduce` every duration token is zero, so nothing moves, and `primitives.spec.ts` proves that every overlay still opens, and is gone after Escape, then.
+
+### 29.4 The content-security policy
+
+**Decided (Product Owner, 5 November 2026).** The edge sends one policy on every response of a browser surface, and the Ops Portal is held to work under it ([SECURITY_DESIGN §14.8](../architecture/SECURITY_DESIGN.md#148-browser-origin-network-and-transport) owns it, and its reason). Redesign step R3 relaxes **one directive, `style-src`, and no other**:
+
+```text
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+Radix UI and Sonner insert `<style>` elements into the page when they run (Sonner's stylesheet when it loads, the select's and the scroll area's with their parts), and `style-src 'self'` refuses them. **`script-src` is `'self'` and is never relaxed**: it protects against injected code acting as the officer, and inline style alone cannot run code. An attacker would first need a way to put markup into the page, an HTML-injection bug, and React escapes what it renders; a style that reaches out is stopped by the directives that did not move. If a primitive needs anything else the policy refuses, the work stops and the need is reported: no other directive is relaxed for a library.
+
+The policy is in `e2e/harness/https-front.ts` and `apps/ops-web/test/browser/support/strict-policy.ts`, which a test holds equal. `apps/ops-web/test/browser/shell.spec.ts` proves that an inline script, `eval`, `new Function` and a script from another origin are still refused, and `primitives-policy.spec.ts` that the primitives raise no violation. The static page and the shipped stylesheets stay free of inline style and of `@import` (`test/build.test.ts`): only what the libraries insert is allowed.
+
+### 29.5 Dependencies and licences
+
+Redesign steps R3 and R5 added these, each an exact pin as the dependency policy requires:
+
+| Package | Version | Licence | What it is for |
+|---|---:|---|---|
+| `radix-ui` | 1.8.1 | MIT | Radix UI, the unified package under the primitives |
+| `cmdk` | 1.1.1 | MIT | the command palette |
+| `sonner` | 2.0.8 | MIT | the toaster |
+| `react-day-picker` | 10.0.2 | MIT | the calendar |
+| `class-variance-authority` | 0.7.1 | Apache-2.0 | the variants of a primitive |
+| `clsx` | 2.1.1 | MIT | class names |
+| `tailwind-merge` | 3.7.0 | MIT | class names |
+| `@tanstack/react-table` | 8.21.3 | MIT | the data-table pattern (§23) |
+| `tw-animate-css` | 1.4.0 | MIT | the animations |
+| `tailwindcss`, `@tailwindcss/vite` | 4.3.3 | MIT | the stylesheet, at build time |
+| `shadcn` | 4.22.1 | MIT | the CLI and its MCP server (a development dependency) |
+| `motion` | 14.4.0 | MIT | animation of what a stylesheet cannot do (§24a), added by redesign step R5; it brings `framer-motion` (MIT, Framer B.V.), `motion-dom` and `motion-utils` (MIT, Motion B.V.) |
+
+Motion's four packages ship their licences too: two texts, `Motion-MIT.txt` (Motion B.V., for `motion`, `motion-dom` and `motion-utils`) and `Framer-Motion-MIT.txt` (Framer B.V., for `framer-motion`), copied byte for byte; `apps/ops-web/test/motion-licences.test.ts` holds the list to the lockfile and to each package's own text, and `test/build.test.ts` holds what the build ships. `react-aria-components` and `@internationalized/date`, which the date field was built on, left with it on 6 November 2026 (§24a), and their three licence files with them.
+
+Each ships with the build under its own licence (MIT asks that the notice travel with the work, Apache-2.0 that a copy of the licence does): 16 files were added to `apps/ops-web/public/licenses/`, copied byte for byte, and packages whose text is identical share one (the 61 packages of Radix UI are one file). The list is `apps/ops-web/test/support/third-party-licences.ts`; `apps/ops-web/test/shadcn-licences.test.ts` holds it to the lockfile and to each package's own text, and `test/build.test.ts` holds what the build ships to the same. The licence of the registry's own source, which the primitives are, is the `shadcn` package's. Two packages have no licence file to ship, and are named in the list with the reason: `react-remove-scroll-bar` (MIT by its `package.json`, which holds none) and `tslib` (0BSD, which asks for no notice); the type-only packages put no code in the bundle. `date-fns`, which step R3 added as a direct dependency of the portal for the calendar, was removed from it in redesign step R4: the portal imports it nowhere, and `react-day-picker` depends on it, so it is installed and its licence is shipped all the same (the list names it as a package of the tree, and it is no longer a root of it).
+
+### 29.6 Deviations from the registry source
+
+Each is made in the file and says so there.
+
+- **sonner** reads the theme from `useResolvedTheme` (`src/platform/theme/`), not from `next-themes`, which the portal does not have and which would be a second owner of the theme; and it re-exports `toast`, so that the door above stays shut to every file but the primitives.
+- **command**: the hidden title and description are inside the panel, where the dialog names itself from them (the registry's leave a heading in the page while it is closed). `CommandDialog` forwards `onCloseAutoFocus`, because a palette opened by a button has no `DialogTrigger` to give focus back to. Its separator is `aria-hidden`, because a list box holds only options and groups (axe `aria-required-children`).
+- **calendar** is in English as written in the United Kingdom and starts its week on Monday by default, as the date field does (COMPONENT_PATTERNS §22a), not in the browser's language.
+- **popover** gains a `container` prop (the element the popover is drawn into, the body by default): a modal `<dialog>` is in the top layer and the page behind it is inert, so the date field's calendar, opened from inside one, is drawn into the dialog or it would open under it, unseen and out of reach.
+- **dropdown-menu** and **tooltip** gain the same `container` prop (task R5.2, M8): the kit's `ActionMenu` and `Tooltip` read the dialog they are in and pass it, so a menu or a hint opened inside a modal `<dialog>` is drawn into the dialog and not under it. The kit's `Popover` does the same by default.
+- **scroll-area**: the viewport is a stop of the keyboard, so that what scrolls can be reached without a pointer (WCAG 2.1.1; axe `scrollable-region-focusable`).
+- **button** has no `xs` sizes (they would be 24px targets, below the smallest control height) and gains the `brand` variant: the crimson of the New button, and nothing else. `destructive` is the outline Danger recipe of §4.6, since no filled Danger button is part of the system (§16.3).
+- **badge** gains the five status variants, `success`, `warning`, `danger`, `info` and `neutral`, from the pairs of §4.4.
+- **tabs** are an underline, not a pill.
+
+### 29.7 What the Product Owner should know
+
+- **The Radix menu and select are modal.** While one is open the page behind it is hidden from assistive technology and focus is held inside. axe takes only a dialog for a modal, so it reports the controls behind as hidden but focusable (`aria-hidden-focus`); that one rule is switched off for those two open states, and only there, in `primitives.spec.ts`, with the reason written beside it. Everything else is scanned with every rule, in both themes.
+- **Tab does nothing inside an open Radix menu or list** (Radix prevents it: a menu is not walked with Tab). Escape closes it and gives focus back to its button.
+- **A palette opened by a button does not get focus back by itself.** Radix returns focus to a `DialogTrigger`, and a command palette has none, so focus would land on the page. The primitive forwards `onCloseAutoFocus` for it; the Melarc palette of step R5 must use it, and the showcase does.
 
 ---
 
@@ -1403,25 +1659,32 @@ Android touch target, navigation, back behavior, system bars, accessibility serv
 
 ## 31. Dark mode
 
-Dark mode is **deferred**.
+Light and dark themes are **both in Version 1** (Product Owner, 5 November 2026). Dark mode is no longer deferred.
 
-Do not create a second theme during initial bootstrap merely for completeness.
-
-Token naming must nevertheless avoid assumptions that make future theming impossible.
-
-For example prefer:
+A theme is a second set of values for the same semantic names, never a second set of components. Components consume semantic tokens only, so:
 
 ```text
 color.surface.default
 ```
 
-over:
+is white in one theme and a dark surface in the other, and no component names a raw value such as:
 
 ```text
-white
+#FFFFFF
 ```
 
-inside components.
+The only exceptions are the two fixed colors of §4.2, `white` and `black`, which a QR code and the tile behind the symbol need to be the same in both themes.
+
+**Implemented as tokens (redesign step R2).** Both themes are in the token file, and the values are §4.3 and §4.4:
+
+- the light values are the `:root` block, and are in force unless something below applies;
+- the dark values are applied by the operating system's setting unless the root carries `data-theme="light"` (`@media (prefers-color-scheme: dark)` on `:root:not([data-theme='light'])`), and by `data-theme="dark"`, whatever the system says. So a later toggle wins both ways, and the dark values are written in both places and a test fails if the two differ;
+- `color-scheme` follows the theme, so that native controls (scrollbars, checkboxes, form fields) do too;
+- each dark pairing is in §4.6 and is held by the tests as the light pairings are, and the components are scanned in the dark in a real browser (§14).
+
+**The choice of theme.** The portal follows the operating system's light or dark setting by default. A person may override it, and that choice is kept in the browser's local storage: a non-sensitive preference, approved as a browser-storage decision under [PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision) (Product Owner, 5 November 2026). **As built in redesign step R4:** the theme control of the top bar and the account menu offer *System* (the default), *Light* and *Dark*; the choice is kept under one key, `melarc-theme`, written for Light and Dark and removed for System, in one module (`apps/ops-web/src/platform/theme/theme-choice.ts`, the only exception to the rule that application code uses no web storage, named in the ESLint configuration) that sets `data-theme` on the root, and the token file still reads no storage. A script of the page's own origin (`public/theme-init.js`, a classic script in the head of `index.html`) applies the stored choice before the first paint, because a module script is deferred and an inline one is refused by the content-security policy; a value that is not `light` or `dark` is ignored, and the other tabs of the browser follow a change.
+
+The logo has its own version for dark grounds ([BRAND_FOUNDATION §4.7](BRAND_FOUNDATION.md#47-the-logo-in-the-ops-portal)). Since redesign step R3 the banner of the Ops Portal's frame (the sign-in screens and the neutral pages) draws the all-white lockup whenever the dark theme applies, by the system's setting or by `data-theme="dark"`: `AppFrame` chooses the file with `useResolvedTheme`, one image that carries the name once, and `src/app/frame-logo.test.tsx` holds it. The Ink sidebar draws the all-white lockup in both themes (redesign step R4).
 
 ---
 
@@ -1469,9 +1732,8 @@ Before accepting a UI-foundation change, verify:
 
 This document does **not** approve:
 
-- Tailwind CSS;
-- Radix UI;
-- shadcn/ui;
+- ~~Tailwind CSS~~ (decided on 5 November 2026: Tailwind CSS v4 on the semantic tokens, with no preflight, §29.3);
+- ~~Radix UI~~ and ~~shadcn/ui~~ (decided on 5 November 2026: shadcn/ui over Radix UI is the component foundation of new components, §29.2);
 - Material UI;
 - Ant Design;
 - Storybook;
@@ -1479,15 +1741,17 @@ This document does **not** approve:
 - CSS Modules;
 - CSS-in-JS;
 - ~~a library for behaviour a native element lacks~~ (decided on 28 October 2026: React Aria Components, §24a; Ant Design and Mantine were
-  built and run for it and Material UI was considered, and React Aria Components was chosen over them);
+  built and run for it and Material UI was considered, and React Aria Components was chosen over them; superseded on 5 November 2026 by the shadcn/ui
+  primitives, §29.2, and React Aria Components was removed on 6 November 2026);
 - ~~a specific icon library~~ (decided on 25 October 2026: Lucide, §24).
 
 Those should be selected based on the actual web implementation and project constraints.
 
 The selected technology must serve this design system, not redefine it.
 
-Since 1 November 2026 a project-wide move to Ant Design, MUI or another UI framework is outside the approved direction, and a specialist grid
-is weighed against a concrete screen before advanced grid behavior is built by hand (§24a, §23).
+Since 1 November 2026 a project-wide move to Ant Design, MUI or another UI framework is outside the approved direction. Since 5 November 2026
+the component foundation of new components is shadcn/ui over Radix UI and Tailwind CSS (§29.2), TanStack Table is adopted (§23), Motion is adopted
+(§24a, since 6 November 2026), and a specialist grid is weighed against a concrete screen before advanced grid behavior is built by hand (§24a, §23).
 
 ---
 
@@ -1547,21 +1811,26 @@ Each pattern should eventually document:
 | Crimson + Ink direction | **APPROVED** |
 | Balanced density model | **APPROVED** |
 | Semantic token architecture | **APPROVED** (Product Owner, 6 October 2026) |
-| Primitive palette values | **APPROVED** (6 October 2026) |
-| Interface crimson `#B4232E` | **APPROVED** as the active interface value (6 October 2026); the logo's own red stays a reference until the vector artwork is supplied (§4.1) |
-| Interface ink `#172033` | **APPROVED** as the active interface value (6 October 2026) |
-| Inter | **APPROVED** (6 October 2026), self-hosted as the variable Latin and Latin Extended files of §5.1 under the SIL Open Font License 1.1 |
+| Primitive palette values | **REPLACED** (5 November 2026): colour has two primitives, `white` and `black` (§4.2); every other colour is a semantic token with a light and a dark value (§4.3, §4.4) |
+| Interface crimson `#B4232E` | **REPLACED** (Product Owner, 5 November 2026) by the logo red `#BE1E2D` for the brand (`#F04B59` in the dark theme), with the primary action moved to Ink (§4.7); in force since step R2. The logo's own red stays a reference until the owner confirms the vector master (§4.1) |
+| Interface ink `#172033` | **REPLACED** by `#0E1525` (5 November 2026, §4.3); in force since step R2 |
+| Inter | **APPROVED** (6 October 2026), self-hosted as the variable Latin and Latin Extended files of §5.1 under the SIL Open Font License 1.1; **JetBrains Mono** is approved for operational codes only (5 November 2026) and shipped since step R2, as its variable Latin file at weights 500 and 600 (§5.1) |
 | 4px spacing base | **APPROVED** (6 October 2026) |
 | Responsive breakpoint set | **APPROVED** (6 October 2026) |
-| Blue focus ring `#2563A6` | **APPROVED** (6 October 2026) |
-| Dark mode | **DEFERRED** |
-| Tailwind | **NOT DECIDED** |
-| Radix | **NOT DECIDED** |
+| Blue focus ring `#2563A6` | **APPROVED** (6 October 2026) for the light theme; `#7AA7F0` in the dark theme (5 November 2026) |
+| Light and dark themes (§31, §4.3) | **APPROVED for Version 1** (Product Owner, 5 November 2026); built as tokens in step R2, where the system's setting decides; the toggle and its stored choice were built in step R4 (7 November 2026, §31) |
+| Theme choice (§31) | **DECIDED** 5 November 2026 (Product Owner): follows the operating system by default; a person may override it; the choice is kept in the browser's local storage as a non-sensitive preference ([PRODUCT_DESIGN_DIRECTION §7](PRODUCT_DESIGN_DIRECTION.md#7-when-a-proposal-needs-a-product-decision)); the toggle was built in step R4 (7 November 2026, §31) |
+| Visual direction (§4.7) | **APPROVED** 5 November 2026: Ink carries the work and crimson carries the brand; the palette, the radii (8, 12 and 16px), the heights (36, 44 and 56px), the motion and the one shadow are the values in force since step R2; the values R2 derived (§4.3), the 44px controls, the 36px rows and the single floating shadow were approved as built on 5 November 2026, in the task of step R3 |
+| Devices (§12) | **DECIDED** 5 November 2026: hub-floor tasks are tablet-first at 768px; the record panel is a full-screen sheet and the sidebar collapses to icons at that width |
+| Planned component kit (§27; COMPONENT_PATTERNS §37) | **APPROVED** 5 November 2026 and **PROPOSED** as patterns, except the six built (the shell's five in step R4, 7 November 2026, and CountBadge in task C1: **ACTIVE**, accepted by the Product Owner on 10 November 2026); the rest is built in step R5 and **ACTIVE** since 10 November 2026 (run 6, at its green final commit), except StatTile, Avatar and Tooltip, which no screen draws and stay IMPLEMENTING until one does |
+| Tailwind (§29.2, §29.3) | **DECIDED** 5 November 2026 (Product Owner): Tailwind CSS v4 on the semantic tokens, preflight not imported; built in step R3 |
+| Radix, shadcn/ui (§29.2) | **DECIDED** 5 November 2026 (Product Owner): shadcn/ui over Radix UI is the component foundation of new components, from the official registry only, through `components/primitives` and one door; built in step R3, which awaits the Product Owner's acceptance |
+| Content-security policy (§29.4) | **DECIDED** 5 November 2026 (Product Owner): `style-src 'self' 'unsafe-inline'`, and no other directive relaxed; `script-src` is never relaxed |
 | Shared web component package | **NOT YET REQUIRED** |
 | Shared brand asset package | **POSSIBLE LATER** |
-| Supported pairings and state recipes (§4.6) | **APPROVED** (6 October 2026), including the danger outline recipe |
+| Supported pairings and state recipes (§4.6) | **APPROVED** (6 October 2026), including the danger outline recipe; written again for the two themes and the new palette in step R2, where the values it derived are marked in §4.3 |
 | Inverse focus, inverse link and Ink-shell indicator values (§4.6) | **APPROVED** as proposed (Product Owner, 6 October 2026); first used by the authenticated Ops shell |
-| `border.control` | **DECIDED** 6 October 2026: darkened to `#7C879B` (`gray.550`), 3:1 on every light surface (§4.6); a provisional value like the rest |
+| `border.control` | **DECIDED** 6 October 2026 (darkened so one token is the boundary of an input wherever it sits); **`#7C859A`** in the light theme and **`#667085`** in the dark since 5 November 2026, 3:1 on the surfaces §4.6 lists |
 | WCAG 2.2 AA design baseline (§14) | **DECIDED** 6 October 2026: components are tested to 2.2 AA, and `surfaces/ops-portal.md` §11 and `vendor-pwa.md` §9 now say 2.2 AA is the working target; the formal conformance level stays **OPEN** (master §40.6) |
 | Setup routes: neutral frame or a bare layout (§13.1) | **DECIDED** 6 October 2026: the neutral frame |
 | First implementation scope (COMPONENT_PATTERNS §42.2) | **CONFIRMED** 6 October 2026, built in three increments |
@@ -1570,11 +1839,11 @@ Each pattern should eventually document:
 | The authenticated shell's navigation: a top band or a side menu (§13.1, §22) | **DECIDED** 25 October 2026 (Product Owner, with a reference screenshot): a collapsible **side menu** on Ink with an account card; the Ops Portal is an application, not a website |
 | Layout of the pre-sign-in screens (§13.1, §13.1a) | **DECIDED** 25 October 2026 (Product Owner): a **split screen**, photography beside the form; the photographs are theirs (`design/images`), their licence is theirs to confirm |
 | Icon family (§24) | **DECIDED** 25 October 2026 (Product Owner): **Lucide**, through one registry; IconButton is built |
-| Interaction primitives (§24a) | **DECIDED** 28 October 2026 (Product Owner): **React Aria Components** for behaviour only, through the components of `components/ui`; the date field is its first component |
-| Web library policy (§23, §24a) | **DECIDED** 1 November 2026 (Product Owner): native elements first; React Aria Components behind Melarc's components; the semantic tokens control appearance; **no project-wide migration** to Ant Design, MUI or another UI framework; a **specialist grid is weighed against a concrete screen's requirements** before advanced grid behavior is built by hand; a web policy that does not prescribe Android libraries |
+| Interaction primitives (§24a) | **DECIDED** 28 October 2026 (Product Owner): **React Aria Components** for behaviour only, through the components of `components/ui`; the date field was its first component. **Superseded for new components** on 5 November 2026 by the shadcn/ui primitives (§29.2), and **removed** on 6 November 2026, when the date field moved to the calendar and popover primitives (COMPONENT_PATTERNS §37) |
+| Web library policy (§23, §24a) | **DECIDED** 1 November 2026 (Product Owner): native elements first; the semantic tokens control appearance; **no project-wide migration** to Ant Design, MUI or another UI framework; a **specialist grid is weighed against a concrete screen's requirements** before advanced grid behavior is built by hand; a web policy that does not prescribe Android libraries. On 5 November 2026 **TanStack Table** was adopted, in redesign step R3; **Motion** is adopted in redesign step R5 (6 November 2026; §24a, §29.5); new components are composed from the shadcn/ui primitives (§29.2) |
 | Date entry and display (§24a; COMPONENT_PATTERNS §22a) | **DECIDED** 28 October 2026 (Product Owner): day, month, year, week from Monday, English; fixed by the portal and not the browser's; "today" is Accra's |
 | Brand asset layout (§26 owns it) | **DECIDED in this revision** (document structure; no brand approval implied) |
-| Self-hosted typeface files | **NOT STARTED** until a typeface is accepted (§5.1) |
+| Self-hosted typeface files | **DONE** for Inter and JetBrains Mono (§5.1) |
 
 ---
 

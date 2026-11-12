@@ -243,6 +243,10 @@ function violationsOf(
  *
  * It compiles lazily, one operation at a time, and `prepare` compiles an operation at once so that a schema
  * that cannot be compiled fails at startup and not at the first request.
+ *
+ * **Made with `{ responses: false }` it prepares the request side alone** (run 5, Stage 1.6): production never validates a response, and the response schemas of
+ * 194 operations cost seconds of a synchronous start. Such a validator refuses `validateResponse` outright, so that a response is never reported as valid by one that
+ * cannot judge it. That every response schema compiles is proved by the tests of the validator and by the start of every other environment.
  */
 export class ContractValidator {
   private readonly strictAjv: Ajv2020;
@@ -251,8 +255,13 @@ export class ContractValidator {
   private readonly pathItems = new Map<string, JsonObject>();
   private readonly prepared = new Map<string, Prepared>();
   private readonly pointers: PointerOwnership;
+  private readonly responses: boolean;
 
-  constructor(private readonly contract: JsonObject) {
+  constructor(
+    private readonly contract: JsonObject,
+    made: { readonly responses?: boolean } = {},
+  ) {
+    this.responses = made.responses ?? true;
     this.pointers = new PointerOwnership(contract);
     const options = { strict: false, allErrors: true, logger: false } as const;
     // Bodies are checked exactly as sent. Path, query and header values are always text on the wire, and
@@ -369,6 +378,11 @@ export class ContractValidator {
     request?: Pick<RequestParts, 'headers'>,
     context?: ResponseContext,
   ): ContractViolation[] {
+    if (!this.responses) {
+      throw new Error(
+        `The contract validator was made without response validators (production does not validate responses): it cannot judge a response of ${operationId}.`,
+      );
+    }
     const prepared = this.preparedFor(operationId);
     // The exact status first, then its range (`2XX`, `4XX`), then the catch-all.
     const declared =
@@ -655,9 +669,9 @@ export class ContractValidator {
     }
 
     const responses = new Map<string, PreparedResponse>();
-    for (const [status, raw] of Object.entries(
-      objectAt(operation.responses, `responses of ${operationId}`),
-    )) {
+    for (const [status, raw] of this.responses
+      ? Object.entries(objectAt(operation.responses, `responses of ${operationId}`))
+      : []) {
       const response = this.resolve(raw, `response ${status} of ${operationId}`);
       const content = isJsonObject(response.content) ? response.content : undefined;
       const json = content?.['application/json'];

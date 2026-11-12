@@ -97,6 +97,10 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   signOut: ['STAFF', 'VENDOR', 'RIDER'],
   listTrustedBrowsers: ['STAFF'],
   revokeTrustedBrowser: ['STAFF'],
+  // Task C1: the count of the work waiting in each queue the session may read; a session of the Ops Portal and no other.
+  getQueueSummary: ['STAFF'],
+  // Task C2: the lookup of a record by its code, a name or a phone number typed in full; a session of the Ops Portal and no other.
+  lookupRecords: ['STAFF'],
   requestAdditionalDeviceGrant: ['VENDOR'],
   listVendorDevices: ['VENDOR'],
   revokeVendorDevice: ['VENDOR'],
@@ -133,7 +137,7 @@ let rider: TestClient;
 let refreshSessions: () => Promise<void>;
 /** The officer, whose records are "theirs" to a Vendor or a Rider, and who may read them. */
 let officer: Actor;
-/** A Senior Ops of the first hub, who reads the riders there (`dispatch.read`, which the Platform Admin does not hold). */
+/** A Senior Ops of the first hub, who reads the riders there (`dispatch.read`, at their hub: the Platform Admin of the sweep reads every hub since task P1). */
 let hubOps: Actor;
 /** Another party's record of each kind an operation is addressed by: a staff member, a rider, a vendor account, a vendor's browser. */
 let theirs: Readonly<Record<string, string>>;
@@ -501,7 +505,7 @@ describe('the existence rule is asked about records that are real (the control o
   )(
     '%s: a caller who may read the record finds it, and is told a missing one is missing',
     async (_id, operation) => {
-      // The officer of the first hub reads what a hub holds (the Platform Admin of the sweep has no primary hub, so its own-hub grants reach none).
+      // The officer of the first hub reads what a hub holds (the Platform Admin of the sweep has no primary hub, and since task P1 its grants reach every hub: this case wants a reader of one).
       const reader =
         operation.id === 'getRider' ||
         [

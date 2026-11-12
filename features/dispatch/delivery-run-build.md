@@ -70,7 +70,7 @@ Assignment, dispatch and run start are **distinct**, and collapsing any two lose
 | **Dispatch**| Ops| Atomic commit; the rider is notified|
 | **Start run**| **Rider**| Work begins. Only the rider does this (§24.6)|
 
-`MSC-DEC-222` established this shape on the pickup side. It applies here symmetrically, and **holders were confirmed on 21 August** as A S P at own hub — restricting assignment to Senior Ops would have made the two halves of the product differ, which is a training cost paid on every officer.
+`MSC-DEC-222` established this shape on the pickup side. It applies here symmetrically, and **holders were confirmed on 21 August** as A S P, each at the scope [permissions.md](../../contracts/permissions.md) gives it — restricting assignment to Senior Ops would have made the two halves of the product differ, which is a training cost paid on every officer.
 
 ### 5.4 Exception paths
 
@@ -115,9 +115,9 @@ Assignment, dispatch and run start are **distinct**, and collapsing any two lose
 
 | Key| Holders| Scope| Home|
 |---|---|---|---|
-| `dispatch.run.create`| A S P| own hub| [permissions.md](../../contracts/permissions.md) §7|
-| `dispatch.run.sequence`| A S P| own hub| §7 — **confirmed `MSC-DEC-232`**|
-| `dispatch.run.assign`| A S P| own hub| §7 — **confirmed `MSC-DEC-232`**|
+| `dispatch.run.create`| A S P| own hub (Platform Admin: all hubs)| [permissions.md](../../contracts/permissions.md) §7|
+| `dispatch.run.sequence`| A S P| own hub (Platform Admin: all hubs)| §7 — **confirmed `MSC-DEC-232`**|
+| `dispatch.run.assign`| A S P| own hub (Platform Admin: all hubs)| §7 — **confirmed `MSC-DEC-232`**|
 
 ## 9. Settings — *pointer*
 

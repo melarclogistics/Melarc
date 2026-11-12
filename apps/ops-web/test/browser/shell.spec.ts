@@ -1,7 +1,30 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import { SESSION_PATH, stubApi } from './support/api';
-import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
+import {
+  reachableNames,
+  stepIncludingLinks,
+  tabReachesLinks,
+  watchPage,
+  wcagViolations,
+} from './support/page';
+import {
+  accountButton,
+  dockedSidebar,
+  focusedStop,
+  openAccountMenu,
+  openSheet,
+  overflowOf,
+  primaryNav,
+  remOf,
+  sheetOf,
+  sheetSettled,
+  sidebarBox,
+  sidebarWidth,
+  signOutFromMenu,
+  topBar,
+} from './support/shell';
 import { enforceStrictPolicy, STRICT_POLICY } from './support/strict-policy';
 
 /**
@@ -14,13 +37,18 @@ const VERIFIED_VIEWPORTS = [
   { width: 320, height: 640 },
 ] as const;
 
-/** From this width the menu is docked at the side; below it a bar with a menu button stands in its place (side-menu.css: 48rem). */
+/** From this width the sidebar is docked at the side; below it the top bar's button opens it in a sheet (the frame: 47.9375rem). */
 const DOCKED_FROM = 768;
+
+/** What the page watcher noted of a permission key on the screen (`watchPage`: the page reports each as a console error). */
+const keyProblems = (problems: readonly string[]) =>
+  problems.filter((problem) => problem.includes('A permission key is on the screen'));
 
 test.describe('the application shell in a browser', () => {
   // Break caught: a production build that does not start, logs errors, or reaches for anything other than its own
-  // files. The one thing it asks of the API is who is signed in, once, on this origin.
-  test('renders the landing for a signed-in person, with no errors, asking the API only who is signed in', async ({
+  // files. The one thing it asks of the API is who is signed in, once, on this origin (and the counts of the queues, which the stand-in answers
+  // apart from the requests it lists).
+  test('renders My work for a signed-in person, with no errors, asking the API only who is signed in', async ({
     page,
     baseURL,
   }) => {
@@ -28,17 +56,21 @@ test.describe('the application shell in a browser', () => {
     const seen = watchPage(page);
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     await expect(page.getByRole('main')).toBeVisible();
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
-    await expect(page.getByText('Nothing is waiting.')).toBeVisible();
-    // The landing is a signed-in screen, so the shell's side menu is beside it: one navigation, and the control to leave. There is no
-    // banner above the page: on a wide screen the menu carries the product's name, and its slim bar is for a narrow screen alone.
-    await expect(page.getByRole('banner')).toHaveCount(0);
-    await expect(page.getByRole('complementary', { name: 'Main menu' })).toBeVisible();
+    // The stand-in's server gave this session no queue, so My work says nothing of waiting: not that nothing is, and no heading over nothing.
+    await expect(page.getByText('Nothing is waiting.')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 2, name: 'Waiting for you' })).toHaveCount(0);
+    // A signed-in screen has the shell around it: the top bar is its one banner and the sidebar its one navigation, and the way to leave is in
+    // the account menu, a button that is there and an item that is not on the page until the menu is opened.
+    await expect(page.getByRole('banner')).toHaveCount(1);
+    await expect(dockedSidebar(page)).toBeVisible();
     await expect(page.getByRole('navigation')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
-    await expect(page).toHaveTitle('Melarc Ops Portal');
+    await expect(accountButton(page)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('menuitem', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page).toHaveTitle('My work · Melarc Ops Portal');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 
     expect(seen.problems).toEqual([]);
@@ -48,10 +80,69 @@ test.describe('the application shell in a browser', () => {
     expect(api.unexpected).toEqual([]);
   });
 
+  // Break caught: a page watcher that does not look at what is drawn, so that a permission key put together at run time (a name built from a variable, a value an answer carried)
+  // reached a screen and every browser test passed (the review of f6cf02b; the source guard cannot see such a key). The page tells its console, which the watcher turns into a problem.
+  // This page draws three keys on purpose: the guard that is on every test must hear exactly these (`permissionKeysOnPurpose`) and no other.
+  test.describe(() => {
+    test.use({ permissionKeysOnPurpose: ['pickup.read', 'staff.read', 'vendor.read'] });
+    test('the page watcher reports a permission key drawn as text, in an attribute, or only for a moment', async ({
+      page,
+    }) => {
+      await stubApi(page);
+      const seen = watchPage(page);
+      await page.route('**/__key-probe', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: `<!doctype html><html lang="en"><head><title>Probe</title></head><body>
+          <p>This needs pickup.read.</p>
+          <button type="button" aria-label="staff.read">Go</button>
+          <script>
+            setTimeout(() => {
+              const moment = document.createElement('i');
+              moment.textContent = 'vendor.read';
+              document.body.append(moment);
+              setTimeout(() => moment.remove(), 20);
+            }, 50);
+          </script>
+        </body></html>`,
+        }),
+      );
+      await page.goto('/__key-probe');
+
+      await expect
+        .poll(() =>
+          keyProblems(seen.problems).map((problem) => /is on the screen: (\S+)/.exec(problem)?.[1]),
+        )
+        .toEqual(expect.arrayContaining(['pickup.read', 'staff.read', 'vendor.read']));
+      await expect(page.getByText('vendor.read')).toHaveCount(0);
+    });
+  });
+
+  // Break caught: a watcher so loose that it reports words (a refusal is told in plain words), which would fail every page of the portal.
+  test('the page watcher says nothing of a page that draws a refusal in plain words', async ({
+    page,
+  }) => {
+    await stubApi(page);
+    const seen = watchPage(page);
+    await page.route('**/__key-probe', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<!doctype html><html lang="en"><head><title>Probe</title></head><body>
+          <p>Your account can’t see pickup requests. Ask an administrator for access.</p>
+          <button type="button" aria-label="Open the request">Go</button>
+        </body></html>`,
+      }),
+    );
+    await page.goto('/__key-probe');
+
+    await expect(page.getByText('Ask an administrator for access.')).toBeVisible();
+    expect(keyProblems(seen.problems)).toEqual([]);
+  });
+
   // Break caught: the guard rendering a signed-in page for somebody the API says is not signed in, for any moment, or
   // not taking them to sign-in. The sign-in screen (S0.43) is there: the person ends on it, in the neutral frame, and
   // the screen asks the API for nothing more.
-  test('a visit with nobody signed in goes to sign-in and never shows the landing', async ({
+  test('a visit with nobody signed in goes to sign-in and never shows My work or the shell', async ({
     page,
   }) => {
     const api = await stubApi(page, 'signed-out');
@@ -59,7 +150,11 @@ test.describe('the application shell in a browser', () => {
     await page.exposeFunction('noteLanding', () => landingShown.push(true));
     await page.addInitScript(() => {
       new MutationObserver(() => {
-        if (document.querySelector('main h1')?.textContent === 'Melarc Ops Portal') {
+        if (
+          document.querySelector('main h1')?.textContent === 'My work' ||
+          document.querySelector('header.ui-topbar') !== null ||
+          document.querySelector('.ui-sidebar') !== null
+        ) {
           void (window as unknown as { noteLanding: () => Promise<void> }).noteLanding();
         }
       }).observe(document, { childList: true, subtree: true });
@@ -69,7 +164,7 @@ test.describe('the application shell in a browser', () => {
     await expect(page).toHaveURL('/sign-in');
     await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
     await expect(page.getByRole('navigation')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(accountButton(page)).toHaveCount(0);
     expect(landingShown).toEqual([]);
     await expect(page.getByText('Synthetic Officer')).toHaveCount(0);
     expect(api.requests).toEqual([`GET ${SESSION_PATH}`]);
@@ -95,12 +190,13 @@ test.describe('the application shell in a browser', () => {
 
     await page.getByRole('button', { name: 'Try again' }).click();
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
   });
 
-  // Break caught: the shell keeping anything in the browser before any workflow exists.
-  test('stores nothing in the browser', async ({ page }) => {
+  // Break caught: the shell keeping anything in the browser before the person has chosen anything: the one thing that is ever kept is the
+  // choice of theme (`melarc-theme`, written only for Light and Dark; test/browser/top-bar.spec.ts).
+  test('stores nothing in the browser until the person chooses a theme', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -116,7 +212,7 @@ test.describe('the application shell in a browser', () => {
     expect(stored).toEqual({ local: 0, session: 0, cookie: '', databases: 0, caches: 0 });
   });
 
-  // Break caught: a keyboard user who cannot see where focus is, cannot skip the header, or is left
+  // Break caught: a keyboard user who cannot see where focus is, cannot skip the sidebar and the top bar, or is left
   // somewhere unexpected after skipping.
   test('keyboard: the skip link is the first stop, visibly focused, and moves focus to the content', async ({
     page,
@@ -172,7 +268,7 @@ test.describe('the application shell in a browser', () => {
     await page.keyboard.press('Enter');
 
     await expect(page).toHaveURL('/');
-    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeFocused();
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeFocused();
     expect(await page.evaluate(() => 'survivedNavigation' in window)).toBe(true);
 
     await page.goBack();
@@ -181,7 +277,7 @@ test.describe('the application shell in a browser', () => {
     expect(seen.problems).toEqual([]);
   });
 
-  // Break caught: a policy with 'unsafe-inline' or 'unsafe-eval' being needed to run the shell.
+  // Break caught: script-src needing 'unsafe-inline' or 'unsafe-eval' to run the shell. (style-src allows inline style by decision, below.)
   test('runs under a strict Content-Security-Policy', async ({ page }) => {
     const violations = await enforceStrictPolicy(page);
     await stubApi(page);
@@ -193,10 +289,110 @@ test.describe('the application shell in a browser', () => {
     expect(response?.headers()['content-security-policy']).toBe(STRICT_POLICY);
     await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
     await page.getByRole('link', { name: 'Go to the start page' }).click();
-    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
 
     expect(violations).toEqual([]);
     expect(seen.problems).toEqual([]);
+  });
+
+  // Break caught: the relaxation of style-src (Product Owner, 5 November 2026) spreading to code. These are the three ways a page can run code
+  // that `script-src 'self'` refuses, tried against the real policy in a real engine: a script written into the page, `eval`, and a script from
+  // another origin. Each must not run, and the browser must report each as a violation of script-src. If one of them runs, the policy is
+  // no longer the protection against injected code acting as the officer, whatever else is true of it.
+  test('still refuses an inline script, eval and a script from another origin', async ({
+    page,
+  }) => {
+    const violations = await enforceStrictPolicy(page);
+    await stubApi(page);
+    // A script of the page's own origin, which script-src lets run: what it then tries is what an injected script would try. (The test cannot call
+    // eval from page.evaluate: Playwright runs that through DevTools, which a content-security policy does not apply to.)
+    await page.route('**/policy-probe.js', (route) =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: [
+          "window.evalError = 'none';",
+          "try { (0, eval)('window.evalRan = true;'); } catch (error) { window.evalError = error.name; }",
+          "window.functionError = 'none';",
+          "try { new Function('window.functionRan = true;')(); } catch (error) { window.functionError = error.name; }",
+        ].join('\n'),
+      }),
+    );
+    await page.goto('/no-such-page');
+    await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
+
+    const outcome = await page.evaluate(async () => {
+      const probes = window as unknown as Record<string, unknown>;
+      const inline = document.createElement('script');
+      inline.textContent = 'window.inlineScriptRan = true;';
+      document.head.append(inline);
+
+      const own = document.createElement('script');
+      own.src = '/policy-probe.js';
+      const loaded = new Promise((resolve) => {
+        own.addEventListener('load', resolve);
+        own.addEventListener('error', resolve);
+      });
+      document.head.append(own);
+      await loaded;
+
+      const foreign = document.createElement('script');
+      foreign.src = 'https://scripts.example.invalid/injected.js';
+      document.head.append(foreign);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      return {
+        inlineRan: probes.inlineScriptRan === true,
+        evalRan: probes.evalRan === true,
+        evalError: probes.evalError,
+        functionRan: probes.functionRan === true,
+        functionError: probes.functionError,
+      };
+    });
+
+    expect(outcome).toEqual({
+      inlineRan: false,
+      evalRan: false,
+      evalError: 'EvalError',
+      functionRan: false,
+      functionError: 'EvalError',
+    });
+    const report = violations.join('\n');
+    expect(report).toMatch(/script-src[\w-]* inline/);
+    expect(report).toMatch(/script-src[\w-]* eval/);
+    expect(report).toMatch(/script-src[\w-]* https:\/\/scripts\.example\.invalid/);
+  });
+
+  // Break caught: the decision of 5 November 2026 not holding, so that a UI library which inserts <style> elements at run time (Radix does)
+  // is refused, or the relaxation being wider than inline style. A style element and a style attribute are the two inline styles; both apply,
+  // and neither is a violation.
+  test('allows the inline style a library inserts at run time, and a style attribute', async ({
+    page,
+  }) => {
+    const violations = await enforceStrictPolicy(page);
+    await stubApi(page);
+    await page.goto('/no-such-page');
+    await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
+
+    const applied = await page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent = ':root { --policy-probe: applied; }';
+      document.head.append(style);
+
+      const box = document.createElement('div');
+      box.setAttribute('style', 'min-width: 123px');
+      box.textContent = 'An element with a style attribute';
+      document.body.append(box);
+
+      return {
+        fromElement: getComputedStyle(document.documentElement)
+          .getPropertyValue('--policy-probe')
+          .trim(),
+        fromAttribute: getComputedStyle(box).minWidth,
+      };
+    });
+
+    expect(applied).toEqual({ fromElement: 'applied', fromAttribute: '123px' });
+    expect(violations).toEqual([]);
   });
 
   // Break caught: the typeface being declared but never loading under the policy of this file (font-src 'self'), so that
@@ -207,7 +403,7 @@ test.describe('the application shell in a browser', () => {
     const seen = watchPage(page);
 
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1, name: 'Melarc Ops Portal' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
 
     const loaded = await page.evaluate(async () => {
       await document.fonts.ready;
@@ -234,7 +430,7 @@ test.describe('the application shell in a browser', () => {
     const violations = await enforceStrictPolicy(page);
     await stubApi(page);
     const seen = watchPage(page);
-    // The full logo is the neutral frame's banner, which an address that matches no route has (a signed-in screen has the menu's mark instead).
+    // The full logo is the neutral frame's banner, which an address that matches no route has (a signed-in screen has the sidebar's lockup).
     await page.goto('/no-such-page');
     const logo = page.getByRole('banner').getByRole('img', { name: 'Melarc Logistics' });
     await expect(logo).toBeVisible();
@@ -265,34 +461,52 @@ test.describe('the application shell in a browser', () => {
     expect(seen.problems).toEqual([]);
   });
 
-  // Break caught: the mark of the side menu blocked by the policy (inlined, or from another origin) or not shipped, so that the menu names the
-  // product beside an empty square; or the name of the product missing from the menu, whose mark is decorative and says nothing.
-  test('shows the mark and the name of the product in the side menu under the strict policy', async ({
+  // Break caught: the lockup of the sidebar blocked by the policy (inlined, or from another origin) or not shipped, so that the sidebar names the
+  // product beside an empty square; the lockup squashed; or, on the rail, the symbol missing from its tile.
+  test('shows the all-white lockup in the sidebar, and the symbol on its tile on the rail, as their own files under the strict policy', async ({
     page,
     baseURL,
   }) => {
     const violations = await enforceStrictPolicy(page);
     await stubApi(page);
     const seen = watchPage(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
-    const menu = page.getByRole('complementary', { name: 'Main menu' });
-    await expect(menu).toBeVisible();
+    const lockup = dockedSidebar(page).getByRole('img', { name: 'Melarc Logistics' });
+    await expect(lockup).toBeVisible();
 
-    await expect(menu.getByText('Melarc Logistics')).toBeVisible();
-    await expect(menu.getByText('Ops Portal')).toBeVisible();
-    const mark = menu.locator('.ui-brand-lockup__mark img');
+    const loaded = await lockup.evaluate((image: HTMLImageElement) => ({
+      complete: image.complete,
+      naturalWidth: image.naturalWidth,
+      src: image.currentSrc,
+    }));
+    expect(loaded.complete).toBe(true);
+    expect(loaded.naturalWidth).toBeGreaterThan(0);
+    const source = new URL(loaded.src);
+    expect(source.origin).toBe(baseURL);
+    expect(source.pathname).toMatch(/^\/assets\/melarc-logo-dark-[\w-]+\.svg$/);
+    expect(loaded.src.startsWith('data:')).toBe(false);
+    // The proportions of the artwork, and about 132 by 42 at the browser's text size.
+    const box = await lockup.boundingBox();
+    expect((box?.width ?? 0) / (box?.height ?? 1)).toBeCloseTo(188.88 / 60.29, 1);
+    expect(box?.height ?? 0).toBeCloseTo(42, 0);
+
+    await page.getByRole('button', { name: 'Collapse menu' }).click();
+    const mark = dockedSidebar(page).locator('.ui-brand-lockup__mark img');
     await expect(mark).toBeVisible();
-    const loaded = await mark.evaluate((image: HTMLImageElement) => ({
+    const tile = await mark.evaluate((image: HTMLImageElement) => ({
       complete: image.complete,
       naturalWidth: image.naturalWidth,
       src: image.currentSrc,
       alt: image.alt,
     }));
-    expect(loaded.complete).toBe(true);
-    expect(loaded.naturalWidth).toBeGreaterThan(0);
-    expect(new URL(loaded.src).origin).toBe(baseURL);
-    expect(new URL(loaded.src).pathname).toBe('/favicon.svg');
-    expect(loaded.alt).toBe('');
+    expect(tile.complete).toBe(true);
+    expect(tile.naturalWidth).toBeGreaterThan(0);
+    expect(new URL(tile.src).origin).toBe(baseURL);
+    expect(new URL(tile.src).pathname).toBe('/favicon.svg');
+    expect(tile.alt).toBe('');
+    // The name of the product stays in the rail for a screen reader.
+    await expect(dockedSidebar(page).getByText('Melarc Logistics')).toBeAttached();
 
     expect(violations).toEqual([]);
     expect(seen.problems).toEqual([]);
@@ -311,11 +525,7 @@ test.describe('the application shell in a browser', () => {
         await page.goto(path);
         await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
         expect(await wcagViolations(page), path).toEqual([]);
-
-        const overflow = await page.evaluate(
-          () => document.documentElement.scrollWidth - window.innerWidth,
-        );
-        expect(overflow, `${path} overflows sideways`).toBeLessThanOrEqual(0);
+        expect(await overflowOf(page), `${path} overflows sideways`).toBeLessThanOrEqual(0);
       }
 
       await page.goto('/');
@@ -330,25 +540,16 @@ test.describe('the application shell in a browser', () => {
 });
 
 test.describe('the authenticated Ops shell in a browser', () => {
-  const menuOf = (page: Page) => page.getByRole('complementary', { name: 'Main menu' });
-  const navOf = (page: Page) => page.getByRole('navigation', { name: 'Primary' });
-  const panelOf = (page: Page) => page.locator('.ui-side-menu__panel');
-  const widthOf = async (page: Page): Promise<number> =>
-    (await panelOf(page).boundingBox())?.width ?? 0;
-
-  /** The panel has stopped sliding and is at the left edge: what a screenshot, an axe run and a click should wait for. */
-  async function settled(page: Page): Promise<void> {
-    await expect.poll(async () => (await panelOf(page).boundingBox())?.x ?? -1).toBe(0);
-  }
-
-  // Break caught: the menu inside the main content, where the skip link would land on it, or after it, where a keyboard user finds it last; a
-  // top band left above it; a menu that is not at the edge, the height of the window, with the page beginning where it ends.
-  test('draws the side menu beside the main content: before it, outside it, at the left edge and as tall as the window', async ({
+  // Break caught: the sidebar inside the main content, where the skip link would land on it, or after it, where a keyboard user finds it last;
+  // the top bar anywhere but over the page, or not the page's banner; a sidebar that is not at the edge, the height of the window, 248px wide, with
+  // the page beginning where it ends; a top bar that is not 56px; the old band above everything left in the frame.
+  test('draws the sidebar and the top bar around the main content: in the order of the landmarks, the sidebar full height at the left edge, the top bar 56px over the page', async ({
     page,
   }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(navOf(page)).toBeVisible();
+    await expect(primaryNav(page)).toBeVisible();
+    const rem = await remOf(page);
 
     const layout = await page.evaluate(() => {
       const everything = [...document.body.querySelectorAll('*')];
@@ -356,51 +557,109 @@ test.describe('the authenticated Ops shell in a browser', () => {
         const found = document.querySelector(selector);
         return found === null ? -1 : everything.indexOf(found);
       };
-      const menu = document.querySelector('aside[aria-label="Main menu"]')?.getBoundingClientRect();
-      const main = document.querySelector('main')?.getBoundingClientRect();
+      const box = (selector: string) => {
+        const found = document.querySelector(selector)?.getBoundingClientRect();
+        return found === undefined
+          ? null
+          : { x: found.x, y: found.y, width: found.width, height: found.height };
+      };
       return {
+        skip: index('a.skip-link'),
         menu: index('aside[aria-label="Main menu"]'),
         nav: index('aside nav[aria-label="Primary"]'),
-        signOut: document.querySelector('aside button[aria-label="Sign out"]') !== null,
+        bar: index('header.ui-topbar'),
         main: index('main'),
         navInMain: document.querySelector('main nav') !== null,
         menuInMain: document.querySelector('main aside') !== null,
+        barInMain: document.querySelector('main header.ui-topbar') !== null,
         band: document.querySelector('.app-header') !== null,
-        menuBox:
-          menu === undefined
-            ? null
-            : { x: menu.x, y: menu.y, height: menu.height, width: menu.width },
-        mainLeft: main?.left ?? -1,
+        menuBox: box('aside[aria-label="Main menu"]'),
+        barBox: box('header.ui-topbar'),
+        mainBox: box('main'),
+        windowWidth: window.innerWidth,
         windowHeight: window.innerHeight,
       };
     });
-    expect(layout.menu).toBeGreaterThanOrEqual(0);
+    // The order of the document: the skip link, the sidebar (landmark, then its navigation), the top bar, then the main content.
+    expect(layout.skip).toBeGreaterThanOrEqual(0);
+    expect(layout.menu).toBeGreaterThan(layout.skip);
     expect(layout.nav).toBeGreaterThan(layout.menu);
-    expect(layout.main).toBeGreaterThan(layout.nav);
-    expect(layout.signOut).toBe(true);
+    expect(layout.bar).toBeGreaterThan(layout.nav);
+    expect(layout.main).toBeGreaterThan(layout.bar);
     expect(layout.navInMain).toBe(false);
     expect(layout.menuInMain).toBe(false);
+    expect(layout.barInMain).toBe(false);
     expect(layout.band).toBe(false);
+    // The sidebar: at the corner, 248px (15.5rem), as tall as the window.
     expect(layout.menuBox?.x).toBe(0);
     expect(layout.menuBox?.y).toBe(0);
+    expect(layout.menuBox?.width).toBe(15.5 * rem);
     expect(layout.menuBox?.height).toBeCloseTo(layout.windowHeight, 0);
-    expect(layout.mainLeft).toBeGreaterThanOrEqual(layout.menuBox?.width ?? Number.MAX_VALUE);
-    await expect(navOf(page).getByRole('link', { name: 'Overview' })).toHaveAttribute(
+    // The top bar: beside the sidebar and over the page, 56px (3.5rem).
+    expect(layout.barBox?.x).toBe(layout.menuBox?.width);
+    expect(layout.barBox?.y).toBe(0);
+    expect(layout.barBox?.height).toBe(3.5 * rem);
+    expect((layout.barBox?.x ?? 0) + (layout.barBox?.width ?? 0)).toBeCloseTo(
+      layout.windowWidth,
+      0,
+    );
+    // The page begins where the sidebar ends and under the top bar.
+    expect(layout.mainBox?.x ?? -1).toBeGreaterThanOrEqual(
+      layout.menuBox?.width ?? Number.MAX_VALUE,
+    );
+    expect(layout.mainBox?.y ?? -1).toBeGreaterThanOrEqual(
+      layout.barBox?.height ?? Number.MAX_VALUE,
+    );
+    await expect(primaryNav(page).getByRole('link', { name: 'My work' })).toHaveAttribute(
       'aria-current',
       'page',
     );
   });
 
-  // Break caught: an entry with no picture (the same family of icons everywhere is the rule), or a picture that reaches a screen reader as a
-  // second name for the entry.
-  test('gives every entry an icon of the family, which is decoration beside the entry’s name', async ({
+  // Break caught: no toaster in the signed-in frame (a toast that a screen raises is never seen), or two (every toast shown twice). The production build draws exactly one,
+  // a polite region named Notifications, under the strict policy: Sonner inserts a stylesheet when it loads, which the policy's one relaxation (inline style) allows, and
+  // the browser reports each violation, none may be raised.
+  test('draws the application’s one toaster, a polite region named Notifications', async ({
+    page,
+  }) => {
+    const seen = watchPage(page);
+    const violations = await enforceStrictPolicy(page);
+    await stubApi(page);
+    await page.goto('/');
+    await expect(primaryNav(page)).toBeVisible();
+
+    const toaster = page.locator('section[aria-label^="Notifications"]');
+    await expect(toaster).toHaveCount(1);
+    await expect(toaster).toHaveAttribute('aria-live', 'polite');
+    await expect(toaster).toHaveAttribute('aria-label', 'Notifications alt+T');
+    expect(violations).toEqual([]);
+    expect(seen.problems).toEqual([]);
+  });
+
+  // Break caught: the entries not in the groups of the specification or not in their order, a group named by a heading that adds to the page's
+  // outline, an entry with no picture (the same family of icons everywhere is the rule), or a picture that reaches a screen reader as a second name.
+  test('lists the entries in groups, each a list named by its heading, each entry with an icon of the family that is decoration beside its name', async ({
     page,
   }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(navOf(page)).toBeVisible();
+    await expect(primaryNav(page)).toBeVisible();
 
-    const links = await navOf(page)
+    // The stubbed session holds `staff.read`: it is given My work, and the staff list and the sessions page. The groups with nothing in them are not drawn.
+    await expect(primaryNav(page).locator('.ui-sidebar__heading')).toHaveText([
+      'Today',
+      'People and access',
+    ]);
+    await expect(
+      primaryNav(page).getByRole('list', { name: 'Today' }).getByRole('link'),
+    ).toHaveText(['My work']);
+    await expect(
+      primaryNav(page).getByRole('list', { name: 'People and access' }).getByRole('link'),
+    ).toHaveText(['Staff', 'Sessions']);
+    // A group's heading is a label of its list and is not a heading of the page: the page's outline is its own.
+    await expect(page.getByRole('heading')).toHaveText(['My work']);
+
+    const links = await primaryNav(page)
       .getByRole('link')
       .evaluateAll((all) =>
         all.map((link) => ({
@@ -409,33 +668,56 @@ test.describe('the authenticated Ops shell in a browser', () => {
           hidden: link.querySelector('svg')?.getAttribute('aria-hidden'),
         })),
       );
-    expect(links.map((link) => link.name)).toEqual([
-      'Overview',
-      'Staff',
-      'Sessions',
-      'Trusted browsers',
-    ]);
+    expect(links.map((link) => link.name)).toEqual(['My work', 'Staff', 'Sessions']);
     for (const link of links)
       expect(link, link.name).toMatchObject({ pictures: 1, hidden: 'true' });
   });
 
-  // Break caught: the account card missing, or saying who is signed in with a picture alone, or naming a person other than the session's.
-  test('says who is signed in and where they act, in a card with the control to leave', async ({
+  // Break caught: the current entry told by colour alone (a plain colour change is what the Product Owner rejected on 6 November 2026), or
+  // not the solid crimson fill of the specification.
+  test('marks the current entry by more than its colour: a solid fill, bold, and aria-current', async ({
     page,
   }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await expect(primaryNav(page)).toBeVisible();
+
+    const current = primaryNav(page).getByRole('link', { name: 'My work' });
+    const other = primaryNav(page).getByRole('link', { name: 'Staff' });
+    await expect(current).toHaveAttribute('aria-current', 'page');
+    await expect(primaryNav(page).locator('[aria-current="page"]')).toHaveCount(1);
+    const read = (link: typeof current) =>
+      link.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const probe = document.createElement('span');
+        probe.style.backgroundColor = 'var(--shell-active)';
+        document.body.append(probe);
+        const crimson = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return { weight: style.fontWeight, fill: style.backgroundColor, crimson };
+      });
+    const [now, then] = await Promise.all([read(current), read(other)]);
+    expect(now.fill).toBe(now.crimson);
+    expect(then.fill).not.toBe(now.crimson);
+    expect(Number(now.weight)).toBeGreaterThan(Number(then.weight));
+  });
+
+  // Break caught: the account card missing from the foot, or saying who is signed in with a picture alone, or naming a person other than the
+  // session's. The sign-out is the account menu's and is not in the foot.
+  test('says who is signed in and where they act at the foot of the sidebar', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
 
     const account = page.getByRole('group', { name: 'Your account' });
     await expect(account.getByText('Synthetic Officer')).toBeVisible();
     await expect(account.getByText('Synthetic Hub')).toBeVisible();
-    await expect(account.getByRole('button', { name: 'Sign out' })).toBeVisible();
     // The initials are decoration: the name beside them is the content.
-    await expect(account.locator('.ui-side-menu__avatar')).toHaveText('SO');
-    await expect(account.locator('.ui-side-menu__avatar')).toHaveAttribute('aria-hidden', 'true');
+    await expect(account.locator('.ui-sidebar__avatar')).toHaveText('SO');
+    await expect(account.locator('.ui-sidebar__avatar')).toHaveAttribute('aria-hidden', 'true');
+    await expect(account.getByRole('button')).toHaveCount(0);
   });
 
-  // Break caught: the neutral frame gaining the menu: an address that matches no route cannot know whether a session exists.
+  // Break caught: the neutral frame gaining the shell: an address that matches no route cannot know whether a session exists.
   test('is not around an unknown address', async ({ page }) => {
     await stubApi(page);
     await page.goto('/no-such-page');
@@ -443,54 +725,39 @@ test.describe('the authenticated Ops shell in a browser', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
     await expect(page.getByRole('navigation')).toHaveCount(0);
     await expect(page.getByRole('complementary')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(accountButton(page)).toHaveCount(0);
+    await expect(page.locator('header.ui-topbar')).toHaveCount(0);
   });
 
-  // Break caught: the focus indicator of the Ink menu being the default blue ring, which is only 2.64:1 on Ink, or being lost; a menu button
-  // missing from the walk, or one that is out of sight (the narrow screen's) taking a stop on a wide screen.
-  test('walks by Tab through the skip link, the collapse button, the entries and sign-out, each with the inverse focus ring', async ({
+  // Break caught: the focus indicator of the Ink sidebar being the default blue ring, which is only 2.96:1 on Ink, or being lost; a control
+  // missing from the walk, or one that is out of sight taking a stop.
+  test('walks by Tab through the skip link, the sidebar, then the top bar, each stop with the ring of its ground', async ({
     page,
   }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(navOf(page)).toBeVisible();
+    await expect(primaryNav(page)).toBeVisible();
     const tabs = await tabReachesLinks(page);
-    await expect(navOf(page)).toBeVisible();
+    await expect(primaryNav(page)).toBeVisible();
 
-    const stops: { name: string; outline: string; width: number; ring: string }[] = [];
-    // The stubbed session holds `staff.read`, so the menu also has the staff list and the sessions page (S0.44), and every session is
-    // offered the person's own trusted browsers (S0.46).
+    const stops: Awaited<ReturnType<typeof focusedStop>>[] = [];
+    // The stubbed session holds `staff.read`, so the sidebar has the staff list and the sessions page. The hub is one, so its name is drawn and is
+    // no stop; the session may create nothing, so there is no New menu. The links are no stop in an engine that leaves them out of the Tab order.
     const expected = tabs
       ? [
           'Skip to main content',
           'Collapse menu',
-          'Overview',
+          'My work',
           'Staff',
           'Sessions',
-          'Trusted browsers',
-          'Sign out',
+          'Search a code, name or phone',
+          'Theme: System',
+          'Account menu',
         ]
-      : ['Collapse menu', 'Sign out'];
+      : ['Collapse menu', 'Search a code, name or phone', 'Theme: System', 'Account menu'];
     for (const name of expected) {
       await page.keyboard.press('Tab');
-      stops.push(
-        await page.evaluate(() => {
-          const element = document.activeElement;
-          if (element === null) return { name: '', outline: '', width: 0, ring: '' };
-          const style = getComputedStyle(element);
-          const probe = document.createElement('span');
-          probe.style.color = 'var(--focus-ring-inverse)';
-          document.body.append(probe);
-          const ring = getComputedStyle(probe).color;
-          probe.remove();
-          return {
-            name: (element.getAttribute('aria-label') ?? element.textContent).trim(),
-            outline: style.outlineColor,
-            width: parseFloat(style.outlineWidth),
-            ring,
-          };
-        }),
-      );
+      stops.push(await focusedStop(page));
       expect(stops.at(-1)?.name, `the stop after ${String(stops.length)} Tab presses`).toBe(name);
     }
 
@@ -499,9 +766,21 @@ test.describe('the authenticated Ops shell in a browser', () => {
       expect(stop.width, stop.name).toBe(2);
       expect(stop.outline, stop.name).toBe(stop.ring);
     }
+    // The sidebar's stops are on Ink and have the inverse ring; the top bar's are on the page and have the standard one.
+    expect(stops.filter((stop) => stop.inSidebar).map((stop) => stop.name)).toEqual(
+      expected.filter(
+        (name) =>
+          ![
+            'Skip to main content',
+            'Search a code, name or phone',
+            'Theme: System',
+            'Account menu',
+          ].includes(name),
+      ),
+    );
   });
 
-  // Break caught: a menu that cannot be collapsed, or that loses the names of its entries when it is (a screen reader then hears "link" and a
+  // Break caught: a sidebar that cannot be collapsed, or that loses the names of its entries when it is (a screen reader then hears "link" and a
   // picture), or that leaves the room it gave up empty, or whose choice is written to the browser.
   test('collapses to a rail of icons and expands again, each entry keeping its name', async ({
     page,
@@ -509,37 +788,38 @@ test.describe('the authenticated Ops shell in a browser', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await stubApi(page);
     await page.goto('/');
-    const rem = await page.evaluate(() =>
-      parseFloat(getComputedStyle(document.documentElement).fontSize),
-    );
+    const rem = await remOf(page);
     const toggle = page.getByRole('button', { name: 'Collapse menu' });
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(await widthOf(page)).toBe(16 * rem);
+    // 248px: 15.5rem at the browser's text size.
+    expect(await sidebarWidth(page)).toBe(15.5 * rem);
     const mainBefore = (await page.getByRole('main').boundingBox())?.x ?? 0;
 
     await toggle.click();
 
     const expand = page.getByRole('button', { name: 'Expand menu' });
     await expect(expand).toHaveAttribute('aria-expanded', 'false');
-    await expect.poll(() => widthOf(page)).toBe(4.5 * rem);
-    // The page takes the room the menu gave up.
+    // The 64px rail: 4rem.
+    await expect.poll(() => sidebarWidth(page)).toBe(4 * rem);
+    // The page takes the room the sidebar gave up, and the top bar with it.
     expect((await page.getByRole('main').boundingBox())?.x ?? Number.MAX_VALUE).toBeLessThan(
       mainBefore,
     );
-    for (const name of ['Overview', 'Staff', 'Sessions']) {
-      const link = navOf(page).getByRole('link', { name });
-      await expect(link).toHaveAttribute('title', name);
+    expect((await topBar(page).boundingBox())?.x ?? Number.MAX_VALUE).toBeLessThan(mainBefore);
+    for (const name of ['My work', 'Staff', 'Sessions']) {
+      const link = primaryNav(page).getByRole('link', { name });
       // The label is drawn out of sight, not taken out of the document, and the picture stays.
       expect(
-        (await link.locator('.ui-primary-nav__label').boundingBox())?.width ?? 99,
+        (await link.locator('.ui-sidebar__label').boundingBox())?.width ?? 99,
       ).toBeLessThanOrEqual(1);
       expect((await link.locator('svg').boundingBox())?.width ?? 0).toBeGreaterThan(0);
     }
     const account = page.getByRole('group', { name: 'Your account' });
-    await expect(account.getByRole('button', { name: 'Sign out' })).toBeVisible();
+    await expect(account.locator('.ui-sidebar__avatar')).toBeVisible();
     expect(
       (await account.getByText('Synthetic Officer').boundingBox())?.width ?? 99,
     ).toBeLessThanOrEqual(1);
+    // Nothing was written: the choice lasts as long as the page and no longer.
     expect(
       await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
     ).toEqual({ local: 0, session: 0 });
@@ -548,40 +828,70 @@ test.describe('the authenticated Ops shell in a browser', () => {
     await expand.focus();
     await page.keyboard.press('Space');
     await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeFocused();
-    await expect.poll(() => widthOf(page)).toBe(16 * rem);
+    await expect.poll(() => sidebarWidth(page)).toBe(15.5 * rem);
 
     // What was chosen lasts as long as the page and no longer: nothing was written, so a reload starts expanded.
     await page.getByRole('button', { name: 'Collapse menu' }).click();
-    await expect.poll(() => widthOf(page)).toBe(4.5 * rem);
+    await expect.poll(() => sidebarWidth(page)).toBe(4 * rem);
     await page.reload();
     await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeVisible();
-    expect(await widthOf(page)).toBe(16 * rem);
+    expect(await sidebarWidth(page)).toBe(15.5 * rem);
   });
 
-  // Break caught: the narrow screen's controls (the bar and its button) drawn on a wide screen, or the wide screen's collapse button on a narrow
-  // one, where the menu does not dock and there is nothing to collapse.
+  // Break caught: the rail at the width where there is room for the full sidebar, or the full sidebar where the page needs the room (below
+  // 1280px the page is the rail's neighbour), or a choice of the person undone by a resize.
+  test('is the full sidebar from 1280 px and the rail below it, and the person may ask for the other', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await stubApi(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    const rem = await remOf(page);
+    await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeVisible();
+    expect(await sidebarWidth(page)).toBe(15.5 * rem);
+
+    await page.setViewportSize({ width: 1279, height: 800 });
+
+    await expect(page.getByRole('button', { name: 'Expand menu' })).toBeVisible();
+    await expect.poll(() => sidebarWidth(page)).toBe(4 * rem);
+
+    await page.setViewportSize({ width: 768, height: 800 });
+    await expect(page.getByRole('button', { name: 'Expand menu' })).toBeVisible();
+    expect(await sidebarWidth(page)).toBe(4 * rem);
+
+    // The person asks for the full sidebar at this width, and gets it until the page is loaded again.
+    await page.getByRole('button', { name: 'Expand menu' }).click();
+    await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeVisible();
+    await expect.poll(() => sidebarWidth(page)).toBe(15.5 * rem);
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Expand menu' })).toBeVisible();
+    expect(await sidebarWidth(page)).toBe(4 * rem);
+  });
+
+  // Break caught: the narrow screen's controls (the sheet's button) drawn on a wide screen, or the wide screen's collapse button on a narrow
+  // one, where the sidebar does not dock and there is nothing to collapse.
   test('shows the collapse button on a wide screen and the menu button on a narrow one, never both', async ({
     page,
   }) => {
     await stubApi(page);
     await page.goto('/');
     await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open menu' })).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Close menu' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open menu' })).toHaveCount(0);
 
     await page.setViewportSize({ width: 600, height: 800 });
 
     await expect(page.getByRole('button', { name: 'Open menu' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeHidden();
-    await expect(menuOf(page)).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Collapse menu' })).toHaveCount(0);
+    await expect(dockedSidebar(page)).toHaveCount(0);
   });
 
   test.describe('on a narrow screen', () => {
     test.use({ viewport: { width: 320, height: 640 } });
 
-    // Break caught: a menu that is only out of sight, so that a keyboard user tabs into entries they cannot see, or a screen whose only way
-    // to leave or navigate is inside a closed menu with no button to open it.
-    test('keeps the menu behind a button, out of the tab order while it is closed, under a bar that names the product', async ({
+    // Break caught: a sidebar that is only out of sight, so that a keyboard user tabs into entries they cannot see, or a screen whose only way
+    // to navigate is inside a closed sidebar with no button to open it.
+    test('keeps the sidebar behind the top bar’s button, out of the document and the tab order while it is closed', async ({
       page,
     }) => {
       await stubApi(page);
@@ -590,23 +900,25 @@ test.describe('the authenticated Ops shell in a browser', () => {
 
       await expect(open).toBeVisible();
       await expect(open).toHaveAttribute('aria-expanded', 'false');
-      await expect(page.getByRole('banner').getByText('Melarc Logistics')).toBeVisible();
-      await expect(menuOf(page)).toBeHidden();
-      await expect(page.getByRole('button', { name: 'Sign out' })).toBeHidden();
-      await expect(page.getByRole('button', { name: 'Collapse menu' })).toBeHidden();
+      await expect(open).toHaveAttribute('aria-haspopup', 'dialog');
+      await expect(topBar(page)).toBeVisible();
+      await expect(topBar(page).getByText('Synthetic Hub')).toBeVisible();
+      await expect(dockedSidebar(page)).toHaveCount(0);
+      await expect(primaryNav(page)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Collapse menu' })).toHaveCount(0);
+      // The theme is chosen in the account menu on a narrow screen: the bar keeps its room for the search and the account.
+      await expect(page.getByRole('button', { name: /^Theme:/ })).toHaveCount(0);
       const names = await reachableNames(page, true);
       expect(names).toContain('Open menu');
-      for (const name of ['Overview', 'Sign out', 'Close menu', 'Collapse menu']) {
+      expect(names).toContain('Account menu');
+      for (const name of ['My work', 'Staff', 'Sessions', 'Close menu', 'Collapse menu']) {
         expect(names, name).not.toContain(name);
       }
-      // The landing's own list of places has a link to the staff and to the sessions: the menu's entries of the same names are not stops.
-      expect(names.filter((name) => name === 'Staff')).toHaveLength(1);
-      expect(names.filter((name) => name === 'Sessions')).toHaveLength(1);
     });
 
-    // Break caught: a menu that opens without taking focus in, or leaves the page behind it operable, or cannot be closed from the keyboard, or
-    // closes and leaves focus nowhere.
-    test('slides in over the page, takes focus, makes the page behind it inert, and Escape closes it and gives focus back', async ({
+    // Break caught: a sheet that opens without taking focus in, or leaves the page behind it reachable, or cannot be closed from the keyboard,
+    // or closes and leaves focus nowhere.
+    test('opens as a sheet over the page, takes focus, hides the page behind it, and Escape closes it and gives focus back', async ({
       page,
     }) => {
       await stubApi(page);
@@ -615,26 +927,37 @@ test.describe('the authenticated Ops shell in a browser', () => {
 
       await open.click();
 
-      await expect(menuOf(page)).toBeVisible();
-      await expect(open).toHaveAttribute('aria-expanded', 'true');
+      const sheet = sheetOf(page);
+      await expect(sheet).toBeVisible();
+      await expect(page.locator('button[aria-label="Open menu"]')).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
       await expect(page.getByRole('button', { name: 'Close menu' })).toBeFocused();
-      await expect(page.locator('main')).toHaveAttribute('inert', '');
-      await settled(page);
-      const box = await panelOf(page).boundingBox();
+      await expect(sheet.getByRole('navigation', { name: 'Primary' })).toBeVisible();
+      await expect(sheet.getByRole('link', { name: 'My work' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      await expect(sheet.getByRole('group', { name: 'Your account' })).toContainText(
+        'Synthetic Officer',
+      );
+      // The page behind the sheet is out of reach of assistive technology while it is open.
+      await expect(page.getByRole('main')).toHaveCount(0);
+      await sheetSettled(page);
+      const box = await page.locator('[data-slot="sheet-content"]').boundingBox();
       expect(box?.height).toBe(640);
       expect(box?.width ?? 999).toBeLessThanOrEqual(0.85 * 320);
-      await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
-      await expect(navOf(page).getByRole('link', { name: 'Overview' })).toBeVisible();
 
       await page.keyboard.press('Escape');
 
-      await expect(menuOf(page)).toBeHidden();
+      await expect(sheet).toHaveCount(0);
       await expect(open).toBeFocused();
       await expect(open).toHaveAttribute('aria-expanded', 'false');
-      await expect(page.locator('main')).not.toHaveAttribute('inert');
+      await expect(page.getByRole('main')).toHaveCount(1);
     });
 
-    // Break caught: a scrim that does not close the menu, or a close button that does and leaves focus behind.
+    // Break caught: a scrim that does not close the sheet, or a close button that does and leaves focus behind.
     test('closes by the scrim and by its close button, each giving focus back to the menu button', async ({
       page,
     }) => {
@@ -643,47 +966,67 @@ test.describe('the authenticated Ops shell in a browser', () => {
       const open = page.getByRole('button', { name: 'Open menu' });
 
       await open.click();
-      await settled(page);
-      await page.locator('.ui-side-menu__scrim').click({ position: { x: 300, y: 320 } });
-      await expect(menuOf(page)).toBeHidden();
+      await sheetSettled(page);
+      await page.locator('[data-slot="sheet-overlay"]').click({ position: { x: 300, y: 320 } });
+      await expect(sheetOf(page)).toHaveCount(0);
       await expect(open).toBeFocused();
 
       await open.click();
-      await settled(page);
+      await sheetSettled(page);
       await page.getByRole('button', { name: 'Close menu' }).click();
-      await expect(menuOf(page)).toBeHidden();
+      await expect(sheetOf(page)).toHaveCount(0);
       await expect(open).toBeFocused();
-      await expect(page.locator('main')).not.toHaveAttribute('inert');
+      await expect(page.getByRole('main')).toHaveCount(1);
     });
 
-    // Break caught: the slide or its visibility change running for a person who asked for no motion. The rule that says so must win over the
-    // rule of the open state, which names more.
-    test('does not animate the slide when the person asked for less motion, and does when they did not', async ({
+    // Break caught: a link followed from the sheet that leaves the sheet over the new page, or leaves focus on the body: the person who went to a
+    // page must land on that page's heading, as after any other navigation.
+    test('following an entry closes the sheet and lands on the new page’s heading', async ({
+      page,
+    }) => {
+      const api = await stubApi(page);
+      await page.goto('/');
+      const sheet = await openSheet(page);
+      await sheetSettled(page);
+
+      await sheet.getByRole('link', { name: 'Sessions' }).click();
+
+      await expect(page).toHaveURL('/admin/sessions');
+      await expect(sheetOf(page)).toHaveCount(0);
+      await expect(page.getByRole('heading', { level: 1, name: 'Sessions' })).toBeFocused();
+      await expect(page.locator('button[aria-label="Open menu"]')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      expect(api.unexpected).toEqual([]);
+    });
+
+    // Break caught: the slide running for a person who asked for no motion. The rule that says so must win over the rule of the open state.
+    test('does not slide the sheet in when the person asked for less motion, and does when they did not', async ({
       page,
     }) => {
       await stubApi(page);
       await page.goto('/');
-      const open = page.getByRole('button', { name: 'Open menu' });
-      const durations = (): Promise<string> =>
-        panelOf(page).evaluate((panel) => getComputedStyle(panel).transitionDuration);
+      const content = page.locator('[data-slot="sheet-content"]');
+      const durationOf = (): Promise<string> =>
+        content.evaluate((element) => getComputedStyle(element).animationDuration);
 
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      expect(await durations(), 'closed, reduced motion').toBe('0s');
-      await open.click();
-      await expect(menuOf(page)).toBeVisible();
-      expect(await durations(), 'open, reduced motion').toBe('0s');
+      await page.getByRole('button', { name: 'Open menu' }).click();
+      await expect(sheetOf(page)).toBeVisible();
+      expect(await durationOf(), 'open, reduced motion').toBe('0s');
       await page.keyboard.press('Escape');
+      await expect(content).toHaveCount(0);
 
       await page.emulateMedia({ reducedMotion: 'no-preference' });
-      await open.click();
-      await expect(menuOf(page)).toBeVisible();
-      expect(await durations(), 'open, motion allowed').not.toBe('0s');
+      await page.getByRole('button', { name: 'Open menu' }).click();
+      await expect(sheetOf(page)).toBeVisible();
+      expect(await durationOf(), 'open, motion allowed').not.toBe('0s');
     });
 
-    // Break caught: the bar or the open menu overflowing the screen when text is enlarged; the name of the product crushed into a column of single
-    // letters beside the mark, which made the head taller than the window and squeezed the entries until the account card spilled out of the
-    // panel; an entry or the sign-out control that no keyboard can bring into view (WCAG 1.4.4, 1.4.10, 2.4.11).
-    test('keeps the bar and the open menu whole when text is enlarged to 200%', async ({
+    // Break caught: the bar or the open sheet overflowing the screen when text is enlarged; the lockup pushing the close button out of the sheet; an
+    // entry or the account card that no keyboard can bring into view (WCAG 1.4.4, 1.4.10, 2.4.11).
+    test('keeps the bar and the open sheet whole when text is enlarged to 200%', async ({
       page,
     }) => {
       await stubApi(page);
@@ -694,44 +1037,37 @@ test.describe('the authenticated Ops shell in a browser', () => {
         document.documentElement.style.fontSize = '200%';
       });
 
-      const overflow = (): Promise<number> =>
-        page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      const within = async (name: string, control: Locator): Promise<void> => {
+      const within = async (name: string, control: ReturnType<Page['locator']>): Promise<void> => {
         const box = await control.boundingBox();
         expect(box?.x ?? -1, `${name}: left edge`).toBeGreaterThanOrEqual(0);
         expect((box?.x ?? 0) + (box?.width ?? 0), `${name}: right edge`).toBeLessThanOrEqual(320);
         expect(box?.y ?? -1, `${name}: top edge`).toBeGreaterThanOrEqual(0);
         expect((box?.y ?? 0) + (box?.height ?? 0), `${name}: bottom edge`).toBeLessThanOrEqual(640);
       };
-      expect(await overflow(), 'the bar').toBeLessThanOrEqual(0);
+      expect(await overflowOf(page), 'the bar').toBeLessThanOrEqual(0);
       await within('Open menu', page.getByRole('button', { name: 'Open menu' }));
+      await within('Account menu', accountButton(page));
+      await within('Search', page.getByRole('button', { name: 'Search a code, name or phone' }));
 
       await page.getByRole('button', { name: 'Open menu' }).click();
-      await settled(page);
+      await sheetSettled(page);
 
-      expect(await overflow(), 'the open menu').toBeLessThanOrEqual(0);
+      expect(await overflowOf(page), 'the open sheet').toBeLessThanOrEqual(0);
       await within('Close menu', page.getByRole('button', { name: 'Close menu' }));
-
-      // The name of the product reads in lines, not letters: no line of it is narrower than its longest word.
-      const name = await panelOf(page)
-        .locator('.ui-brand-lockup__name')
-        .evaluate((element) => {
-          const line = parseFloat(getComputedStyle(element).lineHeight);
-          return {
-            lines: Math.round(element.getBoundingClientRect().height / line),
-            width: element.getBoundingClientRect().width,
-          };
-        });
-      expect(name.lines, 'lines the name takes').toBeLessThanOrEqual(2);
-      expect(name.width, 'width the name has').toBeGreaterThan(100);
+      // The lockup is drawn smaller to make room and is not squeezed out of shape: it is inside the sheet.
+      const logo = await sheetOf(page).getByRole('img', { name: 'Melarc Logistics' }).boundingBox();
+      expect((logo?.x ?? -1) + (logo?.width ?? 0), 'the lockup, right edge').toBeLessThanOrEqual(
+        272,
+      );
+      expect(logo?.width ?? 0, 'the lockup has room').toBeGreaterThan(60);
 
       // Nothing is squeezed or overlaps: every entry lies inside the list, and the account card begins where the list ends.
       const [list, card] = await Promise.all([
-        navOf(page).boundingBox(),
+        primaryNav(page).boundingBox(),
         page.getByRole('group', { name: 'Your account' }).boundingBox(),
       ]);
-      for (const entry of ['Overview', 'Staff', 'Sessions']) {
-        const box = await navOf(page).getByRole('link', { name: entry }).boundingBox();
+      for (const entry of ['My work', 'Staff', 'Sessions']) {
+        const box = await primaryNav(page).getByRole('link', { name: entry }).boundingBox();
         expect((box?.y ?? 0) + (box?.height ?? 0), `${entry}: inside the list`).toBeLessThanOrEqual(
           (list?.y ?? 0) + (list?.height ?? 0) + 1,
         );
@@ -740,13 +1076,13 @@ test.describe('the authenticated Ops shell in a browser', () => {
         (list?.y ?? 0) + (list?.height ?? 0) - 1,
       );
 
-      // The panel scrolls as a whole when it is taller than the window, so focus brings each control into view. Firefox scrolls to a
-      // focused control only when none of it can be seen, so what holds in every engine is that some of it is in view, and that the control
-      // is wholly inside across.
+      // The panel scrolls as a whole when it is taller than the window, so focus brings each control into view. Firefox scrolls to a focused
+      // control only when none of it can be seen, so what holds in every engine is that some of it is in view, and that the control is wholly
+      // inside across.
       for (const [label, control] of [
-        ['Overview', navOf(page).getByRole('link', { name: 'Overview' })],
-        ['Sessions', navOf(page).getByRole('link', { name: 'Sessions' })],
-        ['Sign out', page.getByRole('button', { name: 'Sign out' })],
+        ['My work', primaryNav(page).getByRole('link', { name: 'My work' })],
+        ['Sessions', primaryNav(page).getByRole('link', { name: 'Sessions' })],
+        ['Close menu', page.getByRole('button', { name: 'Close menu' })],
       ] as const) {
         await control.focus();
         await expect(control, `${label}, once focused`).toBeInViewport();
@@ -757,7 +1093,7 @@ test.describe('the authenticated Ops shell in a browser', () => {
     });
   });
 
-  test('signs out: ends the session on the server with the CSRF token, and leaves the signed-in pages', async ({
+  test('signs out from the account menu: ends the session on the server with the CSRF token, and leaves the signed-in pages', async ({
     page,
     context,
     baseURL,
@@ -773,13 +1109,13 @@ test.describe('the authenticated Ops shell in a browser', () => {
     await page.goto('/');
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOutFromMenu(page);
 
     await expect(page).toHaveURL('/sign-in');
     await expect(page.getByText('Synthetic Officer')).toHaveCount(0);
     await expect(page.getByRole('navigation')).toHaveCount(0);
     await expect(page.getByRole('complementary')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(accountButton(page)).toHaveCount(0);
     expect(api.requests).toEqual([`GET ${SESSION_PATH}`, `DELETE ${SESSION_PATH}`]);
     expect(api.signOutTokens).toEqual(['synthetic-csrf-token']);
     expect(api.unexpected).toEqual([]);
@@ -788,20 +1124,56 @@ test.describe('the authenticated Ops shell in a browser', () => {
     await expect(page.getByText('Synthetic Officer')).toHaveCount(0);
   });
 
+  // Break caught: a menu that closes on the selection and takes the progress of the sign-out with it, or one that lets a second selection send a
+  // second request.
+  test('keeps the account menu open and says so while the sign-out is under way, and sends it once', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await context.addCookies([
+      {
+        name: 'melarc_csrf',
+        value: 'synthetic-csrf-token',
+        url: baseURL ?? 'http://127.0.0.1:4173',
+      },
+    ]);
+    const api = await stubApi(page, 'signed-in', { signOut: 'held-ok' });
+    await page.goto('/');
+
+    const menu = await openAccountMenu(page);
+    await menu.getByRole('menuitem', { name: 'Sign out' }).click();
+
+    // The sign-out stays under way until the test lets it finish, however long the steps below take.
+    const busy = menu.getByRole('menuitem', { name: 'Signing out…' });
+    await expect(busy).toBeVisible();
+    await expect(busy).toHaveAttribute('aria-busy', 'true');
+    await expect(menu).toBeVisible();
+    // Another choice of the item while it is under way does nothing.
+    await busy.press('Enter');
+    api.releaseSignOut();
+
+    await expect(page).toHaveURL('/sign-in');
+    expect(api.requests.filter((request) => request.startsWith('DELETE'))).toEqual([
+      `DELETE ${SESSION_PATH}`,
+    ]);
+  });
+
   test('reads as done when the session had already ended', async ({ page }) => {
     await stubApi(page, 'signed-in', { signOut: 'session-invalid' });
     await page.goto('/');
     await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOutFromMenu(page);
 
     await expect(page).toHaveURL('/sign-in');
     await expect(page.getByText(/did not finish|SESSION_INVALID|Diagnostic/)).toHaveCount(0);
   });
 
-  // Break caught: telling the person they are signed out while the session may be live.
+  // Break caught: telling the person they are signed out while the session may be live; or the failure told inside a menu that stays open over it
+  // instead of at the top of the page.
   for (const answer of ['fault', 'csrf-refused', 'no-connection'] as const) {
-    test(`stays signed in and says so when sign-out meets ${answer}, and tries again`, async ({
+    test(`stays signed in and says so at the top of the page when sign-out meets ${answer}, and tries again`, async ({
       page,
     }) => {
       await stubApi(page, 'signed-in', {
@@ -810,15 +1182,17 @@ test.describe('the authenticated Ops shell in a browser', () => {
       await page.goto('/');
       await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
 
-      await page.getByRole('button', { name: 'Sign out' }).click();
+      await signOutFromMenu(page);
 
       await expect(
         page
           .getByRole('alert')
           .filter({ hasText: 'Sign-out did not finish, so you are still signed in.' }),
       ).toBeVisible();
+      // The menu that showed it under way is closed, so that the failure is not behind it.
+      await expect(page.getByRole('menu')).toHaveCount(0);
       await expect(page.getByRole('main').getByText('Synthetic Officer')).toBeVisible();
-      await expect(navOf(page)).toBeVisible();
+      await expect(primaryNav(page)).toBeVisible();
       await expect(page.getByText(/Diagnostic text|SESSION_|CSRF_/)).toHaveCount(0);
       expect(await wcagViolations(page), 'with the failure showing').toEqual([]);
       if (answer === 'fault') {
@@ -829,59 +1203,65 @@ test.describe('the authenticated Ops shell in a browser', () => {
   }
 
   for (const { width, height } of VERIFIED_VIEWPORTS) {
-    // Break caught: a menu that clips or makes the page scroll sideways at a verified width, or contrast and target sizes that fail with the real
-    // layout, in each state the menu has there (docked and collapsed on a wide screen, closed and open on a narrow one).
-    test(`has no WCAG 2.2 A or AA violation and no sideways scrolling at ${String(width)} px, with the menu`, async ({
-      page,
-    }) => {
-      await page.setViewportSize({ width, height });
-      await stubApi(page);
-      await page.goto('/');
-      await expect(navOf(page).or(page.getByRole('button', { name: 'Open menu' }))).toBeVisible();
-      const overflow = (): Promise<number> =>
-        page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    for (const scheme of ['light', 'dark'] as const) {
+      // Break caught: a sidebar or top bar that clips or makes the page scroll sideways at a verified width, or contrast and target sizes that
+      // fail with the real layout in either theme, in each form the sidebar has there (the full sidebar and the rail from 768px, the sheet below it).
+      test(`has no WCAG 2.2 A or AA violation and no sideways scrolling at ${String(width)} px in the ${scheme} theme, with the sidebar in each form it has there`, async ({
+        page,
+      }) => {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.setViewportSize({ width, height });
+        await stubApi(page);
+        await page.goto('/');
+        await expect(topBar(page)).toBeVisible();
 
-      expect(await wcagViolations(page), 'as first drawn').toEqual([]);
-      expect(await overflow(), 'as first drawn').toBeLessThanOrEqual(0);
+        expect(await wcagViolations(page), 'as first drawn').toEqual([]);
+        expect(await overflowOf(page), 'as first drawn').toBeLessThanOrEqual(0);
 
-      if (width >= DOCKED_FROM) {
-        await page.getByRole('button', { name: 'Collapse menu' }).click();
-        await expect(page.getByRole('button', { name: 'Expand menu' })).toBeVisible();
-        await expect.poll(() => widthOf(page)).toBeLessThan(100);
-        expect(await wcagViolations(page), 'collapsed').toEqual([]);
-        expect(await overflow(), 'collapsed').toBeLessThanOrEqual(0);
-      } else {
-        await page.getByRole('button', { name: 'Open menu' }).click();
-        await expect(menuOf(page)).toBeVisible();
-        await settled(page);
-        expect(await wcagViolations(page), 'open').toEqual([]);
-        expect(await overflow(), 'open').toBeLessThanOrEqual(0);
-      }
+        if (width >= DOCKED_FROM) {
+          // 1280px draws the full sidebar and 768px the rail: each is looked at, and then the other.
+          const toggle = page.getByRole('button', { name: /^(Collapse|Expand) menu$/ });
+          await toggle.click();
+          await expect(
+            page.getByRole('button', { name: /^(Collapse|Expand) menu$/ }),
+          ).toBeVisible();
+          await page.mouse.move(0, 0);
+          expect(await wcagViolations(page), 'the other form').toEqual([]);
+          expect(await overflowOf(page), 'the other form').toBeLessThanOrEqual(0);
+        } else {
+          await openSheet(page);
+          await sheetSettled(page);
+          expect(await wcagViolations(page), 'the sheet open').toEqual([]);
+          expect(await overflowOf(page), 'the sheet open').toBeLessThanOrEqual(0);
+        }
 
-      const box = await page.getByRole('button', { name: 'Sign out' }).boundingBox();
-      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
-      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
-    });
+        const box = await accountButton(page)
+          .or(page.locator('button[aria-label="Account menu"]'))
+          .boundingBox();
+        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      });
+    }
   }
 
-  // Break caught: the menu lost under forced colours, where the Ink fill is dropped: its edge, and the current entry, must still be marked.
-  test('keeps the edge of the menu and the current page marked under forced colours', async ({
+  // Break caught: the sidebar lost under forced colours, where the Ink fill is dropped: its edge, and the current entry, must still be marked.
+  test('keeps the edge of the sidebar and the current page marked under forced colours', async ({
     page,
     browserName,
   }) => {
     test.skip(
       browserName === 'webkit',
-      'Playwright cannot emulate forced colours in WebKit; the menu’s edge and its current entry are plain borders and system colours in every engine.',
+      'Playwright cannot emulate forced colours in WebKit; the sidebar’s edge and its current entry are plain borders and system colours in every engine.',
     );
     await page.emulateMedia({ forcedColors: 'active' });
     await stubApi(page);
     await page.goto('/');
-    await expect(navOf(page)).toBeVisible();
+    await expect(primaryNav(page)).toBeVisible();
 
     const marks = await page.evaluate(() => {
-      const panel = document.querySelector('.ui-side-menu__panel');
-      const current = document.querySelector('.ui-primary-nav a[aria-current="page"]');
-      const other = document.querySelector('.ui-primary-nav a:not([aria-current])');
+      const panel = document.querySelector('.ui-sidebar');
+      const current = document.querySelector('.ui-sidebar__link[aria-current="page"]');
+      const other = document.querySelector('.ui-sidebar__link:not([aria-current])');
       return {
         edge: panel === null ? '' : getComputedStyle(panel).borderRightStyle,
         border: current === null ? '' : getComputedStyle(current).borderBottomStyle,
@@ -893,5 +1273,413 @@ test.describe('the authenticated Ops shell in a browser', () => {
       };
     });
     expect(marks).toEqual({ edge: 'solid', border: 'solid', filled: true });
+    await expect(sidebarBox(page)).toBeVisible();
+  });
+});
+
+/**
+ * The widths the sticky top bar is looked at: a phone (the sheet), the first width with a docked sidebar (the 64px rail) and the full sidebar's. The
+ * redesign review of 7 November 2026 found what the layers and the page's scrolling do there, which jsdom has no layout to show.
+ */
+const BAR_WIDTHS = [
+  { width: 390, height: 800 },
+  { width: 768, height: 1024 },
+  { width: 1280, height: 800 },
+] as const;
+
+/** Makes the page taller than the window: a spacer at the end of the main landmark, under what the page draws. */
+async function makeScrollable(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('the page has no main landmark');
+    const spacer = document.createElement('div');
+    spacer.style.height = '4000px';
+    main.append(spacer);
+  });
+}
+
+/** Adds to the page a heading far down it, with room above and below, and returns nothing: it is `#far-down`. */
+async function addHeadingFarDown(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('the page has no main landmark');
+    const above = document.createElement('div');
+    above.style.height = '1600px';
+    const heading = document.createElement('h2');
+    heading.id = 'far-down';
+    heading.tabIndex = -1;
+    heading.textContent = 'A heading far down the page';
+    const below = document.createElement('div');
+    below.style.height = '2400px';
+    main.append(above, heading, below);
+  });
+}
+
+/** Adds to the page a long list of links at the end of its main landmark: sixty stops for Tab, one under the other, in the list `#long-list`. */
+async function addLongList(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const main = document.querySelector('main');
+    if (main === null) throw new Error('the page has no main landmark');
+    const list = document.createElement('ul');
+    list.id = 'long-list';
+    for (let row = 1; row <= 60; row += 1) {
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = `#row-${String(row)}`;
+      link.textContent = `Row ${String(row)} of the long list`;
+      item.append(link);
+      list.append(item);
+    }
+    main.append(list);
+  });
+}
+
+/** How far the top of an element is from the top of the window. */
+const topOf = (page: Page, selector: string): Promise<number> =>
+  page.evaluate(
+    (css) => document.querySelector(css)?.getBoundingClientRect().top ?? Number.NaN,
+    selector,
+  );
+
+test.describe('the sticky top bar, the skip link and the page’s padding in a browser', () => {
+  for (const { width, height } of BAR_WIDTHS) {
+    // Break caught (review of 7 November 2026): the focused skip link painted under the sticky top bar, whose layer is above the link's: invisible on
+    // a phone (the link lies wholly inside the bar) and half hidden over the rail at 768px, the one thing a keyboard user needs to see on the first
+    // Tab (WCAG 2.4.7). `toBeInViewport` is the window's intersection and sees nothing of what is painted over the link: the element at the link's
+    // own centre, and at the corners of its box, is what shows whether the link is the topmost thing there.
+    test(`paints the focused skip link above the top bar: it is the element at its own centre and corners at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await stubApi(page);
+      await page.goto('/');
+      const tabs = await tabReachesLinks(page);
+      await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
+      const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+      if (tabs) await page.keyboard.press('Tab');
+      else await skipLink.focus();
+      await expect(skipLink).toBeFocused();
+      await expect(skipLink).toBeInViewport();
+
+      const covered = await skipLink.evaluate((link) => {
+        const box = link.getBoundingClientRect();
+        const places = [
+          ['centre', 0.5, 0.5],
+          ['top left', 0.04, 0.12],
+          ['top right', 0.96, 0.12],
+          ['bottom left', 0.04, 0.88],
+          ['bottom right', 0.96, 0.88],
+        ] as const;
+        return places
+          .map(([place, across, down]) => {
+            const found = document.elementFromPoint(
+              box.left + box.width * across,
+              box.top + box.height * down,
+            );
+            const topmost = found !== null && (found === link || link.contains(found));
+            return topmost ? '' : `${place}: ${found?.tagName.toLowerCase() ?? 'nothing'}`;
+          })
+          .filter((missed) => missed !== '');
+      });
+      expect(covered, 'where something else is painted over the link').toEqual([]);
+    });
+
+    // Break caught (review of 7 November 2026): a top bar that does not stay at the top of the window while the page scrolls (its `position: sticky`
+    // lost, or a layout in which it has no room to stick, as a grid item in a row as tall as itself may have in an engine that keeps a sticky item
+    // inside its grid area), so that what the specification draws (the bar and the sidebar always in reach) is gone. That the bar stays was
+    // asserted in a comment and never tested. It is also what a pointer reaches at the top edge of a scrolled page.
+    test(`keeps the top bar at the top of the window while the page scrolls, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await stubApi(page);
+      await page.goto('/');
+      await expect(topBar(page)).toBeVisible();
+      await makeScrollable(page);
+
+      await page.evaluate(() => {
+        window.scrollTo(0, 1500);
+      });
+
+      await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(1500);
+      expect(await topOf(page, 'header.ui-topbar')).toBe(0);
+      const reached = await page.evaluate(
+        () =>
+          document
+            .elementFromPoint(window.innerWidth / 2, 4)
+            ?.closest('header.ui-topbar') instanceof HTMLElement,
+      );
+      expect(reached, 'the bar is what is at the top edge').toBe(true);
+      if (width >= DOCKED_FROM) expect(await topOf(page, 'aside.ui-sidebar')).toBe(0);
+    });
+
+    // Break caught (review of 7 November 2026): a sticky region without scroll padding (DESIGN_SYSTEM section 14: "sticky regions set scroll padding"):
+    // what the browser scrolls into view, a heading the frame focuses after a navigation or a control reached by Tab, lands under the opaque bar at the
+    // top edge, and the focused element is not seen (WCAG 2.4.11). A heading is scrolled into view the two ways a browser does it, and is below the bar.
+    test(`brings a heading into view below the top bar, not under it, at ${String(width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await stubApi(page);
+      await page.goto('/');
+      await expect(topBar(page)).toBeVisible();
+      const barHeight = (await topBar(page).boundingBox())?.height ?? 0;
+      expect(barHeight).toBeGreaterThan(0);
+      await addHeadingFarDown(page);
+
+      await page.evaluate(() => {
+        document.getElementById('far-down')?.scrollIntoView({ block: 'start' });
+      });
+      await expect.poll(() => topOf(page, '#far-down')).toBeGreaterThanOrEqual(barHeight);
+
+      // The way a frame focuses the heading of a page it has navigated to: the heading is partly above the top edge, and focus brings it in.
+      await page.evaluate(() => {
+        const heading = document.getElementById('far-down');
+        if (heading === null) throw new Error('no heading');
+        window.scrollTo(0, heading.getBoundingClientRect().top + window.scrollY + 8);
+        heading.focus();
+      });
+      await expect.poll(() => topOf(page, '#far-down')).toBeGreaterThanOrEqual(barHeight);
+      await expect(page.locator('#far-down')).toBeFocused();
+    });
+  }
+
+  for (const size of ['100%', '200%'] as const) {
+    // Break caught (audit B2, 7 November 2026): a scroll padding written for the one row of the bar (56px and a little more), so that when the bar wraps
+    // into a second row (text at 200% on a phone) a control reached by Shift+Tab, backwards up a long page, is scrolled in under the bar's second row
+    // and the person cannot see where focus is (WCAG 2.4.11). The padding is the bar's measured height; and each control reached on the way up is below
+    // the bottom edge of the bar, whatever height the bar has. At 100% the bar is one row and the walk is the control of the test.
+    test(`keeps each control reached by Shift+Tab up a long list below the top bar, with text at ${size}`, async ({
+      page,
+      browserName,
+    }) => {
+      await page.setViewportSize({ width: 390, height: 700 });
+      await stubApi(page);
+      await page.goto('/');
+      await expect(topBar(page)).toBeVisible();
+      await page.evaluate((fontSize) => {
+        document.documentElement.style.fontSize = fontSize;
+      }, size);
+      await addLongList(page);
+
+      const clearance = await page.evaluate(() => ({
+        padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+        bar: document.querySelector('.app-topbar')?.getBoundingClientRect().height ?? 0,
+      }));
+      expect(clearance.bar).toBeGreaterThan(0);
+      expect(
+        clearance.padding,
+        'the scroll padding is at least the height the bar has',
+      ).toBeGreaterThanOrEqual(clearance.bar);
+
+      await page.locator('#long-list a').last().focus();
+      let walked = 0;
+      for (let step = 0; step < 70; step += 1) {
+        // The list is of links. Safari's Shift+Tab walks past links (Option+Shift+Tab reaches them), so the step is the one a person who reaches links makes in the engine.
+        await stepIncludingLinks(page, { backwards: true });
+        // Two frames before the look, as a person's eye has them: WebKit scrolls to a control a frame or two after it has taken focus (read in the very frame, a control at
+        // 200% text was seen with its whole height under the bar, a position the engine then left), and where a control is in the frame it took focus is not where it stays.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  resolve();
+                });
+              });
+            }),
+        );
+        const state = await page.evaluate(() => {
+          const active = document.activeElement;
+          return {
+            inList: active?.closest('#long-list') != null,
+            top: active?.getBoundingClientRect().top ?? Number.NaN,
+            bottom: active?.getBoundingClientRect().bottom ?? Number.NaN,
+            barBottom:
+              document.querySelector('.app-topbar')?.getBoundingClientRect().bottom ?? Number.NaN,
+            text: active?.textContent ?? '',
+          };
+        });
+        if (!state.inList) break;
+        walked += 1;
+        // WCAG 2.2 criterion 2.4.11, Focus Not Obscured (Minimum), level AA: a control that has focus is not entirely hidden by the bar. It is asked of every engine.
+        expect(state.bottom, `"${state.text}" is not entirely under the bar`).toBeGreaterThan(
+          state.barBottom,
+        );
+        // The scroll padding gives more, and each control is scrolled in below the bar's edge: Chromium, WebKit and Firefox at 100% text do it every time, so the stricter
+        // reading is asked of them. Firefox at 200% text does not scroll to give a control that is already partly in view the padding: it moved focus to rows 59 to 55 with the
+        // page still and scrolled only when a control was nearly hidden (row 55 sat 13.5 px under the bar, with 74 of its 88 px in view). The enhanced criterion 2.4.12, Focus
+        // Not Obscured (Enhanced), level AAA, is not asked of it (Product Owner, 10 November 2026), and 2.4.11 above still is.
+        const scrollsToThePadding = browserName !== 'firefox' || size === '100%';
+        if (scrollsToThePadding) {
+          expect(state.top, `"${state.text}" is below the bar`).toBeGreaterThanOrEqual(
+            state.barBottom,
+          );
+        }
+      }
+      // The walk went the whole way up the list, so that every row was a stop.
+      expect(walked).toBe(59);
+    });
+  }
+
+  // Break caught (review of 7 November 2026): the page padded 16px beside a top bar padded 24px at exactly 768px (the stylesheet of the frame said
+  // "up to 48rem" where the bar and the viewport hook say "under 48rem"), so that the page and the bar are 8px out of line at the first width with a docked
+  // sidebar. At a width the sidebar is docked, both are 24px from the sidebar and from the edge; one pixel less, both are 16px.
+  for (const { width, side, name } of [
+    { width: 1280, side: 1.5, name: 'wide' },
+    { width: 768, side: 1.5, name: 'the first width with a docked sidebar' },
+    { width: 767, side: 1, name: 'the last width of the sheet' },
+  ] as const) {
+    test(`pads the page and the top bar alike at ${String(width)} px: ${name}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await stubApi(page);
+      await page.goto('/');
+      await expect(topBar(page)).toBeVisible();
+      const rem = await remOf(page);
+
+      const sides = await page.evaluate(() => {
+        const padding = (selector: string) => {
+          const style = getComputedStyle(document.querySelector(selector) ?? document.body);
+          return { left: style.paddingLeft, right: style.paddingRight };
+        };
+        return { bar: padding('header.ui-topbar'), page: padding('main') };
+      });
+
+      const expected = `${String(side * rem)}px`;
+      expect(sides).toEqual({
+        bar: { left: expected, right: expected },
+        page: { left: expected, right: expected },
+      });
+    });
+  }
+
+  // Break caught (review of 7 November 2026): the strict policy proved for the shell at a desktop's width only, with the sheet of a narrow screen (a
+  // Radix dialog that inserts a style and traps focus) never drawn under it: the sheet opened, followed and closed under the policy raises no violation.
+  test('runs the sheet of a narrow screen under the strict policy: opened, followed and closed', async ({
+    page,
+  }) => {
+    const violations = await enforceStrictPolicy(page);
+    await page.setViewportSize({ width: 390, height: 800 });
+    const api = await stubApi(page);
+    const seen = watchPage(page);
+
+    const response = await page.goto('/');
+    expect(response?.headers()['content-security-policy']).toBe(STRICT_POLICY);
+    await expect(page.getByRole('heading', { level: 1, name: 'My work' })).toBeVisible();
+    const sheet = await openSheet(page);
+    await sheetSettled(page);
+    await expect(sheet.getByRole('navigation', { name: 'Primary' })).toBeVisible();
+    await sheet.getByRole('link', { name: 'Sessions' }).click();
+
+    await expect(page).toHaveURL('/admin/sessions');
+    await expect(sheetOf(page)).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'Sessions' })).toBeFocused();
+    expect(violations).toEqual([]);
+    expect(seen.problems).toEqual([]);
+    expect(api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the step that includes links, which the tests that walk links take in every engine', () => {
+  // Break caught: a model of Option+Tab that walks only the controls a plain Tab walks in Safari's engine (so that a walk of links stands still), that passes over a link, steps
+  // into a control that takes no focus (disabled, not drawn) or ends on the wrong one, forward or back, or that starts from a heading focused by a script from the wrong place.
+  test('takes focus to each control and link in the order of the page, forward and back', async ({
+    page,
+  }) => {
+    await page.setContent(`
+      <h1 id="heading" tabindex="-1">A heading that a script focuses</h1>
+      <button id="first" type="button">First</button>
+      <a id="link-one" href="#one">A link</a>
+      <button id="off" type="button" disabled>Disabled</button>
+      <a id="not-drawn" href="#not-drawn" hidden>Not drawn</a>
+      <input id="field" aria-label="A field" />
+      <a id="link-two" href="#two">Another link</a>
+    `);
+    const active = (): Promise<string> =>
+      page.evaluate(() => document.activeElement?.id ?? 'nothing');
+
+    const forward: string[] = [];
+    for (let step = 0; step < 4; step += 1) {
+      await stepIncludingLinks(page);
+      forward.push(await active());
+    }
+    expect(forward).toEqual(['first', 'link-one', 'field', 'link-two']);
+
+    const back: string[] = [];
+    for (let step = 0; step < 3; step += 1) {
+      await stepIncludingLinks(page, { backwards: true });
+      back.push(await active());
+    }
+    expect(back).toEqual(['field', 'link-one', 'first']);
+
+    // From a heading that a script focused (which is not a stop), the next stop is the first one after it in the document.
+    await page.locator('#heading').focus();
+    await stepIncludingLinks(page);
+    expect(await active()).toBe('first');
+  });
+});
+
+/**
+ * The guard against a permission key on a screen is on every test of every spec (run 7, Stage 2.3: `support/guarded-test.ts`, an automatic fixture). This test draws a key on a page and
+ * asserts nothing about it, and is marked as one that must fail: Playwright counts the guard's failure at the end of the test as the failure it expects, and a guard that stopped failing it
+ * (taken off the context, or made to fail only for a test that looks) would make this test pass unexpectedly, which Playwright reports as a failure.
+ */
+test.describe('the guard against a permission key on a screen', () => {
+  const SELF_TEST = '/__guard-self-test';
+
+  async function drawKey(page: Page, body: string): Promise<void> {
+    await page.route(`**${SELF_TEST}`, (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<!doctype html><title>Guard</title>${body}`,
+      }),
+    );
+    await page.goto(SELF_TEST);
+  }
+
+  test('fails a test that draws a permission key in the text of a page, though it asserts nothing about it', async ({
+    page,
+  }) => {
+    test.fail();
+    await drawKey(page, '<main><p>Your account can’t do this (pickup.read).</p></main>');
+    await expect(page.getByRole('main')).toBeVisible();
+  });
+
+  test('fails a test that draws a permission key in an attribute of a page, though it asserts nothing about it', async ({
+    page,
+  }) => {
+    test.fail();
+    await drawKey(page, '<main><p data-reason="staff.read">A refusal.</p></main>');
+    await expect(page.getByRole('main')).toBeVisible();
+  });
+
+  // A test that says it draws one key on purpose and draws another too is failed: the allowance is for the keys it names, and no others.
+  test.describe(() => {
+    test.use({ permissionKeysOnPurpose: ['pickup.read'] });
+    test('fails a test that draws a key it did not name, though it named another', async ({
+      page,
+    }) => {
+      test.fail();
+      await drawKey(page, '<main><p>pickup.read and staff.read</p></main>');
+      await expect(page.getByRole('main')).toBeVisible();
+    });
+  });
+
+  // A test that says it draws a key on purpose and draws none is failed too: the allowance is a claim, and it must hold.
+  test.describe(() => {
+    test.use({ permissionKeysOnPurpose: ['pickup.read'] });
+    test('fails a test that names a key it does not draw', async ({ page }) => {
+      test.fail();
+      await drawKey(page, '<main><p>Your account can’t see pickup requests.</p></main>');
+      await expect(page.getByRole('main')).toBeVisible();
+    });
+  });
+
+  // Break caught: a guard that fails every test, which would make the two above pass for the wrong reason.
+  test('lets a test that draws no key through', async ({ page }) => {
+    await drawKey(page, '<main><p>Your account can’t see pickup requests.</p></main>');
+    await expect(page.getByRole('main')).toBeVisible();
   });
 });

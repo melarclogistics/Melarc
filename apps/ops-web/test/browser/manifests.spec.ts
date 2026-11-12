@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
+import { expect, test } from './support/guarded-test';
 
 import {
   IDS,
@@ -12,6 +13,9 @@ import {
   type World,
 } from './support/manifest-api';
 import { watchPage, wcagViolations } from './support/page';
+import { menuEntry } from './support/shell';
+import { expectWholeInTheWindow } from './support/whole';
+import { expectNoTableScrollsSideways } from './support/tables';
 
 /**
  * The manifest screens (S1.25) in a real browser: the list, the builder, one run and the Ops skip of a stop. What jsdom cannot show is here: the
@@ -90,15 +94,18 @@ function clippedControls(page: Page): Promise<string[]> {
 }
 
 const poolTable = (page: Page) =>
-  page.getByRole('table', { name: 'Confirmed pickups waiting for a manifest' });
+  page.getByRole('table', { name: 'Confirmed pickups waiting for a pickup run' });
 const poolCards = (page: Page) =>
-  page.getByRole('list', { name: 'Confirmed pickups waiting for a manifest' });
+  page.getByRole('list', { name: 'Confirmed pickups waiting for a pickup run' });
+
+/** The cancellation is in the menu of the record's header: it is opened, and the act is chosen. It brings its own question. */
+async function chooseAct(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: /^More actions for / }).click();
+  await page.getByRole('menuitem', { name }).click();
+}
 
 async function typeDate(page: Page, digits: string): Promise<void> {
-  const day = page
-    .getByRole('group', { name: /Service date/ })
-    .getByRole('spinbutton')
-    .first();
+  const day = page.getByRole('group', { name: /Service date/ }).getByRole('textbox');
   await day.click();
   await page.keyboard.type(digits);
 }
@@ -109,8 +116,8 @@ test.describe('moving through the screens', () => {
     page,
   }) => {
     const { api, watch } = await open(page, '/');
-    await page.getByRole('link', { name: 'Manifests' }).first().click();
-    await expect(page.getByRole('heading', { level: 1, name: 'Manifests' })).toBeFocused();
+    await menuEntry(page, 'Pickup runs').click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Pickup runs' })).toBeFocused();
 
     await page.getByRole('link', { name: 'ACC-MF-Q92422' }).first().click();
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-Q92422' })).toBeFocused();
@@ -118,11 +125,16 @@ test.describe('moving through the screens', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('a session without the key sees no entry, and the page names the key', async ({ page }) => {
+  test('a session without the key sees no entry, and the page says what it cannot do', async ({
+    page,
+  }) => {
     await open(page, '/manifests', { permissions: ['staff.read'] });
 
-    await expect(page.getByText('pickup.read')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Manifests' })).toHaveCount(0);
+    await expect(
+      page.getByText('Your account can’t see pickup runs. Ask an administrator for access.'),
+    ).toBeVisible();
+    await expect(page.getByRole('main')).not.toContainText('pickup.read');
+    await expect(menuEntry(page, 'Pickup runs')).toHaveCount(0);
   });
 
   test('the list tells that it is oldest first, and moves by the server’s token', async ({
@@ -132,10 +144,9 @@ test.describe('moving through the screens', () => {
       manifests: [manifest(), manifest({ id: IDS.run, code: 'ACC-MF-K7M4PX', stops: [] })],
       pageSize: 1,
     });
-    await expect(page.getByText(/Listed oldest first, as the server returns them/)).toBeVisible();
-    // The one control that is a menu is the state filter, and it asks for no state until one is chosen.
-    await expect(page.getByRole('combobox')).toHaveCount(1);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('');
+    await expect(page.getByText('Oldest first', { exact: true })).toBeVisible();
+    // The states are the views of the page, and it asks for no state until one is chosen.
+    await expect(page.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('button', { name: /Next page/ }).click();
     await expect(page.getByRole('link', { name: 'ACC-MF-K7M4PX' }).first()).toBeVisible();
@@ -172,7 +183,8 @@ test.describe('building a manifest', () => {
     await page.getByRole('button', { name: /Previous page/ }).click();
 
     await expect(page.getByRole('checkbox', { name: 'Choose ACC-PR-7KQ2MZ' })).toBeChecked();
-    await expect(page.getByText(/2 requests chosen/)).toBeVisible();
+    // The run's own line (the button that goes to the run, on a narrow page, says it too).
+    await expect(page.getByText('2 requests chosen.', { exact: true })).toBeVisible();
     const pool = api.calls.filter((call) => call.path === '/api/v1/pickup-requests');
     expect(
       pool.every(
@@ -190,15 +202,15 @@ test.describe('building a manifest', () => {
     await page.getByRole('checkbox', { name: 'Choose ACC-PR-9WXH4T' }).check();
     await page.getByRole('checkbox', { name: 'Choose ACC-PR-7KQ2MZ' }).check();
     await typeDate(page, '04112026');
-    await expect(page.getByRole('heading', { level: 3, name: 'ACC-PR-9WXH4T' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 4, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     await page
       .getByRole('combobox', { name: /Why it is carried over/ })
       .selectOption('RUN_WAS_FULL');
 
-    await page.getByRole('button', { name: 'Create the manifest' }).click();
+    await page.getByRole('button', { name: 'Create the pickup run' }).click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-N7R4PX' })).toBeFocused();
-    await expect(page.getByText(/The manifest is made\./)).toBeVisible();
+    await expect(page.getByText(/The pickup run is made\./)).toBeVisible();
     const create = callTo(api, 'POST', '/pickup-manifests')[0];
     expect(create?.idempotencyKey).toMatch(KEY);
     expect(create?.ifMatch).toBeUndefined();
@@ -221,11 +233,192 @@ test.describe('building a manifest', () => {
       if (row.code === 'ACC-PR-ZYU26H') row.manifested = true;
     }
 
-    await page.getByRole('button', { name: 'Create the manifest' }).click();
+    await page.getByRole('button', { name: 'Create the pickup run' }).click();
 
-    await expect(page.getByText('Already on a manifest.')).toBeVisible();
-    await expect(page.getByText(/A request you chose is already on a manifest/)).toBeVisible();
+    await expect(page.getByText('Already on a pickup run.')).toBeVisible();
+    await expect(page.getByText(/A request you chose is already on a pickup run/)).toBeVisible();
     expect(api.world.manifests).toHaveLength(1);
+  });
+});
+
+test.describe('the builder in a short window (run 4, Stage 2; the review of 5edada2, M2 and M6)', () => {
+  // Break caught: the run beside the pool sticking 16px from the top of the window, under the sticky top bar, and a run taller than the room below it, so that its Create and the reasons
+  // of the carried-over requests cannot be reached.
+  test('keeps the run below the top bar and whole in the window, with its reasons and its Create in reach', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 520 });
+    await open(page, '/manifests/new');
+    for (const code of ['ACC-PR-9WXH4T', 'ACC-PR-7KQ2MZ', 'ACC-PR-ZYU26H']) {
+      await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
+    }
+    await typeDate(page, '04112026');
+    const reason = page.getByRole('combobox', { name: /Why it is carried over/ });
+    await expect(reason.first()).toBeVisible();
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+
+    const bar = await page.getByRole('banner').boundingBox();
+    const barBottom = (bar?.y ?? 0) + (bar?.height ?? 0);
+    const run = await page.getByRole('region', { name: 'Review' }).boundingBox();
+    expect(barBottom).toBeGreaterThan(40);
+    expect(run?.y ?? 0).toBeGreaterThanOrEqual(barBottom - 1);
+    expect((run?.y ?? 0) + (run?.height ?? 0)).toBeLessThanOrEqual(520 + 1);
+
+    // The Create is at the foot of the run and in the window at once, however many requests are chosen: the rows scroll inside the run, the actions do not.
+    const create = page.getByRole('button', { name: /^Create the / });
+    await expectWholeInTheWindow(page, create);
+    const button = await create.boundingBox();
+    expect(button?.y ?? 0).toBeGreaterThanOrEqual(barBottom);
+    // And a reason is reached by scrolling the run, with the Create still in view.
+    await reason.first().scrollIntoViewIfNeeded();
+    await expectWholeInTheWindow(page, reason.first());
+    await expectWholeInTheWindow(page, create);
+  });
+
+  // Break caught (the Product Owner, 9 November 2026, Stage 3 item 8): the Create among the rows it creates from, so that where the pane scrolls inside it scrolls away with them. It is in the
+  // pane's own footer, below the box that scrolls, and it stays where it is while the rows scroll inside the pane, with the page scrolled to the middle of the stretch in which the pane is
+  // held below the top bar (the page is short here, so the middle of the page is above that stretch: it is measured from the pane's own place).
+  test('keeps the Create in the run pane’s own footer, where it stays while the rows scroll inside the pane, at mid-scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 520 });
+    await open(page, '/manifests/new');
+    for (const code of ['ACC-PR-9WXH4T', 'ACC-PR-7KQ2MZ', 'ACC-PR-ZYU26H']) {
+      await page.getByRole('checkbox', { name: `Choose ${code}` }).check();
+    }
+    await typeDate(page, '04112026');
+    await expect(
+      page.getByRole('combobox', { name: /Why it is carried over/ }).first(),
+    ).toBeVisible();
+    const run = page.getByRole('region', { name: 'Review' });
+    // The pane is held below the top bar from the scroll at which it reaches it (its place on the page less its offset) to the end of the page: scroll to the middle of that.
+    const stretch = await run.evaluate((element) => {
+      const held = parseFloat(getComputedStyle(element).top);
+      const reaches = element.getBoundingClientRect().top + window.scrollY - held;
+      const end = document.documentElement.scrollHeight - window.innerHeight;
+      return { held, reaches, end };
+    });
+    expect(stretch.end, 'the page is long enough to hold the pane').toBeGreaterThan(
+      stretch.reaches,
+    );
+    await page.evaluate(
+      (to) => {
+        window.scrollTo(0, to);
+      },
+      (stretch.reaches + stretch.end) / 2,
+    );
+    await expect
+      .poll(async () => Math.round((await run.boundingBox())?.y ?? -1))
+      .toBeGreaterThanOrEqual(Math.round(stretch.held));
+    const footer = run.locator('.ui-builder__footer');
+    const create = footer.getByRole('button', { name: /^Create the / });
+    const rows = run.locator('.ui-builder__run-body');
+    await expectWholeInTheWindow(page, create);
+    // The rows' box scrolls inside the pane; the footer is below it and is not part of it.
+    expect(
+      await rows.evaluate((element) => element.scrollHeight - element.clientHeight),
+    ).toBeGreaterThan(0);
+    const rowsBox = await rows.boundingBox();
+    const footerBox = await footer.boundingBox();
+    expect(footerBox?.y ?? 0).toBeGreaterThanOrEqual(
+      (rowsBox?.y ?? 0) + (rowsBox?.height ?? 0) - 1,
+    );
+    const before = await create.boundingBox();
+    await rows.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    expect((await create.boundingBox())?.y).toBe(before?.y);
+    await expectWholeInTheWindow(page, create);
+  });
+
+  // Break caught: the pool dropping its address and its count beside the run, where nothing else shows them: the choice is made on what a request holds.
+  test('shows the address and the count of each request in the pool at 1440px, wrapped and whole', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/manifests/new');
+
+    await expect(poolTable(page)).toBeVisible();
+    await expect(
+      poolTable(page).getByRole('columnheader', { name: 'Pickup address / hub' }),
+    ).toBeVisible();
+    await expect(poolTable(page).getByRole('columnheader', { name: 'Packages' })).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>('.ui-data-table__scroller');
+        return box === null ? 0 : box.scrollWidth - box.clientWidth;
+      }),
+    ).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe('building a pickup run: what the officer reads (run 4, Stage 3.6)', () => {
+  // Break caught (the review of 5edada2): the officer's word for the thing is "pickup run" (surfaces/ops-portal.md: "Build a pickup run"); the contract word, manifest, and the codes
+  // (ACC-MF-...) are not the screen's.
+  test('says "pickup run" in its title, its breadcrumb, its tab and its button', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, '/manifests/new');
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Build a pickup run' })).toBeVisible();
+    expect(await page.title()).toBe('Build a pickup run · Melarc Ops Portal');
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Breadcrumb' })
+        .getByRole('link', { name: 'Pickup runs' }),
+    ).toHaveAttribute('href', '/manifests');
+    await expect(page.getByRole('button', { name: 'Create the pickup run' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create the manifest' })).toHaveCount(0);
+  });
+
+  // Break caught: a pool of cards that cannot be moved through by heading, because the card's title is a span.
+  test('keeps a heading for each request of the pool when it is cards', async ({ page }) => {
+    await page.setViewportSize(NARROW);
+    await open(page, '/manifests/new');
+
+    const cards = poolCards(page);
+    await expect(cards).toBeVisible();
+    const headings = cards.getByRole('heading', { level: 3 });
+    await expect(headings).toHaveCount(4);
+    await expect(headings.first()).toHaveText('ACC-PR-7KQ2MZ');
+    await expect(cards.getByRole('listitem')).toHaveCount(4);
+  });
+});
+
+test.describe('a rider’s name on a run (run 7, Stage 2.4)', () => {
+  // Break caught (the Product Owner's review of 198e5be): a rider's name kept for the session on a key shared by every page, so that a rider renamed since the last visit to a run was named as
+  // before. It is read once while the run is on the screen, and read again on the next visit.
+  test('is read again on the next visit to the run, and once while the run stays', async ({
+    page,
+  }) => {
+    await page.setViewportSize(WIDE);
+    const { api } = await open(page, RUN, runWorld());
+    const riderReads = () =>
+      api.calls.filter(
+        (call) => call.method === 'GET' && call.path.endsWith(`/ops/riders/${IDS.riderA}`),
+      ).length;
+    await expect(page.getByText('Kwame Mensah').first()).toBeVisible();
+    expect(riderReads()).toBe(1);
+
+    // The rider is renamed at the server while the officer is on another page, some time before they come back.
+    const rider = api.world.riders.find((candidate) => candidate.id === IDS.riderA);
+    if (rider !== undefined) rider.name = 'Kwame Asante';
+    await page.getByRole('link', { name: 'Back to pickup runs' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Pickup runs' })).toBeVisible();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 200);
+        }),
+    );
+    await page.goBack();
+
+    await expect(page.getByText('Kwame Asante').first()).toBeVisible();
+    expect(riderReads()).toBe(2);
   });
 });
 
@@ -275,14 +468,14 @@ test.describe('ordering, assigning and dispatching a run', () => {
     await assign.getByRole('button', { name: 'Choose: Kwame Mensah' }).click();
     await assign.getByRole('button', { name: 'Assign the rider' }).click();
     await expect(
-      page.getByText(/A rider is assigned\. The manifest is still a draft/),
+      page.getByText(/A rider is assigned\. The pickup run is still a draft/),
     ).toBeVisible();
     expect(callTo(api, 'POST', '/dispatch')).toHaveLength(0);
 
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
-    const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
-    await dispatch.getByRole('button', { name: 'Dispatch the manifest' }).click();
-    await expect(page.getByText(/The manifest is dispatched/)).toBeVisible();
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
+    const dispatch = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
+    await dispatch.getByRole('button', { name: 'Dispatch the pickup run' }).click();
+    await expect(page.getByText(/The pickup run is dispatched/)).toBeVisible();
     await expect(page.getByText('Dispatched', { exact: true }).first()).toBeVisible();
 
     const assigned = callTo(api, 'POST', '/assign-rider')[0];
@@ -296,17 +489,17 @@ test.describe('ordering, assigning and dispatching a run', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  test('tells a dispatch refused for a day that has passed, in words, with the manifest still a draft', async ({
+  test('tells a dispatch refused for a day that has passed, in words, with the pickup run still a draft', async ({
     page,
   }) => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, DRAFT, {
       manifests: [manifest({ service_date: '2026-11-02', riderId: IDS.riderA })],
     });
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
     await page
       .getByRole('alertdialog')
-      .getByRole('button', { name: 'Dispatch the manifest' })
+      .getByRole('button', { name: 'Dispatch the pickup run' })
       .click();
 
     await expect(
@@ -320,15 +513,15 @@ test.describe('ordering, assigning and dispatching a run', () => {
   }) => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, DRAFT);
-    await page.getByRole('button', { name: 'Cancel the manifest' }).first().click();
-    const dialog = page.getByRole('alertdialog', { name: 'Cancel this manifest?' });
-    await dialog.getByRole('button', { name: 'Cancel the manifest' }).click();
+    await chooseAct(page, 'Cancel the pickup run');
+    const dialog = page.getByRole('alertdialog', { name: 'Cancel this pickup run?' });
+    await dialog.getByRole('button', { name: 'Cancel the pickup run' }).click();
     await expect(dialog.getByText('Write a note saying why.')).toBeVisible();
 
     await dialog.getByRole('textbox', { name: /Why it is cancelled/ }).fill('Rider unwell');
-    await dialog.getByRole('button', { name: 'Cancel the manifest' }).click();
+    await dialog.getByRole('button', { name: 'Cancel the pickup run' }).click();
 
-    await expect(page.getByText(/The manifest is cancelled\./)).toBeVisible();
+    await expect(page.getByText(/The pickup run is cancelled\./)).toBeVisible();
     const cancel = callTo(api, 'POST', '/cancel')[0];
     expect(cancel?.ifMatch).toBe('"m1"');
     expect(cancel?.idempotencyKey).toMatch(KEY);
@@ -340,8 +533,8 @@ test.describe('ordering, assigning and dispatching a run', () => {
   test('keeps Tab inside the dialog of an act, and Escape closes it', async ({ page }) => {
     await page.setViewportSize(WIDE);
     await open(page, DRAFT);
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
-    const dialog = page.getByRole('alertdialog', { name: 'Dispatch this manifest?' });
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
+    const dialog = page.getByRole('alertdialog', { name: 'Dispatch this pickup run?' });
     await expect(dialog).toBeVisible();
 
     // Past the dialog's last control a browser may hand Tab to its own interface (the document has focus then); what must never happen is focus
@@ -357,6 +550,46 @@ test.describe('ordering, assigning and dispatching a run', () => {
     }
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
+  });
+});
+
+test.describe('the stops of a run, through the data table (owner item b, 9 November 2026)', () => {
+  // Break caught: the stops in a table that scrolls sideways on a phone, so that the state of a stop and its act are off to the right: under 40rem each stop is a card with its place, its state
+  // and its act, and nothing scrolls.
+  test('draws each stop as a card at 390 px, with its state and its act in view', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { watch } = await open(page, RUN, runWorld());
+
+    const cards = page.getByRole('list', { name: 'Stops' });
+    await expect(cards).toBeVisible();
+    await expect(page.getByRole('table', { name: 'Stops' })).toHaveCount(0);
+    const first = cards.getByRole('listitem').first();
+    await expect(first.getByRole('heading', { level: 3, name: 'Stop 1' })).toBeVisible();
+    await expect(first.getByRole('link', { name: 'ACC-PR-7KQ2MZ', exact: true })).toBeVisible();
+    await expect(first.getByText('To be worked')).toBeVisible();
+    await expect(first.getByRole('link', { name: 'Skip stop 1, ACC-PR-7KQ2MZ' })).toBeVisible();
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: the table that gave way to cards where it had room, or that dropped a column: at 1440 px the stops are a table of five columns, the state among them.
+  test('draws the stops as a table of five columns at 1440 px', async ({ page }) => {
+    await page.setViewportSize(WIDE);
+    await open(page, RUN, runWorld());
+
+    const table = page.getByRole('table', { name: 'Stops' });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Stop',
+      'Pickup',
+      'Place',
+      'State',
+      'Actions',
+    ]);
+    await expect(table.getByText('To be worked').first()).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Stops' })).toHaveCount(0);
   });
 });
 
@@ -566,7 +799,7 @@ const ALL_CODES = ['ACC-MF-Q92422', 'ACC-MF-K7M4PX', 'ACC-MF-D3F5RT', 'ACC-MF-C4
 const listedCodes = async (page: Page): Promise<string[]> =>
   (
     await page
-      .getByRole('table', { name: 'Manifests' })
+      .getByRole('table', { name: 'Pickup runs' })
       .getByRole('rowheader')
       .evaluateAll((cells) => cells.map((cell) => cell.querySelector('a')?.textContent ?? ''))
   ).filter((code) => code !== '');
@@ -576,8 +809,10 @@ const listRequests = (api: ManifestApi) =>
   api.calls.filter((call) => call.method === 'GET' && call.path === '/api/v1/pickup-manifests');
 
 test.describe('filtering the list', () => {
+  /** The date filter is in the popover of the filter row, which opens with the Filter button and closes once the date is a whole one. */
   async function typeFilterDate(page: Page, digits: string): Promise<void> {
-    const day = page.getByRole('group', { name: 'Service date' }).getByRole('spinbutton').first();
+    await page.getByRole('button', { name: 'Filter', exact: true }).click();
+    const day = page.getByRole('group', { name: 'Service date' }).getByRole('textbox');
     await day.click();
     await page.keyboard.type(digits);
   }
@@ -588,9 +823,11 @@ test.describe('filtering the list', () => {
   }) => {
     await page.setViewportSize(WIDE);
     const { api, watch } = await open(page, '/manifests', filterWorld());
+    // Polled, like every later read of the list: `open` returns at the page's load, and the rows are drawn when the stand-in has answered,
+    // which can be after it (a bare read found no rows in one run in forty).
     await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('DRAFT');
+    await page.getByRole('tab', { name: 'Draft' }).click();
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
     expect(new URL(page.url()).search).toBe('?state=DRAFT');
     expect(listRequests(api).at(-1)?.search).toBe('?state=DRAFT');
@@ -600,11 +837,11 @@ test.describe('filtering the list', () => {
     expect(new URL(page.url()).search).toBe('?state=DRAFT&date=2026-11-05');
     expect(listRequests(api).at(-1)?.search).toBe('?state=DRAFT&service_date=2026-11-05');
 
-    await page.getByRole('button', { name: 'Every service date' }).click();
+    await page.getByRole('button', { name: 'Remove filter: Service date: Thu 5 Nov 2026' }).click();
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
     expect(new URL(page.url()).search).toBe('?state=DRAFT');
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('');
+    await page.getByRole('tab', { name: 'All' }).click();
     await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
     expect(new URL(page.url()).search).toBe('');
     expect(listRequests(api).at(-1)?.search).toBe('');
@@ -631,7 +868,7 @@ test.describe('filtering the list', () => {
     );
 
     await expect.poll(() => listedCodes(page)).toEqual(ALL_CODES);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('');
+    await expect(page.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
     expect(listRequests(api).map((call) => call.search)).toEqual(['']);
     expect(watch.problems).toEqual([]);
   });
@@ -644,7 +881,7 @@ test.describe('filtering the list', () => {
     await expect(page.getByText(/on page 2/)).toBeVisible();
     expect(listRequests(api).at(-1)?.search).toBe('?page_token=2');
 
-    await page.getByRole('combobox', { name: 'State' }).selectOption('DRAFT');
+    await page.getByRole('tab', { name: 'Draft' }).click();
 
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-Q92422', 'ACC-MF-D3F5RT']);
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
@@ -658,13 +895,13 @@ test.describe('filtering the list', () => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, '/manifests?state=COMPLETED&date=2026-11-05', filterWorld());
 
-    await expect(page.getByRole('heading', { name: 'No manifests match' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toBeVisible();
     await expect(
       page.getByText(/Nothing fits the state Completed and the service date Thu 5 Nov 2026\./),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests yet' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No pickup runs yet' })).toHaveCount(0);
 
-    const clear = page.getByRole('button', { name: 'Show every manifest' });
+    const clear = page.getByRole('button', { name: 'Show every pickup run' });
     await clear.focus();
     await page.keyboard.press('Enter');
 
@@ -677,8 +914,8 @@ test.describe('filtering the list', () => {
     await page.setViewportSize(WIDE);
     const { api } = await open(page, '/manifests', { manifests: [] });
 
-    await expect(page.getByRole('heading', { name: 'No manifests yet' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests match' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No pickup runs yet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toHaveCount(0);
     expect(api.unexpected).toEqual([]);
   });
 
@@ -699,11 +936,13 @@ test.describe('filtering the list', () => {
         },
       }),
     );
-    await page.getByRole('button', { name: 'Refresh page' }).click();
+    await page.getByRole('button', { name: 'Refresh' }).click();
 
-    await expect(page.getByText('The manifests could not be loaded.')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests match' })).toHaveCount(0);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'The pickup runs could not be loaded.' }),
+    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
   });
 
   // Break caught: a reload that loses the filters, or a way back from a manifest that opens the plain list.
@@ -720,11 +959,11 @@ test.describe('filtering the list', () => {
 
     await page.reload();
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-D3F5RT']);
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
+    await expect(page.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
 
     await page.getByRole('link', { name: 'ACC-MF-D3F5RT' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-D3F5RT' })).toBeFocused();
-    await page.getByRole('link', { name: 'Back to manifests' }).click();
+    await page.getByRole('link', { name: 'Back to pickup runs' }).click();
     await expect(page.getByRole('link', { name: 'ACC-MF-D3F5RT' })).toBeFocused();
     expect(new URL(page.url()).search).toBe('?state=DRAFT&date=2026-11-05');
     await expect.poll(() => listedCodes(page)).toEqual(['ACC-MF-D3F5RT']);
@@ -744,7 +983,7 @@ test.describe('filtering the list', () => {
     await page.setViewportSize(WIDE);
     await open(page, '/manifests/a1000000-0000-4000-8000-0000000000b1', filterWorld());
 
-    await expect(page.getByRole('link', { name: 'Back to manifests' })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'Back to pickup runs' })).toHaveAttribute(
       'href',
       '/manifests',
     );
@@ -809,7 +1048,7 @@ test.describe('the manifests: coming back from a manifest', () => {
     return view;
   }
 
-  const backLink = (page: Page) => page.getByRole('link', { name: 'Back to manifests' });
+  const backLink = (page: Page) => page.getByRole('link', { name: 'Back to pickup runs' });
 
   /** Where the officer should be: the page they left, read again, with focus on the manifest they opened. */
   async function expectTheOfficerBack(page: Page, api: ManifestApi) {
@@ -863,7 +1102,7 @@ test.describe('the manifests: coming back from a manifest', () => {
     await page.getByRole('button', { name: 'Next page' }).click();
     await page.getByRole('link', { name: opened }).click();
     await expect(page.getByRole('heading', { level: 1, name: opened })).toBeVisible();
-    await page.getByRole('link', { name: 'Manifests' }).first().click();
+    await menuEntry(page, 'Pickup runs').click();
     await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
     await expect(page.getByText(/on page 2/)).toHaveCount(0);
 
@@ -915,7 +1154,9 @@ test.describe('the manifests: coming back from a manifest', () => {
     await page.route(`**/api/v1/pickup-manifests/${MANY[7]?.id ?? ''}`, failing(404, 'NOT_FOUND'));
 
     await page.getByRole('link', { name: opened }).click();
-    await expect(page.getByRole('heading', { level: 1, name: 'Manifest not found' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Pickup run not found' }),
+    ).toBeVisible();
     await expect(backLink(page)).toHaveAttribute('href', '/manifests?state=DRAFT');
     const reads = listRequests(api).length;
     await backLink(page).click();
@@ -930,7 +1171,9 @@ test.describe('the manifests: coming back from a manifest', () => {
     // An identifier that is a manifest's in form, and that the stand-in does not hold.
     await open(page, '/manifests/a2000000-0000-4000-8000-0000000000ff', FIVE_AT_A_TIME);
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Manifest not found' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Pickup run not found' }),
+    ).toBeVisible();
     await expect(backLink(page)).toHaveAttribute('href', '/manifests');
   });
 
@@ -967,7 +1210,7 @@ test.describe('the manifests: coming back from a manifest', () => {
 
     await backLink(page).click();
 
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Pickup runs' })).toBeFocused();
     await expect(page.getByText(/on page 2/)).toBeVisible();
     await expect(page.getByRole('link', { name: opened })).toHaveCount(0);
   });
@@ -978,12 +1221,12 @@ test.describe('the manifests: coming back from a manifest', () => {
     const release = await holdReads(page);
 
     await backLink(page).click();
-    await expect(page.getByText('Loading the manifests…')).toBeVisible();
-    await page.getByRole('combobox', { name: 'State' }).focus();
+    await expect(page.getByText('Loading pickup runs')).toBeAttached();
+    await page.getByRole('tab', { name: 'Draft' }).focus();
     release();
 
     await expect(page.getByRole('link', { name: opened })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'State' })).toBeFocused();
+    await expect(page.getByRole('tab', { name: 'Draft' })).toBeFocused();
   });
 
   test('says there are no manifests on a later page that has emptied, and goes to the first only when asked', async ({
@@ -995,14 +1238,14 @@ test.describe('the manifests: coming back from a manifest', () => {
 
     await backLink(page).click();
 
-    await expect(page.getByRole('heading', { name: 'No manifests on this page' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'No manifests yet' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No pickup runs on this page' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No pickup runs yet' })).toHaveCount(0);
     expect(listRequests(api)).toHaveLength(reads + 1);
 
     await page.getByRole('button', { name: 'Back to first page' }).click();
 
     await expect(page.getByRole('link', { name: codeOf(0) })).toBeVisible();
-    await expect(page.locator('.ui-queue-table__results')).toBeFocused();
+    await expect(page.getByRole('region', { name: 'Pickup runs' })).toBeFocused();
     expect(listRequests(api).at(-1)?.search).toBe('?state=DRAFT');
   });
 
@@ -1027,10 +1270,14 @@ test.describe('the manifests: coming back from a manifest', () => {
 
     await backLink(page).click();
 
-    await expect(page.getByText(/That page of the manifests could not be opened/)).toBeVisible();
+    await expect(
+      page
+        .getByRole('alert')
+        .filter({ hasText: 'That page of the pickup runs could not be opened' }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
     await expect(page).toHaveURL('/manifests?state=DRAFT');
-    await expect(page.getByRole('combobox', { name: 'State' })).toHaveValue('DRAFT');
+    await expect(page.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('body')).not.toContainText('Diagnostic text');
 
     await page.getByRole('button', { name: 'Back to first page' }).click();
@@ -1050,7 +1297,7 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
     name: 'the list that a filter empties',
     reach: async (page) => {
       await open(page, '/manifests?state=COMPLETED&date=2026-11-05', filterWorld());
-      await expect(page.getByRole('heading', { name: 'No manifests match' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'No pickup runs match' })).toBeVisible();
     },
   },
   {
@@ -1077,15 +1324,18 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
       await open(page, '/manifests/new');
       await page.getByRole('checkbox', { name: 'Choose ACC-PR-9WXH4T' }).first().check();
       await typeDate(page, '04112026');
-      await expect(page.getByRole('heading', { level: 3, name: 'ACC-PR-9WXH4T' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 4, name: 'ACC-PR-9WXH4T' })).toBeVisible();
     },
   },
   {
     name: 'a draft manifest',
     reach: async (page) => {
       await open(page, DRAFT);
-      await expect(page.getByRole('table', { name: 'Stops' })).toBeVisible();
-      await expect(page.getByText('Demo Fabrics Ltd')).toBeVisible();
+      // The stops are a table where the box they are in has room (40rem) and a list of cards where it has not: at 1280px with the menu open the main column of the record is cards.
+      await expect(
+        page.getByRole('table', { name: 'Stops' }).or(page.getByRole('list', { name: 'Stops' })),
+      ).toBeVisible();
+      await expect(page.getByText('Demo Fabrics Ltd').first()).toBeVisible();
     },
   },
   {
@@ -1117,6 +1367,71 @@ const SCREENS: { name: string; reach: (page: Page) => Promise<void> }[] = [
   },
 ];
 
+test.describe('the pickup runs, drawn for the room they have (the Product Owner, 10 November 2026)', () => {
+  // Break caught: a table that scrolls sideways at 768px (a box of 41rem), where no table may, or that takes a column away that it has room for. The four columns fit, so all four are drawn and the box
+  // scrolls nowhere.
+  test('keeps the table at 768px with every column in view, and never scrolls it sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, '/manifests');
+
+    const table = page.getByRole('table', { name: 'Pickup runs' });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Pickup run / hub',
+      'State',
+      'Service date',
+      'Rider / progress',
+    ]);
+    expect(
+      await page
+        .locator('.ui-data-table__scroller')
+        .evaluate((box) => box.scrollWidth - box.clientWidth),
+    ).toBeLessThanOrEqual(0);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught: a card that tells less than the row it replaces (the rider and the progress, the hub or the day left out where the table has no room for its columns).
+  test('draws a card with every fact of a run at 390px, each a label and its value', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, '/manifests');
+
+    const cards = page.getByRole('list', { name: 'Pickup runs' }).getByRole('listitem');
+    await expect(cards.first()).toBeVisible();
+    await expect(cards.first().getByRole('term')).toHaveText([
+      'Service date',
+      'Hub',
+      'Rider / progress',
+    ]);
+    await expect(cards.first().getByRole('definition').nth(1)).not.toBeEmpty();
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+});
+
+test.describe('the builder’s pool, drawn for the room it has (the Product Owner, 10 November 2026)', () => {
+  // Break caught: a card that tells less than the row it replaces (the hub under the address, the count of packages, or the day left out where the table has no room for its columns).
+  test('draws a card for each request of the pool at 390px with every fact, each a label and its value', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, '/manifests/new');
+
+    const cards = page
+      .getByRole('list', { name: 'Confirmed pickups waiting for a pickup run' })
+      .getByRole('listitem');
+    await expect(cards.first()).toBeVisible();
+    await expect(cards.first().getByRole('term')).toHaveText([
+      'Promised for',
+      'Pickup address / hub',
+      'Packages',
+    ]);
+    expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+  });
+});
+
 test.describe('every screen, at the verified widths', () => {
   for (const { width, height } of VIEWPORTS) {
     for (const screen of SCREENS) {
@@ -1129,6 +1444,7 @@ test.describe('every screen, at the verified widths', () => {
 
         expect(await wcagViolations(page)).toEqual([]);
         expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+        await expectNoTableScrollsSideways(page);
         await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
       });
     }
@@ -1147,8 +1463,10 @@ test.describe('every screen, at the verified widths', () => {
       expect(await wcagViolations(page)).toEqual([]);
       await page.keyboard.press('Escape');
 
-      await page.getByRole('button', { name: 'Cancel the manifest' }).first().click();
-      await expect(page.getByRole('alertdialog', { name: 'Cancel this manifest?' })).toBeVisible();
+      await chooseAct(page, 'Cancel the pickup run');
+      await expect(
+        page.getByRole('alertdialog', { name: 'Cancel this pickup run?' }),
+      ).toBeVisible();
       expect(await wcagViolations(page)).toEqual([]);
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     });
@@ -1199,7 +1517,7 @@ test.describe('enlarged text, forced colours and reduced motion', () => {
   test('with reduced motion nothing moves when a dialog of an act opens', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await open(page, DRAFT);
-    await page.getByRole('button', { name: 'Dispatch the manifest' }).first().click();
+    await page.getByRole('button', { name: 'Dispatch the pickup run' }).first().click();
     await expect(page.getByRole('alertdialog')).toBeVisible();
 
     const running = await page.evaluate(
