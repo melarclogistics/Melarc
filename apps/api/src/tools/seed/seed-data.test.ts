@@ -11,6 +11,7 @@ import {
   IDENTITY_REASON_DOMAINS,
   OWNERSHIP_SCOPES,
   PERMISSION_DOMAINS,
+  REASON_FAILURE_CATEGORIES,
   WORKFLOW_REASON_DOMAINS,
 } from '../../platform/database/schema/reference-data.js';
 import {
@@ -684,6 +685,7 @@ describe('the workflow reasons (domain-model.md section 3.9)', () => {
           reason?.requiresNote,
           reason?.requiresContactAttempt,
           reason?.requiresPhoto,
+          reason?.failureCategory,
         ],
         row.code,
       ).toEqual([
@@ -692,7 +694,36 @@ describe('the workflow reasons (domain-model.md section 3.9)', () => {
         row.requiresNote,
         row.requiresContactAttempt,
         row.requiresPhoto,
+        row.failureCategory,
       ]);
+    }
+  });
+
+  // Break caught (D-A4, OB-S1-73): a failure reason bound to another category than the document gives it, or none, or a reason of another domain that carries one: the door wait
+  // of VENDOR_UNAVAILABLE and the escalation-only rule of REFUSED_COLLECTION would then follow the pairing and not the reason. The mapping is the document's table, written out here
+  // so that the table and the seed cannot drift together.
+  it('binds each of the eight failure reasons to the one category the document gives it, two under each, and no other reason to any', () => {
+    const bound = Object.fromEntries(
+      WORKFLOW_REASONS.filter((reason) => reason.domain === 'PICKUP_FAILURE').map((reason) => [
+        reason.code,
+        reason.failureCategory,
+      ]),
+    );
+    expect(bound).toEqual({
+      VENDOR_NOT_AT_LOCATION: 'VENDOR_UNAVAILABLE',
+      VENDOR_UNREACHABLE_BY_PHONE: 'VENDOR_UNAVAILABLE',
+      ENTRY_REFUSED_BY_SECURITY: 'ACCESS_DENIED',
+      LOCATION_CLOSED: 'ACCESS_DENIED',
+      PARCELS_NOT_PACKED: 'PARCEL_NOT_READY',
+      VENDOR_ASKED_TO_COME_BACK_LATER: 'PARCEL_NOT_READY',
+      VENDOR_REFUSED_HANDOVER: 'REFUSED_COLLECTION',
+      PARCEL_NOT_ACCEPTABLE: 'REFUSED_COLLECTION',
+    });
+    for (const category of REASON_FAILURE_CATEGORIES) {
+      expect(Object.values(bound).filter((each) => each === category)).toHaveLength(2);
+    }
+    for (const reason of WORKFLOW_REASONS.filter((each) => each.domain !== 'PICKUP_FAILURE')) {
+      expect(reason.failureCategory, reason.code).toBeNull();
     }
   });
 

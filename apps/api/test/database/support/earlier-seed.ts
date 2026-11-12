@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type pg from 'pg';
@@ -76,4 +76,49 @@ export async function applyMigration(client: pg.Client, fileName: string): Promi
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * The statements of the migration `*_failure_category_and_photo.sql` that give the eight failure reasons their categories in a database seeded before it (D-A4): the update policy
+ * that exists for the migration alone, the backfill under the seed capability, the dropping of that policy, and the check that makes a category mandatory for the failure domain. Read
+ * from the migration file itself (found by its name, whatever its number), so that a test of "a database seeded earlier" runs the very text the migrator runs. A database migrated to
+ * the head already holds the check, and the migrations that wrote the failure reasons (0054) write them with no category, so a test that applies those again drops the check first and
+ * puts it back after the backfill (`applyReasonMigrations` of `pickup-reasons.db.test.ts`).
+ */
+export interface FailureCategoryMigration {
+  readonly backfill: readonly string[];
+  readonly constraint: string;
+}
+
+export function failureCategoryMigration(): FailureCategoryMigration {
+  const files = readdirSync(MIGRATIONS).filter((name) =>
+    name.endsWith('_failure_category_and_photo.sql'),
+  );
+  if (files.length !== 1 || files[0] === undefined) {
+    throw new Error(
+      `there are ${String(files.length)} migrations named *_failure_category_and_photo`,
+    );
+  }
+  const statements = readFileSync(resolve(MIGRATIONS, files[0]), 'utf8')
+    .replaceAll('\r\n', '\n')
+    .split('--> statement-breakpoint')
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+  const one = (needle: string): string => {
+    const found = statements.filter((statement) => statement.includes(needle));
+    if (found.length !== 1 || found[0] === undefined) {
+      throw new Error(
+        `${files[0] ?? 'the migration'} holds ${String(found.length)} statements with ${needle}`,
+      );
+    }
+    return found[0];
+  };
+  return {
+    backfill: [
+      one('CREATE POLICY "reason_code_seed_category"'),
+      one('DO $failure_categories$'),
+      one('DROP POLICY "reason_code_seed_category"'),
+    ],
+    constraint: one('ADD CONSTRAINT "reason_code_failure_category_by_domain"'),
+  };
 }

@@ -5,7 +5,11 @@ import { REASON_DOMAINS } from '../../src/platform/database/schema/reference-dat
 import { MIGRATION_ROLE } from '../../src/tools/database/safety.js';
 import { IDENTITY_REASONS } from '../../src/tools/seed/reasons.js';
 import { WORKFLOW_REASONS } from '../../src/tools/seed/workflow-reasons.js';
-import { applyMigration, seedEarlierContent } from './support/earlier-seed.js';
+import {
+  applyMigration,
+  failureCategoryMigration,
+  seedEarlierContent,
+} from './support/earlier-seed.js';
 import { observe, type Observer } from './support/observe.js';
 import { seedReferenceData } from './support/seeded.js';
 import {
@@ -49,6 +53,12 @@ ALTER TABLE reason_code ADD CONSTRAINT reason_code_domain_closed CHECK (domain I
  * code) cannot take its set again. So it is not applied then: the files that write codes (0054, 0061) are the ones written to be repeated.
  */
 const applyReasonMigrations = async (w: Pick<World, 'migration' | 'admin'>): Promise<void> => {
+  // Migration 0054 wrote the failure reasons with no category, and the check of migration 0083 (a category for each failure reason, none for any other) refuses that: a database
+  // seeded earlier met 0054 long before 0083 added the column. So the check is put aside while the older migrations write, and put back after 0083's own backfill gives the categories.
+  const categories = failureCategoryMigration();
+  await w.migration.query(
+    'ALTER TABLE reason_code DROP CONSTRAINT IF EXISTS reason_code_failure_category_by_domain',
+  );
   const later = await w.admin.query(
     `select 1 from reason_code where domain = 'PICKUP_CARRYOVER' limit 1`,
   );
@@ -57,6 +67,8 @@ const applyReasonMigrations = async (w: Pick<World, 'migration' | 'admin'>): Pro
     await applyMigration(w.migration, file);
     if (file === MIGRATIONS[0]) await w.migration.query(CURRENT_DOMAINS);
   }
+  for (const statement of categories.backfill) await w.migration.query(statement);
+  await w.migration.query(categories.constraint);
 };
 const codesOf = (domain: string): string[] =>
   WORKFLOW_REASONS.filter((reason) => reason.domain === domain)
@@ -95,7 +107,7 @@ async function world(): Promise<World> {
 const reasons = (observer: Observer) =>
   observer.rows<Record<string, unknown>>(
     `select code, domain, valid_checkpoints, label, requires_note, requires_photo, requires_contact_attempt, requires_approval,
-            attribution, consumes_delivery_attempt, requires_ops_review, requires_escalation, active, permitted_operations
+            attribution, consumes_delivery_attempt, requires_ops_review, requires_escalation, active, permitted_operations, failure_category
        from reason_code order by code collate "C"`,
   );
 
@@ -105,7 +117,8 @@ async function acceptsDomain(admin: pg.Client, domain: string): Promise<string |
   try {
     return await sqlState(
       admin,
-      `insert into reason_code (code, domain, label, attribution) values ('FIXTURE_DOMAIN_PROBE', $1, 'Probe', 'MELARC')`,
+      `insert into reason_code (code, domain, label, attribution, failure_category)
+       values ('FIXTURE_DOMAIN_PROBE', $1, 'Probe', 'MELARC', case when $1::text = 'PICKUP_FAILURE' then 'PARCEL_NOT_READY' end)`,
       [domain],
     );
   } finally {
@@ -198,6 +211,31 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
     // then hand to different people.
     it('holds exactly the reasons a new seed writes, row for row', async () => {
       expect(await reasons(earlier.observer)).toEqual(await reasons(fresh.observer));
+    });
+
+    // Break caught (D-A4, OB-S1-73): the backfill of migration 0083 leaving a failure reason of a database seeded earlier with no category, or with another one than the seed gives
+    // it (the pairing would then differ between the owner's database and a new one), a category on a reason that is not a failure reason, or the update policy it needs left behind
+    // for the next writer (reason_code has no standing update path).
+    it('binds each failure reason to its category as a new seed does, binds no other reason, and leaves no update policy behind', async () => {
+      const rows = await reasons(earlier.observer);
+      expect(
+        rows
+          .filter((row) => row.domain === 'PICKUP_FAILURE')
+          .map((row) => [row.code, row.failure_category]),
+      ).toEqual(
+        WORKFLOW_REASONS.filter((reason) => reason.domain === 'PICKUP_FAILURE')
+          .map((reason) => [reason.code, reason.failureCategory])
+          .toSorted((one, other) => (String(one[0]) < String(other[0]) ? -1 : 1)),
+      );
+      expect(
+        rows
+          .filter((row) => row.domain !== 'PICKUP_FAILURE')
+          .every((row) => row.failure_category === null),
+      ).toBe(true);
+      const policies = await earlier.observer.rows<{ polname: string }>(
+        `select polname from pg_policy where polrelid = 'public.reason_code'::regclass`,
+      );
+      expect(policies.map((policy) => policy.polname)).not.toContain('reason_code_seed_category');
     });
 
     it('holds the four codes of the stop skip, once each', async () => {

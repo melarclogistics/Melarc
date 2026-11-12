@@ -113,6 +113,7 @@ describe('the reference seed plan', () => {
         'requires_escalation',
         'active',
         'permitted_operations',
+        'failure_category',
       ],
     };
     for (const [table, rows] of Object.entries(plan.payload)) {

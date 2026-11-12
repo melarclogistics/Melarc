@@ -6,6 +6,7 @@ import type { TestClient, TestResponse } from '../../src/test-support/test-clien
 import { refusalReleasedFor } from '../../src/pickup/attempt-ceiling.js';
 import { PICKUP_FAILURE_CATEGORIES } from '../../src/pickup/pickup-vocabulary.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
+import { photoOf } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { arrangeRun, arrangedRider, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -23,8 +24,8 @@ import {
  * - **The stop becomes `FAILED`** with its fixed category and the snapshot of its reason as the catalogue holds it (the label and the attribution, the note, the
  *   contact attempts), at the database's own moment; it keeps its place, its arrival and its claim; the request is not written; and one event is written in the
  *   rider's name, bound to the stored stop. A run whose last stop failed with nothing collected is completed by the system, and no other run is.
- * - **The category is one of the four, the reason is the catalogue's, and what else is mandatory is read from the reason**: the note, a contact attempt and a
- *   photo (which cannot be given yet, so a reason that asks for one is refused and said so). Nothing is made by a refusal.
+ * - **The category is one of the four, the reason is the catalogue's and belongs to that category, and what else is mandatory is read from the reason**: the note, a
+ *   contact attempt and a photo (the pairings in pickup-failure-category.db.test.ts, the photo in pickup-failure-photo.db.test.ts). Nothing is made by a refusal.
  * - **Only the assigned rider, on a started run, on an arrived stop, on the stop's current version**; a stop with a count is never failed.
  * - **Physical failure is terminal** (`AC-SLICE-001-32`): nothing moves a failed stop back, for any writer.
  * - **A refused collection is escalation-only** (`AC-SLICE-001-33`): the office cannot reschedule it, whatever the cap, until hub Senior Ops force-extends it; it
@@ -323,12 +324,27 @@ describe('reportPickupFailure: the stop becomes FAILED', () => {
     expect(event?.detail).toEqual({ failure_category: 'VENDOR_UNAVAILABLE', contact_attempts: 3 });
   });
 
-  // Break caught: a category refused or mapped to another (AC-SLICE-001-30: the four are accepted).
+  // Break caught: a category refused or mapped to another (AC-SLICE-001-30: the four are accepted). Each is reported with a reason of its own (D-A4: the catalogue binds a reason to
+  // one category, and the pairings are tried one by one in pickup-failure-category.db.test.ts); the two access refusals ask for a photo, and the vendor-unavailable ones for a contact attempt.
   it.each(PICKUP_FAILURE_CATEGORIES)('accepts the fixed category %s', async (category) => {
     const arranged = await run();
     const stop = first(arranged);
-    const response = await fail(arranged.rider, stop.id, { ...ORDINARY, category });
-    expect(response.status).toBe(200);
+    const body = {
+      VENDOR_UNAVAILABLE: {
+        reason_code: 'VENDOR_UNREACHABLE_BY_PHONE',
+        contact_attempts: [
+          { method: 'PHONE_CALL', attempted_at: '2026-11-04T08:00:00Z', outcome: 'No answer' },
+        ],
+      },
+      ACCESS_DENIED: {
+        reason_code: 'LOCATION_CLOSED',
+        evidence_ids: [(await photoOf(routes, arranged.rider, stop.id)).id],
+      },
+      PARCEL_NOT_READY: { reason_code: 'PARCELS_NOT_PACKED' },
+      REFUSED_COLLECTION: { reason_code: 'PARCEL_NOT_ACCEPTABLE' },
+    }[category];
+    const response = await fail(arranged.rider, stop.id, { category, note: NOTE, ...body });
+    expect(response.status, response.text).toBe(200);
     expect((response.json() as StopBody).failure_category).toBe(category);
     expect((await stopOf(stop.id)).failure_category).toBe(category);
   });
@@ -440,13 +456,19 @@ describe('reportPickupFailure: what the body and the reason must say', () => {
       'REASON_REQUIRED',
     ],
     [
-      'a reason that asks for a photo, which cannot be given yet',
+      'a reason that asks for a photo, with none',
       { category: 'ACCESS_DENIED', reason_code: 'LOCATION_CLOSED', note: NOTE },
       422,
       'REASON_REQUIRED',
     ],
     [
-      'a reference to evidence, none of which can be stored yet',
+      'a reason reported under a category that is not its own',
+      { ...ORDINARY, category: 'ACCESS_DENIED' },
+      400,
+      'VALIDATION_FAILED',
+    ],
+    [
+      'a reference to evidence nobody stored',
       { ...ORDINARY, evidence_ids: [randomUUID()] },
       422,
       'EVIDENCE_NOT_STORED',
@@ -891,8 +913,9 @@ describe('the door wait (pickup-collection.md: a vendor who is simply busy is no
     expect((await fail(arranged.rider, stop.id, { ...body })).status).toBe(200);
   });
 
-  // Break caught: a category that is held by a reason's wording, so that the same category with another reason slips through, or a refusal that outranks the reason's own.
-  it('holds the category whatever its reason, and tells what is wrong with the body before it tells the rider to wait', async () => {
+  // Break caught: a pairing that is judged after the wait (a reason of another category told to wait as though it were a vendor-unavailable failure, or accepted once the wait has
+  // passed), or a refusal that outranks the reason's own. Since D-A4 the wait follows the reason, which belongs to one category (pickup-failure-category.db.test.ts goes through the pairings).
+  it('judges the pairing and the body before it tells the rider to wait', async () => {
     const arranged = await run({ stops: 2, stopStates: ['ARRIVED', 'ARRIVED'] });
     const [one, two] = arranged.stops;
     await arrivedAgo(one?.id ?? '', '2 minutes');
@@ -902,7 +925,7 @@ describe('the door wait (pickup-collection.md: a vendor who is simply busy is no
       ...UNAVAILABLE,
       reason_code: 'PARCELS_NOT_PACKED',
     });
-    expect(outcome(other)).toEqual([422, 'PICKUP_DOOR_WAIT_NOT_ELAPSED']);
+    expect(outcome(other)).toEqual([400, 'VALIDATION_FAILED']);
     // No note where the reason asks for one: the missing note is the first thing said.
     const noNote = await fail(arranged.rider, two?.id ?? '', {
       category: 'VENDOR_UNAVAILABLE',
