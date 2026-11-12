@@ -1976,6 +1976,23 @@ describe('DataTable: a mistake of the page that it can do without is a throw in 
       logged.mockRestore();
     },
   );
+
+  // Break caught (the Product Owner's review of ba9a18c, item 5): a production table whose cards have no title, which the check above only tells, drew cards with no way to open their record (the card's
+  // title is its button that opens). The row-header cell, which a row of the table opens its record from, is the card's opener then, so that a card can always open its record.
+  it('a card in production that has no title opens its record by the row-header cell', async () => {
+    vi.stubEnv('PROD', true);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const onOpen = vi.fn();
+    const user = userEvent.setup();
+    render(<Table card={cardOf} cardTitle={undefined} layout="cards" onOpen={onOpen} />);
+
+    const cards = within(screen.getByRole('list', { name: 'Pickup requests' }));
+    await user.click(cards.getByRole('button', { name: `Open ${FIRST.code}, ${FIRST.sender}` }));
+
+    expect(onOpen).toHaveBeenCalledWith(FIRST);
+    expect(cards.getAllByRole('button', { name: /^Open / })).toHaveLength(REQUESTS.length);
+    logged.mockRestore();
+  });
 });
 
 describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4)', () => {

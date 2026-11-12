@@ -750,6 +750,13 @@ export function DataTable<Item>({
   if (rowHeaderColumns.length > 1) {
     throw new Error(`The table "${label}" has more than one row-header column.`);
   }
+  /**
+   * The words of a card's title, which is its button that opens the record: the page's `cardTitle`. A table that opens its rows and was given none is a mistake that is thrown in development and
+   * logged in production (below), where the card still must be able to open its record (the review of ba9a18c): its title is the row-header cell then, which a row of the table opens from.
+   */
+  const rowHeaderCell = rowHeaderColumns[0]?.cell;
+  const cardTitleOf =
+    cardTitle ?? (onOpen !== undefined && rowHeaderCell !== undefined ? rowHeaderCell : undefined);
   if (onOpen !== undefined && (openLabel === undefined || rowHeaderColumns.length === 0)) {
     throw new Error(
       `The table "${label}" opens rows, so it needs a row-header column and a label for its button.`,
@@ -1159,9 +1166,9 @@ export function DataTable<Item>({
                 >
                   {box(row, tab)}
                   <div className="ui-data-table__card-body">
-                    {cardTitle === undefined ? null : (
+                    {cardTitleOf === undefined ? null : (
                       <CardHeading level={cardHeadingLevel}>
-                        {opener(row, tab, cardTitle(row.original))}
+                        {opener(row, tab, cardTitleOf(row.original))}
                       </CardHeading>
                     )}
                     {card(row.original)}
