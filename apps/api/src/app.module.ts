@@ -132,7 +132,11 @@ function runtimePortBindings(config: AppConfig): PortBindings {
     // credential is the `Secret` of the configuration. No environment selects R2 until the owner provides a bucket; nothing here calls the network until one does.
     evidenceStore:
       evidence.kind === 'in-process'
-        ? { useFactory: () => new InProcessEvidenceStore() }
+        ? {
+            // The stand-in judges a redemption by the application's own clock, which a test moves.
+            useFactory: (clock: Clock) => new InProcessEvidenceStore({ now: () => clock.now() }),
+            inject: [CLOCK],
+          }
         : {
             useFactory: () =>
               new R2EvidenceStore({

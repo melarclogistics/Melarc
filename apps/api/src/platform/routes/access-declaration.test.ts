@@ -115,6 +115,28 @@ describe('what an authenticated route must state (S0.26)', () => {
     });
   });
 
+  it('keeps owner when it is true, refuses it as anything else, and refuses it on a route that names its key', () => {
+    expect(
+      detailOf(Self({ surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true }))
+        ?.authenticated?.owner,
+    ).toBe(true);
+    expect(
+      detailOf(Self({ surfaces: ['RIDER_ANDROID'], activity: 'qualifying' }))?.authenticated,
+    ).not.toHaveProperty('owner');
+    for (const given of [false, 'owner', 1, null]) {
+      expect(() =>
+        Self({ surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: given as never }),
+      ).toThrow(/owner: true/);
+    }
+    expect(() =>
+      RequiresPermission('pickup.read', {
+        surfaces: ['OPS_PORTAL'],
+        activity: 'qualifying',
+        owner: true,
+      }),
+    ).toThrow(/only a self route states owner/);
+  });
+
   // Break caught (R76; the review of 5 November 2026): the ceiling of the operations that cause a text declared with a value that does not mean it ("false", "yes", 1), which a
   // guard testing for truth would read as a declaration and a reader of the route would read as none; or declared and lost, so that the guard never admits the counter.
   it('keeps providerInitiating when it is true, and refuses it as anything else', () => {
@@ -384,6 +406,14 @@ describe('the declarations state the operation in the description, so the guard 
       return 'x';
     }
 
+    @Get('owner')
+    @ContractOperation('ownerOperation')
+    @Self({ ...EVERY_SURFACE, owner: true })
+    @ApiResponse({ status: 200, description: 'OK' })
+    owner(): string {
+      return 'x';
+    }
+
     @Get('permission')
     @ContractOperation('permissionOperation')
     @RequiresPermission('staff.read', EVERY_SURFACE)
@@ -421,6 +451,15 @@ describe('the declarations state the operation in the description, so the guard 
 
     expect('security' in self).toBe(false);
     expect(self['x-permission']).toBe('self');
+  });
+
+  // Break caught (S1.11): the contract's word `owner` (the evidence operations) lost, so that a route which decides its permission from the owner of the record is described as an
+  // operation on the caller's own record; or `owner` accepted on a route that names its key, which would be two statements of one permission.
+  it('states an operation whose permission is the act’s that it evidences as inheriting the authenticated default, with the permission owner', async () => {
+    const owner = operation(await document(), '/described/owner', 'get');
+
+    expect('security' in owner).toBe(false);
+    expect(owner['x-permission']).toBe('owner');
   });
 
   it('states the permission key of a permission operation, and inherits the authenticated default', async () => {

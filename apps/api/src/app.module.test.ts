@@ -89,6 +89,7 @@ import {
   ATTESTATION_VERIFIER,
   type AttestationVerifier,
 } from './platform/auth/ports/attestation-verifier.port.js';
+import { EVIDENCE_STORE } from './platform/auth/ports/evidence-store.port.js';
 import { IdentityDirectoryNotBuiltError } from './staff/postgres.staff-identity-directory.adapter.js';
 import { NotAVendorQuestionError } from './vendor/postgres.vendor-account-directory.adapter.js';
 import { createLogger } from './platform/logging/create-logger.js';
@@ -238,6 +239,7 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
         port.name !== 'Clock' &&
         port.name !== 'TokenService' &&
         port.name !== 'AttestationVerifier' &&
+        port.name !== 'EvidenceStore' &&
         port.name !== 'Metrics',
     )) {
       expect(() => resolve(entry.token), entry.name).toThrow();
@@ -345,6 +347,7 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
         TOKEN_SERVICE,
         METRICS,
         ATTESTATION_VERIFIER,
+        EVIDENCE_STORE,
         UNIT_OF_WORK,
         SESSION_STORE,
         IDENTITY_DIRECTORY,
@@ -846,9 +849,15 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     });
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS, ATTESTATION_VERIFIER]);
-    // The four bindings and the check that no inert describe adapter was bound; the check is not exported.
-    expect(module.providers).toHaveLength(5);
+    expect(module.exports).toEqual([
+      CLOCK,
+      TOKEN_SERVICE,
+      METRICS,
+      ATTESTATION_VERIFIER,
+      EVIDENCE_STORE,
+    ]);
+    // The five bindings (the evidence store since S1.11) and the check that no inert describe adapter was bound; the check is not exported.
+    expect(module.providers).toHaveLength(6);
     // The platform and the domain modules of the product (S0.35: permission, settings, staff), which depend on it and which it never
     // imports: a domain module is added here as its slice builds it, and `productRoutes: false` leaves them out.
     expect(module.imports).toHaveLength(1 + DOMAIN_MODULES.length);
@@ -862,8 +871,14 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
     const module = AppModule.register(runtime);
 
     expect(module.global).toBe(true);
-    expect(module.exports).toEqual([CLOCK, TOKEN_SERVICE, METRICS, ATTESTATION_VERIFIER]);
-    expect(module.providers).toHaveLength(5);
+    expect(module.exports).toEqual([
+      CLOCK,
+      TOKEN_SERVICE,
+      METRICS,
+      ATTESTATION_VERIFIER,
+      EVIDENCE_STORE,
+    ]);
+    expect(module.providers).toHaveLength(6);
   });
 
   // Break caught: the describe composition exporting more than the seventeen tokens, or fewer.
@@ -936,6 +951,7 @@ describe('the composition root refuses what its environment refuses (S0.2)', () 
       'ATTESTATION_VERIFIER',
       'DELIVERY_EMAIL_ADAPTER',
       'DELIVERY_SMS_ADAPTER',
+      'EVIDENCE_STORE',
       'KEY_CUSTODY',
     ]);
   });
@@ -1393,6 +1409,7 @@ describe('portProviders keeps the port its own token and refuses a malformed bin
       deliveryProvider: { useExisting: 'X' },
       textMessageSender: { useExisting: 'X' },
       attestationVerifier: { useExisting: 'X' },
+      evidenceStore: { useExisting: 'X' },
       metrics: { useExisting: 'X' },
     });
 

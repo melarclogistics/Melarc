@@ -69,6 +69,8 @@ import { NotFoundFallback } from './http/not-found-fallback.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { ShutdownRegistry } from './lifecycle/shutdown.registry.js';
 import { APP_CONFIG, LOGGER } from './platform.tokens.js';
+import { EvidenceController } from './evidence/evidence.controller.js';
+import { evidenceProviders } from './evidence/evidence-providers.js';
 import { RecordLookupController } from './lookup/record-lookup.controller.js';
 import { recordLookupProviders } from './lookup/record-lookup-providers.js';
 import { QueueSummaryController } from './queue-summary/queue-summary.controller.js';
@@ -139,6 +141,7 @@ export class PlatformModule {
               CredentialRecoveryController,
               QueueSummaryController,
               RecordLookupController,
+              EvidenceController,
             ],
       imports: [
         HealthModule,
@@ -194,6 +197,8 @@ export class PlatformModule {
         ...queueSummaryProviders,
         // The service of the lookup of a record by its code, a name or a phone number (task C2), built on the runner above and the sources the domains own.
         ...recordLookupProviders,
+        // The service of the three evidence operations (S1.11), built on the runner above, the idempotency store and the object-store port the composition root bound.
+        ...evidenceProviders,
         NotFoundFallback,
         LifecycleService,
         ShutdownRegistry,

@@ -5641,6 +5641,17 @@ paths:
   /evidence:
     post:
       operationId: createEvidence
+      # S1.11. Rider native operation: reachable through the dedicated non-browser host as well as same-origin (the Rider declares and completes a record).
+      # Same-origin stays FIRST so a generated browser client keeps the default the root list guarantees.
+      servers:
+        - url: /api/v1
+          description: Same-origin. The default for any browser-delivered surface.
+        - url: https://api.melarc.example/v1
+          description: >-
+            Dedicated non-browser host for the Rider native client. Bearer-authenticated,
+            never cookie-authenticated - a browser would not attach the host-only session
+            cookie here, which is why this host is safe for the native app and unsafe for
+            Ops or Vendor.
       x-permission: owner
       x-error-codes:
         [
@@ -5664,6 +5675,14 @@ paths:
         another act, so its authorization is that act's authorization. MSC-DEC-253 confirmed that
         reading (OQ-098 closed): `evidence` is not a permission domain, and `x-permission: owner`
         stands as the stricter option.
+
+        **As built (S1.11).** The permission is that of the act the evidence is about, found from `owner_type`: the first owner is a pickup stop (`PICKUP_STOP`, purpose
+        `COLLECTION_PROOF`) whose failure the rider reports, so the caller is a rider holding `pickup.failure.report`, and the stop is one it has arrived at on a run in progress
+        that is assigned to it (`NOT_FOUND` for work that is not its own, `STATE_CONFLICT` for a stop not arrived at). An owner type the platform has no act for is
+        `PERMISSION_DENIED`, never defaulted. `content_type` must be one of the platform setting `evidence_upload_allowed_mime_types` and `byte_size` at most
+        `evidence_upload_max_bytes` (development values: JPEG, PNG or PDF, 10 MB), and `checksum_sha256` is the 64 hex digits of the SHA-256 of the bytes. The answer carries
+        the capability to upload that one object: the store itself refuses an upload whose type, exact size or hash is not the one declared. A retry with the same
+        `Idempotency-Key` is told the same record and the same capability, made again from the record.
 
         **Step one of two.** This declares the metadata 34.7 requires and returns opaque upload
         instructions. The bytes are not sent here.
@@ -5712,13 +5731,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /evidence/{id}/complete:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     post:
       operationId: completeEvidenceUpload
+      # S1.11. Rider native operation: reachable through the dedicated non-browser host as well as same-origin (the Rider declares and completes a record).
+      # Same-origin stays FIRST so a generated browser client keeps the default the root list guarantees.
+      servers:
+        - url: /api/v1
+          description: Same-origin. The default for any browser-delivered surface.
+        - url: https://api.melarc.example/v1
+          description: >-
+            Dedicated non-browser host for the Rider native client. Bearer-authenticated,
+            never cookie-authenticated - a browser would not attach the host-only session
+            cookie here, which is why this host is safe for the native app and unsafe for
+            Ops or Vendor.
       x-permission: owner
       x-error-codes:
         [
@@ -5734,6 +5763,11 @@ paths:
       tags: [evidence]
       summary: Confirm the bytes landed, moving the record to STORED
       description: |
+        **As built (S1.11).** The server looks at the object the store holds at the record's key and compares its size, its SHA-256 and its type with what step one declared,
+        and the first bytes with the signature of the declared type (JPEG, PNG or PDF), judged on the bytes. Any difference leaves the record `PENDING_UPLOAD` and is
+        `VALIDATION_FAILED`; a window that has passed is `EVIDENCE_UPLOAD_EXPIRED`; the record of another rider, of another act, and one that does not exist are `NOT_FOUND`.
+        Completing a record that is already `STORED` with the version it has answers it again. The malicious-content check is the owner's open item and is not made.
+
         **Step two of two.** The server validates what actually arrived - content type, byte size and
         checksum against what step one declared - and moves the record to `STORED`. Only then may the
         record be named in an `evidence_ids` array.
@@ -5790,10 +5824,15 @@ paths:
           PERMISSION_DENIED,
           RATE_LIMITED,
           SESSION_INVALID,
+          VALIDATION_FAILED,
         ]
       tags: [evidence]
       summary: Obtain a short-lived, single-object retrieval authorization
       description: |
+        **As built (S1.11).** For the staff who hold `pickup.read` (the read of the subject, a pickup stop), within the hubs of the grant: a record in another hub is
+        `HUB_SCOPE_VIOLATION`, one that does not exist `NOT_FOUND`, an identifier that is not a UUID `VALIDATION_FAILED`, and a look at a record in a hub that is not the actor's
+        own is audited as every staff read is. The capability is returned to the one caller, `Cache-Control: no-store`, and is in no log, metric, event or record.
+
         **Evidence holds no authority of its own**, so this is gated exactly as `createEvidence` is:
         `x-permission: owner` means the caller must hold the read permission of the subject this
         evidence attaches to. **No new Evidence permission is created** - 11.6's domain list is
@@ -5832,6 +5871,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EvidenceRetrievalAuthorization' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
