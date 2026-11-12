@@ -2421,6 +2421,50 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     expect(seen.problems).toEqual([]);
   });
 
+  // Break caught (the Product Owner's review of ba9a18c; WebKit on Linux reported "ResizeObserver loop completed with undelivered notifications" in the test above): a table that changes its rows,
+  // its columns or its cards inside the callback of a ResizeObserver, which draws a layout the observers are then told of again in the very frame that is delivering them. Every callback of every
+  // observer the page makes is wrapped, and the nodes put in or taken out of a table while it runs are listed: as the box narrows to cards and widens to the table again, none is, in any engine.
+  test('puts nothing in a table or takes nothing out of it inside the callback of a ResizeObserver', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const inside: string[] = [];
+      (window as unknown as { __inside: string[] }).__inside = inside;
+      const watcher = new MutationObserver(() => undefined);
+      watcher.observe(document, { childList: true, subtree: true });
+      const Native = window.ResizeObserver;
+      window.ResizeObserver = class extends Native {
+        constructor(callback: ResizeObserverCallback) {
+          super((entries, observer) => {
+            // What happened before the callback is not its doing: what is taken after it is.
+            watcher.takeRecords();
+            callback(entries, observer);
+            for (const record of watcher.takeRecords()) {
+              if (!(record.target instanceof Element)) continue;
+              if (record.target.closest('.ui-data-table') === null) continue;
+              inside.push(
+                `${record.target.className}: ${String(record.addedNodes.length)} in, ${String(record.removedNodes.length)} out`,
+              );
+            }
+          });
+        }
+      };
+    });
+    await openKit(page, 'example-queue', { width: 1280, height: 900 });
+    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(page.locator('.ui-data-table__cards').first()).toBeVisible();
+    await expect(page.locator('.ui-data-table__table')).toHaveCount(0);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
+    await expect(page.locator('.ui-data-table__cards')).toHaveCount(0);
+
+    expect(
+      await page.evaluate(() => (window as unknown as { __inside: string[] }).__inside),
+    ).toEqual([]);
+  });
+
   // Break caught (run 7, Stage 1.3): a table that watches its box and not itself, so that what is in it growing wider (a cell that gets its words later, a face wider than the first) is never seen: the
   // box scrolls sideways until the window is resized. No resize is made here: a cell grows by itself and the table takes the lesser column away.
   test('takes a lesser column away when what is in the table grows, with no change of the window', async ({
@@ -2454,40 +2498,44 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     await expect(wide.getByRole('columnheader', { name: 'Request' })).toBeVisible();
   });
 
-  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing): the table's change to cards left to when React next renders, so that the frame in which the window became
-  // narrow still draws the table. A second observer of the same box, made later than the table's, is told in the same frame after it: by then the cards are drawn and no table is.
-  test('draws the cards in the frame in which the box became narrow, and never the table for a frame', async ({
+  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing; the Product Owner's review of ba9a18c, which moved the change a live resize brings to the next animation frame
+  // so that no observer's callback changes the layout, and so accepts one frame of the earlier layout there): the first measure of a table left to an observer, a timer or a frame, so that the
+  // first frame it shows in a narrow box is the table and the cards come a render later. The first measure is a layout effect, which React finishes before the first paint: every frame that
+  // shows the list in a box of 320px shows cards, sampled before each frame is painted from the first frame of the page.
+  test('draws the cards in every frame it shows in a narrow box, and never the table for a frame', async ({
     page,
   }) => {
-    await openKit(page, 'example-queue', { width: 1280, height: 900 });
-    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
-    await page.evaluate(() => {
-      const root = document.querySelector('.ui-data-table');
-      const probe = root?.querySelector('.ui-data-table__probe');
-      if (root === null || probe === null || probe === undefined) {
-        throw new Error('no table in the page');
-      }
-      const seen: { width: number; table: boolean }[] = [];
-      (window as unknown as { __frames: typeof seen }).__frames = seen;
-      // The probe is what the table watches, and this observer was made after the table's own: it is told in the same frame, after them.
-      new ResizeObserver(() => {
-        seen.push({
-          width: root.clientWidth,
-          table: root.querySelector('.ui-data-table__table') !== null,
-        });
-      }).observe(probe);
+    await page.addInitScript(() => {
+      const drawn: { table: boolean; cards: boolean }[] = [];
+      (window as unknown as { __drawn: typeof drawn }).__drawn = drawn;
+      const sample = (): void => {
+        const table = document.querySelector('.ui-data-table__table') !== null;
+        const cards = document.querySelector('.ui-data-table__cards') !== null;
+        if (table || cards) drawn.push({ table, cards });
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
     });
-
-    await page.setViewportSize({ width: 320, height: 800 });
+    await openKit(page, 'example-queue', { width: 320, height: 800 });
     await expect(page.locator('.ui-data-table__cards').first()).toBeVisible();
     await expect(page.locator('.ui-data-table__table')).toHaveCount(0);
-
-    const frames = await page.evaluate(
-      () => (window as unknown as { __frames: { width: number; table: boolean }[] }).__frames,
+    // Two frames more, so that a table that came later than the cards would be sampled.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              resolve();
+            });
+          });
+        }),
     );
-    const narrow = frames.filter((frame) => frame.width > 0 && frame.width < 640);
-    expect(narrow.length).toBeGreaterThan(0);
-    expect(narrow.filter((frame) => frame.table)).toEqual([]);
+
+    const drawn = await page.evaluate(
+      () => (window as unknown as { __drawn: { table: boolean; cards: boolean }[] }).__drawn,
+    );
+    expect(drawn.filter((frame) => frame.cards).length).toBeGreaterThan(0);
+    expect(drawn.filter((frame) => frame.table)).toEqual([]);
   });
 
   // Break caught (run 7, Stage 1.4; the Product Owner suspected that the fit oscillates with the page's scrollbar on his Windows, whose scrollbars take room: a column dropped shortens the rows, the page

@@ -316,9 +316,34 @@ export function drawsCards(widthRem: number): boolean {
 }
 
 /**
+ * Work that an observer asks for and that waits for the next animation frame: asked as often as the observers please and done once, and not at all once cancelled. **A table's layout is never
+ * changed inside the callback of a ResizeObserver, nor in the middle of the delivery of the callbacks** (the Product Owner's review of ba9a18c): a layout changed there is a size the
+ * observers are told of again in the frame that is delivering them, and WebKit reports it as "ResizeObserver loop completed with undelivered notifications" (the red `kit.spec.ts` of the main
+ * branch's first run on Linux). The work of a frame runs before the page is laid out and before the observers are told, and is flushed there (`flushSync`, by the work), so that what the
+ * observers are told of next is the final layout and not a step towards it. The frame the observer was told in is drawn as it was: one frame of the earlier layout, in a live resize or a
+ * face's swap, is the price; the first measure of a table is a layout effect, which React finishes before the first paint, and waits for no frame.
+ */
+function nextFrame(work: () => void): { readonly ask: () => void; readonly cancel: () => void } {
+  let handle: number | null = null;
+  return {
+    ask: () => {
+      if (handle !== null) return;
+      handle = requestAnimationFrame(() => {
+        handle = null;
+        work();
+      });
+    },
+    cancel: () => {
+      if (handle !== null) cancelAnimationFrame(handle);
+      handle = null;
+    },
+  };
+}
+
+/**
  * Whether the table's box is narrow enough for cards: measured as the box changes, and left as it was where nothing can be measured (no layout, a hidden box). The first measure is a layout
- * effect, which React finishes before the first paint; **a change the observer reports is flushed in the callback** (`flushSync`, as the fit's is), so that the frame in which the box became
- * narrow draws the cards and never the table for a frame: a test measures it (`kit.spec.ts`), and it does not lean on when React decides to render.
+ * effect, which React finishes before the first paint, so that a table in a narrow box is never drawn as a table first; **a change the observer reports is made in the next animation frame**
+ * (`nextFrame`), in one flush, and not inside the observer's callback.
  */
 function useNarrow(
   root: RefObject<HTMLDivElement | null>,
@@ -336,11 +361,15 @@ function useNarrow(
       typeof ResizeObserver === 'undefined'
     )
       return;
+    /** What the box was last found to be, so that a frame that finds it as it was changes nothing. */
+    let known: boolean | undefined;
     const measure = (flush: boolean): void => {
       const width = element.clientWidth;
       if (width === 0) return;
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       const next = drawsCards(width / rem);
+      if (next === known) return;
+      known = next;
       if (flush) {
         flushSync(() => {
           setNarrow(next);
@@ -350,14 +379,15 @@ function useNarrow(
       }
     };
     measure(false);
-    // The probe is watched and not the box: it has the width of the box and no height, so the rows becoming cards, which changes the height of the box, is no change of what is watched (an observer
-    // told of a change its own callback made reports "ResizeObserver loop completed with undelivered notifications").
-    const observer = new ResizeObserver(() => {
+    const frame = nextFrame(() => {
       measure(true);
     });
+    // The probe is watched and not the box: it has the width of the box and no height, so the rows becoming cards, which changes the height of the box, is no change of what is watched.
+    const observer = new ResizeObserver(frame.ask);
     observer.observe(watched);
     return () => {
       observer.disconnect();
+      frame.cancel();
     };
   }, [root, probe, layout]);
   return layout === 'cards' ? true : layout === 'table' ? false : narrow;
@@ -407,7 +437,8 @@ interface ColumnFitInput {
  * fits comes back), the faces finish loading (the first measure is made in the fallback face, `font-display: swap`) or its rows change (`rowsKey`), so that the lesser columns are never fewer than the room needs;
  * and it measures again, **adding drops and never giving one back**, whenever the table element itself changes its width (what is in it grew: a cell that got its words, a face that was wider than the
  * first). The measure is a layout effect, so what is drawn first is what fits and no frame shows the scroll. Where nothing can be measured (no layout, a hidden box) every column is drawn. The width is
- * read from a probe of no height, so that the columns going, which shortens the rows, is not a change of what is observed.
+ * read from a probe of no height, so that the columns going, which shortens the rows, is not a change of what is observed. **The start again is made in the next animation frame and not inside
+ * the callback of an observer or the signal of the faces** (`nextFrame`): it is one flush there, measure included, so that the layout the observers are told of next is the final one.
  *
  * **The switch to cards is sticky** (the Product Owner's review of 67bc979): drawing the table again to measure it unmounts every card, so that focus on a card's control falls to the body and a dialog
  * opened from it loses its way back. The box's width at which the list went to cards is remembered (`cardsAt`); the table is drawn again only when the box grows wider than that, or when the columns
@@ -468,8 +499,9 @@ function useColumnFit({
   }, [scroller, probe, active, cardable, count, order.length, full, columnsKey, rowsKey, epoch]);
   useLayoutEffect(() => {
     const element = probe.current;
-    // The start again from every column: the box changed its width, or the faces finished loading. A list that went to cards stays cards unless its box is wider than it was then.
-    const restart = (): void => {
+    // The start again from every column: the box changed its width, or the faces finished loading. It is made in the next animation frame, in one flush, and never inside the callback of the
+    // observer or the signal of the faces (`nextFrame`). A list that went to cards stays cards unless its box is wider than it was then, as the box is when the frame comes.
+    const restart = nextFrame(() => {
       const remembered = cardsAtNow.current;
       if (remembered !== null && (element?.clientWidth ?? 0) <= remembered) return;
       flushSync(() => {
@@ -478,17 +510,17 @@ function useColumnFit({
         setCardsAt(null);
         setEpoch((value) => value + 1);
       });
-    };
+    });
     // A page environment without layout (a test's) has no set of faces to watch.
     const page: { readonly fonts?: FontFaceSet } = document;
     const fonts = page.fonts;
-    fonts?.addEventListener('loadingdone', restart);
+    fonts?.addEventListener('loadingdone', restart.ask);
     // The faces that are still on their way when the table is drawn: `ready` is told when they are in, which WebKit does for a face its layout asked for where it sends no `loadingdone` (found by the
     // targeted run of 11 November 2026). The two are the same moment in an engine that sends both, and the second restart is a measure that changes nothing.
     let gone = false;
     if (fonts?.status === 'loading') {
       void fonts.ready.then(() => {
-        if (!gone) restart();
+        if (!gone) restart.ask();
       });
     }
     let observer: ResizeObserver | undefined;
@@ -497,13 +529,14 @@ function useColumnFit({
       observer = new ResizeObserver(() => {
         if (element.clientWidth === width) return;
         width = element.clientWidth;
-        restart();
+        restart.ask();
       });
       observer.observe(element);
     }
     return () => {
       gone = true;
-      fonts?.removeEventListener('loadingdone', restart);
+      restart.cancel();
+      fonts?.removeEventListener('loadingdone', restart.ask);
       observer?.disconnect();
     };
   }, [probe]);

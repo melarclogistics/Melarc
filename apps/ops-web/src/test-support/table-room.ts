@@ -9,6 +9,9 @@ import { vi } from 'vitest';
  * - `setNeed` changes what a column needs (a face that loaded, a cell that grew), and tells nobody;
  * - `growTable` tells the observers of the table element itself (it grew wider than its box), which is how a browser says that what is in it grew;
  * - `fontsLoaded` tells the page's `document.fonts` that the faces finished loading, as a browser does, and `fontsReadyWithoutEvent` does it as WebKit does for some faces, with `ready` and no event;
+ * - `frame` is the next animation frame: what was asked of `requestAnimationFrame` runs, once, in the order it was asked. A browser runs it before it lays the page out and tells the observers, so
+ *   a table that changes its layout there is changing it outside the delivery of the observers' callbacks; `framesAsked` says how many are waiting. None of the calls above runs a frame by
+ *   itself: a test that wants the frame that follows a change asks for it, and a test that wants to see that nothing was drawn before it looks first;
  *
  * and `restoreTableRoom` puts the measuring back to nothing, after each test.
  */
@@ -32,6 +35,16 @@ export function tableRoom(initialWidth: number, initialNeed = 200) {
     }
   }
   vi.stubGlobal('ResizeObserver', Observer);
+  const frames = new Map<number, FrameRequestCallback>();
+  let lastFrame = 0;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
+    lastFrame += 1;
+    frames.set(lastFrame, callback);
+    return lastFrame;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (handle: number): void => {
+    frames.delete(handle);
+  });
   const fonts = Object.assign(new EventTarget(), { status: 'loading' });
   let settleReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => {
@@ -71,6 +84,16 @@ export function tableRoom(initialWidth: number, initialNeed = 200) {
     },
     growTable(): void {
       tell((target) => target.matches('table'));
+    },
+    /** The next animation frame comes: every request made of it so far runs, in order, and one that is made while they run waits for the frame after. */
+    frame(): void {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const callback of due) callback(0);
+    },
+    /** How many requests wait for the next animation frame (one that was cancelled is not counted). */
+    framesAsked(): number {
+      return frames.size;
     },
     fontsLoaded(): void {
       fonts.status = 'loaded';
