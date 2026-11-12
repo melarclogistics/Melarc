@@ -395,9 +395,20 @@ test.describe('the vendor screens', () => {
         const context = document.createElement('canvas').getContext('2d');
         if (context === null) throw new Error('no canvas');
         context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        // The room is the box less its borders and its padding, read from the box itself and not from `clientWidth`: Firefox's `clientWidth` of a text input already leaves the padding out,
+        // so subtracting it again halved the room (204 where Chromium, WebKit and Firefox's own box all give 228; the hosted run of 12 November 2026, measured in the three engines).
+        const sides = [
+          'borderLeftWidth',
+          'borderRightWidth',
+          'paddingLeft',
+          'paddingRight',
+        ] as const;
         return {
           text: context.measureText(input.placeholder).width,
-          room: input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+          room: sides.reduce(
+            (room, side) => room - parseFloat(style[side]),
+            input.getBoundingClientRect().width,
+          ),
         };
       });
       expect(measured.text).toBeGreaterThan(0);
