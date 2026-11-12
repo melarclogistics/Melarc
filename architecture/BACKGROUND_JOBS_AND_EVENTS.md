@@ -155,7 +155,7 @@ then        every 6 hours, indefinitely - no dead-letter, no final bound
 
 | Job| Cadence| Governing section| Figure|
 |---|---|---|---|
-| Failure backstop sweep| Periodic| §21, `MSC-DEC-237`| **24 hours** — set|
+| Failure backstop sweep| Periodic: at the worker's start and every `PICKUP_BACKSTOP_INTERVAL_MINUTES` (**15**, the worker's configuration; the Product Owner's decision D-A1 of 11 November 2026); a second periodic task of the delivery worker, under the capability `pickup_backstop` (built in Run A, `platform/delivery/backstop/`)| §21, `MSC-DEC-237`| **24 hours** — set (`stale_failure_backstop_hours`, a hub setting)|
 | Vendor statement issue| Weekly, Monday 08:00 `Africa/Accra`| §36.11| Set|
 | Statement overdue transition| Weekly, Thursday 08:00 `Africa/Accra`| §36.11| Set. **No grace period**|
 | Session expiry and idle timeout| Enforced **at request time**; the `expire_sessions` job is housekeeping, continuous| `MSC-DEC-234`| 480 / 15 minutes — set. **The job never decides whether an expired session is accepted**: the server's timeouts do, on every request (8 October 2026)|
