@@ -85,7 +85,7 @@ info:
 # is now structural rather than asserted, because the cross-origin host is not in scope at the
 # root at all.
 #
-# The dedicated host survives where it is genuinely used, declared per operation on the thirteen
+# The dedicated host survives where it is genuinely used, declared per operation on the fifteen
 # Rider native operations (OpenAPI 3 operation-level `servers` overrides this list).
 servers:
   - url: /api/v1
