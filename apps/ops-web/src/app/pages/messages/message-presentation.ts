@@ -118,6 +118,8 @@ export const MESSAGE_KIND_LABELS = {
   HANDSHAKE_CODE_VENDOR_NUMBER: 'Collection handshake code, sent as a fallback',
   PICKUP_FAILED_SENDER: 'Pickup failed',
   PICKUP_FAILED_VENDOR_FEED: 'Pickup failed',
+  PICKUP_FAILED_OPS_FEED: 'Pickup failed',
+  COLLECTION_SHORT_OPS_FEED: 'Pickup counted short',
   PICKUP_SKIPPED_VENDOR_FEED: 'Pickup stop skipped',
   PICKUP_FAILURE_ESCALATED_OPS_FEED: 'Pickup failure escalated',
   HUB_HANDOVER_SUBMITTED_OPS_FEED: 'Hub handover submitted',
