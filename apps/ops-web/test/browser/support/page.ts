@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { KEY_PATTERN_FLAGS, keyPatternSource } from '../../support/permission-catalogue';
 import { watchForPermissionKeys } from '../../support/permission-key-watch';
@@ -251,6 +251,45 @@ export async function settled(page: Page): Promise<void> {
     });
     await Promise.allSettled(moving.map((animation) => animation.finished));
   });
+}
+
+/**
+ * Waits until the animations of one element, and of everything in it, have finished: a panel that slides in, a tooltip that grows into place. A place or a size read before that is a read of the
+ * middle of a movement (the Product Owner's review of ba9a18c, item 6: the heading of a sheet read at the place it had a few frames before it arrived, a tooltip a few pixels short of its
+ * gap). Like `settled`, which waits for the whole page, it does not wait for an animation that never ends, or for one that is paused. Where motion is not what a test checks, the test may
+ * ask for reduced motion instead (`openKit(..., { reducedMotion: true })`) and have nothing to wait for.
+ */
+export async function animationsDone(target: Locator): Promise<void> {
+  await target.evaluate(async (element) => {
+    const moving = element.getAnimations({ subtree: true }).filter((animation) => {
+      const end = animation.effect?.getComputedTiming().endTime;
+      return animation.playState === 'running' && typeof end === 'number' && Number.isFinite(end);
+    });
+    await Promise.allSettled(moving.map((animation) => animation.finished));
+  });
+}
+
+/**
+ * Waits until the page has stopped moving under the reader's scroll: neither its scroll position nor the height of its document has changed for `frames` frames in a row. A page whose table
+ * becomes cards, or whose panel opens, can still be growing or shifting its scroll for a few frames after the control that did it was pressed, and a position read in the middle of that is
+ * not the position the page rests at. Frames are counted, not milliseconds: it waits as long as the machine takes, and the test's own time is its only limit.
+ */
+export async function scrollSettled(page: Page, frames = 3): Promise<void> {
+  await page.evaluate(async (needed) => {
+    const place = (): string =>
+      `${String(window.scrollY)}/${String(document.documentElement.scrollHeight)}`;
+    let last = place();
+    let same = 0;
+    while (same < needed) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const now = place();
+      if (now === last) same += 1;
+      else {
+        same = 0;
+        last = now;
+      }
+    }
+  }, frames);
 }
 
 /**

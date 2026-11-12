@@ -39,6 +39,7 @@ import {
   fromPage,
   goToSignIn,
   openBootstrapSecret,
+  openAccountMenu,
   openLink,
   openReenrolmentSecret,
   readSetupKey,
@@ -657,7 +658,7 @@ async function endOfSessions({ page, context, stack }: JourneyContext): Promise<
       new URL(response.url()).pathname === '/api/v1/auth/session' &&
       response.request().method() === 'DELETE',
   );
-  await page.getByRole('button', { name: 'Account menu' }).click();
+  await openAccountMenu(page);
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   const answer = await ending;
   expect(answer.status()).toBe(204);

@@ -1,7 +1,13 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
-import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
+import {
+  animationsDone,
+  settled,
+  stepIncludingLinks,
+  watchPage,
+  wcagViolations,
+} from './support/page';
 import { withScrollbars } from './support/scrollbars';
 import { expectWholeInTheWindow } from './support/whole';
 import { wordsOf } from './support/words';
@@ -845,6 +851,8 @@ test.describe('SidePanel, RecordHeader, DescriptionList, Panel and StatTile in a
       await row.click();
       const sheet = page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
       await expect(sheet).toBeVisible();
+      // The sheet slides in: its heading is read where it stands when it has arrived, and not where it was a few frames before (the Product Owner's review of ba9a18c, item 6).
+      await animationsDone(sheet);
       expect(Math.round((await box(sheet)).width)).toBe(width);
       // The header is a row with the code at its start, as the docked panel's is, and not a centred column (the primitive's header is a column).
       expect((await box(sheet.getByRole('heading', { level: 2 }))).x).toBeLessThan(width / 4);
@@ -1461,7 +1469,8 @@ test.describe('Tooltip, Popover and Dialog in a browser', () => {
     await confirm(page).focus();
     await expect(tooltip(page)).toBeVisible();
 
-    // Measured once the tooltip has finished coming in (it slides and grows into place).
+    // Measured once the tooltip has finished coming in (it slides and grows into place): its animations are done, and the position the engine computes for it has been applied.
+    await animationsDone(tooltip(page));
     await expect
       .poll(async () => {
         const button = await box(confirm(page));
@@ -1490,6 +1499,8 @@ test.describe('Tooltip, Popover and Dialog in a browser', () => {
     await expect(popover).toBeVisible();
 
     expect(await focusIn(page, '[data-slot="popover-content"]')).toBe(true);
+    // Measured once the popover has finished coming in: its animations are done, and the position the engine computes for it has been applied.
+    await animationsDone(popover);
     await expect
       .poll(async () => {
         const button = await box(service(page));

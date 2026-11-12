@@ -297,16 +297,19 @@ test.describe('the pages and the actions', () => {
 });
 
 test.describe('the search of records', () => {
-  // Break caught: a request for a text too short to search, or a request for each letter typed.
-  test('asks nothing under two characters, and once for a text that has stood still', async ({
+  // Break caught: a request for a text too short to search, or a search that is not for the text the officer stopped at. What is asserted is about the texts that were asked and not about timing (the
+  // Product Owner's review of ba9a18c, item 6): the test waited half a second and counted requests, which is a statement about the machine's speed (the hosted WebKit run of 12 November 2026 did not see
+  // the hint within five seconds, in a test that took 29 in all, and the cause was not found). A text of a single character is never asked, whatever the machine did between two keys, and the text that
+  // stood still is the last one asked, whole.
+  // That the keys are asked for once, after the debounce, and not once for each letter, is held by the hook's own test with a clock it drives (`use-record-lookup.test.tsx`).
+  test('asks nothing under two characters, and asks for the text that has stood still', async ({
     page,
   }) => {
     const opened = await open(page, items(REQUEST_RESULT));
     await openByKey(page);
 
     await typeText(page, 'a');
-    await page.waitForTimeout(500);
-    expect(opened.asked).toEqual([]);
+    await expect(field(page)).toHaveValue('a');
     await expect(
       palette(page).getByText('Type two letters or more to search records.'),
     ).toBeVisible();
@@ -314,11 +317,8 @@ test.describe('the search of records', () => {
     await typeText(page, 'cde');
 
     await expect(option(page, /ACC-PR-7KQ2MZ/)).toBeVisible();
-    // The text that stood still is the one asked last, and not one request for each letter, which would be three ('ac', 'acd', 'acde'). A machine
-    // that stalls for longer than the wait between two keys may split the text in two requests, and never in three (review of 7 November 2026: the test
-    // expected exactly one, which four keys 15 ms apart only give while the machine keeps up).
     expect(opened.asked.at(-1)).toBe('acde');
-    expect(opened.asked.length).toBeLessThan(3);
+    expect(opened.asked.filter((text) => text.length < 2)).toEqual([]);
     expect(opened.bodies.at(-1)).toEqual({ q: 'acde' });
   });
 

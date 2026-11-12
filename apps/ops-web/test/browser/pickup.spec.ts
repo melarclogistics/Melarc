@@ -1,7 +1,7 @@
 import type { Locator, Page, Route } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
-import { watchPage, wcagViolations } from './support/page';
+import { scrollSettled, watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
 import { disturbTheFit, expectCardsOfTheFit, frames, markNode, stillThere } from './support/fit';
 import { wordsOf } from './support/words';
@@ -1679,6 +1679,9 @@ test.describe('the queue: coming back from a request', () => {
         .getByRole('dialog', { name: codeOf(10) })
         .getByRole('link', { name: 'Open full page' });
       await link.scrollIntoViewIfNeeded();
+      // The place is read where the page rests: opening the panel narrows the queue's box, and the page can still be growing or shifting its scroll for a few frames (the Product Owner's review of
+      // ba9a18c, item 6: the hosted WebKit run of 12 November 2026 read a place 147px from the one the page came back to).
+      await scrollSettled(page);
       const before = await page.evaluate(() => window.scrollY);
       await link.click();
       await expect(page.getByRole('heading', { level: 1, name: codeOf(10) })).toBeVisible();
@@ -1686,6 +1689,7 @@ test.describe('the queue: coming back from a request', () => {
       await back(page);
 
       await expect(far).toBeFocused();
+      await scrollSettled(page);
       const after = await page.evaluate(() => window.scrollY);
       expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
       const box = await far.boundingBox();

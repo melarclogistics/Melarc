@@ -117,9 +117,28 @@ export async function expectLanding(page: Page, name?: string): Promise<void> {
   if (name !== undefined) await expect(page.getByRole('main').getByText(name)).toBeVisible();
 }
 
+/**
+ * Opens the account menu of the top bar and waits until it has come in. The menu slides and grows into place, and Playwright presses an item only when its box has stood still for two frames: in
+ * WebKit on a loaded runner "Sign out" was "not stable" for the 20 seconds an action may take (the hosted run of 12 November 2026, the journey of row 6, in two runs of four; a probe of the same
+ * clicks in WebKit settled in under two and a half seconds every time, and the cause was not found). The wait is for the menu's own animations to finish and not for a time; motion is not what a
+ * journey checks.
+ */
+export async function openAccountMenu(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  await menu.evaluate(async (element) => {
+    const moving = element.getAnimations({ subtree: true }).filter((animation) => {
+      const end = animation.effect?.getComputedTiming().endTime;
+      return animation.playState === 'running' && typeof end === 'number' && Number.isFinite(end);
+    });
+    await Promise.allSettled(moving.map((animation) => animation.finished));
+  });
+}
+
 /** Signs out the way every signed-in screen offers: the account menu of the top bar, and its Sign out item. */
 export async function signOut(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Account menu' }).click();
+  await openAccountMenu(page);
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
   await expectHeading(page, 'Sign in');
