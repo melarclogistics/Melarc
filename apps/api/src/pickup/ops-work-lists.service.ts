@@ -155,7 +155,7 @@ export class PickupOpsWorkLists {
    * its state is `EXPIRED` or `EXHAUSTED`; or its code is still live by state but its life has passed on the database's clock (the state is moved only
    * when someone asks, so a code nobody tried is expired all the same); or the SMS fallback has sent the platform's cap (`sms_fallback_max_per_pickup`) and the
    * rider has no more to ask. The first that applies is `routed_because`. **Not open** is the handshakes Ops settled (an override, or a hand resolution), which
-   * the list keeps so that Ops can see what it did. A handshake that closed through the portal or the SMS fallback is in neither: it never needed Ops. The cap
+   * the list keeps so that Ops can see what it did (both record the channel `OPS_OVERRIDE`, so the channel is what says it). A handshake that closed through the portal or the SMS fallback is in neither: it never needed Ops. The cap
    * and the attempt limit are read from the platform's settings as they stand; where one holds no usable value it is `null` and judges nothing (a default
    * is never invented), and that is the only way an unusable setting is told.
    */
@@ -196,7 +196,7 @@ export class PickupOpsWorkLists {
           from judged j
           join pickup_stop s on s.id = j.pickup_stop_id
           join pickup_request r on r.id = j.pickup_request_id
-         where (j.routed_because is not null or j.state = 'MANUALLY_RESOLVED' or j.channel = 'OPS_OVERRIDE')
+         where (j.routed_because is not null or j.channel = 'OPS_OVERRIDE')
            and ${openIs('j.routed_because is not null', parts)}
          order by j.created_at, j.id
          limit ${parts.limit}`,

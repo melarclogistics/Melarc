@@ -37,6 +37,7 @@ let browserA: TestClient;
 let browserB: TestClient;
 let browserC: TestClient;
 let opsA: Actor;
+let seniorA: Actor;
 let opsB: Actor;
 let platformAdmin: Actor;
 
@@ -70,6 +71,7 @@ const KEYS: Record<Which, string> = {
   failures: 'pickup.failure.resolve',
 };
 
+const RESOLVE_NOTE = 'The vendor confirmed by phone';
 const OVERRIDE_NOTE = 'Phoned the vendor on the number we hold';
 const DISPUTE_NOTE = 'Two of the three parcels were not ours';
 const CANCEL_REASON = 'FIXTURE_WORKLIST_RESCHEDULE';
@@ -143,6 +145,7 @@ interface World {
   readonly handshakeExhausted: string;
   readonly handshakeFallbackUsed: string;
   readonly handshakeOverridden: string;
+  readonly handshakeResolved: string;
   readonly handshakeOtherHub: string;
   readonly shortfallOpen: string;
   readonly shortfallClosed: string;
@@ -188,6 +191,14 @@ async function override(who: Actor, stopId: string): Promise<void> {
     { origin: OPS, headers: { 'Idempotency-Key': randomUUID() } },
   );
   expect(response.status, `override: ${response.text}`).toBe(200);
+}
+async function resolveByHand(who: Actor, stopId: string): Promise<void> {
+  const response = await who.client.post(
+    `${STOP(stopId)}/handshake/resolve`,
+    { note: RESOLVE_NOTE },
+    { origin: OPS, headers: { 'Idempotency-Key': randomUUID() } },
+  );
+  expect(response.status, `resolve: ${response.text}`).toBe(200);
 }
 async function dispute(client: TestClient, stopId: string): Promise<void> {
   const response = await client.post(
@@ -254,7 +265,7 @@ async function build(): Promise<World> {
     });
 
   // Hub A, vendor A: twelve stops the rider has arrived at, each worked a different way.
-  const runA = await open(vendorA, HUB_A, 12);
+  const runA = await open(vendorA, HUB_A, 13);
   const riderA = runA.rider;
   const at = (n: number): string => stopAt(runA, n);
   // 0. A clean count closed by Ops's override and disputed by the vendor: an open dispute, and a handshake Ops settled.
@@ -322,6 +333,14 @@ async function build(): Promise<World> {
   await cancel(opsA, runA.stops[10]?.requestId ?? '', true);
   await failStop(riderA, at(11));
   await cancel(opsA, runA.stops[11]?.requestId ?? '', false);
+  // 12. A code that ran out and that Senior Ops resolved by hand: settled, and recorded as Ops's own.
+  await count(riderA, at(12));
+  await initiate(riderA, at(12));
+  await age(at(12));
+  expect(
+    outcome(await browserA.post(`${STOP(at(12))}/handshake/verify`, { code: codeOfStop(at(12)) })),
+  ).toEqual([422, 'CODE_EXPIRED']);
+  await resolveByHand(seniorA, at(12));
 
   // Hub A, vendor B: a short count, closed by Ops, disputed, the run completed and the dispute resolved.
   const runB = await open(vendorB, HUB_A, 1);
@@ -361,6 +380,7 @@ async function build(): Promise<World> {
     handshakeExhausted: at(4),
     handshakeFallbackUsed: at(5),
     handshakeOverridden: at(6),
+    handshakeResolved: at(12),
     handshakeOtherHub: stopAt(runC, 1),
     shortfallOpen: at(7),
     shortfallClosed: stopAt(runB, 0),
@@ -391,6 +411,7 @@ beforeAll(async () => {
   browserB = await signedIn(vendorB);
   browserC = await signedIn(vendorC);
   opsA = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
+  seniorA = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
   opsB = await routes.actor(BUNDLE_IDS.opsStaff, HUB_B);
   platformAdmin = await routes.platformAdmin();
   await routes.admin.query(
@@ -491,6 +512,7 @@ describe('listHandshakesForOps', () => {
       world.handshakeExhausted,
       world.handshakeFallbackUsed,
       world.handshakeOverridden,
+      world.handshakeResolved,
       world.disputeResolved,
     ]);
     expect(stopsOf(items)).not.toContain(world.handshakeLive);
@@ -532,6 +554,13 @@ describe('listHandshakesForOps', () => {
       });
       expect(typeof by(stopId).confirmed_at).toBe('string');
     }
+    expect(by(world.handshakeResolved)).toMatchObject({
+      state: 'MANUALLY_RESOLVED',
+      routed_because: null,
+      channel: 'OPS_OVERRIDE',
+      authorised_by: seniorA.identity.id,
+      stop_state: 'COLLECTED',
+    });
     expect(by(world.handshakeOverridden)).toMatchObject({
       state: 'VERIFIED',
       stop_state: 'COLLECTED',
@@ -551,6 +580,7 @@ describe('listHandshakesForOps', () => {
     expect(stopsOf(await everything(opsA.client, 'handshakes', { open: false }))).toEqual([
       world.disputeOpen,
       world.handshakeOverridden,
+      world.handshakeResolved,
       world.disputeResolved,
     ]);
     const reasons = (await everything(opsA.client, 'handshakes', { open: true })).map(
@@ -901,6 +931,7 @@ describe('what never reaches the wire', () => {
     for (const sentinel of [
       PHONE,
       OVERRIDE_NOTE,
+      RESOLVE_NOTE,
       'code_digest',
       'primary_phone',
       'contact_phone',
