@@ -1038,19 +1038,28 @@ test.describe('the components in a browser: themes', () => {
   // Break caught: a duration that survives reduced motion, which a person who asked for none would still see move. The easings are not
   // durations and stay.
   test('every duration is zero under reduced motion and none is otherwise', async ({ page }) => {
-    const durations = (): Promise<string[]> =>
-      page.evaluate(() => {
-        const root = getComputedStyle(document.documentElement);
-        return ['--motion-fast', '--motion-normal', '--motion-slow', '--motion-highlight'].map(
-          (name) => root.getPropertyValue(name).trim(),
-        );
-      });
+    // A duration is read as a time, in milliseconds, and not as the text the stylesheet was written with: the production build's stylesheet is minified, which writes `120ms` as `.12s`,
+    // and Firefox and WebKit run the showcase against that build (Chromium, against the development server, sees `120ms`). Text that is not a time is NaN, which no check below accepts.
+    const milliseconds = (text: string): number => {
+      const match = /^(\d*\.?\d+)(ms|s)?$/.exec(text);
+      return match === null ? Number.NaN : Number(match[1]) * (match[2] === 's' ? 1000 : 1);
+    };
+    const durations = async (): Promise<number[]> =>
+      (
+        await page.evaluate(() => {
+          const root = getComputedStyle(document.documentElement);
+          return ['--motion-fast', '--motion-normal', '--motion-slow', '--motion-highlight'].map(
+            (name) => root.getPropertyValue(name).trim(),
+          );
+        })
+      ).map(milliseconds);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await openShowcase(page);
-    expect((await durations()).every((value) => /^[1-9]\d*ms$/.test(value))).toBe(true);
+    // The durations that are not a positive time, so that a failure names them.
+    expect((await durations()).filter((value) => !(value > 0))).toEqual([]);
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    expect(await durations()).toEqual(['0ms', '0ms', '0ms', '0ms']);
+    expect(await durations()).toEqual([0, 0, 0, 0]);
   });
 
   for (const { width, height } of [
