@@ -595,11 +595,12 @@ test.describe('the queue: the parts that stay in view, long text and the room it
   // (the old table's guards, which run 3 removed): the text is on the page whole, in the box it has, at every width and with the panel open.
   //
   // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). The result is one, and named, at every
-  // width where it does not depend on how wide the platform sets its text: wider than 960px the table draws the address, and **at 832px the page reaches the table with its address column taken
-  // away and no address on the page**, on every engine and in both builds, whenever the face arrives (a decision to go to cards made while the face was on its way is measured again when it is in:
-  // `useColumnFit`, the Product Owner's answer of 12 November 2026; the test below holds that with the face held back). **768px is not such a width**: the box is 41rem there, and the table of five
-  // columns (the address gone) needs between 671 and 678px on the Product Owner's Windows, where it is cards in all three engines, and no more than 654px on the hosted Linux run of 12 November
-  // 2026, where it is the table. So there the layout and the address must agree (the table without it, or the cards with it, never both and never neither), and everything that is drawn is whole.
+  // width, on every engine, in both builds and on every platform, whenever the face arrives (a decision to go to cards made while the face was on its way is measured again when it is in:
+  // `useColumnFit`, the Product Owner's answer of 12 November 2026; the test below holds that with the face held back). Wider than 960px the table draws the address. **At 832px it is the table with its
+  // address column taken away**, and no address is on the page. **At 768px (a box of 41rem, 654px) it is cards**, which carry every fact of a request, the address among them: the table of five columns
+  // needs 677 to 678px, on the Product Owner's Windows and on the hosted Linux runner alike (measured on both on 12 November 2026). A page read before the face has arrived and the table has
+  // measured again is a table at 768px (the hosted run of that day found the approver's queue so in the development-server WebKit): a test of the result waits for the face and for the frames the
+  // restart takes (`expectCardsOfTheFit`), and then looks.
   for (const size of [
     WIDE,
     { width: 1280, height: 800 },
@@ -620,9 +621,9 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
       const address = page.getByText(LONG_ADDRESS).locator('visible=true');
       if (size.width === 768) {
-        const cards = await queueCards(page).count();
-        await expect(address).toHaveCount(cards === 1 ? 2 : 0);
-        await expect(queueTable(page)).toHaveCount(1 - cards);
+        await expect(queueCards(page)).toBeVisible();
+        await expect(queueTable(page)).toHaveCount(0);
+        await expect(address).toHaveCount(2);
       } else if (size.width === 832) {
         await expect(queueTable(page)).toBeVisible();
         await expect(queueCards(page)).toHaveCount(0);
@@ -645,13 +646,11 @@ test.describe('the queue: the parts that stay in view, long text and the room it
   }
 
   // Break caught (the Product Owner's answer to the note of 7325628, 12 November 2026): a first decision to go to cards, made while the face was on its way, and kept until the box grew, so that which of
-  // two results the queue reached depended on when the face arrived (the hosted run of that day: cards in the development server, which sends the face later, the table in the production build). The face
-  // is held back here, so that the first measure is made while the faces are loading on every machine, and what the table finds then is wider than the room it has, as a wide fallback face would make it:
-  // the queue is cards while the face is on its way, and, when it is in, the table with its address column taken away, as in the test above, where the face was in before the first measure. The width
-  // is 832px, where that result is the same on every platform (see above). The first measure is made wide by a rule that gives each cell 16rem, which the test takes away again *before* it lets the
-  // face go, and not by a wide fallback face: the room the table has at 832px is 6 to 10% more than it needs, depending on the platform's text (671 to 678px on a Windows machine, 654 or less on the
-  // hosted Linux runner), which is less than a plain monospace fallback is wider than Inter, and Firefox does not apply a face made on the spot (`local()`) in time for the first measure. What the table
-  // does not care about is why the first measure found too little room.
+  // two results the queue reached depended on when the face arrived. The face is held back here, so that the first measure is made while the faces are loading on every machine, and in a room too small
+  // for the table (a rule that gives each cell 16rem, taken away again before the face is let go): the queue is cards while the face is on its way, and, when it is in, the table with its address column
+  // taken away, as in the test above, where the face was in before the first measure. The width is 832px, where the real face makes a table (it needs 677 to 678px of 718): at 768px it makes cards, which
+  // a decision kept from the first measure could not be told from the right one by. A wide fallback face was tried for the first measure and does not do: a plain monospace is only some 10% wider than
+  // Inter, and Firefox does not apply a face made on the spot (`local()`) in time for it.
   test('reaches the table at 832 px when the face arrives after the first measure', async ({
     page,
   }) => {
@@ -678,7 +677,7 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     await page.goto('/pickup-requests', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
     // The first measure was made while the face was on its way, in a room too small for the table: it had nothing more to give, and the list went to cards.
-    await expectCardsOfTheFit(queueRegion(page));
+    await expectCardsOfTheFit(queueRegion(page), { facesLoading: true });
     expect(await page.evaluate(() => document.fonts.status)).toBe('loading');
 
     // The rule goes first, and the face after it: the cards are not drawn again by that (there is no table to read it), and the table that is drawn when the face is in is measured as it is.
