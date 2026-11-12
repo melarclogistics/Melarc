@@ -193,13 +193,16 @@ export function PickupRequestListPage() {
 
   // Once the rows that were read again after an act are drawn, focus goes to the row that changed (the request's own button), else to the results: the officer is not left on nothing.
   // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c).
+  // The panel that is open when the read lands may be another request's: the officer opened it while the queue was read again, and whatever has focus in it, a click on its text among it, is theirs.
+  const openedId = opened?.id;
   useEffect(() => {
     if (afterAct || returnTo.current === undefined) return;
     const id = returnTo.current;
     returnTo.current = undefined;
-    if (!isUnclaimed(document.activeElement)) return;
+    const panelIsAnotherRequests = openedId !== undefined && openedId !== id;
+    if (!isUnclaimed(document.activeElement, { panelIsAnotherRequests })) return;
     if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
-  }, [afterAct, list.dataUpdatedAt]);
+  }, [afterAct, list.dataUpdatedAt, openedId]);
 
   /**
    * The queue is read again after an act, its rows kept. If that read fails the rows stay, with a line that says they may be out of date and the way to read them again; any other read that

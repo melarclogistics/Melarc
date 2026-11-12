@@ -190,7 +190,7 @@ function Emptiness({ empty }: { readonly empty: QueueEmptiness }) {
  *
  * What it carries from the kit, so that a page does not wire it again: the fit of the columns (the table measures its own box, which narrows when the panel opens, and takes a column
  * the page marked lesser away only as far as it takes for the box not to scroll sideways, whatever is beside it, so the table never scrolls sideways at 1440px; its prose columns keep
- * their room and its words break at their spaces; the rows are cards under 40rem of the box, and where a list that opens nothing cannot fit its columns), the bar of acts above the rows and its eligible-only acts, cards at 390px, the place the officer left and the row they
+ * their room and its words break at their spaces; the rows are cards under 40rem of the box, and wherever the table has nothing more to give: every lesser column gone and the box still overflowing), the bar of acts above the rows and its eligible-only acts, cards at 390px, the place the officer left and the row they
  * came from (`table.initialScroll`, `table.onScrollChange`, `table.focusRowId`), and the panel becoming a full-screen sheet at 768px and below. **Every state is told:** loading
  * (rows of the table's own shape), nothing yet, nothing that fits the filters, nothing at the chosen hub (with *Show all hubs*), a failure with a way to try again, and stale rows with
  * a way to read again.
@@ -219,17 +219,30 @@ export function QueueWorkspace<Item>({
     }),
     [],
   );
-  /** The record the panel was last opened from: the row to give focus back to. */
-  const openedFrom = useRef<string | undefined>(undefined);
-  const { onOpen, rowId } = table;
-  /** The control of a row as it is drawn now: the table's row button, or the card's, whichever layout the table is in. */
-  const controlOf = useCallback((id: string | undefined): HTMLElement | undefined => {
-    if (id === undefined) return undefined;
-    const row = Array.from(root.current?.querySelectorAll('[data-row-id]') ?? []).find(
-      (candidate) => candidate.getAttribute('data-row-id') === id,
-    );
-    return row?.querySelector<HTMLElement>('.ui-data-table__open') ?? undefined;
-  }, []);
+  /** The record the panel was last opened from, and whether the row's own act (the queue's Confirm) opened it and not the button that opens the row: the control to give focus back to. */
+  const openedFrom = useRef<{ readonly id: string; readonly byAct: boolean } | undefined>(
+    undefined,
+  );
+  const { onOpen, rowId, rowAction } = table;
+  /**
+   * The control the panel was opened from, as it is drawn now (the table's row button, or the card's, whichever layout the table is in): the row's own act when that is what opened it and it is still
+   * there, else the button that opens the row. A confirmation takes its own act away, and the way back is then the row.
+   */
+  const controlOf = useCallback(
+    (
+      from: { readonly id: string; readonly byAct: boolean } | undefined,
+    ): HTMLElement | undefined => {
+      if (from === undefined) return undefined;
+      const row = Array.from(root.current?.querySelectorAll('[data-row-id]') ?? []).find(
+        (candidate) => candidate.getAttribute('data-row-id') === from.id,
+      );
+      const act = from.byAct
+        ? row?.querySelector<HTMLElement>('.ui-data-table__action:not(:disabled)')
+        : null;
+      return act ?? row?.querySelector<HTMLElement>('.ui-data-table__open') ?? undefined;
+    },
+    [],
+  );
 
   // Opening the panel narrows the table's own box, and a table narrower than 40rem is drawn as cards: the row button the person pressed is then not the one that is there
   // when the panel closes, and closing the panel widens the box again and swaps it once more. So the way back to the row is the row's control **as it is drawn now**,
@@ -271,8 +284,20 @@ export function QueueWorkspace<Item>({
         ? {}
         : {
             onOpen: (item: Item) => {
-              openedFrom.current = rowId(item);
+              openedFrom.current = { id: rowId(item), byAct: false };
               onOpen(item);
+            },
+          })}
+      // A row's own act that opens the panel (the queue's Confirm) is a way to open it as the row's button is: the way back is the row, and not the act, which the act itself may take away.
+      {...(rowAction === undefined
+        ? {}
+        : {
+            rowAction: {
+              ...rowAction,
+              onRun: (item: Item) => {
+                openedFrom.current = { id: rowId(item), byAct: true };
+                rowAction.onRun(item);
+              },
             },
           })}
       rows={result.status === 'ready' ? result.rows : []}

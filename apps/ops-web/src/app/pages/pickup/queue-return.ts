@@ -56,20 +56,46 @@ export function searchOf(filters: {
 }
 
 /**
+ * What holds the person's focus because the page behind it is inert: a question (a native modal dialog, an alert dialog) and the sheet the panel becomes at 768px and below (a modal dialog on the
+ * sheet primitive, which does not say `aria-modal="false"`). There is nothing behind them to give focus to.
+ */
+const MODAL_SURFACE = 'dialog, [role="alertdialog"], [role="dialog"]:not([aria-modal="false"])';
+
+/** The panel docked beside the queue, which does not take the page (`aria-modal="false"`): the rows stay in reach beside it. */
+const DOCKED_PANEL = '[role="dialog"][aria-modal="false"]';
+
+/** What the page knows that the element alone does not say. */
+export interface UnclaimedOptions {
+  /**
+   * The panel that is open shows another request than the one an act was made on a moment ago: the officer has moved on to it, and whatever has focus in it is theirs, the panel's region among it.
+   * Left out, the open panel is the one the act was made in.
+   */
+  readonly panelIsAnotherRequests?: boolean;
+}
+
+/**
  * Whether focus is where nobody has put it: on nothing, on the document, on the page's main region or on its heading, which is where the frame
  * puts it when a page replaces another (`AppFrame`), or on the region of a read state that the kit marks (`UNCLAIMED_FOCUS_SELECTOR`).
  * The last is what Safari's engine does when a button of the panel is pressed: it gives no focus to a button, and gives it to the nearest ancestor
  * that can have it (the region of the read state that draws the panel's content, `ReadState`), so that after an act made in the panel focus is on a wrapper that no officer chose, and the
  * row that changed would never be given it. Only that region is named, by the mark the kit sets on it and never by `tabindex="-1"`: the panel's own heading is at `tabindex="-1"` too, and
  * it is where an officer is after opening another request while the queue was read again (run 7, Stage 2.1). Focus anywhere else, on a control or on a heading, is the officer's.
+ *
+ * **Focus inside a surface that holds the person's focus is theirs, whatever holds it** (the Product Owner's review of 67bc979): the mark counts only outside such a surface. A question and the sheet
+ * the panel becomes are modal, always. The panel docked beside the queue is the person's when it shows another request than the one the act was made on: a click on plain text in it focuses
+ * the nearest element that can have focus (Chromium and Firefox), which is that panel's read-state region, marked, and the read that lands must not take focus from there back to the row of the request
+ * they acted on a moment ago. It is not the person's in the panel of the request the act was made in, where the mark is what the press of the act left behind (the targeted run of 11 November 2026 on
+ * WebKit: the panel of a confirmed request in Safari's engine, whose row must be given focus).
  */
-export function isUnclaimed(active: Element | null): boolean {
-  return (
-    active === null ||
-    active === document.body ||
-    active === document.documentElement ||
-    active.matches(`main, h1, ${UNCLAIMED_FOCUS_SELECTOR}`)
-  );
+export function isUnclaimed(active: Element | null, options: UnclaimedOptions = {}): boolean {
+  if (active === null || active === document.body || active === document.documentElement) {
+    return true;
+  }
+  if (active.closest(MODAL_SURFACE) !== null) return false;
+  if (options.panelIsAnotherRequests === true && active.closest(DOCKED_PANEL) !== null) {
+    return false;
+  }
+  return active.matches(`main, h1, ${UNCLAIMED_FOCUS_SELECTOR}`);
 }
 
 /** What gives focus back, as the queue workspace and a table offer it (`QueueWorkspaceHandle`): a page asks the table and never looks for a class of the kit's markup. */
