@@ -61,7 +61,9 @@ const COVERAGE: Readonly<Record<string, readonly string[] | 'a later slice'>> = 
   ],
   'Pickup run dispatched': ['RUN_DISPATCHED_RIDER', 'RUN_REASSIGNED_RIDER'],
   'Collection completion/handshake': ['HANDSHAKE_CODE_SENDER', 'HANDSHAKE_CODE_VENDOR_NUMBER'],
-  'Pickup failure': ['PICKUP_FAILED_SENDER', 'PICKUP_FAILED_VENDOR_FEED'],
+  'Pickup failure': ['PICKUP_FAILED_SENDER', 'PICKUP_FAILED_VENDOR_FEED', 'PICKUP_FAILED_OPS_FEED'],
+  // Added to §31.2 on 12 November 2026 (OB-S1-51) for an event the acceptance criterion already signed: AC-SLICE-001-21, "an office notification is raised at that moment".
+  'Pickup counted short (MSC-DEC-194)': ['COLLECTION_SHORT_OPS_FEED'],
   // Added to §31.2 on 2 November 2026 (S1.23) for an event the contract already signed: MSC-DEC-412, "the Vendor is notified, always".
   'Pickup stop skipped by Ops (MSC-DEC-412)': ['PICKUP_SKIPPED_VENDOR_FEED'],
   'Failure escalation': ['PICKUP_FAILURE_ESCALATED_OPS_FEED'],
@@ -539,6 +541,136 @@ describe('the notice of a skipped stop (S1.23; MSC-DEC-412)', () => {
           }),
     ).toBe(
       'Your pickup request ACC-PR-ABC123 for Tuesday 3 November was not collected on this run (LOCATION_INACCESSIBLE). What we need from you: CORRECT_PICKUP_LOCATION.',
+    );
+  });
+});
+
+describe('the messages of a failure (S1.28) and the office entry for a short count (OB-S1-51)', () => {
+  const sender = messageOfKind('PICKUP_FAILED_SENDER');
+  const vendorFeed = messageOfKind('PICKUP_FAILED_VENDOR_FEED');
+  const opsFeed = messageOfKind('PICKUP_FAILED_OPS_FEED');
+  const shortFeed = messageOfKind('COLLECTION_SHORT_OPS_FEED');
+  const vendorRequest = { vendorOrganizationId: 'v-1', adHocSenderId: null };
+
+  // Break caught: a message raised from the wrong event (the lane dead-letters an envelope no message answers), or a short count that raises the failure's messages.
+  it('are raised by the two events the database writes, in the order of the list', () => {
+    expect(messagesFor('pickup.failure.reported').map((each) => each.kind)).toEqual([
+      'PICKUP_FAILED_SENDER',
+      'PICKUP_FAILED_VENDOR_FEED',
+      'PICKUP_FAILED_OPS_FEED',
+    ]);
+    expect(messagesFor('pickup.collection.shortfall_flagged').map((each) => each.kind)).toEqual([
+      'COLLECTION_SHORT_OPS_FEED',
+    ]);
+    for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
+      expect(message?.aggregateType, message?.kind).toBe('PICKUP_REQUEST');
+    }
+  });
+
+  // Break caught: a text to a registered vendor's request (it has no sender to text), a feed entry written for a walk-in, or an Ops entry that a kind of sender can switch off.
+  it('text an individual sender only, write the vendor’s entry for a registered vendor only, and tell the office of every failure and short count', () => {
+    expect(sender).toMatchObject({ audience: 'AD_HOC_SENDER', channel: 'SMS' });
+    expect(appliesToRequest(sender, {})).toBe(true);
+    expect(appliesToRequest(sender, vendorRequest)).toBe(false);
+
+    expect(vendorFeed).toMatchObject({ audience: 'VENDOR_FEED', channel: 'FEED' });
+    expect(appliesToRequest(vendorFeed, {})).toBe(false);
+    expect(appliesToRequest(vendorFeed, vendorRequest)).toBe(true);
+
+    for (const entry of [opsFeed, shortFeed]) {
+      expect(entry, entry?.kind).toMatchObject({ audience: 'OPS_FEED', channel: 'FEED' });
+      expect(appliesToRequest(entry, {}), entry?.kind).toBe(true);
+      expect(appliesToRequest(entry, vendorRequest), entry?.kind).toBe(true);
+    }
+  });
+
+  // Break caught: a failure withheld because the office decided first (cancelled, rescheduled), which would leave the sender and the vendor not told of what happened.
+  it('stay true whatever became of the request: a failure and a count are facts of the day', () => {
+    for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
+      for (const state of ['CONFIRMED', 'CANCELLED', 'DECLINED', 'PENDING']) {
+        expect(stillTrueOfRequest(message, { state }), `${message?.kind ?? ''} ${state}`).toBe(
+          true,
+        );
+      }
+    }
+  });
+
+  // Break caught: a payload member copied that the message did not declare (the stop, the rider's note), a value that is not a token reaching the table's check, or a text that
+  // carries the reason (the text to a sender says nothing of why).
+  it('copy the category and the reason as tokens and nothing else; the text to the sender copies nothing', () => {
+    const payload = {
+      stop: '8f1c8c1e-0000-4000-8000-000000000003',
+      category: 'VENDOR_UNAVAILABLE',
+      reason: 'VENDOR_NOT_AT_LOCATION',
+      note: 'The gate was welded shut',
+    };
+    for (const message of [vendorFeed, opsFeed]) {
+      expect(message?.carries, message?.kind).toEqual(['category', 'reason']);
+      expect(parametersOf(message ?? {}, payload), message?.kind).toEqual({
+        category: 'VENDOR_UNAVAILABLE',
+        reason: 'VENDOR_NOT_AT_LOCATION',
+      });
+    }
+    expect(shortFeed?.carries).toEqual(['reason']);
+    expect(parametersOf(shortFeed ?? {}, { ...payload, reason: 'SOME_PARCELS_NOT_READY' })).toEqual(
+      { reason: 'SOME_PARCELS_NOT_READY' },
+    );
+    expect(sender?.carries).toBeUndefined();
+    expect(parametersOf(sender ?? {}, payload)).toEqual({});
+    // A reason that is not a token (free text, a number) is left out and the message is still raised.
+    expect(parametersOf(opsFeed ?? {}, { category: 'ACCESS_DENIED', reason: 'the gate' })).toEqual({
+      category: 'ACCESS_DENIED',
+    });
+  });
+
+  // Break caught: wording approved without the owner (the capture adapter would send any, and the owner has not approved these words), a text that says why, or a word of the
+  // rider's note, a count, a number or an address in any of the four.
+  it('are drafts, and none of the words carries a note, a count, a number or an address', () => {
+    for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
+      const template = templateOf(message?.kind ?? '', 1);
+      expect(template, message?.kind).toBeDefined();
+      expect(template === undefined ? true : isApproved(template), message?.kind).toBe(false);
+      expect(template?.placeholders, message?.kind).not.toContain('note');
+      expect(template?.wording, message?.kind).not.toMatch(/note|address|phone|number|http/i);
+    }
+    expect(templateOf('PICKUP_FAILED_SENDER', 1)?.placeholders).toEqual(['code', 'date']);
+    expect(templateOf('PICKUP_FAILED_VENDOR_FEED', 1)?.placeholders).toEqual([
+      'code',
+      'date',
+      'category',
+      'reason',
+    ]);
+    expect(templateOf('PICKUP_FAILED_OPS_FEED', 1)?.placeholders).toEqual([
+      'code',
+      'date',
+      'category',
+      'reason',
+    ]);
+    expect(templateOf('COLLECTION_SHORT_OPS_FEED', 1)?.placeholders).toEqual([
+      'code',
+      'date',
+      'reason',
+    ]);
+  });
+
+  it('say, in draft words, what happened to the request and the day it was for', () => {
+    const text = templateOf('PICKUP_FAILED_SENDER', 1);
+    expect(
+      text === undefined ? '' : render(text, { code: 'ACC-PR-ABC123', date: 'Tuesday 3 November' }),
+    ).toBe(
+      'Melarc: we could not complete your pickup ACC-PR-ABC123 planned for Tuesday 3 November. We will be in touch about the next step.',
+    );
+    const entry = templateOf('COLLECTION_SHORT_OPS_FEED', 1);
+    expect(
+      entry === undefined
+        ? ''
+        : render(entry, {
+            code: 'ACC-PR-ABC123',
+            date: 'Tuesday 3 November',
+            reason: 'SOME_PARCELS_NOT_READY',
+          }),
+    ).toBe(
+      'Pickup request ACC-PR-ABC123 for Tuesday 3 November was counted short at the door (SOME_PARCELS_NOT_READY). The office is asked to follow it up.',
     );
   });
 });

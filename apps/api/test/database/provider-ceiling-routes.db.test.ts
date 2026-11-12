@@ -16,8 +16,9 @@ import {
 
 /**
  * R76, the sub-ceiling of the operations that cause an outbound text (`provider_initiating_operation_ceiling_per_minute`, settings.md section
- * 7.7; plan OB-S1-65; the review of 4 November 2026), through the real application and a real PostgreSQL, from the five routes that declare it:
- * `confirmPickupRequest`, `dispatchManifest`, `skipPickupStop`, `initiateHandshake` and `requestSmsHandshakeFallback`. The counter itself is
+ * 7.7; plan OB-S1-65; the review of 4 November 2026), through the real application and a real PostgreSQL, from the seven routes that declare it:
+ * `confirmPickupRequest`, `dispatchManifest`, `skipPickupStop`, `initiateHandshake`, `requestSmsHandshakeFallback` and, since the messages of S1.28,
+ * `reportPickupFailure` and `recordCollection`. The counter itself is
  * tested at its own level (`alone/rate-limiter.db.test.ts`) and the guard at its own (`authentication-guard.db.test.ts`); here each claim is
  * what a caller meets:
  *
@@ -120,9 +121,23 @@ const OPERATIONS: readonly {
       return async () => riderRequest(await rider, `${STOP(randomUUID())}/handshake/sms-fallback`);
     },
   },
+  {
+    id: 'reportPickupFailure',
+    ask: () => {
+      const rider = aRider();
+      return async () => riderRequest(await rider, `${STOP(randomUUID())}/fail`);
+    },
+  },
+  {
+    id: 'recordCollection',
+    ask: () => {
+      const rider = aRider();
+      return async () => riderRequest(await rider, `${STOP(randomUUID())}/collect`);
+    },
+  },
 ];
 
-describe('the five operations that cause a text are each bounded, for the session that asks', () => {
+describe('the seven operations that write an envelope for a text or a feed are each bounded, for the session that asks', () => {
   // Break caught: a route that causes a text and does not declare the ceiling (the hole of OB-S1-65), a ceiling counted for one operation and not another, or a limit
   // that is not the setting's. The requests are ones the operation would refuse in any case, so that what is shown is the guard's alone.
   for (const operation of OPERATIONS) {

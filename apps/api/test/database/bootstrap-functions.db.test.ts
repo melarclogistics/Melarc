@@ -283,6 +283,9 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.rider_door_wait_minutes',
       // S1.11 (migration 0080): the derivation of the scope of the evidence of a stop.
       'melarc.evidence_pickup_stop_scope',
+      // S1.28 and OB-S1-51: the outbox envelopes of the rider's failure and short count.
+      'melarc.failure_envelope',
+      'melarc.shortfall_envelope',
     ]);
   });
 

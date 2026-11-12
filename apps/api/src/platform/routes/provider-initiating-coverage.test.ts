@@ -17,11 +17,13 @@ import { listDeclaredRoutes } from './route-inventory.js';
  * what the source writes into the outbox, reads what the routes declare, and requires the two to be the same set.
  *
  * What it reads, and why it is enough: the envelope of the outbox is written in two places only. The TypeScript writer
- * (`OutboxWriter.write`, called with the operation that did the act) and the one `SECURITY DEFINER` function that writes it in SQL
- * (`melarc.handshake_envelope`, called with the operation's name). The TypeScript side is read as a syntax tree, not as text, so a
+ * (`OutboxWriter.write`, called with the operation that did the act) and three `SECURITY DEFINER` functions that write it in SQL:
+ * `melarc.handshake_envelope`, called with the operation's name, and the envelopes of the two acts of a rider that the writer cannot serve,
+ * `melarc.failure_envelope` (`reportPickupFailure`) and `melarc.shortfall_envelope` (`recordCollection`), which fix their operation in their
+ * own text and are called from that operation's service and from nowhere else. The TypeScript side is read as a syntax tree, not as text, so a
  * different variable name, a different layout or an envelope built apart from the call does not slip past: a file that imports the writer
  * and calls it in a way the test cannot read is a failure of its own, and so is a file that imports it and is not on the list below. A
- * third writer, in either language, fails here and has to be added on purpose, with its operation.
+ * fourth writer, in either language, fails here and has to be added on purpose, with its operation.
  *
  * What it does not cover, said here and in the plan (OB-S1-65): the credential messages (a setup grant, a recovery link, written by the
  * two stores that enqueue them for the credential delivery worker). They are not envelopes of the outbox and no route of the pickup
@@ -180,6 +182,31 @@ function sqlEnvelopeOperations(): string[] {
   return found;
 }
 
+/**
+ * The two SQL writers that fix their operation in their own text, with the operation each is for and the one file of the application that may call it: the envelopes of the
+ * two acts of a rider that the writer cannot serve (the rider's arm of the outbox asks for a rider scope that a request does not have). Each is called from its operation's
+ * service, in the transaction of the act, and from nowhere else.
+ */
+const FIXED_OPERATION_WRITERS: Readonly<Record<string, { operation: string; caller: string }>> = {
+  'melarc.failure_envelope': {
+    operation: 'reportPickupFailure',
+    caller: 'pickup/pickup-failure.service.ts',
+  },
+  'melarc.shortfall_envelope': {
+    operation: 'recordCollection',
+    caller: 'pickup/collection.service.ts',
+  },
+};
+
+/** The operation a writer function names in its own envelope: the literal that follows the originating principal in its `VALUES`. */
+const fixedOperationOf = (statement: string): string | undefined =>
+  /melarc\.current_principal_id\(\),\s*'([A-Za-z]+)'/.exec(statement)?.[1];
+
+/** The name of the function a statement creates, or why it is not one. */
+const functionNameOf = (statement: string): string =>
+  /^CREATE (?:OR REPLACE )?FUNCTION (melarc\.[a-z_]+)\(/i.exec(statement)?.[1] ??
+  '(an outbox insert outside a function)';
+
 let running: TestApp | undefined;
 
 beforeAll(async () => {
@@ -233,17 +260,26 @@ describe('the provider-initiating ceiling covers every operation that writes a n
     ]);
   });
 
-  // Break caught: a second SQL function that inserts into the outbox, whose operation nobody declared.
-  it('knows the one SQL function that writes the outbox, and the operations it is called for', () => {
+  // Break caught: a further SQL function that inserts into the outbox, whose operation nobody declared, or one of the two that fix their operation changed to name another.
+  it('knows the SQL functions that write the outbox, and the operations they are for', () => {
     const writers = migrationStatements().filter((each) =>
       /INSERT\s+INTO\s+(public\.)?"?outbox"?\s*\(/i.test(each.statement),
     );
     expect(writers.length).toBeGreaterThan(0);
-    for (const writer of writers) {
-      expect(
-        writer.statement,
-        `${writer.file} writes the outbox outside melarc.handshake_envelope`,
-      ).toMatch(/^CREATE (OR REPLACE )?FUNCTION melarc\.handshake_envelope\(/i);
+    expect(
+      writers
+        .map((writer) => functionNameOf(writer.statement))
+        .filter((name, at, all) => all.indexOf(name) === at)
+        .toSorted(),
+    ).toEqual([
+      'melarc.failure_envelope',
+      'melarc.handshake_envelope',
+      'melarc.shortfall_envelope',
+    ]);
+    for (const [name, expected] of Object.entries(FIXED_OPERATION_WRITERS)) {
+      const own = writers.filter((writer) => functionNameOf(writer.statement) === name);
+      expect(own.length, name).toBe(1);
+      expect(fixedOperationOf(own[0]?.statement ?? ''), name).toBe(expected.operation);
     }
 
     expect(
@@ -256,9 +292,14 @@ describe('the provider-initiating ceiling covers every operation that writes a n
   // Break caught: an operation that writes an envelope and does not declare the ceiling (the hole this test exists for), or a declaration left on an operation that no
   // longer writes one.
   it('declares the ceiling on exactly those operations', () => {
+    const fixed = migrationStatements()
+      .filter((each) => /INSERT\s+INTO\s+(public\.)?"?outbox"?\s*\(/i.test(each.statement))
+      .filter((each) => functionNameOf(each.statement) in FIXED_OPERATION_WRITERS)
+      .map((each) => fixedOperationOf(each.statement) ?? '(no operation named)');
     const writes = [
       ...typescriptEnvelopeWrites().map((each) => each.operation),
       ...sqlEnvelopeOperations(),
+      ...fixed,
     ]
       .filter((operation, at, all) => all.indexOf(operation) === at)
       .toSorted();
@@ -268,9 +309,22 @@ describe('the provider-initiating ceiling covers every operation that writes a n
       'confirmPickupRequest',
       'dispatchManifest',
       'initiateHandshake',
+      'recordCollection',
+      'reportPickupFailure',
       'requestSmsHandshakeFallback',
       'skipPickupStop',
     ]);
+  });
+
+  // Break caught: a call of one of the two envelopes of a rider's acts from another operation, whose envelope would then say the failure or the short count of an act that is not
+  // one (the functions refuse a stop the caller did not just fail or count, but the net for the declaration reads callers), or the call dropped from its own operation.
+  it('calls the envelopes of a rider’s acts from the service of the operation each is for, and from nowhere else', () => {
+    for (const [name, { caller }] of Object.entries(FIXED_OPERATION_WRITERS)) {
+      const callers = applicationSources()
+        .filter(({ tree }) => tree.getFullText().includes(`${name}(`))
+        .map(({ file }) => file);
+      expect(callers, name).toEqual([caller]);
+    }
   });
 });
 

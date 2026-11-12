@@ -946,7 +946,12 @@ describe('the real application', () => {
         path: '/api/v1/pickup-stops/:id/collect',
         access: 'permission',
         permission: 'pickup.collection.confirm',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
+        // OB-S1-51: a short count writes an envelope for the notification lane (the Ops feed entry), so the sub-ceiling of the operations that write one applies.
+        authenticated: {
+          surfaces: ['RIDER_ANDROID'],
+          activity: 'qualifying',
+          providerInitiating: true,
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.29: the vendor disputes the collection of its own pickup; the Vendor app alone, and no record scope (the operation answers a stop that is not the vendor's as one that does not exist).
@@ -964,7 +969,12 @@ describe('the real application', () => {
         path: '/api/v1/pickup-stops/:id/fail',
         access: 'permission',
         permission: 'pickup.failure.report',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
+        // S1.28: a failure writes the envelope of the individual sender's text, so the sub-ceiling of the operations that can cause a text applies.
+        authenticated: {
+          surfaces: ['RIDER_ANDROID'],
+          activity: 'qualifying',
+          providerInitiating: true,
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.27: the collection handshake. The rider asks for the code of a stop it counted, enters the code of a sender, asks for the SMS fallback; the
