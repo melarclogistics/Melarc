@@ -89,6 +89,9 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/auth/vendor/devices/:id/revoke' },
       { method: 'POST', path: '/api/v1/auth/vendor/setup/credential' },
       { method: 'POST', path: '/api/v1/auth/vendor/sign-in' },
+      { method: 'POST', path: '/api/v1/evidence' },
+      { method: 'POST', path: '/api/v1/evidence/:id/complete' },
+      { method: 'POST', path: '/api/v1/evidence/:id/retrieval-authorization' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
@@ -572,6 +575,29 @@ describe('the real application', () => {
         access: 'anonymous',
         bucket: 'rate_limit_vendor_signin',
         client: VENDOR_BROWSER,
+      },
+      // S1.11: the evidence operations (`x-permission: owner`): a `self` route whose use case asks for the grant of the act the record is about. The rider declares and completes the record of a
+      // stop it has arrived at (the Rider app); the staff of the hub are given a way to read it (the Ops Portal). The route states `owner`, and no permission key.
+      {
+        method: 'POST',
+        path: '/api/v1/evidence',
+        access: 'self',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/evidence/:id/complete',
+        access: 'self',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/evidence/:id/retrieval-authorization',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
       // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that

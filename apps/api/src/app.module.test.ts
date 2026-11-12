@@ -1253,21 +1253,35 @@ describe('every port binding is an application singleton (S0.2)', () => {
     if (error instanceof PortBindingError) return error.notSingletons.join();
     throw error instanceof Error ? error : new Error('expected a refusal');
   };
+  /**
+   * The evidence store of the runtime composition (the in-process stand-in of a local run, S1.11) is built over the application's clock, so a clock that is **request-scoped** makes
+   * the store one too, by the dependency, and the check names both; the describe composition binds an inert store with no dependency and names the clock alone, and a singleton that
+   * injects a **transient** provider is still one object (its dependents stay singletons), so a transient clock is named alone in either.
+   */
+  const withTheStore = (port: string): string => `${port},EvidenceStore`;
 
   // Break caught: a port bound with a lifetime of its own, which the check would then have had to skip, or which the root
   // would have carried to a request without anyone being told.
   describe('refuses a request or transient binding before it listens', () => {
-    const cases: [label: string, bindings: PortBindings, port: string][] = [
+    const cases: [
+      label: string,
+      bindings: PortBindings,
+      port: string,
+      /** In the runtime composition, the evidence store built over the clock is refused with it. */
+      storeFollows?: true,
+    ][] = [
       [
         'a class whose metadata is request-scoped',
         { clock: { useClass: RequestScopedClock } },
         'Clock',
+        true,
       ],
       ['a class whose metadata is transient', { clock: { useClass: TransientClock } }, 'Clock'],
       [
         'a class that injects a request-scoped provider',
         { clock: { useClass: ClockNeedingARequest } },
         'Clock',
+        true,
       ],
       ['an alias of a request-scoped provider', { metrics: { useExisting: SCOPED } }, 'Metrics'],
       [
@@ -1277,15 +1291,18 @@ describe('every port binding is an application singleton (S0.2)', () => {
       ],
     ];
 
-    it.each(cases)('%s, in the runtime composition', async (_label, bindings, port) => {
-      const listen = vi.spyOn(net.Server.prototype, 'listen');
+    it.each(cases)(
+      '%s, in the runtime composition',
+      async (_label, bindings, port, storeFollows) => {
+        const listen = vi.spyOn(net.Server.prototype, 'listen');
 
-      await expect(bootRuntime(bindings, LifetimesModule)).rejects.toSatisfy(
-        (error) => notSingletons(error) === port,
-      );
-      expect(listen).not.toHaveBeenCalled();
-      listen.mockRestore();
-    });
+        await expect(bootRuntime(bindings, LifetimesModule)).rejects.toSatisfy(
+          (error) => notSingletons(error) === (storeFollows === true ? withTheStore(port) : port),
+        );
+        expect(listen).not.toHaveBeenCalled();
+        listen.mockRestore();
+      },
+    );
 
     it.each(cases)('%s, in the describe composition', async (_label, bindings, port) => {
       const listen = vi.spyOn(net.Server.prototype, 'listen');
@@ -1312,7 +1329,7 @@ describe('every port binding is an application singleton (S0.2)', () => {
     ).rejects.toSatisfy(
       (error) =>
         error instanceof PortBindingError &&
-        error.notSingletons.join() === 'Clock' &&
+        error.notSingletons.join() === withTheStore('Clock') &&
         error.describeAdapters.join() === 'Hasher',
     );
   });

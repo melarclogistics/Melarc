@@ -61,6 +61,10 @@ const JPEG = Uint8Array.from([
   0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
 ]);
 const NOT_A_JPEG = new TextEncoder().encode('MZ this is a program, not a picture');
+/** The first bytes of a PNG: a file of another type the platform accepts, which is no JPEG. */
+const A_PNG = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+]);
 const sha = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 const run = (over: Partial<Parameters<typeof arrangeRun>[2]> = {}): Promise<ArrangedRun> =>
@@ -403,6 +407,12 @@ describe('completeEvidenceUpload: what arrived decides, and the record is stored
     expect(outcome(done)).toEqual([400, 'VALIDATION_FAILED']);
     expect(ruleOf(done)).toBe('signature');
     expect((await rowOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
+    // A file that is another supported type, declared as a JPEG, is refused the same way: the bytes decide the type, and any recognised signature is not enough.
+    const png = await uploaded(arranged, A_PNG);
+    const spoofed = await complete(arranged.rider, png.ticket.evidence.id, png.etag);
+    expect(outcome(spoofed)).toEqual([400, 'VALIDATION_FAILED']);
+    expect(ruleOf(spoofed)).toBe('signature');
+    expect((await rowOf(png.ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
   });
 
   it('refuses an object that is missing, of another size, of another hash or of another type, and never reaches STORED (GBT-N15)', async () => {
@@ -585,6 +595,9 @@ describe('createEvidenceRetrievalAuthorization: a way to read one stored object,
         [sentinel],
       );
       expect(kept[0]?.n).toBe(0);
+      // Nor in a log line of the application (GBT-N13: every log, trace and error report).
+      expect(routes.kit.app.logs.text()).not.toContain(sentinel);
     }
+    expect(routes.kit.app.logs.text()).not.toContain('X-Amz-Signature');
   });
 });

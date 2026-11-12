@@ -359,7 +359,9 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
   const RIDER_OPERATIONS = [
     'arriveAtDeliveryStop',
     'arriveAtPickupStop',
+    'completeEvidenceUpload',
     'completeRiderDeviceEnrolment',
+    'createEvidence',
     'initiateHandshake',
     'recordCollection',
     'reportPickupFailure',
@@ -388,16 +390,17 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
     return found.toSorted();
   };
 
-  // Break caught: a server declaration dropped to make a count agree. All thirteen stay: the dedicated host is
+  // Break caught: a server declaration dropped to make a count agree. All fifteen stay: the dedicated host is
   // where a native client calls these, and removing one would send it to the cookie-only default. (The three of the
-  // collection handshake were added in S1.27: the rider shows and enters codes at the door; the report of a failure in S1.28.)
-  it('keeps all thirteen operation-level server declarations', () => {
+  // collection handshake were added in S1.27: the rider shows and enters codes at the door; the report of a failure in S1.28;
+  // the declaration and the completion of a piece of evidence in S1.11: the rider uploads what it captured.)
+  it('keeps all fifteen operation-level server declarations', () => {
     expect(withServers()).toEqual(RIDER_OPERATIONS);
   });
 
   // Break caught: the comment above `servers` giving a different count from the one the document has, which
   // sends the next reader looking for an operation that is not there.
-  it('says in its header comment how many there are, and says thirteen', () => {
+  it('says in its header comment how many there are, and says fifteen', () => {
     const text = readFileSync(locateContract(import.meta.dirname), 'utf8');
     const stated = /declared per operation on the (\w+)\s+# Rider native operations/.exec(text);
     const words = [
@@ -415,10 +418,12 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
       'eleven',
       'twelve',
       'thirteen',
+      'fourteen',
+      'fifteen',
     ];
 
     expect(stated?.[1]).toBe(words[withServers().length]);
-    expect(stated?.[1]).toBe('thirteen');
+    expect(stated?.[1]).toBe('fifteen');
   });
 });
 

@@ -176,6 +176,14 @@ describe('the generated description of the real application', () => {
       ['/ops/queue-summary', ['get'], ['getQueueSummary']],
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full (a POST that changes nothing, since 6 November 2026).
       ['/ops/lookup', ['post'], ['lookupRecords']],
+      // S1.11: the evidence operations (`x-permission: owner`): the rider declares and completes a record, the staff of the hub are given a way to read it.
+      ['/evidence', ['post'], ['createEvidence']],
+      ['/evidence/{id}/complete', ['post'], ['completeEvidenceUpload']],
+      [
+        '/evidence/{id}/retrieval-authorization',
+        ['post'],
+        ['createEvidenceRetrievalAuthorization'],
+      ],
       // S0.53a: the rider roster, the first routes of the `dispatch` module.
       ['/ops/riders', ['get'], ['listRiders']],
       ['/ops/riders/{riderId}', ['get'], ['getRider']],

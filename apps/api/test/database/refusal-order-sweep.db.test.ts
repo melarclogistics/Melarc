@@ -105,6 +105,11 @@ const VENDOR_SERVED = new Set([
  * `pickup.collection.confirm` is a vendor's too, and `disputeCollection` is the Vendor app's alone (S1.29), so a rider is refused it by its surface.
  */
 const RIDER_REFUSED_BY_SURFACE = new Set(['disputeCollection']);
+/**
+ * The `owner` operations (S1.11, `x-permission: owner`) that a rider is served: no key names them, the key is that of the act the record is about (the use case asks for it), and the
+ * surface is the Rider app's. A rider is refused the operation that is the staff's (`createEvidenceRetrievalAuthorization`) by its surface.
+ */
+const RIDER_OWNER_OPERATIONS = new Set(['createEvidence', 'completeEvidenceUpload']);
 /** The pre-session operations of the Rider app, a native client: the challenge, the sign-in and the device's enrolment. */
 const isRiderNative = (operation: Operation): boolean => operation.path.startsWith('/auth/rider/');
 const OPS_STAFF_KEYS = new Set(
@@ -206,11 +211,18 @@ const RIDER_KEYS = new Set(
  */
 const SERVED_TO_A_RIDER_WITH_A_BODY = [
   'acceptRunCustodyHandover',
+  'createEvidence',
   'recordCollection',
   'reportPickupFailure',
   'requestSmsHandshakeFallback',
   'verifyHandshake',
 ] as const;
+
+/** Whether the Rider app is served the operation: its key is in the rider's fixed bundle (or it is an owner operation of a rider's act) and its security takes the rider's session. */
+const servedToRider = (operation: Operation): boolean =>
+  (RIDER_KEYS.has(operation.permission) || RIDER_OWNER_OPERATIONS.has(operation.id)) &&
+  operation.schemes.has('riderSession') &&
+  !RIDER_REFUSED_BY_SURFACE.has(operation.id);
 
 const withBody = OPERATIONS.filter(
   (operation) => operation.hasBody && operation.permission !== 'none',
@@ -310,12 +322,7 @@ describe('a malformed body tells nothing to a caller who may not proceed (AC-SLI
   // Break caught: the rider's bundle gaining a key (or an operation gaining one the bundle holds) that this sweep would then expect to be served.
   it('serves a rider exactly the operations with a body that are named above', () => {
     const served = withBody
-      .filter(
-        (operation) =>
-          RIDER_KEYS.has(operation.permission) &&
-          operation.schemes.has('riderSession') &&
-          !RIDER_REFUSED_BY_SURFACE.has(operation.id),
-      )
+      .filter((operation) => servedToRider(operation))
       .map((operation) => operation.id)
       .toSorted();
     expect(served).toEqual([...SERVED_TO_A_RIDER_WITH_A_BODY].toSorted());
@@ -327,10 +334,7 @@ describe('a malformed body tells nothing to a caller who may not proceed (AC-SLI
       const [status, code] = await send(operation, { bearer: riderToken, body: MALFORMED });
       // A rider is served an operation whose key its fixed bundle holds and whose security takes its session (S1.24: the acceptance of a custody
       // handover is the first with a body): authorised, it is then told its body is not valid. Any other operation is refused before the body.
-      const served =
-        RIDER_KEYS.has(operation.permission) &&
-        operation.schemes.has('riderSession') &&
-        !RIDER_REFUSED_BY_SURFACE.has(operation.id);
+      const served = servedToRider(operation);
       expect([status, code]).toEqual(
         served
           ? [400, 'VALIDATION_FAILED']

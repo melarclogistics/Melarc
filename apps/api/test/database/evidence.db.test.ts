@@ -401,10 +401,30 @@ describe('completion, expiry and finality', () => {
       `captured_by_actor = '${randomUUID()}'`,
       `upload_expires_at = now() + interval '1 day'`,
     ]) {
+      // Refused for what it is (the guard's own sentence), alone and together with the one move the record may make: a change that rides along with the store must not pass.
       await expect(
         routes.admin.query(`update evidence set ${change} where id = $1`, [id]),
-      ).rejects.toMatchObject({ code: '23514' });
+      ).rejects.toMatchObject({
+        code: '23514',
+        message: expect.stringContaining('keeps its owner'),
+      });
+      await expect(
+        routes.admin.query(
+          `update evidence set ${change}, state = 'STORED', validated_signature = 'JPEG' where id = $1`,
+          [id],
+        ),
+      ).rejects.toMatchObject({
+        code: '23514',
+        message: expect.stringContaining('keeps its owner'),
+      });
     }
+    expect(
+      (
+        await routes.admin.query<{ state: string }>(`select state from evidence where id = $1`, [
+          id,
+        ])
+      ).rows[0]?.state,
+    ).toBe('PENDING_UPLOAD');
   });
 
   it('is never deleted: the login holds no privilege, and the guard refuses the owner’s statement too', async () => {

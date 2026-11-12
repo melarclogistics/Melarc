@@ -727,3 +727,57 @@ describe('resolveHandshake: the resolution of a handshake that ended short', () 
     expect(outcome(await resolve(senior, randomUUID()))).toEqual([404, 'NOT_FOUND']);
   });
 });
+
+describe('verifyHandshake: ownership is judged before the stop is locked (OB-S1-74 (2))', () => {
+  // Break caught: the stop's row lock taken before the caller is known to own the stop, so that another vendor that had guessed a stop's identifier is made to wait for the lock of
+  // whoever is working on it and learns by how long the answer takes that the stop exists and is being worked; or the owner no longer meeting the stop's lock at all (the
+  // handshake is judged under it), which would let two entries of a code run side by side.
+  it('answers a vendor or a rider that does not own the stop at once, as it answers a stop that does not exist, while the owner waits for the stop’s lock', async () => {
+    const { rider, stop } = await counted();
+    const issued = await initiate(rider, stop.id);
+    expect(issued.status).toBe(201);
+    const code = (issued.json() as Handshake).display_code ?? '';
+    const browserB = routes.browser(vendorB.device.credential.token);
+    expect(
+      (await routes.signIn(browserB, vendorB.row.accountIdentifier, vendorB.secret)).status,
+    ).toBe(200);
+    const otherRider = (await run()).rider;
+    const askers: [string, (id: string) => Promise<TestResponse>][] = [
+      ['another vendor', (id) => browserB.post(VERIFY(id), { code: '0000' })],
+      ['another rider', (id) => verifyAsRider(otherRider, id, '0000')],
+    ];
+
+    const holder = clientFor(routes.database.urlFor('postgres'));
+    await holder.connect();
+    try {
+      // Someone is working on the stop: its row lock is held.
+      await holder.query('begin');
+      await holder.query(`select id from pickup_stop where id = $1 for update`, [stop.id]);
+      const pid = await backendPidOf(holder);
+
+      for (const [who, ask] of askers) {
+        const asking = ask(stop.id);
+        // The refusal is not made to wait: the work ends before any backend is seen waiting for the holder's lock.
+        const waited = await waitUntilBlockedBy(routes.admin, pid, who, asking).then(
+          () => true,
+          () => false,
+        );
+        expect(waited, `${who} was made to wait for the stop’s lock`).toBe(false);
+        const answer = await asking;
+        // And it is the answer a stop that does not exist is given: nothing tells the two apart.
+        expect(outcome(answer), who).toEqual(outcome(await ask(randomUUID())));
+        expect(answer.status, who).toBeGreaterThanOrEqual(400);
+      }
+      expect(await handshakeRow(stop.id)).toMatchObject({ state: 'CODE_GENERATED', attempts: 0 });
+
+      // The owner meets the lock: the handshake is judged under it.
+      const owner = verifyAsVendor(stop.id, code);
+      await waitUntilBlockedBy(routes.admin, pid, 'the owner’s entry', owner);
+      await holder.query('rollback');
+      expect((await owner).status).toBe(200);
+      expect(await handshakeRow(stop.id)).toMatchObject({ state: 'VERIFIED' });
+    } finally {
+      await holder.end().catch(() => undefined);
+    }
+  });
+});
