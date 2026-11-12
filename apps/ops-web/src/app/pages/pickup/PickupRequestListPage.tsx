@@ -192,17 +192,30 @@ export function PickupRequestListPage() {
   const restored = useRef(arrival === undefined);
 
   // Once the rows that were read again after an act are drawn, focus goes to the row that changed (the request's own button), else to the results: the officer is not left on nothing.
-  // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c).
-  // The panel that is open when the read lands may be another request's: the officer opened it while the queue was read again, and whatever has focus in it, a click on its text among it, is theirs.
-  const openedId = opened?.id;
+  // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c). **Once the officer has pressed or typed since the act, focus is theirs,
+  // wherever it is** (the review of ba9a18c): a press or a key is noted from the moment the read begins to the moment it lands, and then a click on plain text in a panel, whichever request it shows, is
+  // not taken for nobody's though it leaves focus on the panel's marked region (`isUnclaimed` says why it is the press that is noted and not a change of the focused element).
+  const touchedSinceAct = useRef(false);
+  useEffect(() => {
+    if (!afterAct) return;
+    touchedSinceAct.current = false;
+    const note = (): void => {
+      touchedSinceAct.current = true;
+    };
+    document.addEventListener('pointerdown', note, true);
+    document.addEventListener('keydown', note, true);
+    return () => {
+      document.removeEventListener('pointerdown', note, true);
+      document.removeEventListener('keydown', note, true);
+    };
+  }, [afterAct]);
   useEffect(() => {
     if (afterAct || returnTo.current === undefined) return;
     const id = returnTo.current;
     returnTo.current = undefined;
-    const panelIsAnotherRequests = openedId !== undefined && openedId !== id;
-    if (!isUnclaimed(document.activeElement, { panelIsAnotherRequests })) return;
+    if (!isUnclaimed(document.activeElement, { touchedSinceAct: touchedSinceAct.current })) return;
     if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
-  }, [afterAct, list.dataUpdatedAt, openedId]);
+  }, [afterAct, list.dataUpdatedAt]);
 
   /**
    * The queue is read again after an act, its rows kept. If that read fails the rows stay, with a line that says they may be out of date and the way to read them again; any other read that

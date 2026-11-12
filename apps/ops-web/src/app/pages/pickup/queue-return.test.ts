@@ -191,41 +191,57 @@ describe('isUnclaimed: focus nobody has taken', () => {
       expect(isUnclaimed(region)).toBe(false);
       expect(isUnclaimed(text)).toBe(false);
       expect(isUnclaimed(heading)).toBe(false);
-      expect(isUnclaimed(region, { panelIsAnotherRequests: true })).toBe(false);
+      expect(isUnclaimed(region, { touchedSinceAct: false })).toBe(false);
     },
   );
 
-  // Break caught (the Product Owner's review of 67bc979): a click on plain text in the panel of another request focuses that panel's read-state region (Chromium and Firefox focus the nearest element that can
-  // have focus), which carries the mark, so that the page read the officer's own click as nobody's and the read that landed moved focus from this panel back to the row of the request acted on earlier.
-  it('is not focus on the marked region of a read state inside the docked panel of another request than the one acted on', () => {
+  // Break caught (the Product Owner's review of ba9a18c, item 4; before it of 67bc979, which gave the exemption to "a docked panel that shows another request"): a click on plain text in a panel
+  // focuses that panel's read-state region (Chromium and Firefox focus the nearest element that can have focus), which carries the mark, so that the page read the officer's own click as nobody's and the
+  // read that landed moved focus from the panel back to the row of the request acted on. The rule is not about which panel it is: once the officer has pressed or typed since the act, focus is theirs,
+  // wherever it is.
+  it('is not focus once the officer has pressed or typed since the act, wherever it is: the marked region of a read state, its text, a heading', () => {
     const { region, text, heading } = surfaceWith(withRole('aside', 'dialog', 'false'));
 
-    expect(isUnclaimed(region, { panelIsAnotherRequests: true })).toBe(false);
-    expect(isUnclaimed(text, { panelIsAnotherRequests: true })).toBe(false);
-    expect(isUnclaimed(heading, { panelIsAnotherRequests: true })).toBe(false);
+    expect(isUnclaimed(region, { touchedSinceAct: true })).toBe(false);
+    expect(isUnclaimed(text, { touchedSinceAct: true })).toBe(false);
+    expect(isUnclaimed(heading, { touchedSinceAct: true })).toBe(false);
+  });
+
+  // Break caught: the same rule read only for the places the kit marks, so that focus the officer moved to the page's heading or its main region after the act was taken from them.
+  it('is not the main region or the heading either, once the officer has pressed or typed since the act', () => {
+    const main = document.createElement('main');
+    const heading = document.createElement('h1');
+    document.body.append(main, heading);
+
+    expect(isUnclaimed(main, { touchedSinceAct: true })).toBe(false);
+    expect(isUnclaimed(heading, { touchedSinceAct: true })).toBe(false);
+    expect(isUnclaimed(main)).toBe(true);
+    expect(isUnclaimed(heading)).toBe(true);
   });
 
   // Break caught (the targeted run of 11 November 2026 on WebKit): the exemption written for every docked panel, so that in Safari's engine, which gives a pressed button no focus and gives it to the region of
-  // the panel of the request just confirmed, the row that changed was never given focus. In the panel of the request the act was made in, the mark is what the press left behind.
-  it('is focus on the marked region of the docked panel of the request the act was made in, and on nothing else in it', () => {
+  // the panel of the request just confirmed, the row that changed was never given focus. Where the officer has done nothing since the act, the mark is what the press left behind, and it is nobody's.
+  it('is focus on the marked region of the docked panel where the officer has done nothing since the act, and on nothing else in it', () => {
     const { region, text, heading } = surfaceWith(withRole('aside', 'dialog', 'false'));
 
     expect(isUnclaimed(region)).toBe(true);
-    expect(isUnclaimed(region, { panelIsAnotherRequests: false })).toBe(true);
+    expect(isUnclaimed(region, { touchedSinceAct: false })).toBe(true);
     expect(isUnclaimed(text)).toBe(false);
     expect(isUnclaimed(heading)).toBe(false);
+    expect(isUnclaimed(text, { touchedSinceAct: false })).toBe(false);
   });
 
-  // Break caught: the exemption written as "anything with a panel open", which would make the whole page the person's once a panel is open.
-  it('still is focus on the marked region of a read state outside the panel, with the panel of another request open beside it', () => {
-    const panel = withRole('aside', 'dialog', 'false');
-    document.body.append(panel);
-    const region = document.createElement('div');
-    region.setAttribute('tabindex', '-1');
-    region.setAttribute(UNCLAIMED_FOCUS_ATTRIBUTE, '');
-    document.body.append(region);
+  // Break caught: focus on the document or on nothing read as the officer's because they pressed something since the act: nobody has focus then, whatever they did, and the row that changed is given it.
+  it('is focus on the document or on nothing, whatever the officer did since the act', () => {
+    expect(isUnclaimed(document.body, { touchedSinceAct: true })).toBe(true);
+    expect(isUnclaimed(null, { touchedSinceAct: true })).toBe(true);
+  });
 
-    expect(isUnclaimed(region, { panelIsAnotherRequests: true })).toBe(true);
+  // Break caught: a surface that holds the person's focus read as nobody's because they have done nothing since the act: the page behind a question or a sheet is inert, so focus inside them is theirs.
+  it('is not focus inside a surface that holds it, though the officer has done nothing since the act', () => {
+    const { region } = surfaceWith(withRole('div', 'alertdialog'));
+
+    expect(isUnclaimed(region, { touchedSinceAct: false })).toBe(false);
   });
 
   // Break caught (run 7, Stage 2.1; a regression of 765e873, which read every container at tabindex -1 that is no control as nobody's): the panel's heading is at tabindex -1 too, and it is where the

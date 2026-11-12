@@ -982,12 +982,10 @@ test.describe('the queue: confirming in the panel', () => {
   });
 
   /**
-   * Confirms the request in its panel and, while the queue is read again for it (the read is held until `release`), opens another request in the panel: the officer is working in that one when the
-   * read lands. `settled` waits for the end of the read and for the effect it runs.
+   * Confirms the request in its panel. From then the queue's read, which the act asks for, is held until `settled` lets it go; `settled` waits for the end of the read and for the effect it runs.
    */
-  async function confirmThenOpenAnother(page: Page) {
+  async function confirmWithTheReadHeld(page: Page) {
     await page.setViewportSize(WIDE);
-    const other = 'ACC-PR-9WXH4T';
     const { api, watch } = await open(page, '/pickup-requests');
     await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
     const panel = page.getByRole('dialog', { name: CODE });
@@ -1014,15 +1012,9 @@ test.describe('the queue: confirming in the panel', () => {
     await expect.poll(() => held).toBe(1);
     await expect(busy).toHaveCount(1);
 
-    // The officer moves on while the queue is read again: another request opens in the panel, and its heading has focus.
-    await opener(page, other).click();
-    const next = page.getByRole('dialog', { name: other });
-    await expect(next.getByRole('heading', { name: other })).toBeFocused();
-
     return {
       watch,
-      other,
-      next,
+      panel,
       settled: async () => {
         release();
         await expect(busy).toHaveCount(0);
@@ -1039,6 +1031,19 @@ test.describe('the queue: confirming in the panel', () => {
         );
       },
     };
+  }
+
+  /** Confirms the request in its panel and, while the queue is read again for it, opens another request in the panel: the officer is working in that one when the read lands. */
+  async function confirmThenOpenAnother(page: Page) {
+    const other = 'ACC-PR-9WXH4T';
+    const { watch, settled } = await confirmWithTheReadHeld(page);
+
+    // The officer moves on while the queue is read again: another request opens in the panel, and its heading has focus.
+    await opener(page, other).click();
+    const next = page.getByRole('dialog', { name: other });
+    await expect(next.getByRole('heading', { name: other })).toBeFocused();
+
+    return { watch, other, next, settled };
   }
 
   // Break caught (run 7, Stage 2.1; a regression of 765e873): the page took every container at tabindex -1 that is no control for focus nobody chose, and the panel's heading is one. An officer who
@@ -1075,6 +1080,33 @@ test.describe('the queue: confirming in the panel', () => {
 
     // A press on a fact of the request: text that is no control. The nearest element that can have focus is the panel's region.
     await next.getByRole('definition').first().click();
+    expect(await inThePanel()).toBe(true);
+
+    await settled();
+    expect(await inThePanel()).toBe(true);
+    await expect(rowButton(page)).not.toBeFocused();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  // Break caught (the Product Owner's review of ba9a18c, item 4): the exemption was written for "a docked panel that shows another request", so that a press on plain text in the panel of the request
+  // JUST CONFIRMED, before the queue was read again, was still taken for nobody's (the press focuses the panel's read-state region, which carries the mark) and the read that landed took focus from
+  // there back to the row. Focus that moved after the act is the officer's, wherever it is: the act's own press left focus where it left it (the test above this block, and the WebKit case of 765e873,
+  // where the press leaves it on the region and the row must be given it), and a press made afterwards moved it.
+  test('leaves focus in the panel of the request just confirmed, where the officer pressed on its text before the queue was read again', async ({
+    page,
+  }) => {
+    const { watch, panel, settled } = await confirmWithTheReadHeld(page);
+    await expect(panel.getByText('Confirmed').first()).toBeVisible();
+    const inThePanel = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          active !== null && active !== document.body && active.closest('[role="dialog"]') !== null
+        );
+      });
+
+    // A press on a fact of the request: text that is no control. The nearest element that can have focus is the panel's region.
+    await panel.getByRole('definition').first().click();
     expect(await inThePanel()).toBe(true);
 
     await settled();
