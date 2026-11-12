@@ -6,6 +6,7 @@ import { fileContractSource } from '../../src/platform/contract/contract-source.
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
+import { photoOf } from './support/evidence-photo.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -316,8 +317,11 @@ async function build(): Promise<World> {
   await override(opsA, at(6));
   // 7. A short count: the office is flagged while the run is in progress.
   await count(riderA, at(7), 2);
-  // 8 to 11. Four failures, and what the office did with each.
+  // 8 to 11. Four failures, and what the office did with each; the first with two photos of the door and the third with one.
+  const photosOfFirst = [await photoOf(routes, riderA, at(8)), await photoOf(routes, riderA, at(8))];
+  const photoOfThird = await photoOf(routes, riderA, at(10));
   await failStop(riderA, at(8), {
+    evidence_ids: photosOfFirst.map((photo) => photo.id),
     contact_attempts: [
       {
         method: 'PHONE_CALL',
@@ -329,7 +333,7 @@ async function build(): Promise<World> {
   });
   await failStop(riderA, at(9));
   await escalate(opsA, runA.stops[9]?.requestId ?? '');
-  await failStop(riderA, at(10));
+  await failStop(riderA, at(10), { evidence_ids: [photoOfThird.id] });
   await cancel(opsA, runA.stops[10]?.requestId ?? '', true);
   await failStop(riderA, at(11));
   await cancel(opsA, runA.stops[11]?.requestId ?? '', false);
@@ -743,6 +747,20 @@ describe('listPickupFailures', () => {
       world.failureRescheduled,
       world.failureCancelled,
     ]);
+  });
+
+  // Break caught (S1.28, S1.30): the count of the photos left out of the queue, answered as a constant, or taken from another key than the stop (the manifest's
+  // photos for every stop of the run would show three for each); a photo of a decided failure dropped with its decision.
+  it('counts the photos the rider attached to each failure, a count and never an address', async () => {
+    expect((await byStop(world.failurePending)).photo_count).toBe(2);
+    expect((await byStop(world.failureEscalated)).photo_count).toBe(0);
+    expect((await byStop(world.failureRescheduled)).photo_count).toBe(1);
+    expect((await byStop(world.failureCancelled)).photo_count).toBe(0);
+    const [stored] = await routes.rows<{ photos: number }>(
+      `select count(*)::int as photos from pickup_stop_evidence e join pickup_stop s on s.id = e.pickup_stop_id where s.pickup_manifest_id = $1`,
+      [world.runA.manifest.id],
+    );
+    expect(stored?.photos).toBe(3);
   });
 
   // Break caught: the waiting time read from the client's clock or fixed when the failure was made; one that goes on running after the office decided.

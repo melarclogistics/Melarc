@@ -257,6 +257,7 @@ describe('the items hold the contract’s members and no other', () => {
       decided_at: null,
       replacement_request_id: null,
       rider_id: ID(6),
+      photo_count: 2,
     } as unknown as PickupFailureRow;
 
     const item = failureViewOf(row);
@@ -282,6 +283,9 @@ describe('the items hold the contract’s members and no other', () => {
       },
     ]);
     expect(item.waiting_seconds).toBe(5400);
+    // The count of the photos is the database's, passed on as it is: a view that dropped it, or answered a constant, shows no photo to the office.
+    expect(item.photo_count).toBe(2);
+    expect(failureViewOf({ ...row, photo_count: 0 }).photo_count).toBe(0);
     expect(bare.note).toBeNull();
     expect(bare.contact_attempts).toEqual([]);
   });

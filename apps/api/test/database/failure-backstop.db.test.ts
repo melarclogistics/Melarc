@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createDeliveryWorkerRuntime } from '../../src/delivery-worker-runtime.js';
 import { SystemClock } from '../../src/platform/auth/clock/system.clock.adapter.js';
@@ -79,20 +79,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await work.close();
   await routes.stop();
-});
-
-/**
- * The worker login holds the capability role by a membership that the provisioning of the roles grants (provisionRoles). A tree whose provisioning does not list this role takes the
- * membership away when it makes a test database of its own (the provisioning revokes every membership of the login that it does not grant again), and the cluster is shared by
- * the trees of a run in parallel: so each test grants it again before it begins, as the provisioning of this tree does at the start of the file.
- */
-const holdsTheCapability = (): Promise<unknown> =>
-  routes.admin.query(
-    `grant ${WORKER_PICKUP_BACKSTOP_ROLE} to ${WORKER_RUNTIME_ROLE} with inherit true, set false`,
-  );
-
-beforeEach(async () => {
-  await holdsTheCapability();
 });
 
 /** One finished run to hold the stops, for each hub. */
@@ -821,7 +807,6 @@ describe('the lane in the worker’s runtime (D-A1)', () => {
   async function until(condition: () => Promise<boolean>, what: string): Promise<void> {
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
-      await holdsTheCapability();
       if (await condition()) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
