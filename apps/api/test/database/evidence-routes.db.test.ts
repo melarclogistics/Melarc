@@ -25,7 +25,8 @@ import {
  *   stop that is not the rider's as for one that does not exist.
  * - **The scope is derived and the server's values are the server's**: neither scope column, the storage reference, the state nor the retention is accepted from the client.
  * - **What arrived decides, not the client's word** (GBT-N14, N15): a spoofed type, a missing object and a size or hash that is not the declared one never reach `STORED`.
- * - **Capabilities are short and for one object** (GBT-N6, N7, N8, N9, N10): redeemed against the stand-in, which judges by the application's clock.
+ * - **Capabilities are short and for one object** (GBT-N7 to N10 here, the capability as the operation answers it, redeemed against the stand-in, which judges by the
+ *   application's clock; GBT-N5 and N6, the upload capability, are the store's own, in `evidence-store.test.ts`).
  * - **No capability is kept or logged** (GBT-N13, U8): none is in an event or a record of the database.
  */
 let routes: VendorRoutes;

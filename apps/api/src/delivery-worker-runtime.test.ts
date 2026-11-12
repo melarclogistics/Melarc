@@ -409,6 +409,10 @@ describe('the delivery worker’s runtime (S0.18)', () => {
       lines
         .map((line) => JSON.parse(line) as Record<string, unknown>)
         .filter((line) => line.msg === 'delivery periodic task failed');
+    // The worker runs other tasks beside the retention cleanup (the notification lane, the sweep of abandoned evidence captures), and each of them fails at once against this
+    // unreachable database: this test is about the retention task's schedule, so it counts that task's failures.
+    const retentionFailures = (): Record<string, unknown>[] =>
+      periodicFailures().filter((line) => line.task === 'retention');
 
     runtime.start();
     // Wait for the second failure to be logged and not for a time to pass: a run is a refused connection, whose duration is the
@@ -416,15 +420,17 @@ describe('the delivery worker’s runtime (S0.18)', () => {
     // used to sleep, and two were expected). The bound is only for a worker that does not run it again, and it separates the interval
     // that was given (100 ms) from the default (60 s): a worker that ignored it would log no second failure within the bound.
     const deadline = Date.now() + 10_000;
-    while (periodicFailures().length < 2 && Date.now() < deadline) {
+    while (retentionFailures().length < 2 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     const outcome = await runtime.shutdown();
 
-    const failed = periodicFailures();
+    const failed = retentionFailures();
     expect(failed.length).toBeGreaterThanOrEqual(2);
     expect(failed[0]).toMatchObject({ task: 'retention', level: 'error' });
     expect(Object.keys(failed[0] ?? {})).not.toContain('err');
+    // The sweep of abandoned evidence captures (S1.11) is composed beside it: it ran at the start, and failed the same way against this database.
+    expect(periodicFailures().some((line) => line.task === 'evidence')).toBe(true);
     expect(lines.join('')).not.toContain('SENTINEL-DB-PASSWORD');
     expect(outcome).toBe('clean');
   });
