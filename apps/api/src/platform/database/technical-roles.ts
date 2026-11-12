@@ -27,6 +27,11 @@ export const WORKER_NOTIFICATION_ROLE = 'melarc_worker_cap_notification';
  * the end of the upload window, and writes the state, to expire an abandoned capture).
  */
 export const WORKER_EVIDENCE_VALIDATION_ROLE = 'melarc_worker_cap_evidence_validation';
+/**
+ * The grant set of the failure backstop lane (S1.28, D-A1): the same login, a further capability, and the one privilege of executing `melarc.failure_backstop_escalate`. It holds no
+ * privilege on any table: the function runs as the owner and the policies that admit its statements name the capability and the owner.
+ */
+export const WORKER_PICKUP_BACKSTOP_ROLE = 'melarc_worker_cap_pickup_backstop';
 export const PROVISIONING_ROLE = 'melarc_provisioning';
 /**
  * The role migrations run as (SECURITY_DESIGN.md §14.17a). `tools/database/safety.ts` holds the same string, because it cannot

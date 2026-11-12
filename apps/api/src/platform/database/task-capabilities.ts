@@ -35,6 +35,10 @@ export const TASK_CAPABILITIES = [
   // (`PENDING_UPLOAD` whose upload window has passed) and keeps them, and is the place the malicious-content check will run (OB-S1-05, the owner's). Held by the
   // worker's login through the grant set `melarc_worker_cap_evidence_validation`, so it is a separation and not only a label: the API's login holds none of the grants.
   'evidence_validation',
+  // The failure backstop lane of the delivery worker (S1.28; migration 0084; registry §5.1 `worker:pickup_backstop`; D-A1, the Product Owner, 11 November 2026): it escalates a
+  // pickup failure that has sat undecided in the Ops decision context beyond its hub's `stale_failure_backstop_hours`, and does nothing else. Held by the worker's login
+  // through the grant set `melarc_worker_cap_pickup_backstop`, whose one privilege is the execution of `melarc.failure_backstop_escalate`: a separation and not only a label.
+  'pickup_backstop',
 ] as const;
 
 export type TaskCapability = (typeof TASK_CAPABILITIES)[number];

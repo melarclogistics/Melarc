@@ -2,6 +2,7 @@ import {
   API_RUNTIME_ROLE,
   PROVISIONING_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   WORKER_RUNTIME_ROLE,
 } from './technical-roles.js';
 
@@ -181,9 +182,14 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.handshake_mark_delivered',
     'melarc.notification_handshake_number',
   ],
+  // The failure backstop lane's grant set holds the one operation that escalates the failures left undecided beyond their hub's threshold (migration 0084, S1.28; D-A1): it
+  // answers the pickup_backstop capability alone, reads the failed stops and the hub's threshold, sets the moment of the escalation and writes its event, in one change. The
+  // worker's login holds it only through this role, and the check asks both the role and the login that inherits it, so the line is on both.
+  [WORKER_PICKUP_BACKSTOP_ROLE]: ['melarc.failure_backstop_escalate'],
   [WORKER_RUNTIME_ROLE]: [
     'melarc.handshake_mark_delivered',
     'melarc.notification_handshake_number',
+    'melarc.failure_backstop_escalate',
   ],
 };
 

@@ -275,6 +275,39 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     returns:
       'Marks a record expired and returns its identifier to nothing outside the process; no storage reference, no signed address and no byte of an object is read or written',
   },
+  pickup_backstop: {
+    identity: 'worker',
+    opener: 'The failure backstop lane of the delivery worker process',
+    openedUnder: ['platform/delivery/backstop/'],
+    // Only inside melarc.failure_backstop_escalate (migration 0084): the capability role holds the EXECUTE of that function and no privilege on any table, and the policies that
+    // admit the statements of the function name the capability, the owner (the function runs as the owner) and the rows it may reach.
+    tables: [
+      ...on(
+        ['PickupRequest'],
+        ['SELECT', 'UPDATE'],
+        'only inside melarc.failure_backstop_escalate: SELECT of the confirmed requests and UPDATE of the moment of an escalation (escalated_at) of a confirmed request that has not been escalated and whose stop failed, and of nothing else; the guard of the request holds both rules for every writer',
+      ),
+      ...on(
+        ['PickupStop'],
+        ['SELECT'],
+        'only inside melarc.failure_backstop_escalate: the stops that FAILED, to find the request whose failure has sat undecided and to say how long it has sat; no write',
+      ),
+      ...on(
+        ['HubSetting'],
+        ['SELECT'],
+        'only inside melarc.failure_backstop_escalate: the value in force of stale_failure_backstop_hours of a hub and no other row; no write',
+      ),
+      ...on(
+        ['AuditEvent'],
+        ['INSERT'],
+        'only inside melarc.failure_backstop_escalate: the one event pickup.request.escalated (enhanced), by SYSTEM with a null actor and the trigger BACKSTOP, about a request the same change has escalated',
+      ),
+    ],
+    lookups:
+      'Finds the confirmed requests of a hub whose stop failed longer ago than the hub’s threshold, oldest first, in bounded batches, taking the row lock with skip locked so that two lanes at once escalate a request once',
+    returns:
+      'The number of requests escalated, whether the batch was full, and the hubs whose threshold is missing or unusable; no identifier of a request, no note and no figure of a person leaves the function',
+  },
   bootstrap: {
     identity: 'provisioning',
     opener: 'The bootstrap seed and the bootstrap-resume command',

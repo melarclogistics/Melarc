@@ -10,6 +10,7 @@ import {
   WORKER_CREDENTIAL_DELIVERY_ROLE,
   WORKER_EVIDENCE_VALIDATION_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
 } from '../../platform/database/technical-roles.js';
 import { OWNER_ROLE } from './provisioning.js';
 import { scopeProbePolicyProblem, type PolicyCommand } from './scope-probe-rule.js';
@@ -154,6 +155,7 @@ const GRANT_SET_ROLES = [
   WORKER_CREDENTIAL_DELIVERY_ROLE,
   WORKER_NOTIFICATION_ROLE,
   WORKER_EVIDENCE_VALIDATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
 ];
 
 interface PolicyExpressions {
@@ -221,6 +223,7 @@ async function technicalRoleViolations(client: Pick<pg.Client, 'query'>): Promis
     WORKER_CREDENTIAL_DELIVERY_ROLE,
     WORKER_NOTIFICATION_ROLE,
     WORKER_EVIDENCE_VALIDATION_ROLE,
+    WORKER_PICKUP_BACKSTOP_ROLE,
   ]) {
     if (!found.has(role)) continue;
     const posture = await client.query<Record<string, unknown>>(

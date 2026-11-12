@@ -1153,12 +1153,23 @@ paths:
 
         **What it records, and what it needs (S1.18).** It sets `escalated_at` on the request once, under the
         `If-Match` of the request's read; the actor, the trigger (`OPS`) and the note are in the enhanced audit event.
-        Only a request that was `CONFIRMED` is escalated, and only once: a pending, declined or cancelled request, or
-        one already escalated, is `STATE_CONFLICT`. A blank note is `REASON_REQUIRED`; a note the ledger would not keep
+        **Only a request that is `CONFIRMED`, has not been escalated and has a stop that `FAILED` is escalated** (S1.28,
+        OB-S1-66: escalation is a resolution of a failure, the third beside the reschedule and the cancellation). A pending,
+        declined or cancelled request, one already escalated, and one none of its stops failed (it has no stop, or only a
+        skipped, collected or unresolved one) are `STATE_CONFLICT`, and for the last `details.rule` is `no_failed_stop`. The
+        database holds the same rule for every writer. A blank note is `REASON_REQUIRED`; a note the ledger would not keep
         (a number or an address of a person) is `VALIDATION_FAILED`. Escalating changes nothing else: the request can
-        still be cancelled, and a Senior Ops extension still opens a further attempt. **A failure can be recorded
-        now (`reportPickupFailure`, S1.28), but the request still need not have failed to be escalated**: that guard, and
-        the scheduled backstop that records `trigger: BACKSTOP`, are the rest of S1.28 and are not built yet.
+        still be cancelled, and a Senior Ops extension still opens a further attempt. The assisted review of a vendor's
+        complaint (AC-SLICE-001-35) is this note, on the escalated request, with the reviewer and the moment in the event.
+
+        **The scheduled backstop (S1.28, D-A1).** A lane of the delivery worker, under its own capability, makes this
+        transition for a request whose failed stop has sat undecided (the request still `CONFIRMED` and not escalated)
+        for longer than its hub's `stale_failure_backstop_hours`; it is not an operation of this API and takes no
+        `If-Match`. It sets `escalated_at` once, however many lanes look at once, and writes the enhanced event as the
+        system, with no actor and no note: `detail.trigger` is `BACKSTOP`, `detail.threshold_hours` the hub's value and
+        `detail.waited_seconds` how long the failure waited, and `related_ids.pickup_stop_id` names the stop. A hub whose
+        value is missing or not a whole number of hours from 1 to 8760 is not judged: nothing of it is escalated, and the
+        worker's alert and health say so.
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
         - { $ref: '#/components/parameters/IfMatch' }

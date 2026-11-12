@@ -25,12 +25,16 @@ export interface AlertRule {
   readonly id: string;
   /** The row of the alert table it implements. */
   readonly alert:
-    'Credential delivery' | 'Text messages' | 'Provider down' | 'Attestation trust data aging';
+    | 'Credential delivery'
+    | 'Text messages'
+    | 'Provider down'
+    | 'Attestation trust data aging'
+    | 'Failure backstop';
   readonly severity: Severity;
   /** What firing means, for the person who is paged. Never a value of a series. */
   readonly summary: string;
   /** The runbook section of OBSERVABILITY_AND_RECOVERY.md section 4 the response is. */
-  readonly runbook: '§4.1' | '§4.3a';
+  readonly runbook: '§4.1' | '§4.3' | '§4.3a';
   fires(history: readonly Scrape[]): boolean;
 }
 
@@ -230,6 +234,9 @@ function providerRules(channel: 'EMAIL' | 'SMS'): AlertRule[] {
   ];
 }
 
+/** The hubs the failure backstop could not judge at its latest check: a gauge the worker serves once a check has run to its end. */
+const BACKSTOP_UNUSABLE = 'pickup_backstop_unusable_hubs';
+
 const TRUST_AGE = 'attestation_trust_data_age_seconds';
 /** The oldest verifier instance's age of its trust data, at each instance's latest reading. */
 function oldestTrustAge(history: readonly Scrape[]): number | undefined {
@@ -358,6 +365,42 @@ export const ALERT_RULES: readonly AlertRule[] = Object.freeze([
   },
   ...providerRules('EMAIL'),
   ...providerRules('SMS'),
+  {
+    id: 'failure_backstop_threshold_unusable',
+    alert: 'Failure backstop',
+    // OBSERVABILITY_AND_RECOVERY.md names no severity for this condition: SEV-3 ("a developing degradation", the Ops decision queue is still worked by people) is this task's reading, recorded
+    // for the Product Owner (plan section 7).
+    severity: 'SEV-3',
+    summary:
+      'A hub has a pickup failure waiting and its stale_failure_backstop_hours is missing or unusable: the backstop does not escalate it.',
+    runbook: '§4.3',
+    fires: (history) =>
+      anyInstance(history, (scrapes) => {
+        const last = scrapes.at(-1);
+        return (
+          last !== undefined &&
+          last.samples.has(BACKSTOP_UNUSABLE) &&
+          total(last, BACKSTOP_UNUSABLE) > 0
+        );
+      }),
+  },
+  {
+    id: 'failure_backstop_not_checking',
+    alert: 'Failure backstop',
+    severity: 'SEV-3',
+    summary:
+      'The failure backstop has failed to complete a check for 30 minutes: pickup failures left undecided are not being escalated.',
+    runbook: '§4.3',
+    fires: (history) =>
+      anyInstance(history, (scrapes) => {
+        const runs = (outcome: string) => (scrape: Scrape) =>
+          total(scrape, 'pickup_backstop_runs_total', { outcome });
+        return (
+          increase(scrapes, runs('FAILED'), 30 * MINUTE) > 0 &&
+          increase(scrapes, runs('CHECKED'), 30 * MINUTE) === 0
+        );
+      }),
+  },
   {
     id: 'attestation_trust_data_aging_warning',
     alert: 'Attestation trust data aging',

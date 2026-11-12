@@ -250,6 +250,34 @@ export const METRIC_DEFINITIONS = Object.freeze({
     labels: {},
     description: 'Outbox envelopes in the dead letter, waiting for a person.',
   }),
+  /**
+   * What each check of the failure backstop came to (S1.28, D-A1; OBSERVABILITY_AND_RECOVERY.md §3): `CHECKED` is a check that ran to its end, whether or not it escalated anything, and
+   * `FAILED` one that raised (the database was away, or the lane's grant is missing). A lane that fails and never checks is the *Failure backstop* row's second condition. Closed
+   * outcomes, no identifier: which request, and in which hub, is the audit event's and the worker's log, never a metric.
+   */
+  pickup_backstop_runs_total: define({
+    kind: 'counter',
+    labels: { outcome: ['CHECKED', 'FAILED'] },
+    description: 'Checks of the failure backstop, by outcome.',
+  }),
+  /** Requests the failure backstop escalated because their failure had sat undecided beyond the hub's threshold. No label: the request is in the audit event. */
+  pickup_backstop_escalations_total: define({
+    kind: 'counter',
+    labels: {},
+    description: 'Pickup requests escalated by the failure backstop.',
+  }),
+  /**
+   * How many hubs the latest check of the failure backstop could not judge, because the hub's `stale_failure_backstop_hours` is missing or not a whole number of hours from 1 to 8760
+   * while a failure waits there: nothing is escalated for such a hub and nothing is invented in its place. Read from the lane's memory when the worker's private metrics endpoint is
+   * read, and absent until a check has run to its end (a lane that has not looked yet is not a lane that found nothing). The *Failure backstop* row's first condition is on it. No label:
+   * which hub is in the worker's log.
+   */
+  pickup_backstop_unusable_hubs: define({
+    kind: 'gauge',
+    labels: {},
+    description:
+      'Hubs the failure backstop could not judge at its latest check (threshold missing or unusable); absent until a check has run.',
+  }),
 }) satisfies Readonly<Record<string, MetricDefinition>>;
 
 export type MetricName = keyof typeof METRIC_DEFINITIONS;
