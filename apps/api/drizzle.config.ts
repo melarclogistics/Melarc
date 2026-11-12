@@ -39,6 +39,8 @@ export default defineConfig({
     // SLICE-001 (S1.27): the two-party handshake of a counted stop, which closes the stop when it ends well.
     './src/pickup/collection-handshake.schema.ts',
     './src/pickup/collection-dispute.schema.ts',
+    // SLICE-001 (S1.28): the evidence photo of a failed stop, attached to the failure the rider reports (the evidence table is the platform's, S1.11).
+    './src/pickup/pickup-stop-evidence.schema.ts',
   ],
   out: './migrations',
   strict: true,

@@ -4,6 +4,9 @@ import { CONTACT_ATTEMPT_METHODS, PICKUP_FAILURE_CATEGORIES } from './pickup-voc
 /** The most contact attempts a failure keeps (a technical bound, held by the table's guard as well; the contract's `maxItems`). */
 export const MAX_CONTACT_ATTEMPTS = 10;
 
+/** The most evidence records one failure carries (a technical bound, the contract's `maxItems`); the same as its contact attempts. */
+export const MAX_FAILURE_EVIDENCE = 10;
+
 /**
  * The body of `reportPickupFailure` as the application describes it (S1.28; the contract's inline request body): the fixed category, the reason of
  * the catalogue, the note, the evidence and the contact attempts. The conformance check compares it with the contract. A body the schema refuses never
@@ -25,6 +28,8 @@ export const PICKUP_FAILURE_BODY = described({
     note: { type: 'string' },
     evidence_ids: {
       type: 'array',
+      maxItems: MAX_FAILURE_EVIDENCE,
+      uniqueItems: true,
       items: { type: 'string', format: 'uuid' },
       description:
         'Each id must name an evidence record in `STORED`. A `PENDING_UPLOAD` record is rejected with `EVIDENCE_NOT_STORED` - otherwise "attached evidence" is satisfiable by a declaration with no bytes behind it.',

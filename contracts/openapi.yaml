@@ -1732,14 +1732,23 @@ paths:
         **As built (S1.28, the part that stands alone).** The stop becomes `FAILED`, which is
         terminal: nothing moves it back, and the only way forward is a new request cloned from the
         source by the office. `category` is one of the four fixed values and `reason_code` a code of
-        the `PICKUP_FAILURE` catalogue; the catalogue does not bind a reason to a category and nothing
-        checks the pairing. A missing note, or a contact attempt the reason asks for
+        the `PICKUP_FAILURE` catalogue. **A reason belongs to one category, which the catalogue holds**
+        (`reason_code.failure_category`; D-A4, the Product Owner, 11 November 2026): a reason reported
+        under another category is `VALIDATION_FAILED` (a violation at `/reason_code`, rule `category`),
+        judged once the reason is read and before the evidence, the photo and the door wait, so that
+        neither the door wait nor the escalation-only rule of a refused collection can be stepped
+        around by pairing. A missing note, or a contact attempt the reason asks for
         (`details.rule` `contact_attempt`), is `REASON_REQUIRED`, and a code the catalogue refuses is
-        `REASON_NOT_ACTIVE`. **Evidence:** `evidence_ids` names records that must be `STORED`; none
-        can be yet, so any reference is `EVIDENCE_NOT_STORED`, and a reason that makes a photo
-        mandatory (`details.rule` `photo`; today `ENTRY_REFUSED_BY_SECURITY` and `LOCATION_CLOSED`) is
-        `REASON_REQUIRED` until evidence can be stored. `contact_attempts` are at most ten, each an
-        instant and what came of it, and are kept on the stop.
+        `REASON_NOT_ACTIVE`. **Evidence:** `evidence_ids` (at most ten) names the photos the rider
+        took of this stop (`createEvidence`, `completeEvidenceUpload`): each must be `STORED`,
+        captured by this rider as the proof of this stop's collection, and not yet attached to a
+        failure; any other (pending, expired, unknown, another rider's, another stop's, already
+        attached) is `EVIDENCE_NOT_STORED`, one answer. A reason that makes a photo mandatory
+        (`details.rule` `photo`; today `ENTRY_REFUSED_BY_SECURITY` and `LOCATION_CLOSED`, read from
+        the catalogue and never hard-coded) is `REASON_REQUIRED` without at least one. The evidence is
+        attached to the failure in the same transaction, and the database holds all of it for every
+        writer. `contact_attempts` are at most ten, each an instant and what came of it, and are kept
+        on the stop.
 
         The stop keeps the reason as the catalogue holds it **at the moment of the report**, and the
         database holds it to that for every writer: a catalogue that changes between the reading of
@@ -1784,14 +1793,14 @@ paths:
         A retried report (the same `Idempotency-Key`) replays the original answer; the same key for
         another body is `IDEMPOTENCY_KEY_CONFLICT`.
 
-        **Not built yet:** the evidence photo (S1.11), the scheduled backstop that
-        escalates an undecided failure, the narrowing of `escalatePickupRequest` to a failed stop, and
-        the notices of a failure.
+        **Built with it (Run A, 12 November 2026).** A failure left undecided beyond its hub's `stale_failure_backstop_hours` is escalated by the scheduled backstop of the delivery worker
+        (`trigger: BACKSTOP`; see `escalatePickupRequest`), and `escalatePickupRequest` itself escalates only a request whose stop failed. **What stays the owner's:** the wording of the
+        messages above (drafts until approved, OQ-037), the pairing of the eight reasons with their categories (provisional: domain-model.md section 3.9), and the Rider app's screen.
 
         **The door wait (review of 5 November 2026).** A failure of the category `VENDOR_UNAVAILABLE` is accepted only once the hub's `rider_door_wait_minutes` (10 at the launch hub) have
         passed since the rider arrived at the stop - the arrival the server recorded, measured on the database's clock; a vendor who is simply busy is no fallback trigger, the rider waits and may then
         fail the stop (pickup-collection.md). Before that it is `PICKUP_DOOR_WAIT_NOT_ELAPSED` (422), whose `details` say `door_wait_minutes`, `available_at` and `retry_after_seconds`, and nothing is
-        written. The other three categories carry no wait. The pairing of a reason with a category is not checked, so the wait follows the category the rider reports. A hub whose door wait is not set
+        written. The other three categories carry no wait. A reason belongs to one category (above), so the wait follows the reason and cannot be stepped around by reporting it under a category that carries none. A hub whose door wait is not set
         cannot be told one: the report of this category fails as an operational failure (`503`, no code) and invents no wait. **The contact attempts** are a method (`PHONE_CALL`, `SMS`,
         `IN_PERSON`), a moment, an outcome and an optional note; at most ten, and the wait is not among them (it is derived from the arrival).
       parameters:
@@ -1816,6 +1825,8 @@ paths:
                 note: { type: string }
                 evidence_ids:
                   type: array
+                  maxItems: 10
+                  uniqueItems: true
                   items: { type: string, format: uuid }
                   description: |
                     Each id must name an evidence record in `STORED`. A `PENDING_UPLOAD` record is

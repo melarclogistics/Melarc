@@ -23,7 +23,8 @@ export type PickupFailureCategory = (typeof PICKUP_FAILURE_CATEGORIES)[number];
  * at the stop: **vendor unavailability** (pickup-failure.md §9: "how long before vendor unavailability becomes a failure"; pickup-collection.md: a vendor who is simply busy is no
  * fallback trigger, the rider waits the door wait and may then fail the stop). The other three categories carry no wait: a door that security refuses, a parcel that is not packed and
  * a handover the vendor refuses are not made true by waiting. The rule attaches to the fixed category, as the escalation-only rule of a refused collection does, and the stop's guard
- * holds the same list (migration 0073). The pairing of a reason with a category is not checked (the screens group them), so the wait follows the category the rider reports.
+ * holds the same list (migration 0073). A reason belongs to one category, which the catalogue holds (`reason_code.failure_category`, D-A4, migration 0083), and a reason reported under
+ * another category is refused, so the wait follows the reason and cannot be stepped around by pairing it with a category that carries none.
  */
 export const DOOR_WAIT_CATEGORIES: readonly PickupFailureCategory[] = Object.freeze([
   'VENDOR_UNAVAILABLE',

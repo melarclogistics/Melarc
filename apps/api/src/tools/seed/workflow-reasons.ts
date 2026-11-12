@@ -1,5 +1,6 @@
 import type {
   REASON_ATTRIBUTIONS,
+  REASON_FAILURE_CATEGORIES,
   WORKFLOW_REASON_DOMAINS,
 } from '../../platform/database/schema/reference-data.js';
 
@@ -50,6 +51,8 @@ export interface WorkflowReasonSeed {
   readonly requiresEscalation: boolean;
   readonly active: boolean;
   readonly permittedOperations: null;
+  /** The one failure category a `PICKUP_FAILURE` reason belongs to (D-A4; migration 0083), and null for every other reason. */
+  readonly failureCategory: FailureCategory | null;
 }
 
 /** The code's own words in sentence case and nothing added: the label until the Product Owner rewords it. */
@@ -59,6 +62,7 @@ const sentenceCase = (code: string): string => {
 };
 
 type Attribution = WorkflowReasonSeed['attribution'];
+type FailureCategory = (typeof REASON_FAILURE_CATEGORIES)[number];
 
 /** What a reason of the three pickup catalogues may make mandatory beyond its code: a note, a contact attempt, a photo. */
 interface Requirements {
@@ -87,6 +91,7 @@ const workflowReason = (
   requiresEscalation: false,
   active: true,
   permittedOperations: null,
+  failureCategory: null,
 });
 
 const stopSkip = (
@@ -100,13 +105,19 @@ const stopSkip = (
 const cancellation = (code: string, attribution: Attribution, note = false): WorkflowReasonSeed =>
   workflowReason('PICKUP_CANCELLATION', code, attribution, note ? { note: true } : {});
 
-/** A pickup failure reason: every one needs a note, and the table says which need a contact attempt or a photo as well. */
+/**
+ * A pickup failure reason: every one needs a note, and the table says which need a contact attempt or a photo as well. **Every one belongs to one of the four fixed failure
+ * categories** (D-A4): the table gives it, and the server refuses a reason reported under another category.
+ */
 const failure = (
   code: string,
+  category: FailureCategory,
   attribution: Attribution,
   more: Omit<Requirements, 'note'> = {},
-): WorkflowReasonSeed =>
-  workflowReason('PICKUP_FAILURE', code, attribution, { note: true, ...more });
+): WorkflowReasonSeed => ({
+  ...workflowReason('PICKUP_FAILURE', code, attribution, { note: true, ...more }),
+  failureCategory: category,
+});
 
 /**
  * A carry-over reason: attributed as the catalogue attributes (who the delay is owed to), and it asks for a note wherever the reason is a
@@ -145,14 +156,16 @@ export const WORKFLOW_REASONS: readonly WorkflowReasonSeed[] = [
   cancellation('GENUINE_EMERGENCY', 'EXTERNAL', true),
   cancellation('OTHER_EXTERNAL_REASON', 'EXTERNAL', true),
 
-  failure('VENDOR_NOT_AT_LOCATION', 'CUSTOMER', { contactAttempt: true }),
-  failure('VENDOR_UNREACHABLE_BY_PHONE', 'CUSTOMER', { contactAttempt: true }),
-  failure('ENTRY_REFUSED_BY_SECURITY', 'EXTERNAL', { photo: true }),
-  failure('LOCATION_CLOSED', 'EXTERNAL', { photo: true }),
-  failure('PARCELS_NOT_PACKED', 'CUSTOMER'),
-  failure('VENDOR_ASKED_TO_COME_BACK_LATER', 'CUSTOMER'),
-  failure('VENDOR_REFUSED_HANDOVER', 'CUSTOMER'),
-  failure('PARCEL_NOT_ACCEPTABLE', 'CUSTOMER'),
+  failure('VENDOR_NOT_AT_LOCATION', 'VENDOR_UNAVAILABLE', 'CUSTOMER', { contactAttempt: true }),
+  failure('VENDOR_UNREACHABLE_BY_PHONE', 'VENDOR_UNAVAILABLE', 'CUSTOMER', {
+    contactAttempt: true,
+  }),
+  failure('ENTRY_REFUSED_BY_SECURITY', 'ACCESS_DENIED', 'EXTERNAL', { photo: true }),
+  failure('LOCATION_CLOSED', 'ACCESS_DENIED', 'EXTERNAL', { photo: true }),
+  failure('PARCELS_NOT_PACKED', 'PARCEL_NOT_READY', 'CUSTOMER'),
+  failure('VENDOR_ASKED_TO_COME_BACK_LATER', 'PARCEL_NOT_READY', 'CUSTOMER'),
+  failure('VENDOR_REFUSED_HANDOVER', 'REFUSED_COLLECTION', 'CUSTOMER'),
+  failure('PARCEL_NOT_ACCEPTABLE', 'REFUSED_COLLECTION', 'CUSTOMER'),
 
   shortCount('SOME_PARCELS_NOT_READY'),
   shortCount('VENDOR_HELD_BACK_PARCELS', { note: true }),
@@ -187,5 +200,6 @@ export function workflowReasonRow(reason: WorkflowReasonSeed): Readonly<Record<s
     requires_escalation: reason.requiresEscalation,
     active: reason.active,
     permitted_operations: reason.permittedOperations,
+    failure_category: reason.failureCategory,
   };
 }

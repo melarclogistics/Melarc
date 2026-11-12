@@ -582,6 +582,13 @@
       "when": 1794470123385,
       "tag": "0082_rider_act_envelopes",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794482022159,
+      "tag": "0083_failure_category_and_photo",
+      "breakpoints": true
     }
   ]
 }

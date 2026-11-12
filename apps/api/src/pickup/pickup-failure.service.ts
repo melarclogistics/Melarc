@@ -14,6 +14,7 @@ import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import type { ReasonValidator } from '../platform/settings/reason-validator.js';
 import { SettingMissingError } from '../platform/settings/settings-reader.js';
 import { momentOf } from './device-moment.js';
+import { attachEvidence, requireStoredEvidence } from './pickup-failure-evidence.js';
 import { MAX_CONTACT_ATTEMPTS } from './pickup-failure-schemas.js';
 import {
   STOP_COLUMNS,
@@ -22,7 +23,11 @@ import {
   type PickupStopView,
   type StopContactAttempt,
 } from './pickup-manifest-view.js';
-import { reasonRefusedByGuard, validatedReason } from './pickup-reason-validation.js';
+import {
+  reasonOfAnotherCategory,
+  reasonRefusedByGuard,
+  validatedReason,
+} from './pickup-reason-validation.js';
 import { pickupStopEtagOf } from './pickup-stop-etag.js';
 import {
   CONTACT_ATTEMPT_METHODS,
@@ -232,18 +237,19 @@ export async function failTheStop(
  * `reportPickupFailure` (S1.28; `pickup.failure.report`; `AC-SLICE-001-30` to `-33` and `-36`; pickup-failure.md; state-machines.md section 5): the rider
  * says that the stop it has arrived at **failed**, with one of the four fixed categories, a reason of the `PICKUP_FAILURE` catalogue, a note, and optionally
  * what it did to reach the sender. **The stop becomes `FAILED`, which is terminal**: nothing moves it back (the stop's guard freezes it), and the only way
- * forward is a new request cloned from the source, by the office. This is the part of S1.28 that stands alone; the evidence photo (S1.11), the scheduled
- * backstop, the narrowing of the escalation and the messages of a failure are not built (the plan's S1.28 paragraph says why).
+ * forward is a new request cloned from the source, by the office. This act carries the photo, the binding of a reason to its category and the messages of the failure (below);
+ * the scheduled backstop and the narrowing of the escalation that the office's third resolution needs are the escalation's own (`failure-backstop.ts`, `pickup-request-chain.service.ts`).
  *
  * - **Judged in this order**, so that a caller learns of its own work first: the principal and the key's format; the body (a category outside the four, a
  *   note or an outcome the ledger could not keep, a method outside the three, a moment that is not a day of the calendar, too many attempts); then, in the transaction, the retry
  *   (`Idempotency-Key`); the stop under its lock (not the rider's: `NOT_ASSIGNED_RIDER`, one answer); the run (`MANIFEST_NOT_STARTED`, `STATE_CONFLICT`);
- *   the stop's `ETag`; that the stop was arrived at and is still unresolved and has no record of a count; the evidence (none can be `STORED` yet: this task
- *   builds no evidence, so a reference is `EVIDENCE_NOT_STORED`); and the reason, which is the catalogue's and whose metadata decides what else is mandatory
- *   (`REASON_REQUIRED`, `REASON_NOT_ACTIVE`): the note, a contact attempt where the reason asks for one, and a photo, which cannot be given yet (so a reason that
- *   asks for one is refused until evidence can be stored, and said so); and, last, **the door wait**: a failure of the category `VENDOR_UNAVAILABLE` is accepted only once the
- *   hub's `rider_door_wait_minutes` have passed since the rider arrived (`PICKUP_DOOR_WAIT_NOT_ELAPSED`, with when it is allowed), by the database's clock and the arrival it
- *   recorded. The other categories carry no wait. The stop's guard holds the same rule for every writer.
+ *   the stop's `ETag`; that the stop was arrived at and is still unresolved and has no record of a count; the reason, which is the catalogue's (`REASON_REQUIRED`,
+ *   `REASON_NOT_ACTIVE`); **that the reason belongs to the category reported** (`VALIDATION_FAILED`, rule `category`: D-A4, the catalogue binds each reason to one category, so the
+ *   door wait and the escalation-only rule of a refused collection cannot be stepped around by pairing); **the evidence** the rider names (`EVIDENCE_NOT_STORED` for a record that
+ *   is not `STORED`, not the rider's, not this stop's or already attached: one answer); what else the reason's metadata makes mandatory: a contact attempt, and **a photo, which is
+ *   evidence attached to this failure** (`REASON_REQUIRED`, rule `photo`: the requirement is read from the reason, never hard-coded); and, last, **the door wait**: a failure of
+ *   the category `VENDOR_UNAVAILABLE` is accepted only once the hub's `rider_door_wait_minutes` have passed since the rider arrived (`PICKUP_DOOR_WAIT_NOT_ELAPSED`, with when it
+ *   is allowed), by the database's clock and the arrival it recorded. The other categories carry no wait. The stop's guard holds the same rules for every writer.
  * - **What it writes**, in one transaction: the stop `FAILED` with the category and the snapshot of the reason (its label and attribution as the catalogue
  *   holds them, the note, the contact attempts), and nothing else of it; the moment of the failure is the database's own, taken once the stop's lock is held, and
  *   the snapshot names it (the stop's guard, migration 0072, judges the snapshot against the catalogue for every writer); `pickup.stop.failed`, built from the
@@ -374,26 +380,25 @@ export class PickupFailures {
         );
       }
 
-      // The evidence: none can be `STORED` in this slice yet, so a reference to any is exactly what the code says.
-      if (body.evidence_ids !== undefined && body.evidence_ids.length > 0) {
-        throw ApiException.of(
-          ErrorCode.EvidenceNotStored,
-          'A referenced evidence record is not stored',
-        );
-      }
-
       const reason = await validatedReason(
         reasons,
         handle,
         pickupReasonRequest(OPERATION, body.reason_code, body.note),
       );
+      // D-A4 (OB-S1-73): a reason belongs to ONE category, which the catalogue holds, and is refused under another. This comes before the evidence, the photo and the door wait,
+      // so that those rules follow the reason and cannot be stepped around by pairing it with a category that does not carry them. The stop's guard holds the same for every writer.
+      if (reason.failureCategory !== body.category) throw reasonOfAnotherCategory();
+
+      // The photo (S1.28, the evidence of S1.11): the records the rider names must be stored evidence of this stop, its own, and not yet attached; they are attached below, before the
+      // stop is failed, because the stop's guard asks for them. What the reason requires is read from the reason, never hard-coded.
+      const evidenceIds = body.evidence_ids ?? [];
+      await requireStoredEvidence(tx, stop.id, riderId, evidenceIds);
       if (reason.requiresContactAttempt && attempts.length === 0) {
         throw ApiException.of(ErrorCode.ReasonRequired, 'This reason needs a contact attempt', {
           rule: 'contact_attempt',
         });
       }
-      if (reason.requiresPhoto) {
-        // The photo the reason demands is evidence, and evidence cannot be stored yet (S1.11): the requirement is unmet, and said so.
+      if (reason.requiresPhoto && evidenceIds.length === 0) {
         throw ApiException.of(ErrorCode.ReasonRequired, 'This reason needs a photo', {
           rule: 'photo',
         });
@@ -401,6 +406,7 @@ export class PickupFailures {
       // The door wait comes last: the rider is told what is wrong with what it sent before it is told to wait.
       const wait = await doorWaitOf(tx, stop, body.category as PickupFailureCategory);
       if (wait !== undefined && wait.remaining > 0) throw doorWaitRefusal(wait);
+      await attachEvidence(tx, stop.id, evidenceIds);
 
       const note = body.note === undefined || body.note.trim() === '' ? undefined : body.note;
       const snapshot = {
