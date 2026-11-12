@@ -644,11 +644,14 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     });
   }
 
-  // Break caught (the Product Owner's answer to the note of 7325628, 12 November 2026): a first decision to go to cards, made in the fallback face while the real one was on its way, and kept until the
-  // box grows, so that which of two results the queue reached depended on when the face arrived (the hosted run of that day: cards in the development server, which sends the face later, the table in
-  // the production build). The face is held back here and the fallback is a wider one (as `kit.spec.ts` does), so that the first measure is made in the wrong face on every machine: the queue is
-  // cards while the face is on its way, and, when it is in, the table with its address column taken away, as in the test above, where the face was in before the first measure. The width is 832px,
-  // where that result is the same on every platform (see above).
+  // Break caught (the Product Owner's answer to the note of 7325628, 12 November 2026): a first decision to go to cards, made while the face was on its way, and kept until the box grew, so that which of
+  // two results the queue reached depended on when the face arrived (the hosted run of that day: cards in the development server, which sends the face later, the table in the production build). The face
+  // is held back here, so that the first measure is made while the faces are loading on every machine, and what the table finds then is wider than the room it has, as a wide fallback face would make it:
+  // the queue is cards while the face is on its way, and, when it is in, the table with its address column taken away, as in the test above, where the face was in before the first measure. The width
+  // is 832px, where that result is the same on every platform (see above). The first measure is made wide by a rule that gives each cell 16rem, which the test takes away again *before* it lets the
+  // face go, and not by a wide fallback face: the room the table has at 832px is 6 to 10% more than it needs, depending on the platform's text (671 to 678px on a Windows machine, 654 or less on the
+  // hosted Linux runner), which is less than a plain monospace fallback is wider than Inter, and Firefox does not apply a face made on the spot (`local()`) in time for the first measure. What the table
+  // does not care about is why the first measure found too little room.
   test('reaches the table at 832 px when the face arrives after the first measure', async ({
     page,
   }) => {
@@ -662,11 +665,11 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     });
     await page.addInitScript(() => {
       document.addEventListener('DOMContentLoaded', () => {
-        // The property of the root's own style, set through the CSS object model: a <style> element would be refused by a strict policy.
-        document.documentElement.style.setProperty(
-          '--font-family-sans',
-          'Inter, "Courier New", monospace',
-        );
+        const wide = document.createElement('style');
+        wide.setAttribute('data-test-wide', '');
+        wide.textContent =
+          '.ui-data-table__table th, .ui-data-table__table td { min-width: 16rem; }';
+        document.head.append(wide);
       });
     });
     const watch = watchPage(page);
@@ -674,9 +677,14 @@ test.describe('the queue: the parts that stay in view, long text and the room it
     await page.setViewportSize({ width: 832, height: 1024 });
     await page.goto('/pickup-requests', { waitUntil: 'domcontentloaded' });
     await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
-    // The first measure was made in the wide fallback: the table had nothing more to give, and the list went to cards while the face was on its way.
+    // The first measure was made while the face was on its way, in a room too small for the table: it had nothing more to give, and the list went to cards.
     await expectCardsOfTheFit(queueRegion(page));
+    expect(await page.evaluate(() => document.fonts.status)).toBe('loading');
 
+    // The rule goes first, and the face after it: the cards are not drawn again by that (there is no table to read it), and the table that is drawn when the face is in is measured as it is.
+    await page.evaluate(() => {
+      document.querySelector('[data-test-wide]')?.remove();
+    });
     release();
     await page.evaluate(async () => {
       await document.fonts.ready;
