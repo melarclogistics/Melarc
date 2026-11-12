@@ -52,6 +52,9 @@ test.describe('the date field in a production build under the strict content-sec
     // The comma after the weekday is the engine's (see date-picker.spec.ts): WebKit on Linux writes none.
     await page.getByRole('button', { name: /Friday,? 30 October 2026/ }).click();
     await expect(page.getByText('The page holds: 2026-10-30')).toBeVisible();
+    // A day chosen closes the calendar, which is in the page for the length of its exit until it is gone: the next one is opened when it is (the hosted Chromium run of 12 November 2026 opened it while
+    // the first was leaving, and `getByRole('dialog')` named two).
+    await expect(page.getByRole('dialog')).toBeHidden();
 
     const range = group(page, 'Demo date in a range');
     await range.getByRole('button', { name: /^Calendar/ }).click();

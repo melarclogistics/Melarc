@@ -1424,15 +1424,23 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
       }, size);
       await addLongList(page);
 
-      const clearance = await page.evaluate(() => ({
-        padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
-        bar: document.querySelector('.app-topbar')?.getBoundingClientRect().height ?? 0,
-      }));
-      expect(clearance.bar).toBeGreaterThan(0);
-      expect(
-        clearance.padding,
-        'the scroll padding is at least the height the bar has',
-      ).toBeGreaterThanOrEqual(clearance.bar);
+      // The padding follows the bar's height as the bar's observer sets it, a frame or two after the bar has wrapped into its second row: the test waits for the padding to reach the height the bar
+      // has, which is what it asserts, and a padding that never does fails it (the Product Owner's review of ba9a18c, item 6: the hosted WebKit run of 12 November 2026 read it at once and found the
+      // padding of the one-row bar, 64px, under a bar of 112).
+      await expect
+        .poll(
+          async () => {
+            const clearance = await page.evaluate(() => ({
+              padding: parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop),
+              bar: document.querySelector('.app-topbar')?.getBoundingClientRect().height ?? 0,
+            }));
+            return clearance.bar > 0 && clearance.padding >= clearance.bar
+              ? 'at least the height of the bar'
+              : `${String(clearance.padding)}px under a bar of ${String(clearance.bar)}px`;
+          },
+          { message: 'the scroll padding is at least the height the bar has' },
+        )
+        .toBe('at least the height of the bar');
 
       await page.locator('#long-list a').last().focus();
       let walked = 0;
