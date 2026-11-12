@@ -317,6 +317,194 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /collection-disputes:
+    get:
+      operationId: listCollectionDisputes
+      # SAFE READ. No CSRF: a read changes nothing.
+      security:
+        - browserSession: []
+      x-permission: pickup.read
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
+      tags: [pickup-stops]
+      summary: List the collection disputes of the hubs of the grant
+      description: |
+        The Ops side of a collection dispute (21.4, `AC-SLICE-001-27`; plan S1.30; `OB-S1-70`): the reconciliation items that vendors raised with
+        `disputeCollection`, oldest first, each with the pickup it is about and what was counted at the door, so that Ops sees what is disputed
+        beside what the vendor says. **For Ops staff alone**: a vendor reads its own dispute where it raised it, and a rider reads none. A dispute never
+        reverses physical completion, so the stop in an item is as it closed.
+
+        **`open` is an item still `OPEN`** (`open=true`); `open=false` is the items that were resolved; left out, all of them. No operation resolves an
+        item in this slice, so every item is open until the reconciliation workflow exists. The note is the vendor's own words about its pickup; no
+        code, phone number or address is in an item.
+
+        Scoped server-side to the hubs of the caller's grant (section 37.6); filters are authorization-checked, never trusted (section 42.4). A
+        read of another hub, where the grant reaches it, is audited without contents, as every staff read is.
+      parameters:
+        - $ref: '#/components/parameters/OpenFilter'
+        - $ref: '#/components/parameters/WorkListHubId'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_page_token]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CollectionDisputeListItem' }
+                  next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /handshakes-for-ops:
+    get:
+      operationId: listHandshakesForOps
+      # SAFE READ. No CSRF: a read changes nothing.
+      security:
+        - browserSession: []
+      x-permission: pickup.handshake.override
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
+      tags: [handshake]
+      summary: List the collection handshakes that route to Ops, and the ones Ops settled
+      description: |
+        The work list of the officer who overrides or resolves a handshake (21.4, `AC-SLICE-001-24`, `AC-SLICE-001-26`; plan S1.30; `OB-S1-70`): the
+        handshakes whose code has run out, whose wrong attempts are used up, or whose SMS fallback has sent all it may, oldest first, each with the pickup
+        it is about, why it needs Ops (`routed_because`) and the counters beside the limits the platform holds. **No code and no digest is in an item**, and
+        neither is the Ops note of an override or a hand resolution.
+
+        **`open` is a handshake that needs Ops now** (`open=true`), as the database judges it when the list is read: its state is `EXPIRED` or `EXHAUSTED`;
+        or its code is still live by state but its life has passed on the database's clock (the state moves only when someone asks, so a code nobody tried is
+        expired all the same); or the SMS fallback has sent the platform's cap (`sms_fallback_max_per_pickup`). The first that applies is
+        `routed_because`. `open=false` is the handshakes Ops has settled by an override or a hand resolution, which the list keeps so that Ops can see what
+        it did (`routed_because` is `null`); left out, both. A handshake that closed through the portal or the SMS fallback is in neither: it never needed
+        Ops. The limits are the platform's settings as they stand, and `null` where the platform holds no usable value: a default is never invented, and an
+        unusable cap judges nothing.
+
+        **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
+        hub, where the grant reaches it, is audited without contents, as every staff read is.
+      parameters:
+        - $ref: '#/components/parameters/OpenFilter'
+        - $ref: '#/components/parameters/WorkListHubId'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_page_token]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OpsHandshake' }
+                  next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /collection-shortfalls:
+    get:
+      operationId: listCollectionShortfalls
+      # SAFE READ. No CSRF: a read changes nothing.
+      security:
+        - browserSession: []
+      x-permission: pickup.handshake.override
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
+      tags: [pickup-stops]
+      summary: List the short counts flagged to the office
+      description: |
+        Where the office finds a shortfall in the system (21.3, `AC-SLICE-001-21`; plan S1.30; `OB-S1-51`, `OB-S1-70`): every collection counted fewer than declared,
+        oldest first, each with what was declared and counted, the reason the rider gave and its note, the moment the office flag was raised and the pickup it
+        is about. It supplements the rider's phone call and never replaces it. The key is the one the collection feature gives for working the shortfall
+        flag (`pickup.handshake.override`).
+
+        **`open` is a shortfall whose run is still in progress** (`open=true`): the rider is still out with the parcels the office was told are missing;
+        `open=false` is the shortfalls of runs that have ended; left out, all of them. Nothing yet marks a shortfall as read or worked (no acknowledgement
+        is built), so the state of the run is the one distinction the data supports. The rider's note is staff's own: no vendor reads it.
+
+        **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
+        hub, where the grant reaches it, is audited without contents, as every staff read is.
+      parameters:
+        - $ref: '#/components/parameters/OpenFilter'
+        - $ref: '#/components/parameters/WorkListHubId'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_page_token]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CollectionShortfall' }
+                  next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /pickup-failures:
+    get:
+      operationId: listPickupFailures
+      # SAFE READ. No CSRF: a read changes nothing.
+      security:
+        - browserSession: []
+      x-permission: pickup.failure.resolve
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
+      tags: [pickup-stops]
+      summary: List the failed pickups waiting for the office's decision
+      description: |
+        The failure decision queue (21.5, 21.6, `AC-SLICE-001-30` to `-35`; plan S1.28, S1.30): one item for each stop that failed, oldest failure first, with
+        what the rider reported (the fixed category, the reason of the catalogue, the rider's note, its contact attempts), what became of the request
+        (`decision`) and how long the failure has waited. It is the Ops read of a failed stop; **the shape of a pickup request is not widened for it**, because a
+        request is read by vendors too and the rider's note is staff's own.
+
+        **`open` is a failure whose request is still `CONFIRMED`** (`open=true`), escalated or not: the office has yet to cancel it or reschedule it (an
+        escalation is a marker and decides nothing). `open=false` is the failures the office decided (the request is `CANCELLED`, with a replacement when
+        it was rescheduled); left out, all of them. `decision` says which: `PENDING`, `ESCALATED`, `RESCHEDULED` or `CANCELLED`.
+
+        **The waiting time is the database's own**: `waiting_seconds` runs from the moment the failure was reported until the decision where there is
+        one, and until the list is read where there is not; the client computes nothing. The attempts are the request's (`attempt_number`, and whether Senior
+        Ops force-extended them). The photo of a failure is not in an item yet: the evidence store that holds it is another task's.
+
+        **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
+        hub, where the grant reaches it, is audited without contents, as every staff read is.
+      parameters:
+        - $ref: '#/components/parameters/OpenFilter'
+        - $ref: '#/components/parameters/WorkListHubId'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_page_token]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/PickupFailureQueueItem' }
+                  next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /pickup-requests:
     post:
       operationId: createPickupRequest
@@ -3263,8 +3451,8 @@ paths:
         The note is required (`REASON_REQUIRED` when blank) and is bounded as the ledger bounds a note (`VALIDATION_FAILED`); a note that the ledger's
         screening would change (a secret that travels inside the text, such as a `token=` value or a credential inside an address) is refused whole, as
         `VALIDATION_FAILED` with the rule `format`, so that the item, the event and the answer hold exactly what the vendor wrote.
-        No operation resolves an item in `SLICE-001`, and **no operation lists or reads one yet** (Ops's side is S1.30's and the vendor's own view is a
-        later screen's; both need operations added to this contract first).
+        No operation resolves an item in `SLICE-001`. Ops lists the items with `listCollectionDisputes`; **no operation reads one for the vendor yet**
+        (the vendor's own view is a later screen's and needs an operation added to this contract first).
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
@@ -11903,6 +12091,21 @@ components:
       name: page_token
       in: query
       schema: { type: string }
+    OpenFilter:
+      name: open
+      in: query
+      schema: { type: boolean }
+      description: >-
+        What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the
+        list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`.
+    WorkListHubId:
+      name: hub_id
+      in: query
+      schema: { type: string, format: uuid }
+      description: >-
+        Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the
+        caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing
+        (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and".
 
   responses:
     Unauthenticated:
@@ -14157,6 +14360,310 @@ components:
       description: >-
         The reconciliation item of 21.4. A dispute never reverses physical completion: the stop stays
         as it closed and the manifest does not wait for the dispute.
+
+    CollectionDisputeListItem:
+      type: object
+      required:
+        - id
+        - pickup_stop_id
+        - pickup_manifest_id
+        - pickup_request_id
+        - responsible_hub_id
+        - request_code
+        - sender_name
+        - vendor_organization_id
+        - state
+        - note
+        - created_at
+        - resolved_at
+        - stop_state
+        - declared_count
+        - collected_count
+        - variance
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        pickup_stop_id: { type: string, format: uuid }
+        pickup_manifest_id: { type: string, format: uuid }
+        pickup_request_id: { type: string, format: uuid }
+        responsible_hub_id: { type: string, format: uuid }
+        request_code:
+          type: string
+          description: The pickup's code, the one the sender is texted, by which Ops finds the pickup.
+        sender_name:
+          type: string
+          description: The vendor or sender as booked. Never a phone number or an address.
+        vendor_organization_id: { type: string, format: uuid }
+        state: { type: string, enum: [OPEN, RESOLVED] }
+        note:
+          type: string
+          description: The vendor's own words about its pickup. Staff of the hub read them; no rider does.
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: [string, 'null'], format: date-time }
+        stop_state:
+          type: string
+          enum: [PENDING, ARRIVED, COLLECTED, PARTIALLY_COLLECTED, FAILED, SKIPPED]
+          description: The stop as it closed; a dispute never changes it.
+        declared_count: { type: integer, minimum: 1 }
+        collected_count: { type: integer, minimum: 1 }
+        variance: { type: string, enum: [MATCH, SHORT] }
+      description: >-
+        A collection dispute as Ops reads it (`listCollectionDisputes`): the reconciliation item, the pickup it is about and what was counted at the door.
+        It is not the `CollectionDispute` a vendor is answered with when it raises one.
+
+    OpsHandshake:
+      type: object
+      required:
+        - id
+        - pickup_stop_id
+        - pickup_manifest_id
+        - pickup_request_id
+        - responsible_hub_id
+        - request_code
+        - sender_name
+        - direction
+        - state
+        - stop_state
+        - routed_because
+        - expires_at
+        - attempts
+        - attempt_limit
+        - fallback_sends
+        - fallback_limit
+        - channel
+        - confirmed_at
+        - authorised_by
+        - created_at
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        pickup_stop_id: { type: string, format: uuid }
+        pickup_manifest_id: { type: string, format: uuid }
+        pickup_request_id: { type: string, format: uuid }
+        responsible_hub_id: { type: string, format: uuid }
+        request_code:
+          type: string
+          description: The pickup's code, the one the sender is texted, by which Ops finds the pickup.
+        sender_name:
+          type: string
+          description: The vendor or sender as booked. Never a phone number or an address.
+        direction:
+          type: string
+          enum: [VENDOR_ENTERED_RIDER_DISPLAYED, SENDER_SMS_RIDER_ENTERED]
+        state:
+          type: string
+          enum:
+            - PENDING
+            - CODE_GENERATED
+            - CODE_DELIVERED
+            - VERIFIED
+            - EXPIRED
+            - EXHAUSTED
+            - DISPUTED
+            - MANUALLY_RESOLVED
+        stop_state:
+          type: string
+          enum: [PENDING, ARRIVED, COLLECTED, PARTIALLY_COLLECTED, FAILED, SKIPPED]
+        routed_because:
+          type: [string, 'null']
+          enum: [CODE_EXPIRED, ATTEMPTS_EXHAUSTED, FALLBACK_LIMIT_REACHED, null]
+          description: >-
+            Why it needs Ops now, as the database judges it when the list is read; `null` for a handshake Ops has already settled.
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the last code of the handshake runs out; null while no code was made.
+        attempts: { type: integer, minimum: 0 }
+        attempt_limit:
+          type: [integer, 'null']
+          minimum: 1
+          description: The platform's `handshake_max_wrong_attempts` as it stands; null where the platform holds no usable value (never a default).
+        fallback_sends: { type: integer, minimum: 0 }
+        fallback_limit:
+          type: [integer, 'null']
+          minimum: 1
+          description: The platform's `sms_fallback_max_per_pickup` as it stands; null where the platform holds no usable value (never a default).
+        channel:
+          type: [string, 'null']
+          enum: [PORTAL, SMS_FALLBACK, OPS_OVERRIDE, null]
+        confirmed_at: { type: [string, 'null'], format: date-time }
+        authorised_by:
+          type: [string, 'null']
+          format: uuid
+          description: The officer who overrode or resolved by hand; null for any other way the handshake ended, and while it has not.
+        created_at: { type: string, format: date-time }
+      description: >-
+        A collection handshake as Ops reads it (`listHandshakesForOps`). It holds no code, no digest and no note of Ops's.
+
+    CollectionShortfall:
+      type: object
+      required:
+        - id
+        - pickup_stop_id
+        - pickup_manifest_id
+        - pickup_request_id
+        - responsible_hub_id
+        - request_code
+        - sender_name
+        - declared_count
+        - collected_count
+        - shortfall_count
+        - reason
+        - note
+        - office_notified_at
+        - recorded_at
+        - recorded_by
+        - stop_state
+        - run_state
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The collection record.
+        pickup_stop_id: { type: string, format: uuid }
+        pickup_manifest_id: { type: string, format: uuid }
+        pickup_request_id: { type: string, format: uuid }
+        responsible_hub_id: { type: string, format: uuid }
+        request_code:
+          type: string
+          description: The pickup's code, the one the sender is texted, by which Ops finds the pickup.
+        sender_name:
+          type: string
+          description: The vendor or sender as booked. Never a phone number or an address.
+        declared_count: { type: integer, minimum: 1 }
+        collected_count: { type: integer, minimum: 1 }
+        shortfall_count:
+          type: integer
+          minimum: 1
+          description: The declared count less the counted one.
+        reason:
+          type: object
+          required: [code, label, attribution]
+          additionalProperties: false
+          properties:
+            code: { type: string }
+            label: { type: string }
+            attribution: { type: string }
+          description: The reason of the `PICKUP_SHORT_COUNT` catalogue the rider gave, as the catalogue held it then.
+        note:
+          type: [string, 'null']
+          description: The rider's note where the reason asked for one. Staff read it; no vendor does.
+        office_notified_at:
+          type: string
+          format: date-time
+          description: The moment the office flag was raised, taken by the database with the count.
+        recorded_at: { type: string, format: date-time }
+        recorded_by:
+          type: string
+          format: uuid
+          description: The rider who counted.
+        stop_state:
+          type: string
+          enum: [PENDING, ARRIVED, COLLECTED, PARTIALLY_COLLECTED, FAILED, SKIPPED]
+        run_state:
+          type: string
+          enum: [DRAFT, DISPATCHED, IN_PROGRESS, COMPLETED, CANCELLED]
+      description: >-
+        A short count flagged to the office (`listCollectionShortfalls`).
+
+    PickupFailureQueueItem:
+      type: object
+      required:
+        - pickup_stop_id
+        - pickup_manifest_id
+        - pickup_request_id
+        - responsible_hub_id
+        - request_code
+        - sender_name
+        - category
+        - reason
+        - note
+        - contact_attempts
+        - failed_at
+        - waiting_seconds
+        - request_state
+        - decision
+        - attempt_number
+        - attempt_extended
+        - escalated_at
+        - decided_at
+        - replacement_request_id
+        - rider_id
+      additionalProperties: false
+      properties:
+        pickup_stop_id: { type: string, format: uuid }
+        pickup_manifest_id: { type: string, format: uuid }
+        pickup_request_id: { type: string, format: uuid }
+        responsible_hub_id: { type: string, format: uuid }
+        request_code:
+          type: string
+          description: The pickup's code, the one the sender is texted, by which Ops finds the pickup.
+        sender_name:
+          type: string
+          description: The vendor or sender as booked. Never a phone number or an address.
+        category:
+          type: string
+          enum: [VENDOR_UNAVAILABLE, ACCESS_DENIED, PARCEL_NOT_READY, REFUSED_COLLECTION]
+        reason:
+          type: object
+          required: [code, label, attribution]
+          additionalProperties: false
+          properties:
+            code: { type: string }
+            label: { type: string }
+            attribution: { type: string }
+          description: The reason of the `PICKUP_FAILURE` catalogue the rider gave, as the catalogue held it then.
+        note:
+          type: [string, 'null']
+          description: The rider's note. It is staff's own and no vendor reads it.
+        contact_attempts:
+          type: array
+          items:
+            type: object
+            required: [method, attempted_at, outcome]
+            additionalProperties: false
+            properties:
+              method: { type: string, enum: [PHONE_CALL, SMS, IN_PERSON] }
+              attempted_at: { type: string, format: date-time }
+              outcome: { type: string }
+              note: { type: string }
+          description: What the rider did to reach the sender before it failed the stop; empty where it gave none.
+        failed_at:
+          type: string
+          format: date-time
+          description: The moment the failure was reported, taken by the database with the failure.
+        waiting_seconds:
+          type: integer
+          minimum: 0
+          description: >-
+            How long the failure has waited for the office, by the database's clock: until the decision where there is one, until the list is read where
+            there is not.
+        request_state:
+          type: string
+          enum: [PENDING, CONFIRMED, DECLINED, CANCELLED]
+        decision:
+          type: string
+          enum: [PENDING, ESCALATED, RESCHEDULED, CANCELLED]
+          description: >-
+            `PENDING` waits for the office; `ESCALATED` has been marked out of Ops's hands and still waits; `RESCHEDULED` was cancelled with a replacement;
+            `CANCELLED` was cancelled without one.
+        attempt_number: { type: integer, minimum: 1 }
+        attempt_extended:
+          type: boolean
+          description: Whether Senior Ops force-extended the attempts of the request.
+        escalated_at: { type: [string, 'null'], format: date-time }
+        decided_at:
+          type: [string, 'null']
+          format: date-time
+          description: The moment the request was cancelled (a cancellation or a reschedule); null while it waits.
+        replacement_request_id: { type: [string, 'null'], format: uuid }
+        rider_id:
+          type: [string, 'null']
+          format: uuid
+          description: The rider of the run.
+      description: >-
+        A failed pickup in the decision queue (`listPickupFailures`). The photo of a failure is not in it yet.
 
     AdHocSender:
       type: object

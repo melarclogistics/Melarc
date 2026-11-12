@@ -21,6 +21,8 @@ import { CollectionDisputeController } from './collection-dispute.controller.js'
 import { CollectionHandshakeController } from './collection-handshake.controller.js';
 import { CollectionController } from './collection.controller.js';
 import { PickupStopsController } from './pickup-stops.controller.js';
+import { OpsWorkListsController } from './ops-work-lists.controller.js';
+import { pickupOpsWorkListsProviders } from './ops-work-lists-providers.js';
 
 /**
  * The `pickup` permission domain (S1.13, `SLICE-001`): the pickup request, from its booking to its cancellation and its chain, and (S1.20)
@@ -42,6 +44,7 @@ import { PickupStopsController } from './pickup-stops.controller.js';
     CollectionController,
     CollectionHandshakeController,
     CollectionDisputeController,
+    OpsWorkListsController,
     PickupRequestCreationController,
     PickupRequestConfirmationController,
     CutoffExceptionController,
@@ -50,6 +53,10 @@ import { PickupStopsController } from './pickup-stops.controller.js';
     PickupRequestChainController,
     AdHocSendersController,
   ],
-  providers: [...pickupRequestsProviders, ...pickupManifestsProviders],
+  providers: [
+    ...pickupRequestsProviders,
+    ...pickupManifestsProviders,
+    ...pickupOpsWorkListsProviders,
+  ],
 })
 export class PickupModule {}
