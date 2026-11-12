@@ -492,6 +492,7 @@ Desktop-first. Dense operational tables may optimise for desktop, but every work
 | The page-level inventory for the remaining later slices — it is written for `SLICE-000` to `SLICE-003` and now `SLICE-005`, **sixty-seven live routes**, and §44.3 will require the rest| D (frontend)| `OQ-030`|
 | The operation-to-screen map §41.1 requires — **the nineteen `SLICE-000` routes name every operation they call** (Gate PD-3R1); the other slices' routes name some, which is not a map derived from the permission catalogue and the contract| D| `OQ-074`|
 | The supported desktop browsers and responsive layouts §40.5 requires| D| `OQ-073`|
+| **The stop's parcel photos, with the progress of their uploads, on the stop page, and the screen for Ops's exception** (`authoriseParcelPhotoException`, `pickup.handshake.override`; D-A10, 12 November 2026): S1.30 builds both, and the photos need a read of a stop's evidence that does not exist yet (the screen reads each photo with `createEvidenceRetrievalAuthorization`). The rule is [pickup-collection.md §5.5](../features/pickup/pickup-collection.md#55-the-photo-of-every-parcel)| D| `OB-S1-80`|
 
 The model, the visibility rules, the state obligations and the never-do list are complete and citable.
 

@@ -74,6 +74,8 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 8. **The price freezes at itemized-order confirmation** and the commercial gate runs: credit reservation where allowance permits, otherwise `PAYMENT_REQUIRED` (§36.11, `MSC-DEC-176`). **HIGH-10 audit remediation (13 September 2026):** the reservation this step creates is guarded twice against exactly the retry this feature's own §22.8 concurrency rule warns about — *"backend transition and idempotency controls are still required; a visual lock alone is not sufficient."* `itemizeOrder` requires both `Idempotency-Key` and `If-Match`, added because a receiving officer retrying over a flaky hub connection would otherwise have produced two priced `Order`s, and a duplicate credit reservation, for one physical parcel ([openapi.yaml](../../contracts/openapi.yaml)). Underneath that, `Order.commercial_state`'s own machine reserves exposure **exactly once, keyed by a uniqueness constraint on the order** — not by retry semantics — and releases it through a defined `→ REVERSED` transition on formal Return initiation ([state-machines.md](../../contracts/state-machines.md) §8). **What is not yet settled is narrower than "idempotency or rollback"**: the ledger mechanics behind *adjusting* a reservation when a correction changes the amount owed — `OQ-005`, §14 below.
 9. **The intake closes** when every hub-received parcel is accounted for. Closure emits `intake.completed` and generates the vendor-facing order summary (§23.10).
 
+**The order's photo (D-A10, 12 November 2026; Stage 7, `OB-S1-82`).** Where the collection has parcel photos ([pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel)), the officer who itemizes a parcel **chooses the photo of that order from the collection's photos**: **one photo per order**, and the photos no order has taken are shown as unmatched until each is matched or accounted for. The order holds **a reference to the evidence**; the evidence's owner stays the pickup stop and is never re-pointed (domain-model.md §3.6), and the database allows one photo for an order and one order for a photo, for every writer. **The photo follows the order**: the order list, the order page and the delivery rider's stop show it (`OB-S1-85`). The choice is made after the hub's count has committed, so the photos are never in front of the blind count ([hub-intake.md §5.3](hub-intake.md#53-what-this-feature-must-never-do)).
+
 ### 5.2 Exception paths
 
 | Path| Behaviour| Error code|
@@ -108,6 +110,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 - **Never present the booking estimate as authoritative.** `MSC-DEC-211` reversed §23.6, `MSC-DEC-175` — every booking now shows an indicative estimate. But it assumes `SMALL` and in-area doorstep, and the class is selected *here*. The estimate and the frozen price must both be preserved and visibly distinct.
 - **Never let a locked price change silently.** Post-freeze correction is reasoned maker-checker with full history.
 - **Never let a retried `itemizeOrder` call mint a second reservation for one physical parcel.** `Idempotency-Key` and `If-Match` are both required on the operation, and the commercial machine additionally reserves exposure exactly once per order by uniqueness constraint — belt and braces, because a receiving officer on a flaky hub connection retries by instinct, not by malice (§22.8, HIGH-10 audit remediation).
+- **Never re-point a parcel photo to the order, give an order two photos, or give a photo two orders.** The order references the evidence; the evidence stays the stop's, and the one-to-one rule is the database's, not the screen's (D-A10).
 - **Never conflate the high-value surcharge with the liability cap.** They answer different questions: the **cap limits what Melarc pays out** on a loss and is company-wide; the **surcharge funds the handling** that makes a loss less likely and is hub-scoped. A parcel can carry the surcharge and still be capped at GH₵300 — that is the design, not a contradiction to be reconciled away.
 
 ---
@@ -374,6 +377,19 @@ And an enhanced audit event records the captured cost for reconciliation against
 ```
 
 **Governs:** `MSC-DEC-210`, §42.3 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `CARRIER_COST_REQUIRED`
+
+### `AC-SLICE-001-90` — An order's photo is chosen from the collection's photos, one photo per order
+
+```text
+Given a collection with three parcel photos and an intake whose hub count has committed,
+When the officer itemizes the first parcel and chooses one of the three photos for the order,
+Then the order references that evidence and the evidence still belongs to the pickup stop,
+And the other two photos are shown as unmatched until they are matched,
+And a photo of another stop cannot be chosen, a second order cannot take the same photo, and the order cannot take a second photo, by any writer,
+And the photo is shown with the order in the order list, on the order page and on the delivery rider's stop.
+```
+
+**Governs:** D-A10, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel) · **Surface:** Melarc Ops · **Test level:** API, database · **Status:** owed by Stage 7 (`OB-S1-82`) and the order screens (`OB-S1-85`); no `Order` table exists yet.
 
 ---
 

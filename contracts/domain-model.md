@@ -94,7 +94,7 @@ Per §34.7, all persisted timestamps are timezone-aware.
 |---|---|---|---|
 | `id`| uuid| no||
 | `owner_type` / `owner_id`| enum + uuid| no| The record this evidences|
-| `purpose`| enum| no| `COLLECTION_PROOF`, `CONDITION`, `OSD`, `HANDOFF_RECEIPT`, `DELIVERY_PROOF`, `RETURN_PROOF`, `MAINTENANCE`, `FUEL`, `COMPLIANCE_DOCUMENT`|
+| `purpose`| enum| no| `COLLECTION_PROOF`, `PARCEL_PHOTO`, `CONDITION`, `OSD`, `HANDOFF_RECEIPT`, `DELIVERY_PROOF`, `RETURN_PROOF`, `MAINTENANCE`, `FUEL`, `COMPLIANCE_DOCUMENT`. **`PARCEL_PHOTO` was added on 12 November 2026 (D-A10)**, below|
 | `captured_at`| timestamptz| no| When captured in the field, **not** when uploaded|
 | `captured_by_actor`| uuid| no||
 | `device_context`| jsonb| yes| The registered rider device (its `RegisteredDevice.id`) where applicable|
@@ -109,6 +109,8 @@ Per §34.7, all persisted timestamps are timezone-aware.
 | `uploaded_at`| timestamptz| yes| Distinct from `captured_at`. Non-null from `STORED`|
 
 `captured_at` being distinct from an upload timestamp matters because the rider app works under unreliable connectivity (specification §7.8) and evidence routinely arrives hours after capture.
+
+**The parcel photo (`PARCEL_PHOTO`, decided by the Product Owner on 12 November 2026, D-A10; the rule is owned by [pickup-collection.md §5.5](../features/pickup/pickup-collection.md#55-the-photo-of-every-parcel)).** The photo of **one parcel at the door**, label side up, captured by the rider who counts it, for the pickup stop (`owner_type` `PICKUP_STOP`). It is evidence of the stop with a purpose of its own, **distinct from `COLLECTION_PROOF`**, which is the photo of a failure or of the parcel a short count left behind: the two are never interchangeable, and neither can be attached where the other belongs. **The photos make the count**: a `CollectionRecord`'s `collected_count` equals the number of parcel photos attached to it, unless Ops let the stop's count through without photos (a row for the stop, made once and before the count). A photo is attached to one collection record, once, and to nothing else; the attachment is its own append-only record (`collection_parcel_photo`), and the evidence's owner is never changed. **At itemization an order will hold a reference to one of the collection's photos** and the evidence stays the stop's (Stage 7), one photo per order. **Two things are recorded as open and not decided:** the retention category of a parcel photo, which must outlast the order's delivery, return and dispute (the period stays the owner's, `OQ-028`; until decided the photo is kept under the one category that exists, `PICKUP_STOP_EVIDENCE`), and how the small copy that lists show is made (the phone or the evidence lane; decided by the task that builds the list).
 
 **Invariants** *(added 24 August, `MSC-DEC-251`)*.
 
