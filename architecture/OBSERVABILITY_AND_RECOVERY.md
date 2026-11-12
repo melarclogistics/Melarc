@@ -348,7 +348,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**194 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 78 `NORMAL`.**
+**198 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 82 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -361,7 +361,11 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `getIntakeSummary`| `NORMAL`| — A read|
 | `getOrder`| `NORMAL`| — A read, and the `ETag` source `requestPayerCorrection` takes|
 | `getPickupStop`| `NORMAL`| — A read, and the `ETag` source the stop mutations take. An authorised staff read of a stop in another hub writes one `auth.hub_boundary.crossed`, as the manifest read does|
+| `listCollectionDisputes`| `NORMAL`| — A read: the disputes a vendor raised, for Ops (D-A3, Run A; `pickup.read`)|
+| `listCollectionShortfalls`| `NORMAL`| — A read: the short counts flagged to the office (D-A3, Run A; `pickup.handshake.override`)|
+| `listHandshakesForOps`| `NORMAL`| — A read: the handshakes that need Ops now (D-A3, Run A; `pickup.handshake.override`)|
 | `listNotifications`| `NORMAL`| — A read: the Ops message log (S1.12e)|
+| `listPickupFailures`| `NORMAL`| — A read: the failure decision queue (D-A3, Run A; `pickup.failure.resolve`)|
 | `listVendorPickupLocations`| `NORMAL`| — A read|
 | `recordIntakeCondition`| `CRITICAL_WRITE`| the condition is authoritative once recorded and routes liability to Senior Ops|
 | `requestPayerCorrection`| `CRITICAL_WRITE`| money — asks to change who pays a frozen price|
