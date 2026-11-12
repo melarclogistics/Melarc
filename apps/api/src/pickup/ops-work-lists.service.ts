@@ -244,7 +244,8 @@ export class PickupOpsWorkLists {
    * rider reported and what became of its request. **Open is a failure whose request is still `CONFIRMED`**, escalated or not: the office has yet to cancel it or
    * reschedule it (an escalation is a marker and decides nothing, OB-S1-15). Not open is a failure the office decided: its request is `CANCELLED`, with a
    * replacement when it was rescheduled. **The waiting time is the database's:** from the moment the failure was reported until the decision where there
-   * is one, and until the read where there is not.
+   * is one, and until the read where there is not. **`photo_count`** is how many photos the rider attached to the failure (`pickup_stop_evidence`, read under the
+   * same key and hub scope as the stop): a count and never an address, the photo itself being read with `createEvidenceRetrievalAuthorization`.
    */
   listPickupFailures(
     authorized: AuthorizedRequest,
@@ -269,6 +270,7 @@ export class PickupOpsWorkLists {
                end as decision,
                r.attempt_number, (r.attempt_extension_id is not null) as attempt_extended, r.escalated_at, r.cancelled_at as decided_at,
                r.replacement_request_id, m.assigned_rider_id as rider_id,
+               (select count(*) from pickup_stop_evidence e where e.pickup_stop_id = s.id)::integer as photo_count,
                s.resolved_at::text as position_text, s.id as position_id
           from pickup_stop s
           join pickup_request r on r.id = s.pickup_request_id

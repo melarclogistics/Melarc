@@ -266,6 +266,8 @@ export interface PickupFailureRow extends ListedRow {
   readonly decided_at: string | Date | null;
   readonly replacement_request_id: string | null;
   readonly rider_id: string | null;
+  /** How many photos the rider attached to the failure (`pickup_stop_evidence`). */
+  readonly photo_count: number;
 }
 
 /** A contact attempt of the rider, copied member by member (the table keeps no more than these). */
@@ -295,6 +297,11 @@ export interface PickupFailureView extends PickupContext {
   readonly decided_at: string | null;
   readonly replacement_request_id: string | null;
   readonly rider_id: string | null;
+  /**
+   * How many photos the rider attached to the failure. The photos themselves are read one at a time, through the evidence store's own
+   * authorization (`createEvidenceRetrievalAuthorization`): the queue carries a count and never an address.
+   */
+  readonly photo_count: number;
 }
 
 function contactAttemptsOf(snapshot: StopFailureSnapshot): FailureContactAttemptView[] {
@@ -333,5 +340,6 @@ export function failureViewOf(row: PickupFailureRow): PickupFailureView {
     decided_at: iso(row.decided_at),
     replacement_request_id: row.replacement_request_id,
     rider_id: row.rider_id,
+    photo_count: row.photo_count,
   };
 }

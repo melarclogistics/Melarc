@@ -478,7 +478,8 @@ paths:
 
         **The waiting time is the database's own**: `waiting_seconds` runs from the moment the failure was reported until the decision where there is
         one, and until the list is read where there is not; the client computes nothing. The attempts are the request's (`attempt_number`, and whether Senior
-        Ops force-extended them). The photo of a failure is not in an item yet: the evidence store that holds it is another task's.
+        Ops force-extended them). `photo_count` is how many photos the rider attached to the failure (`reportPickupFailure`, `evidence_ids`); the photos
+        themselves are read one at a time with `createEvidenceRetrievalAuthorization`, and an item carries no address.
 
         **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
         hub, where the grant reaches it, is audited without contents, as every staff read is.
@@ -14634,6 +14635,7 @@ components:
         - decided_at
         - replacement_request_id
         - rider_id
+        - photo_count
       additionalProperties: false
       properties:
         pickup_stop_id: { type: string, format: uuid }
@@ -14706,8 +14708,14 @@ components:
           type: [string, 'null']
           format: uuid
           description: The rider of the run.
+        photo_count:
+          type: integer
+          minimum: 0
+          description: >-
+            How many photos the rider attached to the failure. A count and never an address: each photo is read with `createEvidenceRetrievalAuthorization`, under the
+            evidence store's own authorization.
       description: >-
-        A failed pickup in the decision queue (`listPickupFailures`). The photo of a failure is not in it yet.
+        A failed pickup in the decision queue (`listPickupFailures`), with the count of the photos of its failure.
 
     AdHocSender:
       type: object

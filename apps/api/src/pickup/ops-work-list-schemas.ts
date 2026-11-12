@@ -178,6 +178,7 @@ export const PICKUP_FAILURE_QUEUE_ITEM_SCHEMA = described({
     'decided_at',
     'replacement_request_id',
     'rider_id',
+    'photo_count',
   ],
   additionalProperties: false,
   properties: {
@@ -209,6 +210,7 @@ export const PICKUP_FAILURE_QUEUE_ITEM_SCHEMA = described({
     decided_at: nullableMoment,
     replacement_request_id: { type: ['string', 'null'], format: 'uuid' },
     rider_id: { type: ['string', 'null'], format: 'uuid' },
+    photo_count: count,
   },
 });
 
