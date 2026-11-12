@@ -880,6 +880,8 @@ States: `PENDING_UPLOAD` · `STORED` · `EXPIRED`. Terminal: `STORED`, `EXPIRED`
 
 **Validation happens on the transition, not on the client's word.** §39.4 requires the contract to define validation, and a client reporting success proves nothing. The three declared facts are re-checked against the object that actually arrived.
 
+**As built (S1.11, 12 November 2026).** The table's guard holds the three transitions for every writer: a record is made `PENDING_UPLOAD` with a capture that is not in the future, its creation instant and the end of its upload window are the database's own, and it changes in one way only, to `STORED` before the window ends (with `uploaded_at` the database's instant) or to `EXPIRED` once it has passed, after which it is final. **The object's first bytes are also checked against the signature of the declared type** (JPEG, PNG or PDF; a declared `image/jpeg` that is not a JPEG stays `PENDING_UPLOAD`, `VALIDATION_FAILED`), and the kind recognised is kept with the record. The System transition is the hourly sweep of the delivery worker under the capability `evidence_validation` ([BACKGROUND_JOBS_AND_EVENTS.md §3.5](../architecture/BACKGROUND_JOBS_AND_EVENTS.md#35-scheduling-and-backstop-jobs)). The malicious-content check that [SECURITY_DESIGN.md §14.18a](../architecture/SECURITY_DESIGN.md#1418a-private-means-authorization-private-not-network-unreachable) lists before `STORED` is **not made** (the owner's open release item, OB-S1-05).
+
 **`EXPIRED` is retained rather than deleted, which will look like clutter.** A rider who captured a damage photo and never got signal has a record of having tried, and §35.1.5 preserves historical records generally. Deletion is retention policy — `OQ-028` — and not this machine's business.
 
 
