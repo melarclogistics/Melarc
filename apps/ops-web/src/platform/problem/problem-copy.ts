@@ -173,7 +173,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   {
     operation: 'completeStaffMfaSignIn',
     code: 'MFA_ENROLMENT_REQUIRED',
-    text: 'You cannot sign in until your authenticator is set up. Use the set-up link you were sent.',
+    text: 'You cannot sign in until your authenticator is set up. If your set-up link has expired or was already used, ask someone who can reset authenticators to reset yours: a new link will be sent to your work email.',
   },
   {
     operation: 'completeStaffMfaSignIn',

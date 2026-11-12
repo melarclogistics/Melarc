@@ -174,8 +174,9 @@ export interface DataTableProps<Item> {
   /**
    * What a row is as a card, for a table that is narrow (task R5.2, M12): the facts of the row as one block of text, badges and codes, **with no control in it**, for the
    * table draws the card's one hit target (the button that opens, which is its title, stretched over the card), its box and its act. Under 40rem of the table's own width the rows are drawn
-   * as these cards in place of the table (a 390px phone), and the keys, the box, the open button and the row act work as they do in the table. So are the rows of a list that opens nothing wherever
-   * its columns cannot fit. Without it the table stays a table at every width, and when nothing more can go its words break anywhere before it scrolls sideways.
+   * as these cards in place of the table (a 390px phone), and the keys, the box, the open button and the row act work as they do in the table. So are the rows of **every** list wherever its columns
+   * cannot fit once every lesser column is gone (a table never breaks a word: where it runs out of room it is cards), and they stay cards until the box grows wider than it was when the list went to
+   * cards. Without it the table stays a table at every width, and when nothing more can go its words break anywhere before it scrolls sideways.
    */
   readonly card?: (item: Item) => ReactNode;
   /**
@@ -188,7 +189,7 @@ export interface DataTableProps<Item> {
   readonly cardHeadingLevel?: 2 | 3 | 4;
   /**
    * `auto` (the default): **a table from 40rem of its own box up, cards under it** (a 390px phone), and in a table the lesser columns (`priority`) go as far as it takes for it not to scroll sideways;
-   * a list whose rows open nothing is cards instead of losing a column. `table` and `cards` fix it, for a screen that knows better and for a test. Without `card` there are no cards: the table stays
+   * a list whose rows open nothing is cards instead of losing a column, and so is any list whose lesser columns are all gone and whose box still scrolls. `table` and `cards` fix it, for a screen that knows better and for a test. Without `card` there are no cards: the table stays
    * a table at every width, and takes its lesser columns away.
    */
   readonly layout?: 'auto' | 'table' | 'cards';
@@ -376,57 +377,105 @@ export function dropOrderOf<Item>(columns: readonly DataColumn<Item>[]): readonl
     .map(({ column }) => column.id);
 }
 
-/** What the fit decided: the lesser columns that went, and whether nothing more could go while the box still scrolled sideways. */
+/** What the fit decided: the lesser columns that went, whether nothing more could go while the box still scrolled sideways, and whether that made the list cards. */
 interface ColumnFit {
   readonly dropped: ReadonlySet<string>;
   /** Every lesser column is gone (there may have been none) and the box still scrolls sideways. */
   readonly full: boolean;
+  /** The fit is full and the list has a card: it is cards, and **stays cards** (`useColumnFit`) until its box grows wider than it was when the list went to cards, or its columns change. */
+  readonly cards: boolean;
+}
+
+/** What the fit is told of the table: where its box and its probe are, whether there is anything to measure, the columns that may go in their order, and what the list is made of. */
+interface ColumnFitInput {
+  readonly scroller: RefObject<HTMLDivElement | null>;
+  readonly probe: RefObject<HTMLDivElement | null>;
+  readonly measuring: boolean;
+  readonly order: readonly string[];
+  /** The columns and their weights: when they change, the fit begins again and the list is a table again. */
+  readonly columnsKey: string;
+  /** The ids of the rows, in order. */
+  readonly rowsKey: string;
+  /** The list has a card and may be drawn as cards (`layout="auto"`): a full fit then makes it cards. */
+  readonly cardable: boolean;
 }
 
 /**
- * **No table scrolls sideways** (the Product Owner, 10 November 2026): the lesser columns that go, as the table's box is measured. A table drawn as a table whose box scrolls sideways takes the next of
- * its lesser columns away (`dropOrderOf`) and measures again, until it does not or none is left (then it is `full`: the table gives up the room its prose columns keep and lets words break anywhere, or,
- * for a list that opens nothing, is cards). It begins again from every column whenever the width of its box changes (a column that now fits comes back), the faces finish loading (the first measure
- * is made in the fallback face, `font-display: swap`) or what is in it does (`contentKey`: its rows and its columns), so that the lesser columns are never fewer than the room needs; and it measures
- * again, **adding drops and never giving one back**, whenever the table element itself changes its width (what is in it grew: a cell that got its words, a face that was wider than the first). The
- * measure is a layout effect, so what is drawn first is what fits and no frame shows the scroll. Where nothing can be measured (no layout, a hidden box) every column is drawn. The width is read from a
- * probe of no height, so that the columns going, which shortens the rows, is not a change of what is observed.
+ * **No table scrolls sideways, and none breaks a word** (the Product Owner, 10 and 11 November 2026): the lesser columns that go, as the table's box is measured. A table drawn as a table whose box
+ * scrolls sideways takes the next of its lesser columns away (`dropOrderOf`) and measures again, until it does not or none is left (then it is `full`: **a list that has a card is cards**, every list
+ * alike, and a table that has no card gives up the room its prose columns keep and lets words break anywhere). It begins again from every column whenever the width of its box changes (a column that now
+ * fits comes back), the faces finish loading (the first measure is made in the fallback face, `font-display: swap`) or its rows change (`rowsKey`), so that the lesser columns are never fewer than the room needs;
+ * and it measures again, **adding drops and never giving one back**, whenever the table element itself changes its width (what is in it grew: a cell that got its words, a face that was wider than the
+ * first). The measure is a layout effect, so what is drawn first is what fits and no frame shows the scroll. Where nothing can be measured (no layout, a hidden box) every column is drawn. The width is
+ * read from a probe of no height, so that the columns going, which shortens the rows, is not a change of what is observed.
+ *
+ * **The switch to cards is sticky** (the Product Owner's review of 67bc979): drawing the table again to measure it unmounts every card, so that focus on a card's control falls to the body and a dialog
+ * opened from it loses its way back. The box's width at which the list went to cards is remembered (`cardsAt`); the table is drawn again only when the box grows wider than that, or when the columns
+ * change. A change of rows, a font load and a narrower box keep the cards.
  */
-function useColumnFit(
-  scroller: RefObject<HTMLDivElement | null>,
-  probe: RefObject<HTMLDivElement | null>,
-  measuring: boolean,
-  order: readonly string[],
-  contentKey: string,
-): ColumnFit {
+function useColumnFit({
+  scroller,
+  probe,
+  measuring,
+  order,
+  columnsKey,
+  rowsKey,
+  cardable,
+}: ColumnFitInput): ColumnFit {
   const [dropped, setDropped] = useState(0);
   const [full, setFull] = useState(false);
+  /** The width of the box (its probe) at which the list went to cards, or `null` while it is a table. */
+  const [cardsAt, setCardsAt] = useState<number | null>(null);
   /** Counts the times the measure is to be made again: when the width of the box changed (even when every column was drawn already and nothing else changes), the faces loaded or the table grew. */
   const [epoch, setEpoch] = useState(0);
-  const [seenKey, setSeenKey] = useState(contentKey);
-  if (seenKey !== contentKey) {
-    setSeenKey(contentKey);
+  const [seenColumns, setSeenColumns] = useState(columnsKey);
+  const [seenRows, setSeenRows] = useState(rowsKey);
+  if (seenColumns !== columnsKey) {
+    setSeenColumns(columnsKey);
+    setSeenRows(rowsKey);
     setDropped(0);
     setFull(false);
+    setCardsAt(null);
+  } else if (seenRows !== rowsKey) {
+    setSeenRows(rowsKey);
+    // Cards stay as they are: another set of rows is no reason to unmount the card that has focus.
+    if (cardsAt === null) {
+      setDropped(0);
+      setFull(false);
+    }
   }
+  /** What the observers of the box read, which is not state of theirs. */
+  const cardsAtNow = useRef(cardsAt);
+  useLayoutEffect(() => {
+    cardsAtNow.current = cardsAt;
+  }, [cardsAt]);
+  /** Cards are drawn, so there is no table to measure. */
+  const active = measuring && cardsAt === null;
   const count = Math.min(dropped, order.length);
   useLayoutEffect(() => {
     const measure = (): void => {
       const box = scroller.current;
-      if (!measuring || box === null || box.clientWidth === 0) return;
+      if (!active || box === null || box.clientWidth === 0) return;
       if (box.scrollWidth <= box.clientWidth + 1) return;
-      if (count < order.length) setDropped(count + 1);
-      else if (!full) setFull(true);
+      if (count < order.length) {
+        setDropped(count + 1);
+        return;
+      }
+      if (!full) setFull(true);
+      if (cardable) setCardsAt(probe.current?.clientWidth ?? box.clientWidth);
     };
     measure();
-  }, [scroller, measuring, count, order.length, full, contentKey, epoch]);
+  }, [scroller, probe, active, cardable, count, order.length, full, columnsKey, rowsKey, epoch]);
   useLayoutEffect(() => {
     const element = probe.current;
-    // The start again from every column: the box changed its width, or the faces finished loading.
+    // The start again from every column: the box changed its width, or the faces finished loading. A list that went to cards stays cards unless its box is wider than it was then.
     const restart = (): void => {
+      const remembered = cardsAtNow.current;
+      if (remembered !== null && (element?.clientWidth ?? 0) <= remembered) return;
       flushSync(() => {
         setDropped(0);
         setFull(false);
+        setCardsAt(null);
         setEpoch((value) => value + 1);
       });
     };
@@ -461,12 +510,7 @@ function useColumnFit(
   // The table element itself, watched while it is drawn: it grows wider than its box when what is in it grows, and then only drops are added.
   useLayoutEffect(() => {
     const table = scroller.current?.querySelector('table');
-    if (
-      !measuring ||
-      table === null ||
-      table === undefined ||
-      typeof ResizeObserver === 'undefined'
-    )
+    if (!active || table === null || table === undefined || typeof ResizeObserver === 'undefined')
       return;
     // Not flushed in the callback: the table is the element watched, and a drop that shrinks it inside its own callback is a change the observer would be told of at once. The measure is made when
     // React next renders, a frame later, which is for what is in the table having grown and not for the window changing.
@@ -477,9 +521,23 @@ function useColumnFit(
     return () => {
       observer.disconnect();
     };
-  }, [scroller, measuring, full]);
+  }, [scroller, active, full]);
   const set = useMemo(() => new Set(order.slice(0, count)), [order, count]);
-  return { dropped: set, full };
+  return { dropped: set, full, cards: cardsAt !== null };
+}
+
+/** The mistakes of a page that production has already told once, so that a table drawn again says nothing more. */
+const told = new Set<string>();
+
+/**
+ * A page's mistake in what it asks of the table, where the table can still do something sound without it (no title for a card; a priority on a column that cannot go). It is **thrown in development
+ * and in tests**, where it is found, and **logged in production**, where a page whose props vary at run time (a column that is lesser for some rows' kinds, a card given later) must never go blank.
+ */
+function misuse(message: string): void {
+  if (!import.meta.env.PROD) throw new Error(message);
+  if (told.has(message)) return;
+  told.add(message);
+  console.error(message);
 }
 
 /** A control that can take focus now: not a disabled button, not one marked unavailable. */
@@ -546,16 +604,21 @@ export function DataTable<Item>({
   const columnsKey = columns
     .map((column) => `${column.id}:${String(column.priority ?? 1)}`)
     .join(',');
-  const fit = useColumnFit(
+  const fit = useColumnFit({
     scroller,
     probe,
-    !narrowCards && status === 'ready' && rows.length > 0,
+    measuring: !narrowCards && status === 'ready' && rows.length > 0,
     order,
-    `${columnsKey}#${rows.map(rowId).join('|')}`,
-  );
-  /** A list that opens nothing, whose columns cannot fit with every fact in them, is drawn as cards (every fact), never as a table with a fact missing. */
-  const cards = narrowCards || (fit.full && !canDrop && card !== undefined && layout === 'auto');
-  /** Nothing more can go and the box still scrolls: the table gives up the room its prose columns keep and lets words break anywhere, so that even a string with no break never scrolls the box. */
+    columnsKey,
+    rowsKey: rows.map(rowId).join('|'),
+    cardable: card !== undefined && layout === 'auto',
+  });
+  /**
+   * **A table never breaks a word: where it runs out of room it is cards** (the Product Owner, 11 November 2026). A list that has a card and whose columns cannot fit with every lesser column gone is
+   * drawn as cards (every fact), never as a table with a fact missing or a word broken inside, whether its rows open something or not.
+   */
+  const cards = card !== undefined && (narrowCards || fit.cards);
+  /** Nothing more can go, the box still scrolls and the list has no card to be: the table gives up the room its prose columns keep and lets words break anywhere, so that even a string with no break never scrolls the box. */
   const exhausted = fit.full && !cards;
   /** The columns drawn: every one but the lesser columns that the room has taken away. */
   const shown = columns.filter((column) => !fit.dropped.has(column.id));
@@ -633,12 +696,12 @@ export function DataTable<Item>({
     );
   }
   if (card !== undefined && onOpen !== undefined && cardTitle === undefined) {
-    throw new Error(
+    misuse(
       `The table "${label}" opens rows as cards, so it needs a cardTitle: the card's title is its button that opens the record.`,
     );
   }
   if (!canDrop && columns.some((column) => (column.priority ?? 1) > 1)) {
-    throw new Error(
+    misuse(
       `The table "${label}" marks lesser columns but its rows open nothing, so no column may go: a fact it took away would be on no screen. Remove the priorities (it is cards where its columns cannot fit).`,
     );
   }

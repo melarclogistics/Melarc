@@ -46,6 +46,11 @@ export interface PageHeaderProps {
 
 const NUMBER = new Intl.NumberFormat('en-GB');
 
+/** `words` as a sentence of its own with `next` after it, and exactly one full stop between: none is added to words that end in one already ("Refresh failed.", "Checking…"). */
+function sentenceThen(words: string, next: string): string {
+  return /[.…!?]$/.test(words) ? `${words} ${next}` : `${words}. ${next}`;
+}
+
 /**
  * How current the results are and the way to read them again, in the page header's words ("Updated 09:42 · Refresh"). It is the header's own line, and is **also drawn alone** by a pane that is
  * not a page header but has results of its own to read again (the builder's pool), so that every screen says it the same way and no page writes its own words for it.
@@ -64,7 +69,9 @@ export function FreshnessLine({ freshness }: { readonly freshness: Freshness }) 
         : `Updated ${updatedAt ?? ''}`;
   return (
     <p className="ui-page-head__freshness">
-      <span role="status">{unavailable === undefined ? words : `${words}. ${unavailable}`}</span>
+      <span role="status">
+        {unavailable === undefined ? words : sentenceThen(words, unavailable)}
+      </span>
       <span aria-hidden="true">·</span>
       <Button
         type="button"
