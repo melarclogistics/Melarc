@@ -115,7 +115,7 @@ const age = (id: string) =>
   );
 const store = (id: string) =>
   arrange(
-    `update evidence set state = 'STORED', uploaded_at = now(), validated_signature = 'JPEG' where id = $1`,
+    `update evidence set state = 'STORED', uploaded_at = now(), validated_signature = 'JPEG', scanner = 'stand-in', scanner_signature_version = 'stand-in/1', scanned_at = now() where id = $1`,
     [id],
   );
 
@@ -258,8 +258,17 @@ describe('the capability can do nothing else', () => {
       (await attempt(`update evidence set upload_expires_at = now() where id = '${pending}'`)).code,
     ).toBe('42501');
     expect((await attempt(`delete from evidence where id = '${aged}'`)).code).toBe('42501');
+    // A store, by itself or with the verdict the record must carry (migration 0086): the guard of the record says a stored record needs a verdict, and the verdict's columns are
+    // not the lane's to write. The first is the record's own rule (it runs before the policy is looked at), the second is the privilege.
     expect(
       (await attempt(`update evidence set state = 'STORED' where id = '${pending}'`)).code,
+    ).toBe('23514');
+    expect(
+      (
+        await attempt(
+          `update evidence set state = 'STORED', scanner = 'clamav', scanner_signature_version = 'v' where id = '${pending}'`,
+        )
+      ).code,
     ).toBe('42501');
     // A window still open does not expire, whoever asks: the record's guard says so.
     expect(

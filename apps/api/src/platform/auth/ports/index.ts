@@ -7,6 +7,7 @@
 export * from './attestation-verifier.port.js';
 export * from './audit-writer.port.js';
 export * from './clock.port.js';
+export * from './content-scanner.port.js';
 export * from './delivery-provider.port.js';
 export * from './evidence-store.port.js';
 export * from './delivery-queue.port.js';

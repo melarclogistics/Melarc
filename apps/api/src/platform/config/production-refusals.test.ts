@@ -84,6 +84,30 @@ describe('AC-SLICE-000-55: the API refuses to start in production with what is o
       ['EVIDENCE_STORE'],
     ],
     [
+      'the in-process stand-in of the content scanner is selected (Run A2, D-A6)',
+      { EVIDENCE_SCANNER: 'in-process' },
+      ['EVIDENCE_SCANNER'],
+    ],
+    [
+      'ClamAV is selected without the daemon’s address',
+      {
+        EVIDENCE_SCANNER: 'clamav',
+        EVIDENCE_CLAMAV_PORT: '3310',
+        EVIDENCE_CLAMAV_TIMEOUT_MS: '8000',
+      },
+      ['EVIDENCE_CLAMAV_HOST'],
+    ],
+    [
+      'ClamAV is selected with a time that outlasts the request’s own budget',
+      {
+        EVIDENCE_SCANNER: 'clamav',
+        EVIDENCE_CLAMAV_HOST: 'clamav.internal.example',
+        EVIDENCE_CLAMAV_PORT: '3310',
+        EVIDENCE_CLAMAV_TIMEOUT_MS: '15000',
+      },
+      ['EVIDENCE_CLAMAV_TIMEOUT_MS'],
+    ],
+    [
       'the R2 evidence store is selected without its bucket',
       { EVIDENCE_R2_BUCKET: undefined },
       ['EVIDENCE_R2_BUCKET'],
@@ -143,6 +167,24 @@ describe('AC-SLICE-000-55: the API refuses to start in production with what is o
     for (const key of keys) expect(refused).toContain(key);
     // And it refuses what the baseline refuses, and nothing more than what the row changed.
     expect(refused.filter((key) => key !== 'KEY_CUSTODY')).toEqual(keys.toSorted());
+  });
+
+  // The two states of production that must not be refused for the scanner (Run A2, D-A6): with no scanner configured the application starts and refuses to store any evidence (the
+  // adapter is bound in `app.module.test.ts` and refuses in `unconfigured.content-scanner.adapter.test.ts`), and with ClamAV it starts and stores on a clean verdict.
+  // Break caught: a production start refused for want of a scanner, which would keep a deployment that has not yet got one from running at all; or ClamAV refused for being real.
+  it.each([
+    ['no scanner configured at all', {}],
+    [
+      'ClamAV, with the daemon’s address and a time inside the request’s budget',
+      {
+        EVIDENCE_SCANNER: 'clamav',
+        EVIDENCE_CLAMAV_HOST: 'clamav.internal.example',
+        EVIDENCE_CLAMAV_PORT: '3310',
+        EVIDENCE_CLAMAV_TIMEOUT_MS: '8000',
+      },
+    ],
+  ])('does not refuse production for its scanner when it has %s', (_clause, change) => {
+    expect(keysOf(problemsFor(production(change)))).toEqual(['KEY_CUSTODY']);
   });
 
   // Break caught: a purpose-separated key allowed to be absent, which would start the API with a purpose that cannot seal or hash.

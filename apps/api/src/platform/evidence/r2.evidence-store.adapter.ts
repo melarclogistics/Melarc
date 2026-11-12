@@ -1,3 +1,4 @@
+import type { ObjectBytes } from '../auth/ports/content-scanner.port.js';
 import type {
   EvidenceStore,
   ObjectCapability,
@@ -32,9 +33,11 @@ import {
  *   capability lists a bucket (GBT-N10).
  * - **What arrived is read back** (`inspect`): a `HEAD` for the size, the type and the checksum the store recorded, and a ranged `GET` for the first bytes, each signed in the header form;
  *   the platform compares them with what was declared and with the signature of the declared type before a record is stored.
+ * - **The object is streamed to the content scanner** (`read`, Run A2): a `GET` signed in the header form whose body is handed on as it arrives through the stream transport the
+ *   composition gives it; and **a file the scanner flagged is removed** (`remove`, a signed `DELETE`). The credential must therefore be able to delete objects of the bucket, and of no other.
  */
 export type R2Transport = (request: {
-  readonly method: 'HEAD' | 'GET';
+  readonly method: 'HEAD' | 'GET' | 'DELETE';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
 }) => Promise<{
@@ -42,6 +45,21 @@ export type R2Transport = (request: {
   /** Header names in lower case. */
   readonly headers: Readonly<Record<string, string>>;
   readonly body: Uint8Array;
+}>;
+
+/**
+ * The transport that reads an object as a stream (Run A2: the platform streams it to the content scanner). It answers once the store has sent its headers; `body` is the bytes as they
+ * arrive, and is nothing for an answer that is not a `200` (the transport has already let go of any body the store sent with it).
+ */
+export type R2StreamTransport = (request: {
+  readonly method: 'GET';
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+}) => Promise<{
+  readonly status: number;
+  /** Header names in lower case. */
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: ObjectBytes | undefined;
 }>;
 
 export interface R2EvidenceStoreOptions {
@@ -52,6 +70,8 @@ export interface R2EvidenceStoreOptions {
   /** Where the store answers; `<accountId>.r2.cloudflarestorage.com` unless a test or a jurisdiction says another. */
   readonly host?: string;
   readonly transport: R2Transport;
+  /** How an object is read as a stream; without it the store cannot be read for the scan (`STORE_NOT_CONFIGURED`). The composition gives `fetchStreamTransport`. */
+  readonly streamTransport?: R2StreamTransport;
   /** The clock a server-side call is signed at (the real clock; a test gives a fixed one). */
   readonly now?: () => Date;
 }
@@ -119,12 +139,12 @@ export class R2EvidenceStore implements EvidenceStore {
     };
   }
 
-  /** A server-side call, signed in the header form. */
-  async #call(
-    method: 'HEAD' | 'GET',
+  /** A server-side request with no body, signed in the header form: the address and the headers to send. */
+  #signed(
+    method: 'HEAD' | 'GET' | 'DELETE',
     key: string,
     extra: Readonly<Record<string, string>> = {},
-  ): ReturnType<R2Transport> {
+  ): { readonly url: string; readonly headers: Readonly<Record<string, string>> } {
     const instant = this.#now();
     const path = objectPathOf(this.#options.bucket, key);
     const headers: Record<string, string> = {
@@ -141,12 +161,20 @@ export class R2EvidenceStore implements EvidenceStore {
       payloadHash: EMPTY_PAYLOAD_SHA256,
     });
     const sent = Object.fromEntries(Object.entries(headers).filter(([name]) => name !== 'host'));
-    const exchange = (): ReturnType<R2Transport> =>
-      this.#options.transport({
-        method,
-        url: `https://${this.#host}${path}`,
-        headers: { ...sent, authorization: authorized.authorization },
-      });
+    return {
+      url: `https://${this.#host}${path}`,
+      headers: { ...sent, authorization: authorized.authorization },
+    };
+  }
+
+  /** A server-side call, signed in the header form. */
+  async #call(
+    method: 'HEAD' | 'GET' | 'DELETE',
+    key: string,
+    extra: Readonly<Record<string, string>> = {},
+  ): ReturnType<R2Transport> {
+    const request = this.#signed(method, key, extra);
+    const exchange = (): ReturnType<R2Transport> => this.#options.transport({ method, ...request });
     try {
       // An outbound call runs under the request's budget when there is one, so that a late answer is refused or recorded (apps/api/CLAUDE.md, "Time is bounded and enforced").
       const budget = currentBudget();
@@ -194,6 +222,66 @@ export class R2EvidenceStore implements EvidenceStore {
       head: leading,
     };
   }
+
+  /**
+   * The object as a stream, for the content scanner: a `GET` signed in the header form, answered once the store has sent its headers, whose body is read as it arrives. A store that does
+   * not answer `200` is `STORE_UNAVAILABLE` (`404` is "nothing there"); a body that breaks off half-way is `STORE_UNAVAILABLE` too, so no caller meets a raw network error.
+   */
+  async read(key: string): Promise<ObjectBytes | undefined> {
+    const { streamTransport } = this.#options;
+    if (streamTransport === undefined) {
+      throw new EvidenceStoreError(
+        'STORE_NOT_CONFIGURED',
+        'The R2 evidence store has no way to read an object as a stream',
+      );
+    }
+    const request = this.#signed('GET', key);
+    const exchange = () => streamTransport({ method: 'GET', ...request });
+    let answer: Awaited<ReturnType<R2StreamTransport>>;
+    try {
+      const budget = currentBudget();
+      answer = await (budget === undefined
+        ? exchange()
+        : budget.effect('evidence_store', exchange));
+    } catch (error) {
+      throw new EvidenceStoreError('STORE_UNAVAILABLE', 'The evidence store did not answer', {
+        cause: error,
+      });
+    }
+    if (answer.status === 404) return undefined;
+    if (answer.status !== 200 || answer.body === undefined) {
+      throw new EvidenceStoreError(
+        'STORE_UNAVAILABLE',
+        `The evidence store answered ${String(answer.status)} to a read of an object`,
+      );
+    }
+    return unbroken(answer.body);
+  }
+
+  /** Takes the object away with a signed `DELETE`; an object that is not there is already gone (`404` is not a failure). */
+  async remove(key: string): Promise<void> {
+    const answer = await this.#call('DELETE', key);
+    if (answer.status === 200 || answer.status === 204 || answer.status === 404) return;
+    throw new EvidenceStoreError(
+      'STORE_UNAVAILABLE',
+      `The evidence store answered ${String(answer.status)} to the removal of an object`,
+    );
+  }
+}
+
+/** Passes the bytes on, and turns a body that breaks off into the store's own failure, so that no caller sees a network error of the transport's. */
+async function* unbroken(body: ObjectBytes): AsyncGenerator<Uint8Array, void, undefined> {
+  try {
+    for await (const chunk of body) yield chunk;
+  } catch (error) {
+    throw new EvidenceStoreError(
+      'STORE_UNAVAILABLE',
+      'The evidence store stopped sending an object',
+      {
+        cause: error,
+      },
+    );
+  }
 }
 
 /**
@@ -215,4 +303,24 @@ export const fetchTransport: R2Transport = async (request) => {
     body:
       request.method === 'HEAD' ? new Uint8Array() : new Uint8Array(await response.arrayBuffer()),
   };
+};
+
+/**
+ * The streaming transport of a running deployment: Node's own `fetch`, following no redirect, bounded as a whole (the headers and the body: a store that stalls with the body half sent
+ * ends the stream with an error). It answers when the headers arrive; the body is the bytes as they come, and is let go of at once for any answer but `200`.
+ */
+export const fetchStreamTransport: R2StreamTransport = async (request) => {
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers: { ...request.headers },
+    redirect: 'error',
+    signal: AbortSignal.timeout(60_000),
+  });
+  const headers: Record<string, string> = {};
+  for (const [name, value] of response.headers.entries()) headers[name.toLowerCase()] = value;
+  if (response.status !== 200 || response.body === null) {
+    await response.body?.cancel();
+    return { status: response.status, headers, body: undefined };
+  }
+  return { status: 200, headers, body: response.body as unknown as ObjectBytes };
 };

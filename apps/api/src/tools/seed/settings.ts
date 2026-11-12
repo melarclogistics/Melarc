@@ -237,6 +237,15 @@ export const SETTINGS: readonly SettingSeed[] = [
     'minutes',
     'The lifetime of a single-object evidence upload authorization.',
   ),
+  // The tolerance on the moment of a capture (the Product Owner, 12 November 2026, D-A8): a platform setting held by the database where the moment is checked. Migration 0085
+  // gives the same row to a database seeded before it.
+  platform(
+    'evidence_capture_clock_tolerance_minutes',
+    'integer',
+    5,
+    'minutes',
+    'How far ahead of the server’s clock the moment of an evidence capture may be, for a phone whose clock runs fast: decided by the Product Owner on 12 November 2026.',
+  ),
   platform(
     'evidence_retrieval_authorization_ttl_minutes',
     'integer',

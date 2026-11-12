@@ -4,6 +4,7 @@ import type {
   AuditWriter,
   Clock,
   ClaimedDelivery,
+  ContentScanner,
   DeliveryJobRef,
   DeliveryOutcome,
   DeliveryProvider,
@@ -278,6 +279,18 @@ export class DescribeEvidenceStore extends DescribeAdapter implements EvidenceSt
   inspect(): Promise<never> {
     return refuse('EvidenceStore', 'inspect');
   }
+  read(): Promise<never> {
+    return refuse('EvidenceStore', 'read');
+  }
+  remove(): Promise<never> {
+    return refuse('EvidenceStore', 'remove');
+  }
+}
+
+export class DescribeContentScanner extends DescribeAdapter implements ContentScanner {
+  scan(): Promise<never> {
+    return refuse('ContentScanner', 'scan');
+  }
 }
 
 export class DescribeMetrics extends DescribeAdapter implements Metrics {
@@ -308,5 +321,6 @@ export const DESCRIBE_PORT_BINDINGS: PortBindings = {
   textMessageSender: { useClass: DescribeTextMessageSender },
   attestationVerifier: { useClass: DescribeAttestationVerifier },
   evidenceStore: { useClass: DescribeEvidenceStore },
+  contentScanner: { useClass: DescribeContentScanner },
   metrics: { useClass: DescribeMetrics },
 };

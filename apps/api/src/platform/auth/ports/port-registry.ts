@@ -6,6 +6,11 @@ import {
 import { AUDIT_WRITER, AUDIT_WRITER_DESCRIPTOR, type AuditWriter } from './audit-writer.port.js';
 import { CLOCK, CLOCK_DESCRIPTOR, type Clock } from './clock.port.js';
 import {
+  CONTENT_SCANNER,
+  CONTENT_SCANNER_DESCRIPTOR,
+  type ContentScanner,
+} from './content-scanner.port.js';
+import {
   DELIVERY_PROVIDER,
   DELIVERY_PROVIDER_DESCRIPTOR,
   type DeliveryProvider,
@@ -85,6 +90,7 @@ export interface PortTypes {
   TextMessageSender: TextMessageSender;
   AttestationVerifier: AttestationVerifier;
   EvidenceStore: EvidenceStore;
+  ContentScanner: ContentScanner;
   Metrics: Metrics;
 }
 
@@ -128,5 +134,6 @@ export const PORTS: readonly PortRegistryEntry[] = [
     descriptor: ATTESTATION_VERIFIER_DESCRIPTOR,
   },
   { name: 'EvidenceStore', token: EVIDENCE_STORE, descriptor: EVIDENCE_STORE_DESCRIPTOR },
+  { name: 'ContentScanner', token: CONTENT_SCANNER, descriptor: CONTENT_SCANNER_DESCRIPTOR },
   { name: 'Metrics', token: METRICS, descriptor: METRICS_DESCRIPTOR },
 ];

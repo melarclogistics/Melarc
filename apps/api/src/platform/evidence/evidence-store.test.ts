@@ -8,7 +8,11 @@ import { CONTENT_TYPE_SIGNATURE, signatureOf, SIGNATURE_BYTES } from './evidence
 import { EvidenceStoreError } from './evidence-store-error.js';
 import { InProcessEvidenceStore, STAND_IN_HOST } from './in-process.evidence-store.adapter.js';
 import { checksumBase64Of, checksumHexOf } from './object-capability.js';
-import { R2EvidenceStore, type R2Transport } from './r2.evidence-store.adapter.js';
+import {
+  R2EvidenceStore,
+  type R2StreamTransport,
+  type R2Transport,
+} from './r2.evidence-store.adapter.js';
 import { amzDateOf, authorizeRequest, EMPTY_PAYLOAD_SHA256, presignRequest } from './sigv4.js';
 
 /**
@@ -219,6 +223,38 @@ describe('the in-process stand-in (Family N, as far as a stand-in lets it run)',
       head: JPEG.slice(0, 4),
     });
   });
+
+  // Break caught: a read that returns the bytes in one piece (a test of the stream would see one frame), reorders them, or invents an object that is not held.
+  it('reads an object as a stream of frames whose bytes are the object, and nothing when nothing is held (Run A2)', async () => {
+    const store = standIn();
+    const big = Buffer.alloc(20_000);
+    for (let at = 0; at < big.length; at += 1) big[at] = at % 253;
+    store.plant(KEY, big);
+    const object = await store.read(KEY);
+    if (object === undefined) throw new Error('the object was held');
+    const frames: Uint8Array[] = [];
+    for await (const frame of object) frames.push(frame);
+    expect(frames.length).toBeGreaterThan(1);
+    expect(Buffer.concat(frames).equals(big)).toBe(true);
+    expect(await store.read(OTHER_KEY)).toBeUndefined();
+    store.plant(OTHER_KEY, new Uint8Array());
+    const none = await store.read(OTHER_KEY);
+    const emptied: Uint8Array[] = [];
+    for await (const frame of none ?? []) emptied.push(frame);
+    expect(emptied).toEqual([]);
+  });
+
+  // Break caught: a removal that leaves the object where an inspection or a read can still find it, or that fails for an object that is already gone.
+  it('removes an object, and removing what is not there is not a failure (Run A2)', async () => {
+    const store = standIn();
+    store.plant(KEY, JPEG);
+    expect(store.has(KEY)).toBe(true);
+    await store.remove(KEY);
+    expect(store.has(KEY)).toBe(false);
+    expect(await store.inspect(KEY, 4)).toBeUndefined();
+    expect(await store.read(KEY)).toBeUndefined();
+    await expect(store.remove(KEY)).resolves.toBeUndefined();
+  });
 });
 
 describe('the R2 adapter, through a fake transport (no network)', () => {
@@ -388,6 +424,167 @@ describe('the R2 adapter, through a fake transport (no network)', () => {
       ),
     );
     await expect(nothing.inspect(KEY, 8)).rejects.toMatchObject({ code: 'STORE_UNAVAILABLE' });
+  });
+
+  // The bytes of an object, as a store would send them: in frames, as an async iterable.
+  async function* sent(...parts: readonly Uint8Array[]): AsyncGenerator<Uint8Array> {
+    for (const part of parts) {
+      await Promise.resolve();
+      yield part;
+    }
+  }
+  const withStream = (stream: R2StreamTransport) => ({
+    ...options(never),
+    streamTransport: stream,
+  });
+
+  // Break caught: a read that is not signed as the published algorithm signs it, that carries a range, or that hands on the bytes in any order but the store's.
+  it('reads an object as a stream through the stream transport, signed in the header form (Run A2)', async () => {
+    const calls: { method: string; url: string; headers: Record<string, string> }[] = [];
+    const store = new R2EvidenceStore(
+      withStream((request) => {
+        calls.push({ method: request.method, url: request.url, headers: { ...request.headers } });
+        return Promise.resolve({
+          status: 200,
+          headers: {},
+          body: sent(JPEG.slice(0, 4), JPEG.slice(4)),
+        });
+      }),
+    );
+    const object = await store.read(KEY);
+    if (object === undefined) throw new Error('the object was there');
+    const taken: Uint8Array[] = [];
+    for await (const frame of object) taken.push(frame);
+    expect(Buffer.concat(taken).equals(Buffer.from(JPEG))).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.url).toBe(`https://testaccount.r2.cloudflarestorage.com/test-evidence/${KEY}`);
+    expect(calls[0]?.headers.range).toBeUndefined();
+    const expected = authorizeRequest(
+      { accessKeyId: 'TESTONLYACCESSKEY', secretAccessKey: SECRET },
+      ISSUED,
+      { region: 'auto', service: 's3' },
+      {
+        method: 'GET',
+        path: `/test-evidence/${KEY}`,
+        query: {},
+        headers: {
+          host: 'testaccount.r2.cloudflarestorage.com',
+          'x-amz-content-sha256': EMPTY_PAYLOAD_SHA256,
+          'x-amz-date': amzDateOf(ISSUED),
+        },
+        payloadHash: EMPTY_PAYLOAD_SHA256,
+      },
+    );
+    expect(calls[0]?.headers.authorization).toBe(expected.authorization);
+    expect(JSON.stringify(calls)).not.toContain(SECRET);
+  });
+
+  it('reads nothing when the store has nothing, and says only the status for any other answer', async () => {
+    const absent = new R2EvidenceStore(
+      withStream(() => Promise.resolve({ status: 404, headers: {}, body: undefined })),
+    );
+    expect(await absent.read(KEY)).toBeUndefined();
+    for (const status of [403, 500, 503]) {
+      const refusing = new R2EvidenceStore(
+        withStream(() => Promise.resolve({ status, headers: {}, body: undefined })),
+      );
+      const error = await refusing.read(KEY).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'STORE_UNAVAILABLE' });
+      expect((error as Error).message).toContain(String(status));
+      expect((error as Error).message).not.toContain('r2.cloudflarestorage.com');
+    }
+    const headless = new R2EvidenceStore(
+      withStream(() => Promise.resolve({ status: 200, headers: {}, body: undefined })),
+    );
+    await expect(headless.read(KEY)).rejects.toMatchObject({ code: 'STORE_UNAVAILABLE' });
+  });
+
+  // Break caught: a transport's network error reaching a caller as it is (it may name the address), or a store that stops sending half-way read as an object that is complete.
+  it('turns a transport that fails, and a body that breaks off, into the store’s own failure without their words', async () => {
+    const down = new R2EvidenceStore(
+      withStream(() => Promise.reject(new Error(`boom ${SECRET} r2.cloudflarestorage.com`))),
+    );
+    const refused = await down.read(KEY).catch((caught: unknown) => caught);
+    expect(refused).toMatchObject({ code: 'STORE_UNAVAILABLE' });
+    expect((refused as Error).message).not.toContain(SECRET);
+    expect((refused as Error).message).not.toContain('r2.cloudflarestorage.com');
+
+    async function* breaking(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve();
+      yield JPEG.slice(0, 4);
+      throw new Error(`terminated ${SECRET}`);
+    }
+    const store = new R2EvidenceStore(
+      withStream(() => Promise.resolve({ status: 200, headers: {}, body: breaking() })),
+    );
+    const object = await store.read(KEY);
+    if (object === undefined) throw new Error('the object was there');
+    const reading = (async () => {
+      for await (const frame of object) void frame;
+    })();
+    const error = await reading.then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(EvidenceStoreError);
+    expect(error).toMatchObject({ code: 'STORE_UNAVAILABLE' });
+    expect((error as Error).message).not.toContain(SECRET);
+  });
+
+  it('cannot read an object without a stream transport, and says so', async () => {
+    const store = new R2EvidenceStore(options(never));
+    await expect(store.read(KEY)).rejects.toMatchObject({ code: 'STORE_NOT_CONFIGURED' });
+  });
+
+  // Break caught: a removal that is not signed, goes to another object, or fails for an object that is already gone.
+  it('removes an object with a signed DELETE, and an object already gone is no failure (Run A2)', async () => {
+    const calls: { method: string; url: string; authorization: string | undefined }[] = [];
+    const answers = [204, 200, 404];
+    const store = new R2EvidenceStore(
+      options((request) => {
+        calls.push({
+          method: request.method,
+          url: request.url,
+          authorization: request.headers.authorization,
+        });
+        return Promise.resolve({
+          status: answers[calls.length - 1] ?? 500,
+          headers: {},
+          body: new Uint8Array(),
+        });
+      }),
+    );
+    await store.remove(KEY);
+    await store.remove(KEY);
+    await store.remove(KEY);
+    expect(calls.map((call) => [call.method, call.url])).toEqual(
+      Array.from({ length: 3 }, () => [
+        'DELETE',
+        `https://testaccount.r2.cloudflarestorage.com/test-evidence/${KEY}`,
+      ]),
+    );
+    const expected = authorizeRequest(
+      { accessKeyId: 'TESTONLYACCESSKEY', secretAccessKey: SECRET },
+      ISSUED,
+      { region: 'auto', service: 's3' },
+      {
+        method: 'DELETE',
+        path: `/test-evidence/${KEY}`,
+        query: {},
+        headers: {
+          host: 'testaccount.r2.cloudflarestorage.com',
+          'x-amz-content-sha256': EMPTY_PAYLOAD_SHA256,
+          'x-amz-date': amzDateOf(ISSUED),
+        },
+        payloadHash: EMPTY_PAYLOAD_SHA256,
+      },
+    );
+    expect(calls[0]?.authorization).toBe(expected.authorization);
+    const failing = new R2EvidenceStore(
+      options(() => Promise.resolve({ status: 500, headers: {}, body: new Uint8Array() })),
+    );
+    await expect(failing.remove(KEY)).rejects.toMatchObject({ code: 'STORE_UNAVAILABLE' });
   });
 
   it('is not configured without an account, a bucket and an access key', () => {

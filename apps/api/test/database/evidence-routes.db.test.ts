@@ -1,9 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import {
+  CONTENT_SCANNER,
+  type ContentScanner,
+} from '../../src/platform/auth/ports/content-scanner.port.js';
 import { EVIDENCE_STORE } from '../../src/platform/auth/ports/evidence-store.port.js';
+import { METRICS, type Metrics } from '../../src/platform/auth/ports/metrics.port.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
+import { ContentScannerError } from '../../src/platform/evidence/content-scanner-error.js';
+import { EICAR_TEST_FILE } from '../../src/platform/evidence/eicar-test-file.js';
 import type { InProcessEvidenceStore } from '../../src/platform/evidence/in-process.evidence-store.adapter.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
@@ -36,6 +43,8 @@ let ops: Actor;
 let opsOtherHub: Actor;
 let platformAdmin: Actor;
 let store: InProcessEvidenceStore;
+let scanner: ContentScanner;
+let metrics: Metrics;
 
 beforeAll(async () => {
   routes = await startVendorRoutes();
@@ -46,6 +55,8 @@ beforeAll(async () => {
   opsOtherHub = await routes.actor(BUNDLE_IDS.opsStaff, HUB_B);
   platformAdmin = await routes.actor(BUNDLE_IDS.platformAdmin, null);
   store = routes.kit.app.app.get<InProcessEvidenceStore>(EVIDENCE_STORE, { strict: false });
+  scanner = routes.kit.app.app.get<ContentScanner>(CONTENT_SCANNER, { strict: false });
+  metrics = routes.kit.app.app.get<Metrics>(METRICS, { strict: false });
 }, 180_000);
 
 afterAll(async () => {
@@ -224,6 +235,8 @@ describe('createEvidence: the rider declares a record for a stop it has arrived 
     expect(Object.keys(ticket.evidence)).not.toContain('storage_ref');
     expect(Object.keys(ticket.evidence)).not.toContain('checksum_sha256');
     expect(response.header('etag')).toMatch(/^"[A-Za-z0-9_-]+"$/);
+    // The answer is a bearer capability to write one object: no intermediary may keep it (finding L3 of the review of Run A), as for the retrieval authorization.
+    expect(response.header('cache-control')).toBe('no-store');
     expect(ticket.upload.method).toBe('PUT');
     expect(ticket.upload.headers).toEqual({
       'Content-Type': 'image/jpeg',
@@ -274,6 +287,8 @@ describe('createEvidence: the rider declares a record for a stop it has arrived 
     expect((retried.json() as Ticket).evidence.id).toBe(first.evidence.id);
     expect((retried.json() as Ticket).upload.url).toBe(first.upload.url);
     expect(retried.header('etag')).toBe(one.header('etag'));
+    // The replay carries the capability again, and says no-store again (finding L3).
+    expect(retried.header('cache-control')).toBe('no-store');
     // Another request under the same key is a conflict and makes nothing.
     const other = await declare(arranged.rider, { ...payload, byte_size: JPEG.length + 1 }, key);
     expect(outcome(other)).toEqual([409, 'IDEMPOTENCY_KEY_CONFLICT']);
@@ -599,5 +614,157 @@ describe('createEvidenceRetrievalAuthorization: a way to read one stored object,
       expect(routes.kit.app.logs.text()).not.toContain(sentinel);
     }
     expect(routes.kit.app.logs.text()).not.toContain('X-Amz-Signature');
+  });
+});
+
+describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; migration 0086)', () => {
+  // A spy that outlived a failed assertion would answer the next test in its place: every test starts from the real store, scanner and meter.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** What the record holds of the scan: nothing until a clean verdict, then the scanner, the version of its signatures and a moment of the database's. */
+  const scanOf = (id: string) =>
+    routes
+      .rows<{
+        state: string;
+        scanner: string | null;
+        scanner_signature_version: string | null;
+        scanned_at: string | null;
+        age_seconds: number | null;
+      }>(
+        `select state, scanner, scanner_signature_version, scanned_at,
+                extract(epoch from (now() - scanned_at))::float as age_seconds
+           from evidence where id = $1`,
+        [id],
+      )
+      .then((rows) => rows[0]);
+  const storageRefOf = async (id: string): Promise<string> => (await rowOf(id))?.storage_ref ?? '';
+
+  // Break caught: a record stored without a verdict on it, or with a moment the writer chose; the stand-in's name and signature version not recorded.
+  it('stores a clean file with the verdict recorded: the scanner, the version of its signatures and a moment of the database’s', async () => {
+    const arranged = await run();
+    const counted = vi.spyOn(metrics, 'increment');
+    const { ticket, etag } = await uploaded(arranged);
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(done.status, done.text).toBe(200);
+    const held = await scanOf(ticket.evidence.id);
+    expect(held).toMatchObject({
+      state: 'STORED',
+      scanner: 'stand-in',
+      scanner_signature_version: 'stand-in/1',
+    });
+    expect(held?.age_seconds).toBeGreaterThanOrEqual(0);
+    expect(held?.age_seconds).toBeLessThan(60);
+    expect(counted).toHaveBeenCalledWith('evidence_scans_total', { outcome: 'CLEAN' });
+    counted.mockRestore();
+    // The answer shows the record and not the verdict's facts: they are the platform's.
+    expect(JSON.stringify(done.json())).not.toContain('stand-in');
+  });
+
+  // Break caught: a flagged file stored, refused for another reason (the signature) so that nobody learns it was malicious, left in the bucket, or left carrying a verdict.
+  it('refuses a flagged file as malicious content, takes its object out of the store and keeps the record pending with no verdict', async () => {
+    const arranged = await run();
+    const eicar = new TextEncoder().encode(EICAR_TEST_FILE);
+    const counted = vi.spyOn(metrics, 'increment');
+    const { ticket, etag } = await uploaded(arranged, eicar);
+    const key = await storageRefOf(ticket.evidence.id);
+    expect(store.has(key)).toBe(true);
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(outcome(done)).toEqual([400, 'VALIDATION_FAILED']);
+    // The reason is the scan's, although these bytes are no JPEG either: the scan precedes the signature.
+    expect(ruleOf(done)).toBe('malicious_content');
+    expect(store.has(key)).toBe(false);
+    expect(await scanOf(ticket.evidence.id)).toMatchObject({
+      state: 'PENDING_UPLOAD',
+      scanner: null,
+      scanner_signature_version: null,
+      scanned_at: null,
+    });
+    expect(counted).toHaveBeenCalledWith('evidence_scans_total', { outcome: 'FLAGGED' });
+    expect(counted).toHaveBeenCalledWith('evidence_object_removals_total', { outcome: 'REMOVED' });
+    counted.mockRestore();
+    // The object is gone: the same completion now finds nothing, and the answer says only that.
+    const again = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(ruleOf(again)).toBe('missing');
+    // The answer names no signature and no scanner.
+    expect(done.text).not.toContain('Eicar');
+    expect(done.text).not.toContain('stand-in');
+  });
+
+  // Break caught: a refusal that depends on the object being removed, or a removal that fails and is not counted.
+  it('refuses a flagged file all the same when its object cannot be removed, and counts that', async () => {
+    const arranged = await run();
+    const eicar = new TextEncoder().encode(EICAR_TEST_FILE);
+    const counted = vi.spyOn(metrics, 'increment');
+    const removing = vi
+      .spyOn(store, 'remove')
+      .mockRejectedValueOnce(new Error('the store is down'));
+    const { ticket, etag } = await uploaded(arranged, eicar);
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(outcome(done)).toEqual([400, 'VALIDATION_FAILED']);
+    expect(ruleOf(done)).toBe('malicious_content');
+    expect(counted).toHaveBeenCalledWith('evidence_object_removals_total', { outcome: 'FAILED' });
+    expect((await scanOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
+    removing.mockRestore();
+    counted.mockRestore();
+  });
+
+  // Break caught (fail closed): a scanner that cannot answer read as clean, or as "skipped", or a record left in a state from which the retry cannot store it.
+  it('is the fixed 503 when the scanner cannot answer, keeps the record pending, and stores it when the retry is answered', async () => {
+    const arranged = await run();
+    const { ticket, etag } = await uploaded(arranged);
+    const counted = vi.spyOn(metrics, 'increment');
+    const scanning = vi
+      .spyOn(scanner, 'scan')
+      .mockRejectedValueOnce(new ContentScannerError('SCANNER_UNAVAILABLE', 'timeout'));
+    const down = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(down.status).toBe(503);
+    expect(down.json()).toEqual({ message: 'Service unavailable', request_id: expect.any(String) });
+    expect(await scanOf(ticket.evidence.id)).toMatchObject({
+      state: 'PENDING_UPLOAD',
+      scanner: null,
+    });
+    expect(counted).toHaveBeenCalledWith('evidence_scans_total', { outcome: 'UNAVAILABLE' });
+    // The retry, with the same version, is answered by the scanner now and stores the record.
+    const retried = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(retried.status, retried.text).toBe(200);
+    expect((await scanOf(ticket.evidence.id))?.state).toBe('STORED');
+    scanning.mockRestore();
+    counted.mockRestore();
+  });
+
+  it('is the fixed 503 and stores nothing when no scanner is configured', async () => {
+    const arranged = await run();
+    const { ticket, etag } = await uploaded(arranged);
+    const counted = vi.spyOn(metrics, 'increment');
+    const scanning = vi
+      .spyOn(scanner, 'scan')
+      .mockRejectedValue(new ContentScannerError('SCANNER_NOT_CONFIGURED', 'none'));
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(done.status).toBe(503);
+    expect(done.json()).toEqual({ message: 'Service unavailable', request_id: expect.any(String) });
+    expect((await scanOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
+    expect(counted).toHaveBeenCalledWith('evidence_scans_total', { outcome: 'NOT_CONFIGURED' });
+    scanning.mockRestore();
+    counted.mockRestore();
+  });
+
+  // Break caught: a verdict taken for an object whose bytes are not the declared ones, because the store's own metadata (its size and the hash it recorded) claims they are.
+  it('never stores an object whose bytes are not the declared ones, whatever the store’s metadata says', async () => {
+    const arranged = await run();
+    const declared = await declare(arranged.rider, body(stopId(arranged)));
+    const ticket = declared.json() as Ticket;
+    const etag = declared.header('etag') ?? '';
+    const key = await storageRefOf(ticket.evidence.id);
+    // The store holds other bytes of the declared length (a JPEG's signature among them), and says they hash as the declared ones.
+    const other = Uint8Array.from(JPEG).reverse();
+    other.set(JPEG.slice(0, 3), 0);
+    expect(other.length).toBe(JPEG.length);
+    store.plant(key, other, { contentType: 'image/jpeg', checksumSha256: sha(JPEG) });
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(outcome(done)).toEqual([400, 'VALIDATION_FAILED']);
+    expect(ruleOf(done)).toBe('checksum');
+    expect((await scanOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
   });
 });

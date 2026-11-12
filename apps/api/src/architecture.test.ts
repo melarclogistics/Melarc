@@ -53,6 +53,7 @@ const PORT_NAMES = [
   'TextMessageSender',
   'AttestationVerifier',
   'EvidenceStore',
+  'ContentScanner',
   'Metrics',
 ] as const;
 
@@ -92,8 +93,11 @@ const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'platform/delivery/postgres.delivery-queue.adapter.ts',
   'platform/delivery/worker/allow-listed.delivery-provider.adapter.ts',
   'platform/delivery/worker/capture.delivery-provider.adapter.ts',
+  'platform/evidence/clamav.content-scanner.adapter.ts',
+  'platform/evidence/in-process.content-scanner.adapter.ts',
   'platform/evidence/in-process.evidence-store.adapter.ts',
   'platform/evidence/r2.evidence-store.adapter.ts',
+  'platform/evidence/unconfigured.content-scanner.adapter.ts',
   'platform/idempotency/postgres.idempotency-store.adapter.ts',
   'platform/limiter/bounded.hash-admission.adapter.ts',
   'platform/limiter/in-memory.rate-limiter.adapter.ts',
@@ -126,8 +130,11 @@ const ADAPTED_PORTS: readonly (readonly [file: string, port: string])[] = [
   ['platform/delivery/postgres.delivery-queue.adapter.ts', 'DeliveryQueue'],
   ['platform/delivery/worker/allow-listed.delivery-provider.adapter.ts', 'DeliveryProvider'],
   ['platform/delivery/worker/capture.delivery-provider.adapter.ts', 'DeliveryProvider'],
+  ['platform/evidence/clamav.content-scanner.adapter.ts', 'ContentScanner'],
+  ['platform/evidence/in-process.content-scanner.adapter.ts', 'ContentScanner'],
   ['platform/evidence/in-process.evidence-store.adapter.ts', 'EvidenceStore'],
   ['platform/evidence/r2.evidence-store.adapter.ts', 'EvidenceStore'],
+  ['platform/evidence/unconfigured.content-scanner.adapter.ts', 'ContentScanner'],
   ['platform/idempotency/postgres.idempotency-store.adapter.ts', 'IdempotencyStore'],
   ['platform/limiter/bounded.hash-admission.adapter.ts', 'HashAdmission'],
   ['platform/limiter/in-memory.rate-limiter.adapter.ts', 'RateLimiter'],
@@ -174,6 +181,7 @@ const COMPOSITION_ROOT: readonly string[] = [
   'tools/seed/seed-runtime.ts',
   'tools/bootstrap/bootstrap-runtime.ts',
   'tools/sms-smoke.ts',
+  'tools/evidence-smoke.ts',
 ];
 
 /**
@@ -698,6 +706,7 @@ describe('the ports of platform/auth (S0.1)', () => {
     // S0.30 added the fourth: the bootstrap seed and the resume command are processes of their own, and bind the clock, the token
     // service and the custody adapters in a file of their own. S1.12 added `notification-sender.ts`, the one place the text-message
     // sender is composed, for the worker and for the owner's `sms:smoke` command, and `tools/sms-smoke.ts` binds the clock to that command.
+    // Run A2 added `tools/evidence-smoke.ts`: the owner's `evidence:smoke` command composes the store and the content scanner the API is configured with, to see them work once.
     // S1.24 added `domain-ports.module.ts`, the one place the two domains that meet over a run are joined: it binds the adapter of each (`pickup` and
     // `fleet`) to the port that `platform/domain-ports/` defines, so that neither imports the other.
     it('names the composition root explicitly: the application module, the delivery worker and the seed and bootstrap process wiring', () => {
@@ -709,6 +718,7 @@ describe('the ports of platform/auth (S0.1)', () => {
         'tools/seed/seed-runtime.ts',
         'tools/bootstrap/bootstrap-runtime.ts',
         'tools/sms-smoke.ts',
+        'tools/evidence-smoke.ts',
       ]);
     });
 

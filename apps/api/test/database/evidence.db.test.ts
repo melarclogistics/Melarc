@@ -302,8 +302,9 @@ describe('who reads a record', () => {
 });
 
 describe('completion, expiry and finality', () => {
+  // A record is stored only with the clean verdict of the content scan on it (migration 0086, D-A6): the scanner and the version of its signatures are the writer's, the moment is the database's.
   const store = (id: string, signature = 'JPEG'): string =>
-    `update evidence set state = 'STORED', validated_signature = '${signature}' where id = '${id}'
+    `update evidence set state = 'STORED', validated_signature = '${signature}', scanner = 'stand-in', scanner_signature_version = 'stand-in/1' where id = '${id}'
        returning id, state, uploaded_at, version, validated_signature`;
 
   it('stores a record before its window ends, with the database’s instant and the next version', async () => {
@@ -381,7 +382,7 @@ describe('completion, expiry and finality', () => {
     await routes.admin.query(`update evidence set state = 'EXPIRED' where id = $1`, [second.id]);
     await expect(
       routes.admin.query(
-        `update evidence set state = 'STORED', validated_signature = 'JPEG' where id = $1`,
+        `update evidence set state = 'STORED', validated_signature = 'JPEG', scanner = 'stand-in', scanner_signature_version = 'stand-in/1' where id = $1`,
         [second.id],
       ),
     ).rejects.toMatchObject({ code: '23514' });
@@ -410,7 +411,7 @@ describe('completion, expiry and finality', () => {
       });
       await expect(
         routes.admin.query(
-          `update evidence set ${change}, state = 'STORED', validated_signature = 'JPEG' where id = $1`,
+          `update evidence set ${change}, state = 'STORED', validated_signature = 'JPEG', scanner = 'stand-in', scanner_signature_version = 'stand-in/1' where id = $1`,
           [id],
         ),
       ).rejects.toMatchObject({
@@ -436,6 +437,115 @@ describe('completion, expiry and finality', () => {
     ).rejects.toMatchObject({
       code: '23514',
     });
+  });
+});
+
+describe('stored means a clean verdict is on the record, for every writer (migration 0086, D-A6)', () => {
+  const storing = (id: string, over = ''): string =>
+    `update evidence set state = 'STORED', validated_signature = 'JPEG'${over} where id = '${id}'
+       returning id, state, scanner, scanner_signature_version, scanned_at, extract(epoch from (clock_timestamp() - scanned_at))::float as age_seconds`;
+  const VERDICT = `, scanner = 'clamav', scanner_signature_version = 'ClamAV 1.4.2/27836/Wed Nov 12 08:05:44 2026'`;
+
+  // Break caught: a record stored with no verdict on it, which is the whole of finding H1: nothing but the service held that a scan was made.
+  it('does not store a record that carries no verdict, or half of one', async () => {
+    const arranged = await run();
+    const own = rider(arranged.rider.id);
+    for (const over of [
+      '',
+      `, scanner = 'clamav'`,
+      `, scanner_signature_version = 'ClamAV 1.4.2'`,
+    ]) {
+      const { id } = await declared(arranged);
+      const result = await attempt(own, storing(id, over));
+      refused(result);
+      expect(result.reason, over).toBe('VALIDATION_FAILED');
+      expect(
+        (
+          await routes.admin.query<{ state: string }>(`select state from evidence where id = $1`, [
+            id,
+          ])
+        ).rows[0]?.state,
+      ).toBe('PENDING_UPLOAD');
+    }
+  });
+
+  it('stores a record with the verdict on it, and takes the moment of the scan from the database’s clock', async () => {
+    const arranged = await run();
+    const { id } = await declared(arranged);
+    const row = reached(await attempt(rider(arranged.rider.id), storing(id, VERDICT)));
+    expect(row.state).toBe('STORED');
+    expect(row.scanner).toBe('clamav');
+    expect(row.scanner_signature_version).toBe('ClamAV 1.4.2/27836/Wed Nov 12 08:05:44 2026');
+    expect(Number(row.age_seconds)).toBeGreaterThanOrEqual(0);
+    expect(Number(row.age_seconds)).toBeLessThan(60);
+  });
+
+  // Break caught: a writer that chooses the moment a scan was made, so that a record seems to have been cleared when it was not.
+  it('does not take the moment from the writer: the runtime login holds no privilege on it, and the owner’s value is replaced', async () => {
+    const arranged = await run();
+    const first = await declared(arranged);
+    refused(
+      await attempt(
+        rider(arranged.rider.id),
+        storing(first.id, `${VERDICT}, scanned_at = '2000-01-01T00:00:00Z'`),
+      ),
+    );
+    const second = await declared(arranged);
+    await routes.admin.query(
+      `update evidence set state = 'STORED', validated_signature = 'JPEG', scanner = 'clamav', scanner_signature_version = 'v', scanned_at = '2000-01-01T00:00:00Z' where id = $1`,
+      [second.id],
+    );
+    const held = await routes.admin.query<{ age: number }>(
+      `select extract(epoch from (now() - scanned_at))::float as age from evidence where id = $1`,
+      [second.id],
+    );
+    expect(Number(held.rows[0]?.age)).toBeLessThan(60);
+  });
+
+  // Break caught: a verdict on a record that is not stored (a flagged or an unscanned one), or a record declared with one.
+  it('lets nothing but a stored record carry a verdict, and declares none', async () => {
+    const arranged = await run();
+    const own = rider(arranged.rider.id);
+    const { id } = await declared(arranged);
+    // Setting a verdict without the move to STORED is a change the record does not make.
+    refused(
+      await attempt(
+        own,
+        `update evidence set scanner = 'clamav', scanner_signature_version = 'v' where id = '${id}'`,
+      ),
+    );
+    // A declaration that names a verdict.
+    refused(
+      await attempt(own, declaration(arranged.rider.id, stopOf(arranged), { scanner: `'clamav'` })),
+    );
+    await expect(
+      routes.admin.query(`update evidence set scanned_at = now() where id = $1`, [id]),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('keeps the verdict a short token and a bounded line, and final with the record', async () => {
+    const arranged = await run();
+    const { id } = await declared(arranged);
+    for (const over of [
+      `, scanner = 'ClamAV', scanner_signature_version = 'v'`,
+      `, scanner = 'clamav', scanner_signature_version = '${'v'.repeat(201)}'`,
+      `, scanner = '', scanner_signature_version = 'v'`,
+    ]) {
+      await expect(
+        routes.admin.query(
+          `update evidence set state = 'STORED', validated_signature = 'JPEG'${over} where id = $1`,
+          [id],
+        ),
+      ).rejects.toMatchObject({ code: '23514' });
+    }
+    reached(await attempt(rider(arranged.rider.id), storing(id, VERDICT)));
+    for (const statement of [
+      `update evidence set scanner = 'stand-in' where id = $1`,
+      `update evidence set scanner_signature_version = 'other' where id = $1`,
+      `update evidence set scanned_at = now() where id = $1`,
+    ]) {
+      await expect(routes.admin.query(statement, [id])).rejects.toMatchObject({ code: '23514' });
+    }
   });
 });
 
@@ -583,13 +693,14 @@ describe('the settings the rider’s key reads', () => {
     }
   });
 
-  it('shows the rider’s key the three it needs and no other platform setting', async () => {
+  it('shows the rider’s key the four it needs (the capture tolerance is the fourth since 0085) and no other platform setting', async () => {
     const arranged = await run();
     const keys = await attempt(
       rider(arranged.rider.id),
       `select key from setting where key like 'evidence\\_%' or key = 'sms_enabled' order by key`,
     );
     expect(keys.rows?.map((row) => row.key)).toEqual([
+      'evidence_capture_clock_tolerance_minutes',
       'evidence_upload_allowed_mime_types',
       'evidence_upload_authorization_ttl_minutes',
       'evidence_upload_max_bytes',

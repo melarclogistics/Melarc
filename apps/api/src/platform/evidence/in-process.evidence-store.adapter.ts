@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
+import type { ObjectBytes } from '../auth/ports/content-scanner.port.js';
 import type {
   EvidenceStore,
   ObjectCapability,
@@ -30,6 +31,8 @@ import {
  */
 export const STAND_IN_HOST = 'evidence.stand-in.invalid';
 const BUCKET = 'evidence';
+/** The size of a frame of an object read from the stand-in: small, so that a test of a stream sees more than one. */
+const READ_FRAME_BYTES = 8192;
 const SCOPE: SigV4Scope = { region: 'auto', service: 's3' };
 
 export interface InProcessEvidenceStoreOptions {
@@ -127,6 +130,26 @@ export class InProcessEvidenceStore implements EvidenceStore {
       contentType: held.contentType,
       head: held.bytes.slice(0, headBytes),
     });
+  }
+
+  /** The bytes of the object, in frames, so that a reader sees them arrive as it would from a store; nothing when nothing is held at the key. */
+  read(key: string): Promise<ObjectBytes | undefined> {
+    const held = this.#objects.get(key);
+    if (held === undefined) return Promise.resolve(undefined);
+    const { bytes } = held;
+    return Promise.resolve(
+      (async function* frames(): AsyncGenerator<Uint8Array, void, undefined> {
+        for (let at = 0; at < bytes.length; at += READ_FRAME_BYTES) {
+          yield bytes.subarray(at, at + READ_FRAME_BYTES);
+        }
+      })(),
+    );
+  }
+
+  /** Takes the object away; what is not there stays not there. */
+  remove(key: string): Promise<void> {
+    this.#objects.delete(key);
+    return Promise.resolve();
   }
 
   /** Arranges an object the store holds, as a test says it is (a size or a hash the platform did not expect). Nothing but a test calls it. */

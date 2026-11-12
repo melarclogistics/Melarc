@@ -596,6 +596,20 @@
       "when": 1794482359826,
       "tag": "0084_failure_backstop",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794514910960,
+      "tag": "0085_evidence_limits_held_by_the_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794516315224,
+      "tag": "0086_evidence_scan_verdict",
+      "breakpoints": true
     }
   ]
 }

@@ -29,12 +29,13 @@ export interface AlertRule {
     | 'Text messages'
     | 'Provider down'
     | 'Attestation trust data aging'
-    | 'Failure backstop';
+    | 'Failure backstop'
+    | 'Evidence scanner';
   readonly severity: Severity;
   /** What firing means, for the person who is paged. Never a value of a series. */
   readonly summary: string;
   /** The runbook section of OBSERVABILITY_AND_RECOVERY.md section 4 the response is. */
-  readonly runbook: '§4.1' | '§4.3' | '§4.3a';
+  readonly runbook: '§4.1' | '§4.3' | '§4.3a' | '§4.3b';
   fires(history: readonly Scrape[]): boolean;
 }
 
@@ -398,6 +399,43 @@ export const ALERT_RULES: readonly AlertRule[] = Object.freeze([
         return (
           increase(scrapes, runs('FAILED'), 30 * MINUTE) > 0 &&
           increase(scrapes, runs('CHECKED'), 30 * MINUTE) === 0
+        );
+      }),
+  },
+  {
+    id: 'evidence_scanner_not_configured',
+    alert: 'Evidence scanner',
+    // OBSERVABILITY_AND_RECOVERY.md names no severity for the scanner's row: SEV-2 (a blocked flow) is this task's reading, recorded for the Product Owner: while no scanner is configured nothing
+    // can be stored, so a rider cannot count a stop with its photos and Ops lets the count through without them, one stop at a time.
+    severity: 'SEV-2',
+    summary:
+      'A rider tried to complete evidence and no content scanner is configured: nothing can be stored until one is.',
+    runbook: '§4.3b',
+    fires: (history) =>
+      anyInstance(
+        history,
+        (scrapes) =>
+          increase(
+            scrapes,
+            (scrape) => total(scrape, 'evidence_scans_total', { outcome: 'NOT_CONFIGURED' }),
+            15 * MINUTE,
+          ) > 0,
+      ),
+  },
+  {
+    id: 'evidence_scanner_unavailable',
+    alert: 'Evidence scanner',
+    severity: 'SEV-2',
+    summary:
+      'The content scanner has not answered for 15 minutes and has scanned nothing clean in that time: evidence is not being stored, and riders are told to try again.',
+    runbook: '§4.3b',
+    fires: (history) =>
+      anyInstance(history, (scrapes) => {
+        const scans = (outcome: string) => (scrape: Scrape) =>
+          total(scrape, 'evidence_scans_total', { outcome });
+        return (
+          increase(scrapes, scans('UNAVAILABLE'), 15 * MINUTE) > 0 &&
+          increase(scrapes, scans('CLEAN'), 15 * MINUTE) === 0
         );
       }),
   },

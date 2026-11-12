@@ -68,6 +68,14 @@ export const evidence = pgTable(
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
     /** The kind of file the stored bytes were recognised as; set with `STORED`, and it names the declared type. */
     validatedSignature: text('validated_signature'),
+    /**
+     * The malicious-content check that cleared the record (Run A2, D-A6; migration 0086): the scanner that decided (`clamav`, `stand-in`), the version of its signatures as it reported
+     * them, and the moment (the database's clock, taken by the guard). **All three, exactly when the record is `STORED`**: a record is stored only on a clean verdict, so the verdict is
+     * the proof and is recorded on the record. A flagged or unscanned record has none.
+     */
+    scanner: text('scanner'),
+    scannerSignatureVersion: text('scanner_signature_version'),
+    scannedAt: timestamp('scanned_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     /** The ETag source, moved by the database on every change and by nothing else. */
     version: integer('version').notNull().default(1),
@@ -121,6 +129,15 @@ export const evidence = pgTable(
     check(
       'evidence_stored_facts',
       sql`(${table.state} = 'STORED' AND ${table.uploadedAt} IS NOT NULL AND ${table.validatedSignature} IS NOT NULL) OR (${table.state} <> 'STORED' AND ${table.uploadedAt} IS NULL AND ${table.validatedSignature} IS NULL)`,
+    ),
+    // Stored means a clean verdict of the malicious-content check is on the record (Run A2, D-A6), and nothing else carries one.
+    check(
+      'evidence_scan_facts',
+      sql`(${table.state} = 'STORED' AND ${table.scanner} IS NOT NULL AND ${table.scannerSignatureVersion} IS NOT NULL AND ${table.scannedAt} IS NOT NULL) OR (${table.state} <> 'STORED' AND ${table.scanner} IS NULL AND ${table.scannerSignatureVersion} IS NULL AND ${table.scannedAt} IS NULL)`,
+    ),
+    check(
+      'evidence_scan_shape',
+      sql`(${table.scanner} IS NULL OR ${table.scanner} ~ '^[a-z][a-z0-9-]{0,31}$') AND (${table.scannerSignatureVersion} IS NULL OR char_length(${table.scannerSignatureVersion}) BETWEEN 1 AND 200)`,
     ),
     check(
       'evidence_signature_matches_type',

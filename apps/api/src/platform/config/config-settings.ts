@@ -20,6 +20,11 @@ export const DELIVERY_ADAPTERS = ['capture', 'provider'] as const;
 export const VERIFIER_KINDS = ['substitute', 'service'] as const;
 /** The object store the evidence records point at (S1.11): the in-process stand-in of a local run and CI, or Cloudflare R2. */
 export const EVIDENCE_STORES = ['in-process', 'r2'] as const;
+/**
+ * The malicious-content check of an uploaded object (Run A2; D-A6): the in-process stand-in of a local run and CI, or ClamAV over TCP. Left out, an environment gets the stand-in
+ * unless it is production, which gets no scanner at all: it starts, and refuses to store any evidence until one is configured (`unconfigured.content-scanner.adapter.ts`).
+ */
+export const EVIDENCE_SCANNERS = ['in-process', 'clamav'] as const;
 export const KEY_CUSTODIES = ['local'] as const;
 
 /**
@@ -151,6 +156,13 @@ export const EXPECTED = {
     'the access key id of an R2 API token restricted to the bucket (8 to 128 letters and digits); required with r2, absent with in-process',
   EVIDENCE_R2_SECRET_ACCESS_KEY:
     'the secret access key of that token (16 to 128 letters, digits and the characters + / = _ -); required with r2, absent with in-process; never printed',
+  EVIDENCE_SCANNER: `one of: ${EVIDENCE_SCANNERS.join(', ')}; in-process is refused when APP_ENV is production; absent, production has no scanner (it starts and stores no evidence) and any other environment gets in-process`,
+  EVIDENCE_CLAMAV_HOST:
+    'the host name or IP address of the ClamAV daemon, without spaces; required with clamav, absent otherwise',
+  EVIDENCE_CLAMAV_PORT:
+    'an integer from 1 to 65535, the port of the ClamAV daemon; required with clamav, absent otherwise',
+  EVIDENCE_CLAMAV_TIMEOUT_MS:
+    'an integer from 100 to 60000, shorter than REQUEST_EXECUTION_BUDGET_MS: how long one scan may take, from the connection to the verdict; required with clamav, absent otherwise',
   METRICS_HOST:
     'a host name or IP address without spaces; a loopback address unless METRICS_SECRET is set',
   METRICS_PORT:
@@ -175,6 +187,10 @@ export const OPTIONAL_KEYS: readonly ConfigKey[] = [
   'EVIDENCE_R2_BUCKET',
   'EVIDENCE_R2_ACCESS_KEY_ID',
   'EVIDENCE_R2_SECRET_ACCESS_KEY',
+  'EVIDENCE_SCANNER',
+  'EVIDENCE_CLAMAV_HOST',
+  'EVIDENCE_CLAMAV_PORT',
+  'EVIDENCE_CLAMAV_TIMEOUT_MS',
   'METRICS_PORT',
   'METRICS_SECRET',
 ];
@@ -287,6 +303,13 @@ export const envShape = {
     .string()
     .regex(/^[A-Za-z0-9+/=_-]{16,128}$/)
     .optional(),
+  EVIDENCE_SCANNER: z.enum(EVIDENCE_SCANNERS).optional(),
+  EVIDENCE_CLAMAV_HOST: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .optional(),
+  EVIDENCE_CLAMAV_PORT: integerBetween(1, 65535).optional(),
+  EVIDENCE_CLAMAV_TIMEOUT_MS: integerBetween(100, 60_000).optional(),
   METRICS_HOST: z
     .string()
     .regex(/^[A-Za-z0-9._:-]+$/)

@@ -15,6 +15,7 @@
     "start:worker": "node dist/delivery-worker-main.js",
     "start:worker:local": "node --env-file=.env --env-file-if-exists=.env.sms dist/delivery-worker-main.js",
     "sms:smoke": "node --env-file=.env --env-file-if-exists=.env.sms dist/tools/sms-smoke.js",
+    "evidence:smoke": "node --env-file=.env dist/tools/evidence-smoke.js",
     "openapi:generate": "node dist/tools/generate-openapi.js",
     "contract:check": "node dist/tools/check-contract.js",
     "db:generate": "drizzle-kit generate",

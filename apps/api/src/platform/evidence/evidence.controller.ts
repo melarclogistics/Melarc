@@ -59,13 +59,21 @@ export class EvidenceController {
     private readonly service: EvidenceService | undefined,
   ) {}
 
-  /** `POST /evidence`: step one of two. Declares a record and answers with the way to upload its bytes; a retry with the same `Idempotency-Key` is told the same. */
+  /**
+   * `POST /evidence`: step one of two. Declares a record and answers with the way to upload its bytes; a retry with the same `Idempotency-Key` is told the same. **The answer carries a
+   * bearer capability to write one object, so it is `Cache-Control: no-store`**, as the retrieval authorization is (Run A2, finding L3 of the review of Run A): no intermediary keeps it.
+   */
   @Post()
   @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   @ContractOperation('createEvidence')
   @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
   @ApiBody({ schema: EVIDENCE_CREATE_BODY })
-  @ApiResponse({ status: 200, schema: EVIDENCE_UPLOAD_TICKET_SCHEMA, headers: ETAG_HEADERS })
+  @ApiResponse({
+    status: 200,
+    schema: EVIDENCE_UPLOAD_TICKET_SCHEMA,
+    headers: { ...ETAG_HEADERS, ...NO_STORE_HEADERS },
+  })
   @DescribeServers(RIDER_SERVERS)
   @DescribeErrors(
     ErrorCode.CsrfValidationFailed,

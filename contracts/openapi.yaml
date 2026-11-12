@@ -5957,6 +5957,10 @@ paths:
           description: Record created PENDING_UPLOAD, with upload instructions
           headers:
             ETag: { $ref: '#/components/headers/ETag' }
+            Cache-Control:
+              description: Always `no-store`. The upload instruction is a bearer capability to write one object, and must not be cached by any intermediary
+              required: true
+              schema: { type: string, const: no-store }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EvidenceUploadTicket' }

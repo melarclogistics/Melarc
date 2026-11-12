@@ -5,14 +5,16 @@ import { sql } from 'drizzle-orm';
 import { randomUUIDv7 } from '../auth/crypto/uuid-v7.js';
 import type { AuditWriter } from '../auth/ports/audit-writer.port.js';
 import type { Clock } from '../auth/ports/clock.port.js';
+import type { ContentScanner } from '../auth/ports/content-scanner.port.js';
 import type { EvidenceStore, ObjectCapability } from '../auth/ports/evidence-store.port.js';
 import type { IdempotencyStore } from '../auth/ports/idempotency-store.port.js';
+import type { Metrics } from '../auth/ports/metrics.port.js';
 import {
   authorizationForKey,
   type AuthorizedRequest,
 } from '../authorization/authorized-request.js';
 import type { OperationRunner } from '../authorization/operation-runner.js';
-import { guardReasonIn } from '../database/database-failures.js';
+import { guardReasonIn, serverErrorIn } from '../database/database-failures.js';
 import { createScopeProbe } from '../database/scope-probe.js';
 import { timestampOf } from '../database/timestamps.js';
 import { transactionOf } from '../database/transaction-handle.js';
@@ -21,7 +23,8 @@ import { ApiException } from '../http/api-exception.js';
 import { ErrorCode } from '../http/error-codes.js';
 import { isIdempotencyKey } from '../idempotency/idempotency-scope.js';
 import { primaryHubOfStaff } from '../lookup/primary-hub.js';
-import type { SettingsReader } from '../settings/settings-reader.js';
+import { SettingMissingError, type SettingsReader } from '../settings/settings-reader.js';
+import { contentTypeOf, judgeStoredObject } from './evidence-judgement.js';
 import { actsReadBy, actsWrittenBy, ownerActOf, type OwnerAct } from './evidence-owners.js';
 import {
   EVIDENCE_COLUMNS,
@@ -30,12 +33,7 @@ import {
   type EvidenceRow,
   type EvidenceView,
 } from './evidence-view.js';
-import {
-  CONTENT_TYPE_SIGNATURE,
-  EVIDENCE_SETTINGS,
-  SIGNATURE_BYTES,
-  signatureOf,
-} from './evidence-vocabulary.js';
+import { CONTENT_TYPE_SIGNATURE, EVIDENCE_SETTINGS } from './evidence-vocabulary.js';
 
 const CREATE = 'createEvidence';
 
@@ -43,9 +41,13 @@ export interface EvidenceServiceOptions {
   readonly runner: Pick<OperationRunner, 'mutate'>;
   readonly idempotency: IdempotencyStore;
   readonly store: EvidenceStore;
+  /** The malicious-content check: a record is `STORED` only on its clean verdict (Run A2, D-A6). */
+  readonly scanner: ContentScanner;
   readonly audit: AuditWriter;
   readonly settings: Pick<SettingsReader, 'integer' | 'list'>;
   readonly clock: Pick<Clock, 'now'>;
+  /** Counts each scan and each removal of a flagged object (`evidence_scans_total`, `evidence_object_removals_total`). */
+  readonly metrics: Metrics;
 }
 
 export interface EvidenceCreateBody {
@@ -79,17 +81,18 @@ export interface EvidenceRetrieval {
 /** The device context is the client's own note of the handset (the contract's open object); it is bounded so that a record cannot carry a document. */
 const MAX_DEVICE_CONTEXT_CHARACTERS = 4096;
 
+/** The key of the setting a guard's refusal names ("the setting evidence_x is missing ..."), or nothing: the message never holds a value. */
+function settingKeyIn(error: unknown): string | undefined {
+  const message = serverErrorIn(error)?.message;
+  return typeof message === 'string' ? /the setting ([a-z_]+) /.exec(message)?.[1] : undefined;
+}
+
 const denied = (): ApiException => ApiException.of(ErrorCode.PermissionDenied, 'Permission denied');
 const notFound = (): ApiException => ApiException.of(ErrorCode.NotFound, 'Not found');
 const invalid = (pointer: string, rule: string): ApiException =>
   new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
     violations: [{ in: 'body', pointer, rule }],
   });
-
-/** `application/pdf; charset=binary` is the type `application/pdf`: a parameter is not part of what the signature of the bytes is checked against. */
-function contentTypeOf(declared: string): string {
-  return (declared.split(';')[0] ?? '').trim().toLowerCase();
-}
 
 /**
  * The three evidence operations (S1.11; domain-model.md 3.6; state-machines.md 17; SECURITY_DESIGN.md 14.10 and 14.18). **Evidence holds no authority of its own**
@@ -104,9 +107,12 @@ function contentTypeOf(declared: string): string {
  *   the type, the exact size and the hash, for the seconds the setting grants. A retry with the same `Idempotency-Key` is told the same, **made again from the row** (the
  *   capability is a pure function of the record, so none is kept anywhere).
  * - **`complete`** (step two): the platform looks at what the store holds at the key **outside any transaction** (a call to the store is never made inside one), and compares
- *   it with what was declared and with the signature of the declared type, judged on the bytes and never on a header the client chose. Only then is the record moved to `STORED`,
- *   under its lock, with the version the caller read. A mismatch leaves it `PENDING_UPLOAD` and is `VALIDATION_FAILED`. The malicious-content check is the owner's open item
- *   (OB-S1-05) and is not made here.
+ *   it with what was declared and with the signature of the declared type, judged on the bytes and never on a header the client chose. **It then streams the object to the content
+ *   scanner** (Run A2, D-A6; the size and the SHA-256 are counted on the way, so the verdict is about the declared object) **and only a clean verdict lets the record move to `STORED`**,
+ *   under its lock, with the version the caller read and the scanner's name and signature version recorded on it. A mismatch leaves it `PENDING_UPLOAD` and is `VALIDATION_FAILED`; a
+ *   flagged file is `VALIDATION_FAILED` too (rule `malicious_content`) and its object is removed; a scanner that cannot answer, or none configured, leaves it `PENDING_UPLOAD` and is the
+ *   platform's fixed retryable `503`. **The scan runs here, in this call, and not in the `evidence_validation` lane**: a lane would need a state between `PENDING_UPLOAD` and `STORED`
+ *   (a contract change), the move to `STORED` would then be decided in two places, and the rider's count waits for its photos to be `STORED`, so a lane's delay would be the rider's.
  * - **`retrieve`**: for the staff who hold the read permission of the subject, within the hubs of the grant (a record in another hub is `HUB_SCOPE_VIOLATION`, one that does not
  *   exist `NOT_FOUND`); a record that is not `STORED` is `EVIDENCE_NOT_STORED`. It writes no state and **keeps nothing**: the capability is returned to the one caller for five minutes
  *   and is in no log, metric, event or record.
@@ -271,8 +277,21 @@ export class EvidenceService {
             ${act.accessRule}, ${act.retentionPolicy}, ${contentType}, ${body.byte_size}, ${checksum}, ${ttlMinutes * 60}, now()
           ) returning ${EVIDENCE_COLUMNS}`);
       } catch (error) {
-        // The guard repeats what the application judged (the moment of a capture, the owner); the statement is aborted, so nothing more is asked of the database.
-        if (guardReasonIn(error) === 'VALIDATION_FAILED') throw invalid('/captured_at', 'future');
+        // The guard repeats what the application judged (the moment of a capture, the size, the owner) and holds the lifetime for every writer; the statement is aborted, so
+        // nothing more is asked of the database.
+        const reason = guardReasonIn(error);
+        if (reason === 'VALIDATION_FAILED') throw invalid('/captured_at', 'future');
+        if (reason === 'UPLOAD_SIZE_EXCEEDED') throw invalid('/byte_size', 'maximum');
+        // The owner changed a limit between this act's reading of the settings and the guard's: nothing was written, and the same request is a retry that reads them again.
+        if (reason === 'UPLOAD_LIFETIME_EXCEEDED') {
+          throw ApiException.of(ErrorCode.StateConflict, 'The upload limits have changed', {
+            rule: 'upload_limits_changed',
+          });
+        }
+        // A limit the guard could not use is the platform's failure, in the same fixed `503` as a setting the service could not read; the key is named, never a value.
+        if (reason === 'SETTING_MISSING') {
+          throw new SettingMissingError(settingKeyIn(error) ?? 'an evidence limit');
+        }
         throw error;
       }
       const row = inserted.rows[0] as unknown as EvidenceRow | undefined;
@@ -356,36 +375,39 @@ export class EvidenceService {
       throw ApiException.of(ErrorCode.EvidenceUploadExpired, 'The upload window has passed');
     }
 
-    // 2. Look at what the store holds, outside any transaction, and judge it against what was declared.
-    const facts = await this.#options.store.inspect(row.storage_ref, SIGNATURE_BYTES);
-    const fail = (rule: string): ApiException =>
-      new ApiException(
+    // 2. Judge the object the store holds, outside any transaction (`judgeStoredObject`, the one place that decides it: what the store says of it against what was declared, then
+    // the bytes themselves streamed to the content scanner with their size and hash verified on the way, then the file signature; Run A2, D-A6). A record is stored only on a clean
+    // verdict; a scanner that cannot answer raises (the fixed retryable `503`) and leaves the record `PENDING_UPLOAD`; a flagged file is refused and its object removed.
+    const { store, scanner, metrics } = this.#options;
+    const judged = await judgeStoredObject(
+      { store, scanner, metrics },
+      {
+        storageRef: row.storage_ref,
+        contentType: row.content_type,
+        byteSize: row.byte_size,
+        checksumSha256: row.checksum_sha256,
+      },
+    );
+    if (!judged.accepted) {
+      throw new ApiException(
         ErrorCode.ValidationFailed,
         400,
         'The uploaded object is not the one declared',
-        {
-          violations: [{ in: 'body', pointer: '/object', rule }],
-        },
+        { violations: [{ in: 'body', pointer: '/object', rule: judged.rule }] },
       );
-    if (facts === undefined) throw fail('missing');
-    if (facts.byteSize !== row.byte_size) throw fail('byte_size');
-    if (facts.checksumSha256 !== row.checksum_sha256) throw fail('checksum');
-    if (facts.contentType !== undefined && contentTypeOf(facts.contentType) !== row.content_type) {
-      throw fail('content_type');
     }
-    // The bytes decide the type (GBT-N14): a declared image/jpeg whose bytes are not a JPEG is refused on the signature.
-    const kind = signatureOf(facts.head);
-    if (kind === undefined || CONTENT_TYPE_SIGNATURE[row.content_type] !== kind) {
-      throw fail('signature');
-    }
+    const { signature: kind, verdict } = judged;
 
-    // 3. Store the record under its lock, as the version the caller read.
+    // 3. Store the record under its lock, as the version the caller read, with the clean verdict recorded on it (the scanner and the version of its signatures; the instant is the
+    // database's). The one place a record moves to `STORED`.
     return this.#options.runner.mutate(decision, correlationId, async (handle) => {
       const tx = transactionOf(handle);
       let moved;
       try {
         moved = await tx.execute(sql`
-          update evidence set state = 'STORED', validated_signature = ${kind}
+          update evidence
+             set state = 'STORED', validated_signature = ${kind},
+                 scanner = ${verdict.scanner}, scanner_signature_version = ${verdict.signatureVersion}
            where id = ${id}::uuid and state = 'PENDING_UPLOAD' and version = ${row.version}
           returning ${EVIDENCE_COLUMNS}`);
       } catch (error) {

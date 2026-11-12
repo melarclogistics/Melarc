@@ -278,6 +278,26 @@ export const METRIC_DEFINITIONS = Object.freeze({
     description:
       'Hubs the failure backstop could not judge at its latest check (threshold missing or unusable); absent until a check has run.',
   }),
+  /**
+   * What the malicious-content check came to for each object it was asked about (Run A2, D-A6; SECURITY_DESIGN.md §14.18b): `CLEAN` (the scanner found nothing: the record may be stored),
+   * `FLAGGED` (a signature matched: the file is refused and its object removed), `UNAVAILABLE` (the scanner did not answer, or answered what it should not: **the record stays unstored and
+   * the call is retried; nothing is stored unscanned**) and `NOT_CONFIGURED` (no scanner is configured, so no evidence can be stored). Served by the API's metrics endpoint. Closed outcomes,
+   * no identifier: which record, and which signature, is the process's log and never a metric.
+   */
+  evidence_scans_total: define({
+    kind: 'counter',
+    labels: { outcome: ['CLEAN', 'FLAGGED', 'UNAVAILABLE', 'NOT_CONFIGURED'] },
+    description: 'Content scans of uploaded evidence, by outcome.',
+  }),
+  /**
+   * What became of the removal of a file the scanner flagged (`REMOVED` or `FAILED`): a flagged object that could not be removed stays in the bucket until the owner's lifecycle rule takes it,
+   * and the record is refused all the same. Served by the API's metrics endpoint. No identifier.
+   */
+  evidence_object_removals_total: define({
+    kind: 'counter',
+    labels: { outcome: ['REMOVED', 'FAILED'] },
+    description: 'Removals of flagged evidence objects from the store, by outcome.',
+  }),
 }) satisfies Readonly<Record<string, MetricDefinition>>;
 
 export type MetricName = keyof typeof METRIC_DEFINITIONS;

@@ -1,8 +1,15 @@
 import { Logger, Module, type DynamicModule } from '@nestjs/common';
 
 import { PostgresAuditWriter } from './platform/audit/postgres.audit-writer.adapter.js';
+import { ClamavContentScanner } from './platform/evidence/clamav.content-scanner.adapter.js';
+import { InProcessContentScanner } from './platform/evidence/in-process.content-scanner.adapter.js';
 import { InProcessEvidenceStore } from './platform/evidence/in-process.evidence-store.adapter.js';
-import { fetchTransport, R2EvidenceStore } from './platform/evidence/r2.evidence-store.adapter.js';
+import {
+  fetchStreamTransport,
+  fetchTransport,
+  R2EvidenceStore,
+} from './platform/evidence/r2.evidence-store.adapter.js';
+import { UnconfiguredContentScanner } from './platform/evidence/unconfigured.content-scanner.adapter.js';
 import { ServiceAttestationVerifier } from './platform/auth/attestation/service.attestation-verifier.adapter.js';
 import { SubstituteAttestationVerifier } from './platform/auth/attestation/substitute.attestation-verifier.adapter.js';
 import { SystemClock } from './platform/auth/clock/system.clock.adapter.js';
@@ -93,6 +100,7 @@ export interface AppModuleOptions extends PlatformModuleOptions {
 function runtimePortBindings(config: AppConfig): PortBindings {
   const verifier = config.adapters.attestationVerifier;
   const evidence = config.adapters.evidenceStore;
+  const scanner = config.adapters.contentScanner;
   const bindings: PortBindings = {
     clock: { useClass: SystemClock },
     tokenService: { useClass: Sha256TokenService },
@@ -145,8 +153,24 @@ function runtimePortBindings(config: AppConfig): PortBindings {
                 accessKeyId: evidence.accessKeyId,
                 secretAccessKey: evidence.secretAccessKey,
                 transport: fetchTransport,
+                streamTransport: fetchStreamTransport,
               }),
           },
+    // The malicious-content check (Run A2, D-A6): ClamAV over TCP where the configuration names a daemon; the in-process stand-in that a local run and CI select (production refuses it,
+    // `adapter-refusals.ts`); or, for production with nothing configured, a scanner that refuses every scan, so the application starts and stores no evidence until one is configured.
+    contentScanner:
+      scanner.kind === 'clamav'
+        ? {
+            useFactory: () =>
+              new ClamavContentScanner({
+                host: scanner.host,
+                port: scanner.port,
+                timeoutMs: scanner.timeoutMs,
+              }),
+          }
+        : scanner.kind === 'in-process'
+          ? { useFactory: () => new InProcessContentScanner() }
+          : { useFactory: () => new UnconfiguredContentScanner() },
     ...(config.database === undefined
       ? {}
       : {

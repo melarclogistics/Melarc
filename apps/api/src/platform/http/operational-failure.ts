@@ -14,6 +14,7 @@ import { CommitOutcomeUnknownError, DatabaseDeadlineError } from '../database/da
 import { PolicyCoordinationError } from '../database/policy-lock/coordinate.js';
 import { VendorOrganizationUnavailableError } from '../authorization/operation-contexts.js';
 import { OperationUnavailableError } from '../authorization/operation-unavailable-error.js';
+import { ContentScannerError } from '../evidence/content-scanner-error.js';
 import { EvidenceStoreError } from '../evidence/evidence-store-error.js';
 import { BudgetExpiredError } from '../execution/execution-budget.js';
 import { LimiterUnavailableError } from '../limiter/limiter-errors.js';
@@ -86,6 +87,9 @@ const OPERATIONAL: readonly (abstract new (...args: never[]) => Error)[] = [
   // S1.11. The object store did not answer, or the adapter has no credential or bucket to use: the platform's failure, in the same fixed, code-less `503`; the message names
   // the status the store gave and never an address, a credential or a body.
   EvidenceStoreError,
+  // Run A2 (D-A6). The content scanner did not answer, or none is configured: the record stays unstored and the call is retried. Never a clean verdict and never "scan skipped": the same
+  // fixed, code-less `503`, whose message names the condition and never the scanner's address or reply.
+  ContentScannerError,
 ];
 
 export function classifyFailure(error: unknown): FailureKind {

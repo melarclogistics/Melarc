@@ -89,7 +89,14 @@ import {
   ATTESTATION_VERIFIER,
   type AttestationVerifier,
 } from './platform/auth/ports/attestation-verifier.port.js';
+import {
+  CONTENT_SCANNER,
+  type ContentScanner,
+} from './platform/auth/ports/content-scanner.port.js';
 import { EVIDENCE_STORE } from './platform/auth/ports/evidence-store.port.js';
+import { ClamavContentScanner } from './platform/evidence/clamav.content-scanner.adapter.js';
+import { InProcessContentScanner } from './platform/evidence/in-process.content-scanner.adapter.js';
+import { UnconfiguredContentScanner } from './platform/evidence/unconfigured.content-scanner.adapter.js';
 import { IdentityDirectoryNotBuiltError } from './staff/postgres.staff-identity-directory.adapter.js';
 import { NotAVendorQuestionError } from './vendor/postgres.vendor-account-directory.adapter.js';
 import { createLogger } from './platform/logging/create-logger.js';
@@ -240,10 +247,14 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
         port.name !== 'TokenService' &&
         port.name !== 'AttestationVerifier' &&
         port.name !== 'EvidenceStore' &&
+        port.name !== 'ContentScanner' &&
         port.name !== 'Metrics',
     )) {
       expect(() => resolve(entry.token), entry.name).toThrow();
     }
+    // The content scanner (Run A2, D-A6) is bound beside the evidence store; a local run and CI get the in-process stand-in, which production refuses.
+    expect(resolve(CONTENT_SCANNER)).toBeInstanceOf(InProcessContentScanner);
+    expect(resolve(CONTENT_SCANNER)).toBe(resolve(CONTENT_SCANNER));
     // The registry (S0.56; the first consumer is the attestation verifier adapter) is one application singleton and the real one.
     expect(resolve(METRICS)).toBeInstanceOf(BoundedMetrics);
     expect(resolve(METRICS)).toBe(resolve(METRICS));
@@ -298,6 +309,47 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
     );
   });
 
+  // Break caught (Run A2, D-A6): the configuration's choice of scanner not reaching the container; the stand-in bound where the configuration names none (so that a production without a
+  // scanner would store what nothing had looked at); or "none" bound to something that answers. For production the choice is made by `loadConfig` (production-refusals.test.ts) and bound here.
+  it.each([
+    [
+      'ClamAV where the configuration names a daemon',
+      { kind: 'clamav', host: '127.0.0.1', port: 1, timeoutMs: 1_000 } as const,
+      ClamavContentScanner,
+    ],
+    ['the stand-in for a local run', { kind: 'in-process' } as const, InProcessContentScanner],
+    [
+      'a scanner that refuses every scan where there is none',
+      { kind: 'none' } as const,
+      UnconfiguredContentScanner,
+    ],
+  ])(
+    'binds the content scanner the configuration selects: %s',
+    async (_name, selected, adapter) => {
+      running = await startTestApp({
+        config: {
+          ...RUNTIME_CONFIG,
+          adapters: { ...RUNTIME_CONFIG.adapters, contentScanner: Object.freeze(selected) },
+        },
+      });
+
+      const scanner = resolve<ContentScanner>(CONTENT_SCANNER);
+      expect(scanner).toBeInstanceOf(adapter);
+      expect(scanner).toBe(resolve(CONTENT_SCANNER));
+      if (selected.kind === 'none') {
+        // Every scan is refused with the declared condition, and none is ever clean: the application started, and stores no evidence.
+        async function* nothing(): AsyncGenerator<Uint8Array> {
+          await Promise.resolve();
+          yield Buffer.from('anything');
+        }
+        await expect(scanner.scan(nothing())).rejects.toMatchObject({
+          name: 'ContentScannerError',
+          code: 'SCANNER_NOT_CONFIGURED',
+        });
+      }
+    },
+  );
+
   // Break caught (S0.24): a credential judged by a store that is not there, or the session machinery built over the inert adapters.
   // With no database none of the session services exists, and the authentication guard answers a credential with the operational
   // failure.
@@ -348,6 +400,7 @@ describe('the composition root binds adapters to the port tokens (S0.1)', () => 
         METRICS,
         ATTESTATION_VERIFIER,
         EVIDENCE_STORE,
+        CONTENT_SCANNER,
         UNIT_OF_WORK,
         SESSION_STORE,
         IDENTITY_DIRECTORY,
@@ -855,9 +908,10 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
       METRICS,
       ATTESTATION_VERIFIER,
       EVIDENCE_STORE,
+      CONTENT_SCANNER,
     ]);
-    // The five bindings (the evidence store since S1.11) and the check that no inert describe adapter was bound; the check is not exported.
-    expect(module.providers).toHaveLength(6);
+    // The six bindings (the evidence store since S1.11, the content scanner since Run A2) and the check that no inert describe adapter was bound; the check is not exported.
+    expect(module.providers).toHaveLength(7);
     // The platform and the domain modules of the product (S0.35: permission, settings, staff), which depend on it and which it never
     // imports: a domain module is added here as its slice builds it, and `productRoutes: false` leaves them out.
     expect(module.imports).toHaveLength(1 + DOMAIN_MODULES.length);
@@ -877,8 +931,9 @@ describe('the root module exposes the port tokens and nothing else (S0.1)', () =
       METRICS,
       ATTESTATION_VERIFIER,
       EVIDENCE_STORE,
+      CONTENT_SCANNER,
     ]);
-    expect(module.providers).toHaveLength(6);
+    expect(module.providers).toHaveLength(7);
   });
 
   // Break caught: the describe composition exporting more than the seventeen tokens, or fewer.
@@ -951,6 +1006,7 @@ describe('the composition root refuses what its environment refuses (S0.2)', () 
       'ATTESTATION_VERIFIER',
       'DELIVERY_EMAIL_ADAPTER',
       'DELIVERY_SMS_ADAPTER',
+      'EVIDENCE_SCANNER',
       'EVIDENCE_STORE',
       'KEY_CUSTODY',
     ]);
@@ -1427,6 +1483,7 @@ describe('portProviders keeps the port its own token and refuses a malformed bin
       textMessageSender: { useExisting: 'X' },
       attestationVerifier: { useExisting: 'X' },
       evidenceStore: { useExisting: 'X' },
+      contentScanner: { useExisting: 'X' },
       metrics: { useExisting: 'X' },
     });
 

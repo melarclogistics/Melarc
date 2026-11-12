@@ -152,6 +152,27 @@ describe('the metric catalogue', () => {
     }
   });
 
+  // Break caught (Run A2, D-A6): the scanner's series missing, an outcome added that the document does not state, a label that identifies a record, or a series the document does not name.
+  it('holds the evidence scanner’s scans and removals, with closed outcomes and no identifier, and the document names them', () => {
+    expect(METRIC_DEFINITIONS.evidence_scans_total).toMatchObject({
+      kind: 'counter',
+      labels: { outcome: ['CLEAN', 'FLAGGED', 'UNAVAILABLE', 'NOT_CONFIGURED'] },
+    });
+    expect(METRIC_DEFINITIONS.evidence_object_removals_total).toMatchObject({
+      kind: 'counter',
+      labels: { outcome: ['REMOVED', 'FAILED'] },
+    });
+    for (const name of [
+      'evidence_scans_total{outcome}',
+      'evidence_object_removals_total{outcome}',
+    ]) {
+      expect(OBSERVABILITY, name).toContain(`\`${name}\``);
+    }
+    for (const outcome of ['CLEAN', 'FLAGGED', 'UNAVAILABLE', 'NOT_CONFIGURED']) {
+      expect(OBSERVABILITY, outcome).toContain(`\`${outcome}\``);
+    }
+  });
+
   // Break caught: a label whose values are not a fixed small set (an identifier, an address, a token) entering the catalogue.
   it('has only labels with a closed, small set of upper-case values, and no label named for an identifier', () => {
     for (const [name, definition] of Object.entries(METRIC_DEFINITIONS)) {

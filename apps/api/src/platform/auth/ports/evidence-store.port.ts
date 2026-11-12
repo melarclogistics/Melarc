@@ -1,3 +1,4 @@
+import type { ObjectBytes } from './content-scanner.port.js';
 import type { PortDescriptor } from './port-descriptor.js';
 
 /**
@@ -12,6 +13,8 @@ import type { PortDescriptor } from './port-descriptor.js';
  *   and the R2 adapter keep none and log none).
  * - **What arrived is judged by the platform, not by the client's word**: `inspect` reads what the store holds at a key (its size, its checksum and the first bytes), and the platform
  *   compares those with what was declared and with the signature of the declared type before a record is `STORED`.
+ * - **The platform reads an object only to judge it, and serves none** (Run A2): `read` streams the bytes to the content scanner (`ContentScanner`) as they arrive, with the size and the
+ *   hash counted on the way, and keeps none of them; `remove` takes away a file the scanner flagged. No byte is returned to a client by either.
  */
 export interface UploadCapabilityRequest {
   /** The object's key, as the platform made it. */
@@ -60,6 +63,13 @@ export interface EvidenceStore {
   presignRetrieval(request: RetrievalCapabilityRequest): ObjectCapability;
   /** What arrived at the key, or nothing when nothing did. Calls the store: never inside a transaction. */
   inspect(key: string, headBytes: number): Promise<StoredObjectFacts | undefined>;
+  /**
+   * The bytes of the object at the key, to be read once and in order (the platform streams them to the content scanner and keeps none), or nothing when nothing is there. The
+   * store is asked when this is called; the bytes are fetched as the stream is read. Calls the store: never inside a transaction.
+   */
+  read(key: string): Promise<ObjectBytes | undefined>;
+  /** Removes the object at the key: the file the content scanner flagged. Removing what is not there is not a failure. Calls the store: never inside a transaction. */
+  remove(key: string): Promise<void>;
 }
 
 export const EVIDENCE_STORE = Symbol('EVIDENCE_STORE');
@@ -90,6 +100,20 @@ export const EVIDENCE_STORE_DESCRIPTOR: PortDescriptor<EvidenceStore> = {
       outputs:
         'the size, the SHA-256 the store recorded, the content type and the leading bytes of what is at the key',
       outcomes: ['OBJECT_ABSENT'],
+      raises: ['STORE_UNAVAILABLE', 'STORE_NOT_CONFIGURED'],
+      transaction: 'outside-any-transaction',
+    },
+    read: {
+      inputs: 'the object key',
+      outputs: 'the bytes of the object as a stream, read once and in order',
+      outcomes: ['OBJECT_ABSENT'],
+      raises: ['STORE_UNAVAILABLE', 'STORE_NOT_CONFIGURED'],
+      transaction: 'outside-any-transaction',
+    },
+    remove: {
+      inputs: 'the object key',
+      outputs: 'nothing: the object is gone, or was never there',
+      outcomes: 'none',
       raises: ['STORE_UNAVAILABLE', 'STORE_NOT_CONFIGURED'],
       transaction: 'outside-any-transaction',
     },
