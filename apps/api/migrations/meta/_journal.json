@@ -568,6 +568,13 @@
       "when": 1794461439040,
       "tag": "0080_evidence_store",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1794469792880,
+      "tag": "0081_handshake_verify_owner_first",
+      "breakpoints": true
     }
   ]
 }
