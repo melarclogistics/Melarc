@@ -26,18 +26,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** A system that is dark or light, as `window.matchMedia` answers: jsdom has none of its own. */
+/**
+ * A system that is dark or light, as `window.matchMedia` answers: jsdom has none of its own. The list holds what the app reads (`matches` and the
+ * event methods). `addListener` and `removeListener`, the pair the type still declares, are left out on purpose: they are deprecated, nothing here
+ * calls them, and typescript-eslint 8.72 reports a stub of either (`no-deprecated`).
+ */
 function systemIs(theme: 'dark' | 'light'): void {
-  window.matchMedia = (query: string) => ({
-    matches: theme === 'dark' && query.includes('dark'),
-    media: query,
-    onchange: null,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    addListener: () => undefined,
-    removeListener: () => undefined,
-    dispatchEvent: () => false,
-  });
+  window.matchMedia = (query: string) =>
+    ({
+      matches: theme === 'dark' && query.includes('dark'),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList;
 }
 
 async function bannerLogo(): Promise<HTMLElement> {
