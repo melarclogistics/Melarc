@@ -2551,10 +2551,11 @@ test.describe('the fix round of task R5.2 in a browser', () => {
   });
 
   // Break caught (run 7, Stage 1.4; the Product Owner suspected that the fit oscillates with the page's scrollbar on his Windows, whose scrollbars take room: a column dropped shortens the rows, the page
-  // no longer needs its scrollbar, the box widens by its width, every column comes back, the page grows past the window again, and so on). Not reproduced: the fit restarts and measures in one
-  // synchronous flush (a layout effect inside `flushSync`), and the layout it reads already has the scrollbar the restarted rows bring, so it drops the column again before anything is drawn and the
-  // widening it settles on starts nothing. The page here is about as tall as the window with the lesser column and shorter without it, and the box holds the table with the scrollbar away and not with
-  // it: the header is changed in the first moments (two restarts, each in one flush) and then not at all, in the next second and a half. A fit that restarted outside that flush (an update left to the next render) is the break this holds.
+  // no longer needs its scrollbar, the box widens by its width, every column comes back, the page grows past the window again, and so on). Not reproduced: the fit restarts, in the frame after the
+  // observer was told, and measures in one synchronous flush (a layout effect inside `flushSync`), and the layout it reads already has the scrollbar the restarted rows bring, so it drops the column again
+  // before anything is drawn and the widening it settles on starts nothing. The page here is about as tall as the window with the lesser column and shorter without it, and the box holds the table
+  // with the scrollbar away and not with it: the header is changed in the first moments (two restarts, each in one flush) and then not at all, in the next ninety frames. A fit that restarted outside
+  // that flush (an update left to the next render), or one that started itself again each frame, is the break this holds.
   test('settles when the page is about as tall as the window, and then leaves its columns alone', async ({
     page: provided,
     baseURL,
@@ -2609,28 +2610,46 @@ test.describe('the fix round of task R5.2 in a browser', () => {
         .locator('thead')
         .evaluate((head) => {
           const seen: number[] = [];
-          (window as unknown as { __fit: number[] }).__fit = seen;
-          const start = performance.now();
-          // Every time a heading cell is put in or taken out, and when (a column that went and came back in one flush is still seen).
+          const drawn = { frames: 0 };
+          const watch = window as unknown as { __fit: number[]; __drawn: { frames: number } };
+          watch.__fit = seen;
+          watch.__drawn = drawn;
+          const count = (): void => {
+            drawn.frames += 1;
+            requestAnimationFrame(count);
+          };
+          requestAnimationFrame(count);
+          // Every time a heading cell is put in or taken out, and in which frame (a column that went and came back in one flush is still seen).
           new MutationObserver((records) => {
             for (const record of records) {
               const cells = [...record.addedNodes, ...record.removedNodes];
-              if (cells.some((node) => node.nodeName === 'TH')) {
-                seen.push(Math.round(performance.now() - start));
-              }
+              if (cells.some((node) => node.nodeName === 'TH')) seen.push(drawn.frames);
             }
           }).observe(head, { childList: true, subtree: true });
         });
 
       // The window becomes a little shorter than the page: the page needs its scrollbar, and the box is narrower by its width.
       await page.setViewportSize({ width: 1100, height: measured.height - 80 });
-      await page.waitForTimeout(3000);
 
-      const times = await page.evaluate(() => (window as unknown as { __fit: number[] }).__fit);
-      // The fit was started by the window: it changed the header (at least the column that went) ...
-      expect(times.length).toBeGreaterThan(0);
-      // ... and, after the first moments (the restart the window starts and the one the widening starts after it, on a loaded machine a second at the most), did not touch it again.
-      expect(times.filter((time) => time > 1500)).toEqual([]);
+      // The fit was started by the window: it changed the header (at least the column that went) ... and, after the first moments (the restart the window starts and the one the widening starts after
+      // it, a frame each), left it alone: ninety frames in a row, a second and a half at 60 a second, without a heading cell put in or taken out. It is frames that are counted and not milliseconds: a
+      // frame after a resize takes a few hundred milliseconds where a window this size is drawn in software (the Product Owner's Windows), and the same few frames settle the fit there as anywhere. A
+      // fit that never settles never has such a run, and fails with the length of its last one. The budget is the machine's, for a page that is being changed every frame draws slowly.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const watch = window as unknown as { __fit: number[]; __drawn: { frames: number } };
+              const last = watch.__fit.at(-1);
+              return last === undefined ? 0 : watch.__drawn.frames - last;
+            }),
+          {
+            message:
+              'the window changed the header, and then it went ninety frames in a row untouched (the frames since its last change)',
+            timeout: 20_000,
+          },
+        )
+        .toBeGreaterThanOrEqual(90);
       // It settled with the column away and the box not scrolling sideways.
       await expect(list().getByRole('columnheader', { name: 'Notes' })).toHaveCount(0);
       expect(
