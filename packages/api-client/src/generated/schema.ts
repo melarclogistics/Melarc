@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.102.0
- *   SHA-256 f8b69098b8a84b4b7ce5ae393e332958715e2465995a0e5f224af3d9d6905b79 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.103.0
+ *   SHA-256 9dd3551c6b34c3be8adc9dd572abd1e556d25265ac40ac6c5a4d7d2222613ddc (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -905,7 +905,9 @@ export interface paths {
          *     writer, at the end of the transaction, and holds that a photo is attached once and only to the count
          *     of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
          *     `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
-         *     any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer.
+         *     any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer. The database holds that
+         *     photo for every writer, at the end of the transaction: a short count whose reason asks for a photo has
+         *     attached to its stop a stored `COLLECTION_PROOF` record of that stop, captured by the rider who counted.
          *
          *     **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
          *     `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake

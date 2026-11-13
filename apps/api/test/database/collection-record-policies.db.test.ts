@@ -474,7 +474,7 @@ describe('the facts of a collection record that are the catalogue’s and the cl
       readonly code?: string;
       readonly make: (genuine: Reason) => string | Promise<string>;
       readonly reason: 'REASON_NOT_ACTIVE' | 'REASON_REQUIRED';
-      /** The snapshot the same writer is then accepted with; left out, the genuine reason's own, and for a reason that asks for a photo a plain reason's. */
+      /** The snapshot the same writer is then accepted with; left out, a plain reason's (SOME_PARCELS_NOT_READY). */
       readonly control?: (genuine: Reason) => string;
     }
     const REFUSED: readonly (readonly [string, Case])[] = [
@@ -581,14 +581,6 @@ describe('the facts of a collection record that are the catalogue’s and the cl
           control: (g: Reason) => snapshotOf(g, { note: 'Vendor says it packed five' }),
         },
       ],
-      [
-        'a reason that asks for a photo, which cannot be given yet',
-        {
-          code: 'PARCEL_DAMAGED_OR_UNSAFE',
-          make: (g: Reason) => snapshotOf(g),
-          reason: 'REASON_REQUIRED',
-        },
-      ],
     ];
 
     // Break caught: the guard not judging the snapshot (the probe of 4 November 2026 stored every one of these), or judging only some of what it says (the
@@ -611,8 +603,8 @@ describe('the facts of a collection record that are the catalogue’s and the cl
         ).toEqual({ code: '23514', reason: spec.reason });
         expect(await recordsOf(stop.id)).toEqual([]);
 
-        // The same writer, the same stop, the facts the application would have written: made. A reason that asks for a photo has no genuine form yet, so
-        // the control is another, plain reason.
+        // The same writer, the same stop, the facts the application would have written: made. The control is a plain reason, or the case's own. (A reason that asks for a photo
+        // is not refused here: it is the rule of the end of the transaction, and has its own file, collection-reason-photo.db.test.ts.)
         const control =
           spec.control !== undefined
             ? spec.control(genuine)

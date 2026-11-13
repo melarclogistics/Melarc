@@ -1,7 +1,7 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.102.0 with the photo of every parcel at the door and Ops's exception for the day the camera fails, 13 November 2026)
+# Version: see `info.version` below (5.103.0 with Run B, the Ops half of SLICE-001 Stage 5, 13 November 2026)
 # Date:    13 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
@@ -16,6 +16,7 @@
 #   5.100.0 C4    `created_at` (required, a `date-time`) on `PickupManifest`: the moment the run was made, from the table's own column, on a read, on every item of a list and on every answer that carries a run (it is not part of the run's `ETag`: it never changes, and a rolling release serves a build that does not state it beside one that does, so the `ETag` of a run is the one the build before computed). The moment a run was cancelled is not stored and is not stated (OB-S1-79)
 #   5.101.0 A     Run A (SLICE-001, Stage 5): `createEvidence`, `completeEvidenceUpload` and `createEvidenceRetrievalAuthorization` (the evidence store: `x-permission: owner` on three self routes, the first owner a pickup stop; the first two on the Rider host); `listCollectionDisputes`, `listHandshakesForOps`, `listCollectionShortfalls` and `listPickupFailures` (the Ops reads of the collection and the failure, each item of the last with its `photo_count`); `evidence_ids` of `reportPickupFailure` (a stored photo, at most ten, each once) with its refusals `EVIDENCE_NOT_STORED` and `VALIDATION_FAILED` for a reason that is not of the category named (rule `category`); the four message kinds of a failure and of a short count; `escalatePickupRequest` escalates only a request whose stop failed (`STATE_CONFLICT`, rule `no_failed_stop`), and its trigger `BACKSTOP` is the scheduled lane of the delivery worker
 #   5.102.0 A2    Run A2 (SLICE-001, Stage 5, the Product Owner's decisions of 12 November 2026): `authoriseParcelPhotoException` (Ops lets a stop's count through without parcel photos: `pickup.handshake.override`, once for a stop, before the count, with a required note); `parcel_photo_ids` on `recordCollection` and `CollectionRecord` (exactly `collected_count` stored photos of this rider and this stop, or none for a stop let through; `VALIDATION_FAILED` with the rules `parcel_photo_count` and `duplicate`, `EVIDENCE_NOT_STORED` for a photo that cannot be counted; `evidence_ids` is now the photo a short count's reason asks for); the purpose `PARCEL_PHOTO` of `EvidenceCreate` (declared under `pickup.collection.confirm`, a failure's proof under `pickup.failure.report`); `Cache-Control: no-store` on the answer of `createEvidence` (the upload instruction is a bearer capability); the text of `completeEvidenceUpload` and `recordCollection` as built
+#   5.103.0 B    Run B (SLICE-001, Stage 5, the Ops half: the Product Owner's review of Run A2 and S1.30): the text of `recordCollection` says that the database holds the photo a short count's reason asks for, for every writer, at the end of the transaction
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -26,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.102.0
+  version: 5.103.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -1665,7 +1666,9 @@ paths:
         writer, at the end of the transaction, and holds that a photo is attached once and only to the count
         of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
         `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
-        any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer.
+        any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer. The database holds that
+        photo for every writer, at the end of the transaction: a short count whose reason asks for a photo has
+        attached to its stop a stored `COLLECTION_PROOF` record of that stop, captured by the rider who counted.
 
         **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
         `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake

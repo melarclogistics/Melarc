@@ -505,13 +505,13 @@ describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -
       'REASON_REQUIRED',
     ],
     [
-      'a reason that needs a photo, which cannot be given yet',
+      'a reason that needs a photo, with none named',
       { collected_count: 2, variance_reason_code: 'PARCEL_DAMAGED_OR_UNSAFE' },
       422,
       'REASON_REQUIRED',
     ],
     [
-      'a reference to evidence, none of which can be stored yet',
+      'a reference to evidence that is not there',
       {
         collected_count: 2,
         variance_reason_code: 'SOME_PARCELS_NOT_READY',
