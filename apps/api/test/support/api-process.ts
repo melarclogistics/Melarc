@@ -253,6 +253,32 @@ export class RunningProcess {
   }
 
   /**
+   * Waits until what the process has written to its standard output satisfies `seen`, looking every 10 ms: the line it writes when something has
+   * happened (`shutdown started`), for a test that must not act before then. A test that sends a signal and asks the process something at once
+   * races two processes, and may be answered as the process was before it took the signal. It fails, saying what was being waited for and what the
+   * process wrote, if the process ends first or the deadline passes. It kills nothing: the test's cleanup does.
+   */
+  async waitForOutput(
+    seen: (stdout: string) => boolean,
+    deadlineMs: number,
+    what: string,
+  ): Promise<void> {
+    const deadline = Date.now() + deadlineMs;
+    while (!seen(this.out)) {
+      if (this.startFailure !== undefined) throw this.startFailure;
+      if (this.done !== undefined) {
+        throw new Error(
+          `${what}: the process exited first (${this.describeExit(this.done)})\n${this.report('')}`,
+        );
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(this.report(`${what} within ${String(deadlineMs)} ms`));
+      }
+      await sleep(10);
+    }
+  }
+
+  /**
    * Waits for the process to end by itself. If it does not within the deadline it is killed, and the
    * failure says what was being waited for, not what the kill left behind.
    */

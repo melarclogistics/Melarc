@@ -63,7 +63,8 @@ describe('the process helpers', () => {
   // and (27 October 2026) a project whose tests start processes left at a limit the waits do not fit.
   it('finish inside Vitest’s limits, test and hook, of every project that starts processes, even when the longest test uses them all', () => {
     const declared = (vitestConfig.test?.projects ?? []) as unknown as readonly DeclaredProject[];
-    const longestTest = DEADLINES.ready + DEADLINES.request + DEADLINES.stop;
+    // The longest is the SIGTERM test: the API comes up, says it has taken the signal, answers one request and ends.
+    const longestTest = DEADLINES.ready + DEADLINES.stop + DEADLINES.request + DEADLINES.stop;
     for (const name of ['process', 'database', 'database-alone']) {
       const own = declared.find((entry) => entry.test.name === name)?.test;
       for (const limit of [own?.testTimeout, own?.hookTimeout]) {
@@ -251,6 +252,64 @@ describe('the process helpers', () => {
     expect((failure as Error).message).toContain('exited before it was live');
     expect((failure as Error).message).toContain('code 4');
     expect((failure as Error).message).toContain('boom: bad config');
+  });
+
+  // Break caught (the hosted unit job of 12 November 2026: the API's SIGTERM test failed in about one run in eight, on main's code as well as on a branch that does not touch the API): a test that sends a
+  // signal and then asks the process something in the same breath races two processes, and the answer can be the one from before the signal was taken. A process says what has happened by what it
+  // writes, and a test that must not act before then waits for that.
+  it('wait until the process has written what the test is waiting for', async () => {
+    const running = start(
+      script(
+        'setTimeout(() => console.log("shutdown started"), 150); setInterval(() => {}, 1000);',
+      ),
+      {},
+    );
+
+    await running.waitForOutput(
+      (output) => output.includes('shutdown started'),
+      3_000,
+      'the process did not say it had stopped',
+    );
+
+    expect(running.stdout).toContain('shutdown started');
+  });
+
+  it('say what it waited for, with what the process wrote, when the process never writes it', async () => {
+    const running = start(script(FOREVER), {});
+
+    const failure = await running
+      .waitForOutput(
+        (output) => output.includes('never written'),
+        400,
+        'the process did not say it had stopped',
+      )
+      .catch((error: unknown) => error as Error);
+
+    const message = (failure as Error).message;
+    expect(message).toContain('the process did not say it had stopped within 400 ms');
+    expect(message).toMatch(/after \d+ ms/);
+    expect(message).toContain('started');
+    expect(message).toContain('noise');
+  });
+
+  it('say that the process ended first, with what it wrote, instead of waiting out the deadline', async () => {
+    const running = start(script('console.log("last words"); process.exit(5);'), {});
+    const began = Date.now();
+
+    const failure = await running
+      .waitForOutput(
+        (output) => output.includes('never written'),
+        10_000,
+        'the process did not say it had stopped',
+      )
+      .catch((error: unknown) => error as Error);
+
+    const message = (failure as Error).message;
+    expect(Date.now() - began).toBeLessThan(5_000);
+    expect(message).toContain('the process did not say it had stopped');
+    expect(message).toContain('exited first');
+    expect(message).toContain('code 5');
+    expect(message).toContain('last words');
   });
 
   // Break caught: forced cleanup that asks politely (SIGTERM), so a process that handles the signal, or
