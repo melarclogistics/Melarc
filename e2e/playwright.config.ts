@@ -13,10 +13,27 @@ withoutPageSnapshots();
 
 type Use = NonNullable<PlaywrightTestProject['use']>;
 
+/**
+ * Whether WebKit is launched headed: MELARC_WEBKIT_HEADED, `1`, or not set (empty and `0` are not set). CI sets it for the jobs that hold WebKit's runs and runs them under a virtual display (xvfb-run, in
+ * .github/workflows/ci.yml, which says why: the Product Owner's decision D-B4 of 13 November 2026); no developer's machine sets it, and Chromium and Firefox are never launched headed by it. It is the one value
+ * that apps/ops-web/playwright.config.ts reads as well. Any other value is refused and not read as "not set", so that a typo never leaves WebKit headless in the run that was meant to be headed.
+ */
+function webkitHeaded(value: string | undefined): boolean {
+  const named = value?.trim() ?? '';
+  if (named === '' || named === '0') return false;
+  if (named === '1') return true;
+  throw new Error(
+    `MELARC_WEBKIT_HEADED is "${named}", which is not a value here. Use 1 to launch WebKit headed (CI does, under xvfb-run) or leave it unset.`,
+  );
+}
+
+const WEBKIT_HEADED = webkitHeaded(process.env.MELARC_WEBKIT_HEADED);
+
 const DEVICES: Readonly<Record<Engine, Use>> = {
   chromium: { ...devices['Desktop Chrome'], channel: 'chromium' },
   firefox: devices['Desktop Firefox'],
-  webkit: devices['Desktop Safari'],
+  // Headed only where MELARC_WEBKIT_HEADED says so (above): headless WebKit stalls in the hosted runs.
+  webkit: { ...devices['Desktop Safari'], ...(WEBKIT_HEADED ? { headless: false } : {}) },
 };
 
 /**
