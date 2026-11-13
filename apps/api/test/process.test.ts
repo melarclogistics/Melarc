@@ -394,12 +394,19 @@ describe('startup refusals for the settings S0.2 adds', () => {
       ATTESTATION_VERIFIER_URL: 'https://verifier.internal.example',
       ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
       ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+      // The evidence store of a deployment is the real one: the in-process stand-in is refused in production (S1.11), and the bucket's four settings go with the real one. The scanner
+      // is left unset on purpose: a production without one starts and stores nothing (EVIDENCE_SCANNER in config-settings.ts), so it is no refusal of the start.
+      EVIDENCE_STORE: 'r2',
+      EVIDENCE_R2_ACCOUNT_ID: 'testaccount',
+      EVIDENCE_R2_BUCKET: 'test-evidence',
+      EVIDENCE_R2_ACCESS_KEY_ID: 'TESTONLYACCESSKEY',
+      EVIDENCE_R2_SECRET_ACCESS_KEY: randomKey(),
       ...overrides,
     });
 
   const secretsIn = (env: Record<string, string>): string[] =>
     Object.entries(env)
-      .filter(([name]) => /_MATERIAL$|CALLER_SECRET$/.test(name))
+      .filter(([name]) => /_MATERIAL$|CALLER_SECRET$|SECRET_ACCESS_KEY$/.test(name))
       .flatMap(([, value]) => value.split(',').map((entry) => entry.slice(entry.indexOf(':') + 1)));
 
   // The proof of DEPLOYMENT_AND_ENVIRONMENTS.md section 12.3 that matters: the real binary, in production, with everything else
@@ -415,8 +422,9 @@ describe('startup refusals for the settings S0.2 adds', () => {
       problems: [{ key: 'KEY_CUSTODY', problem: 'invalid' }],
     });
     await expect(nothingListening(port)).rejects.toThrow();
+    // The five keys, the verifier's caller secret and the bucket's secret access key: none of them is printed by the refusal.
     const secrets = secretsIn(env);
-    expect(secrets).toHaveLength(6);
+    expect(secrets).toHaveLength(7);
     for (const secret of secrets) {
       expect(`${result.stdout}${result.stderr}`).not.toContain(secret);
     }

@@ -712,6 +712,8 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       // S1.28 and OB-S1-51: the outbox envelopes of the rider's failure and short count.
       'melarc.failure_envelope',
       'melarc.shortfall_envelope',
+      // D-A10 (migration 0088): Ops's exception for the day the camera fails, once for a stop and before its count.
+      'melarc.authorise_parcel_photo_exception',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).
