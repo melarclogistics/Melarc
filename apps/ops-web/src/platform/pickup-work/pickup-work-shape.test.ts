@@ -32,6 +32,14 @@ import {
 
 const OTHER_ID = '5bdf4a5b-6c7d-4e8f-8a9b-0c1d2e3f4a5b';
 
+/** A page's worth of failures, each of its own stop: a stop listed twice is refused for that reason, which is not what a page too long is refused for. */
+const distinctFailures = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    failureFixture({
+      pickup_stop_id: `0c1d2e3f-4a5b-4c6d-8e7f-${index.toString(16).padStart(12, '0')}`,
+    }),
+  );
+
 describe('a failed pickup', () => {
   it('is read with the fields the screen draws, and the escalation of a person without a threshold or a wait', () => {
     const failure = parsePickupFailure(
@@ -224,12 +232,20 @@ describe('a page of failed pickups', () => {
     [
       'more items than a page holds',
       {
-        items: Array.from({ length: MAX_PAGE_ITEMS + 1 }, () => failureFixture()),
+        items: distinctFailures(MAX_PAGE_ITEMS + 1),
         next_page_token: null,
       },
     ],
   ])('is refused with %s', (_name, body) => {
     expect(parsePickupFailurePage(body)).toBeUndefined();
+  });
+
+  // Break caught: a limit on a page that refuses what the contract allows (the guard of the size must be the contract's, no less).
+  it('believes a page of exactly as many items as the contract allows', () => {
+    expect(
+      parsePickupFailurePage({ items: distinctFailures(MAX_PAGE_ITEMS), next_page_token: null })
+        ?.items,
+    ).toHaveLength(MAX_PAGE_ITEMS);
   });
 });
 

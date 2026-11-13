@@ -106,7 +106,12 @@ const request = (version = 'v1', overrides: Record<string, unknown> = {}): Respo
 async function openRow(user: UserEvent, code = 'ACC-PR-7KQ2MZ', sender = 'Demo Fabrics Ltd') {
   await table();
   await user.click(screen.getByRole('button', { name: `Open ${code}, ${sender}` }));
-  return screen.findByRole('region', { name: `Details of ${code}` });
+  // The panel slides and fades in: what is read in it is read once it has arrived and is not part way (the opacity of a panel that has just opened is not yet one).
+  const region = await screen.findByRole('region', { name: `Details of ${code}` });
+  await waitFor(() => {
+    expect(region).toBeVisible();
+  });
+  return region;
 }
 
 describe('the failed pickups: what the queue shows', () => {
@@ -347,6 +352,45 @@ describe('a failure opened beside the queue', () => {
     await waitFor(() => {
       expect(screen.queryByRole('region', { name: /^Details of / })).toBeNull();
     });
+  });
+
+  // Break caught: the rows replaced by the loading rows while the queue is read again after an act, so that the officer loses their place and the row that changed.
+  it('keeps its rows while the queue is read again after an act', async () => {
+    let reads = 0;
+    const { user } = open(
+      () => {
+        reads += 1;
+        return reads === 1 ? page([waiting, escalated]) : new Promise<Response>(() => undefined);
+      },
+      OFFICER,
+      {
+        [READ]: () => request('v1'),
+        [`POST /pickup-requests/${WORK_REQUEST_ID}/escalate`]: () => request('v2'),
+      },
+    );
+    const panel = within(await openRow(user));
+
+    await user.click(await panel.findByRole('button', { name: 'Escalate' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Escalate this request?' });
+    await user.type(
+      within(dialog).getByRole('textbox', { name: /Why it is escalated/ }),
+      'Refused',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Escalate the request' }));
+
+    expect(
+      await screen.findByText(
+        'The request ACC-PR-7KQ2MZ is escalated. It still waits for a decision.',
+      ),
+    ).toBeVisible();
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    const rows = within(screen.getByRole('table', { name: 'Failed pickups' }));
+    expect(rows.getByText('ACC-PR-7KQ2MZ')).toBeVisible();
+    expect(rows.getByText('ACC-PR-9XM4TQ')).toBeVisible();
+    // No loading rows have taken their place.
+    expect(screen.queryByText('Loading failed pickups')).toBeNull();
   });
 
   it('extends the attempts with a reason, for a holder of the senior key', async () => {

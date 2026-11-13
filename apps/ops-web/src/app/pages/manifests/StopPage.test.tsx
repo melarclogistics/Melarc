@@ -177,7 +177,7 @@ describe('the stop: what the page shows', () => {
     expect(panel.getByText('Parcel photo 1')).toBeVisible();
     expect(panel.getAllByText('The scan found it clean.')).toHaveLength(3);
     expect(panel.getAllByText('Stored')).toHaveLength(3);
-    expect(document.querySelector('img.stop-photo__image')).toBeNull();
+    expect((await photosPanel()).querySelector('img')).toBeNull();
     expect(authorizations()).toHaveLength(0);
   });
 
@@ -193,7 +193,7 @@ describe('the stop: what the page shows', () => {
       '100',
     );
     expect(authorizations()).toHaveLength(0);
-    expect(document.querySelector('img.stop-photo__image')).toBeNull();
+    expect((await photosPanel()).querySelector('img')).toBeNull();
   });
 
   it('shows a photo that is not stored yet as waiting, and cannot be opened', async () => {

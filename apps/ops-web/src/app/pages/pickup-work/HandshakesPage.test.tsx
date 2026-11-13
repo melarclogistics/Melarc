@@ -96,7 +96,12 @@ const sent = (route: string) =>
 async function openRow(user: UserEvent, code = 'ACC-PR-7KQ2MZ', sender = 'Demo Fabrics Ltd') {
   await table();
   await user.click(screen.getByRole('button', { name: `Open ${code}, ${sender}` }));
-  return screen.findByRole('region', { name: `Details of ${code}` });
+  // The panel slides and fades in: what is read in it is read once it has arrived and is not part way (the opacity of a panel that has just opened is not yet one).
+  const region = await screen.findByRole('region', { name: `Details of ${code}` });
+  await waitFor(() => {
+    expect(region).toBeVisible();
+  });
+  return region;
 }
 
 describe('the handshakes: what the list shows', () => {
