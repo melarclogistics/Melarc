@@ -367,6 +367,32 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     returns:
       'The kind of change, the new revision and floor, and the ids of the sessions it ended; the sessions and their audit events are written under the authentication capability inside the same transaction',
   },
+  collection_photo_check: {
+    identity: 'api',
+    opener:
+      'The deferred check of a collection record, `melarc.collection_photos_check` (migration `0090`), which runs as the owner for its own statements at the end of the transaction of whoever writes a count or a photo, and which no login may execute',
+    // No application context is opened under it: the database function asserts the capability for its own statements, and every policy that admits it names the owner, so a context the API
+    // opened under it would reach nothing. The one directory is the evidence platform's, so that the check of source text has a place where the label may be named should one ever be.
+    openedUnder: ['platform/evidence/'],
+    tables: [
+      ...on(
+        [
+          'CollectionRecord',
+          'CollectionParcelPhoto',
+          'ParcelPhotoException',
+          'PickupStopEvidence',
+          'Evidence',
+          'ReasonCode',
+        ],
+        ['SELECT'],
+        'only inside melarc.collection_photos_check, and only as the owner: the policies that admit the capability name the owner too, so the API login asserting the label reaches no row; no write',
+      ),
+    ],
+    lookups:
+      'By the identifier of the count the trigger event names (or of the count a photo names): its photos, the exception of its stop, the photos attached to its stop and the catalogue row of its reason',
+    returns:
+      'Nothing: the check ends quietly or refuses the transaction naming a constraint; no row leaves the function',
+  },
 };
 
 /**

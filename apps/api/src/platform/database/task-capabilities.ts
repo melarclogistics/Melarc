@@ -39,6 +39,11 @@ export const TASK_CAPABILITIES = [
   // pickup failure that has sat undecided in the Ops decision context beyond its hub's `stale_failure_backstop_hours`, and does nothing else. Held by the worker's login
   // through the grant set `melarc_worker_cap_pickup_backstop`, whose one privilege is the execution of `melarc.failure_backstop_escalate`: a separation and not only a label.
   'pickup_backstop',
+  // The end-of-transaction check of a collection record (Run B, Part 1, item 2 of the review of Run A2; migration 0090): the number of the parcel photos of a count and the photo a short
+  // count's reason asks for. Only the database function `melarc.collection_photos_check` asserts it, for its own statements, at the end of the transaction of whoever writes a count or a
+  // photo, so that it reads the count, its photos and the exception of its stop as the system and not as the context the writer happens to be in at the commit. No application context is
+  // opened under it, no login may execute the function, and every policy that admits the label names the owner too: a statement of any other login reaches nothing.
+  'collection_photo_check',
 ] as const;
 
 export type TaskCapability = (typeof TASK_CAPABILITIES)[number];

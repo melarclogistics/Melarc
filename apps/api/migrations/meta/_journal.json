@@ -631,6 +631,13 @@
       "when": 1794563086401,
       "tag": "0089_short_count_photo",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794571073349,
+      "tag": "0090_collection_photos_check_as_system",
+      "breakpoints": true
     }
   ]
 }
