@@ -29,6 +29,8 @@ const CAPABILITY = {
   'pickup.manifest.assign': 'assign a rider to a pickup run',
   'pickup.manifest.dispatch': 'send a pickup run out',
   'pickup.stop.skip': 'skip a stop',
+  'pickup.handshake.override': 'work the handshakes, short counts and photo exceptions of a pickup',
+  'pickup.handshake.resolve': 'resolve a pickup’s handshake by hand',
   // Custody of a run's parcels.
   'fleet.custody.read': 'see custody handovers',
   'fleet.custody.initiate': 'start a custody handover',
@@ -57,9 +59,9 @@ const CAPABILITY = {
 /**
  * What a page reads with a key where that is not what the key's own words say, named once here so that the page writes no words of its own: the list and the pages of
  * a pickup run are read with `pickup.read`, the key that reads requests, and are told as "see pickup runs" (the review of 499399c: the list of runs was refused in the
- * words of the requests it is not about).
+ * words of the requests it is not about). The list of the collection disputes vendors raised is read with the same key and is told as "see collection disputes" (S1.30).
  */
-const READ_WITH_THE_SAME_KEY = ['see pickup runs'] as const;
+const READ_WITH_THE_SAME_KEY = ['see pickup runs', 'see collection disputes'] as const;
 
 /** Words of the table: what holding a key lets a person do, or what a page reads with it. The one type a refusal component or `cannotText` takes for them. */
 export type CapabilityWords =
@@ -123,6 +125,11 @@ export function lackedText(
 const OUTSIDE_HUBS_OF = {
   'pickup requests': 'These pickup requests are at a hub your account does not work in.',
   'pickup runs': 'These pickup runs are at a hub your account does not work in.',
+  'failed pickups': 'These failed pickups are at a hub your account does not work in.',
+  handshakes: 'These handshakes are at a hub your account does not work in.',
+  'short counts': 'These short counts are at a hub your account does not work in.',
+  'collection disputes': 'These collection disputes are at a hub your account does not work in.',
+  'this stop': 'This stop is at a hub your account does not work in.',
   messages: 'These messages are at a hub your account does not work in.',
   riders: 'These riders are at a hub your account does not work in.',
   'vendor accounts': 'These vendor accounts are at a hub your account does not work in.',

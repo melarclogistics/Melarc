@@ -73,8 +73,8 @@ describe('the real registry', () => {
     );
     expect(menusFor(everyKey)).toEqual({
       groups: [
-        ['Today', ['My work', 'Decisions']],
-        ['Pickups', ['Requests', 'Pickup runs']],
+        ['Today', ['My work', 'Decisions', 'Handshakes']],
+        ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
         ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
         ['System', ['Message log']],
       ],
@@ -102,7 +102,7 @@ describe('the real registry', () => {
     expect(menusFor(['pickup.read'])).toEqual({
       groups: [
         ['Today', ['My work']],
-        ['Pickups', ['Requests', 'Pickup runs']],
+        ['Pickups', ['Requests', 'Pickup runs', 'Disputes']],
       ],
       create: [],
       account: ['Trusted browsers'],
@@ -126,8 +126,42 @@ describe('the real registry', () => {
     expect(offered(['pickup.read', 'pickup.exception.request'])).not.toContain('/approvals');
     expect(menusFor(['pickup.read', 'pickup.exception.approve']).groups).toEqual([
       ['Today', ['My work', 'Decisions']],
-      ['Pickups', ['Requests', 'Pickup runs']],
+      ['Pickups', ['Requests', 'Pickup runs', 'Disputes']],
     ]);
+  });
+
+  // Break caught (ops-portal.md section 7, S1.30): a work list of the door or the failure offered to a session without the key of its own operation, the resolution by hand opening a list of its own, a stop's
+  // page or its form given a menu entry, or an entry drawing a count the queue summary does not state.
+  it('offers each screen of the door and the failure to the holders of its own key, and draws no count on any', () => {
+    expect(menusFor(['pickup.failure.resolve']).groups).toEqual([
+      ['Today', ['My work']],
+      ['Pickups', ['Failed pickups']],
+    ]);
+    expect(menusFor(['pickup.handshake.override']).groups).toEqual([
+      ['Today', ['My work', 'Handshakes']],
+      ['Pickups', ['Short counts']],
+    ]);
+    // The resolution by hand is the act of a second key, offered inside the list: it opens no list of its own.
+    expect(menusFor(['pickup.handshake.resolve']).groups).toEqual([['Today', ['My work']]]);
+    expect(menusFor(['pickup.read']).groups).toEqual([
+      ['Today', ['My work']],
+      ['Pickups', ['Requests', 'Pickup runs', 'Disputes']],
+    ]);
+    const entries = navigationFor(
+      [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS],
+      SIGNED_IN_ROUTES,
+    ).groups.flatMap((group) => group.entries);
+    for (const label of ['Handshakes', 'Failed pickups', 'Short counts', 'Disputes']) {
+      expect(entries.find((entry) => entry.label === label)?.queue, label).toBeUndefined();
+    }
+    // The stop's page and its form are reached from the run and the lists, and have no entry; each is behind its own key.
+    const stop = SIGNED_IN_ROUTES.find((route) => route.path === '/manifests/:id/stops/:stopId');
+    const exception = SIGNED_IN_ROUTES.find(
+      (route) => route.path === '/manifests/:id/stops/:stopId/photo-exception',
+    );
+    expect([stop?.menu, exception?.menu]).toEqual([null, null]);
+    expect(stop?.access).toEqual({ permission: 'pickup.read', capability: 'see pickup runs' });
+    expect(exception?.access).toEqual({ permission: 'pickup.handshake.override' });
   });
 
   // Break caught: Decisions gathering the staff approver's count: it stays on Staff, and a merged inbox is a later page that is not built.
@@ -172,8 +206,8 @@ describe('the real registry', () => {
       'Ops Staff',
       {
         groups: [
-          ['Today', ['My work', 'Decisions']],
-          ['Pickups', ['Requests', 'Pickup runs']],
+          ['Today', ['My work', 'Decisions', 'Handshakes']],
+          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
           ['People and access', ['Riders', 'Vendors']],
           ['System', ['Message log']],
         ],
@@ -185,8 +219,8 @@ describe('the real registry', () => {
       'Senior Ops',
       {
         groups: [
-          ['Today', ['My work', 'Decisions']],
-          ['Pickups', ['Requests', 'Pickup runs']],
+          ['Today', ['My work', 'Decisions', 'Handshakes']],
+          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],
@@ -198,8 +232,8 @@ describe('the real registry', () => {
       'Platform Admin',
       {
         groups: [
-          ['Today', ['My work', 'Decisions']],
-          ['Pickups', ['Requests', 'Pickup runs']],
+          ['Today', ['My work', 'Decisions', 'Handshakes']],
+          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],

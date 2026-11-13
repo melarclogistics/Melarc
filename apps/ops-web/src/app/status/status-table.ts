@@ -10,6 +10,12 @@ import {
 } from '../pages/manifests/manifest-presentation';
 import { FEED_STATE_MAP, NOTIFICATION_STATE_MAP } from '../pages/messages/message-presentation';
 import { PICKUP_STATE_MAP } from '../pages/pickup/pickup-presentation';
+import {
+  DECISION_MAP,
+  DISPUTE_STATE_MAP,
+  EVIDENCE_STATE_MAP,
+  HANDSHAKE_STATE_MAP,
+} from '../pages/pickup-work/pickup-work-presentation';
 import { RIDER_DEVICE_STATUS_MAP, RIDER_STATUS_MAP } from '../pages/riders/rider-presentation';
 import { STAFF_STATUS_MAP } from '../pages/staff/staff-presentation';
 import { DEVICE_STATUS_MAP, VENDOR_STATUS_MAP } from '../pages/vendors/vendor-presentation';
@@ -33,6 +39,11 @@ export const STATUS_TABLE = {
   STAFF_IDENTITY: STAFF_STATUS_MAP,
   VENDOR_ACCOUNT: VENDOR_STATUS_MAP,
   VENDOR_DEVICE: DEVICE_STATUS_MAP,
+  // The work of the door and the failure (S1.30).
+  PICKUP_FAILURE: DECISION_MAP,
+  HANDSHAKE: HANDSHAKE_STATE_MAP,
+  COLLECTION_DISPUTE: DISPUTE_STATE_MAP,
+  STOP_EVIDENCE: EVIDENCE_STATE_MAP,
 } as const satisfies Readonly<Record<string, StatusMap<string>>>;
 
 export type StatusDomain = keyof typeof STATUS_TABLE;
