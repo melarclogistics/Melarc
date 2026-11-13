@@ -1,8 +1,8 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.101.0 with the evidence store, the Ops reads of the collection and the failure, the photo of a failure and the escalation as a resolution of a failure, 12 November 2026)
-# Date:    12 November 2026 (a working revision: see the implementation plan, section 1.1)
+# Version: see `info.version` below (5.102.0 with the photo of every parcel at the door and Ops's exception for the day the camera fails, 13 November 2026)
+# Date:    13 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
 #   5.92.0  C2    lookupRecords (global lookup)
@@ -15,6 +15,7 @@
 #   5.99.0  A3    `listPickupRequests` and `getPickupRequest` are no longer served to a Rider (their security names the browser session alone: surfaces/rider-android.md, "Not a rider act"); `lookupRecords` takes one lookup in flight per session (a second answers `429` `RATE_LIMITED` with `Retry-After: 1`) and gives the whole lookup one budget of 3 seconds; the text of `RateLimited` says where the `Retry-After` of `requestAdditionalDeviceGrant` comes from
 #   5.100.0 C4    `created_at` (required, a `date-time`) on `PickupManifest`: the moment the run was made, from the table's own column, on a read, on every item of a list and on every answer that carries a run (it is not part of the run's `ETag`: it never changes, and a rolling release serves a build that does not state it beside one that does, so the `ETag` of a run is the one the build before computed). The moment a run was cancelled is not stored and is not stated (OB-S1-79)
 #   5.101.0 A     Run A (SLICE-001, Stage 5): `createEvidence`, `completeEvidenceUpload` and `createEvidenceRetrievalAuthorization` (the evidence store: `x-permission: owner` on three self routes, the first owner a pickup stop; the first two on the Rider host); `listCollectionDisputes`, `listHandshakesForOps`, `listCollectionShortfalls` and `listPickupFailures` (the Ops reads of the collection and the failure, each item of the last with its `photo_count`); `evidence_ids` of `reportPickupFailure` (a stored photo, at most ten, each once) with its refusals `EVIDENCE_NOT_STORED` and `VALIDATION_FAILED` for a reason that is not of the category named (rule `category`); the four message kinds of a failure and of a short count; `escalatePickupRequest` escalates only a request whose stop failed (`STATE_CONFLICT`, rule `no_failed_stop`), and its trigger `BACKSTOP` is the scheduled lane of the delivery worker
+#   5.102.0 A2    Run A2 (SLICE-001, Stage 5, the Product Owner's decisions of 12 November 2026): `authoriseParcelPhotoException` (Ops lets a stop's count through without parcel photos: `pickup.handshake.override`, once for a stop, before the count, with a required note); `parcel_photo_ids` on `recordCollection` and `CollectionRecord` (exactly `collected_count` stored photos of this rider and this stop, or none for a stop let through; `VALIDATION_FAILED` with the rules `parcel_photo_count` and `duplicate`, `EVIDENCE_NOT_STORED` for a photo that cannot be counted; `evidence_ids` is now the photo a short count's reason asks for); the purpose `PARCEL_PHOTO` of `EvidenceCreate` (declared under `pickup.collection.confirm`, a failure's proof under `pickup.failure.report`); `Cache-Control: no-store` on the answer of `createEvidence` (the upload instruction is a bearer capability); the text of `completeEvidenceUpload` and `recordCollection` as built
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -25,7 +26,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.101.0
+  version: 5.102.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
