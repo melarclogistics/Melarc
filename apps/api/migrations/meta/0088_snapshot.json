@@ -8268,19 +8268,6 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
-        },
-        "parcel_photo_exception_officer_fkey": {
-          "name": "parcel_photo_exception_officer_fkey",
-          "tableFrom": "parcel_photo_exception",
-          "tableTo": "staff_identity",
-          "columnsFrom": [
-            "authorised_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},

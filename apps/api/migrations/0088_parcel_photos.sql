@@ -23,7 +23,6 @@ ALTER TABLE "collection_parcel_photo" ADD CONSTRAINT "collection_parcel_photo_re
 ALTER TABLE "collection_parcel_photo" ADD CONSTRAINT "collection_parcel_photo_stop_fkey" FOREIGN KEY ("pickup_stop_id","responsible_hub_id") REFERENCES "public"."pickup_stop"("id","responsible_hub_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "collection_parcel_photo" ADD CONSTRAINT "collection_parcel_photo_rider_fkey" FOREIGN KEY ("attached_by_rider") REFERENCES "public"."rider_identity"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "parcel_photo_exception" ADD CONSTRAINT "parcel_photo_exception_stop_fkey" FOREIGN KEY ("pickup_stop_id","responsible_hub_id") REFERENCES "public"."pickup_stop"("id","responsible_hub_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "parcel_photo_exception" ADD CONSTRAINT "parcel_photo_exception_officer_fkey" FOREIGN KEY ("authorised_by") REFERENCES "public"."staff_identity"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "collection_parcel_photo_record_idx" ON "collection_parcel_photo" USING btree ("collection_record_id");--> statement-breakpoint
 CREATE INDEX "collection_parcel_photo_stop_idx" ON "collection_parcel_photo" USING btree ("pickup_stop_id");--> statement-breakpoint
 CREATE INDEX "collection_parcel_photo_hub_idx" ON "collection_parcel_photo" USING btree ("responsible_hub_id","attached_at");--> statement-breakpoint

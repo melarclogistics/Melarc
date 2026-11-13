@@ -11,7 +11,6 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-import { staffIdentity } from '../staff/staff-identity.schema.js';
 import { pickupStop } from './pickup-stop.schema.js';
 
 /**
@@ -32,7 +31,7 @@ export const parcelPhotoException = pgTable(
     pickupStopId: uuid('pickup_stop_id').notNull(),
     /** The stop's hub, set by the guard from the stop and carried by a composite key. */
     responsibleHubId: uuid('responsible_hub_id').notNull(),
-    /** The officer who let the stop through: the session's, set by the guard. */
+    /** The officer who let the stop through: the session's, set by the guard. Not a foreign key, like the officer of the handshake's override (`collection_handshake.authorised_by`): the tables of the identity domain alone reference a staff identity. */
     authorisedBy: uuid('authorised_by').notNull(),
     /** The database's own moment (the guard). */
     authorisedAt: timestamp('authorised_at', { withTimezone: true }).notNull().defaultNow(),
@@ -43,11 +42,6 @@ export const parcelPhotoException = pgTable(
       name: 'parcel_photo_exception_stop_fkey',
       columns: [table.pickupStopId, table.responsibleHubId],
       foreignColumns: [pickupStop.id, pickupStop.responsibleHubId],
-    }).onDelete('restrict'),
-    foreignKey({
-      name: 'parcel_photo_exception_officer_fkey',
-      columns: [table.authorisedBy],
-      foreignColumns: [staffIdentity.id],
     }).onDelete('restrict'),
     // At most one per stop: a second exception for the stop finds this index and is a conflict.
     uniqueIndex('parcel_photo_exception_stop_key').on(table.pickupStopId),
