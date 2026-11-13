@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContentScanner, ScanVerdict } from '../platform/auth/ports/content-scanner.port.js';
 import { ContentScannerError } from '../platform/evidence/content-scanner-error.js';
+import { EICAR_TEST_FILE } from '../platform/evidence/eicar-test-file.js';
 import { EvidenceStoreError } from '../platform/evidence/evidence-store-error.js';
 import { InProcessContentScanner } from '../platform/evidence/in-process.content-scanner.adapter.js';
 import { InProcessEvidenceStore } from '../platform/evidence/in-process.evidence-store.adapter.js';
@@ -40,19 +41,48 @@ function standInWorld(
 async function run(
   world: SmokeWorld | string[],
   argv: readonly string[] = [],
-): Promise<{ readonly code: number; readonly lines: string[] }> {
+  env: Readonly<Record<string, string | undefined>> = {},
+): Promise<{ readonly code: number; readonly lines: string[]; readonly composed: number }> {
   const lines: string[] = [];
-  const code = await runEvidenceSmoke(
-    argv,
-    {},
-    {
-      out: (line) => lines.push(line),
-      now: () => NOW,
-      compose: () => world,
+  let composed = 0;
+  const code = await runEvidenceSmoke(argv, env, {
+    out: (line) => lines.push(line),
+    now: () => NOW,
+    compose: () => {
+      composed += 1;
+      return world;
     },
-  );
-  return { code, lines };
+  });
+  return { code, lines, composed };
 }
+
+/** The keys the command asks the store to sign an upload for, which are the objects it makes. */
+function keysMadeBy(world: SmokeWorld & { store: InProcessEvidenceStore }): string[] {
+  const keys: string[] = [];
+  const presign = world.store.presignUpload.bind(world.store);
+  world.store.presignUpload = (request) => {
+    keys.push(request.key);
+    return presign(request);
+  };
+  return keys;
+}
+
+/** A daemon with its defaults (Run B, item 3): it flags the EICAR test file, and says OK to an encrypted document it did not look into. */
+const defaults: ContentScanner = {
+  scan: async (object) => {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of object) chunks.push(chunk);
+    const eicar =
+      Buffer.concat(chunks).subarray(0, EICAR_TEST_FILE.length).toString('latin1') ===
+      EICAR_TEST_FILE;
+    return {
+      verdict: eicar ? 'FLAGGED' : 'CLEAN',
+      scanner: 'clamav',
+      signatureVersion: 'ClamAV 1.4.2/27836/Wed Nov 12 08:05:44 2026',
+      ...(eicar ? { signature: 'Eicar-Test-Signature' } : {}),
+    } satisfies ScanVerdict;
+  },
+};
 
 /**
  * Nothing that could name where the store or the scanner is, or what was signed: no object key, no address, no part of a signed address (its query names: `X-Amz-Signature`,
@@ -90,6 +120,11 @@ describe('evidence:smoke', () => {
       "The EICAR test file: the platform's check REFUSED it as malicious content.",
     );
     expect(text).toContain('The EICAR test file: its object was removed from the store.');
+    // Run B, item 3: an encrypted document is one the daemon does not look into unless AlertEncrypted is yes.
+    expect(text).toContain(
+      "An encrypted PDF: the platform's check REFUSED it as malicious content.",
+    );
+    expect(text).toContain('An encrypted PDF: its object was removed from the store.');
     expect(text).toContain('An upload longer than the length signed: the store refused it');
     expect(text).toContain(
       'An upload of the signed length that hashes otherwise: the store refused it',
@@ -202,6 +237,67 @@ describe('evidence:smoke', () => {
     expect(lines.join('\n')).not.toContain('secret.example');
     expect(lines.join('\n')).not.toContain('token');
     clean(lines);
+  });
+
+  // Break caught (Run B, item 3; fails on 7cb3bb1: there is no such check): a daemon with its defaults, which says OK to an encrypted PDF it did not look into, read as a daemon that works.
+  it('fails, naming the setting, when the scanner does not flag an encrypted PDF', async () => {
+    const { code, lines } = await run(standInWorld({ scanner: defaults }));
+    expect(code).toBe(1);
+    const failed = lines.filter((line) => line.startsWith('FAIL An encrypted PDF'));
+    expect(failed.length).toBeGreaterThanOrEqual(1);
+    expect(failed.join(' ')).toContain('AlertEncrypted');
+    // The EICAR file is still found: it is the encrypted document the defaults miss.
+    expect(lines.join(' ')).toContain(
+      "The EICAR test file: the platform's check REFUSED it as malicious content.",
+    );
+    clean(lines);
+  });
+
+  // Break caught (fails on 7cb3bb1): objects the command made left in the owner's bucket when the scanner could not be reached, because the removal sat after the call that threw.
+  it('removes what it made even when the scanner cannot be reached', async () => {
+    const down: ContentScanner = {
+      scan: () => Promise.reject(new ContentScannerError('SCANNER_UNAVAILABLE', 'refused')),
+    };
+    const world = standInWorld({ scanner: down });
+    const keys = keysMadeBy(world);
+    const { code } = await run(world);
+    expect(code).toBe(1);
+    expect(keys.length).toBeGreaterThanOrEqual(1);
+    for (const key of keys) expect(world.store.has(key), 'an object was left').toBe(false);
+  });
+
+  // Break caught (fails on 7cb3bb1): an object the command could not remove passed over in silence, or named by its key.
+  it('says what it could not remove by a fixed word, and never names the object', async () => {
+    const world = standInWorld();
+    const stuck: SmokeWorld = {
+      ...world,
+      store: {
+        presignUpload: (request) => world.store.presignUpload(request),
+        presignRetrieval: (request) => world.store.presignRetrieval(request),
+        inspect: (key, headBytes) => world.store.inspect(key, headBytes),
+        read: (key) => world.store.read(key),
+        remove: () =>
+          Promise.reject(
+            new EvidenceStoreError(
+              'STORE_UNAVAILABLE',
+              'DELETE https://x.r2/ev/abc?X-Amz-Signature=1',
+            ),
+          ),
+      },
+    };
+    const { code, lines } = await run(stuck);
+    expect(code).toBe(1);
+    expect(lines.some((line) => line.startsWith('FAIL NOT_REMOVED'))).toBe(true);
+    clean(lines);
+  });
+
+  // Break caught (fails on 7cb3bb1): a smoke run against production, which makes and removes objects in the bucket it is given.
+  it('is not run against production, and does nothing', async () => {
+    const { code, lines, composed } = await run(standInWorld(), [], { APP_ENV: 'production' });
+    expect(code).toBe(2);
+    expect(composed).toBe(0);
+    expect(lines.join(' ')).toContain('production');
+    expect(lines.join(' ')).not.toContain('RESULT');
   });
 
   it('refuses settings it cannot use, naming keys only, and does nothing', async () => {

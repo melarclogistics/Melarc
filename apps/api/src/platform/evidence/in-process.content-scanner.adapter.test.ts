@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { EICAR_TEST_FILE } from './eicar-test-file.js';
+import { ENCRYPTED_PDF_SIGNATURE, ENCRYPTED_PDF_TEST_FILE } from './encrypted-pdf-test-file.js';
 import {
   EICAR_SIGNATURE,
   InProcessContentScanner,
@@ -61,6 +62,30 @@ describe('the stand-in content scanner', () => {
         scanner: 'stand-in',
         signatureVersion: STAND_IN_SIGNATURE_VERSION,
       });
+    }
+  });
+
+  // Break caught (Run B, item 3): a stand-in that calls the encrypted PDF clean, so that a dry run of the smoke command would not ask the question the real daemon is asked.
+  it('flags an encrypted PDF, whole or split across frames, as a daemon configured for the release gate does', async () => {
+    for (const frames of [
+      [ENCRYPTED_PDF_TEST_FILE],
+      [ENCRYPTED_PDF_TEST_FILE.slice(0, 100), ENCRYPTED_PDF_TEST_FILE.slice(100)],
+    ]) {
+      expect(await scanner.scan(framesOf(...frames))).toEqual({
+        verdict: 'FLAGGED',
+        scanner: 'stand-in',
+        signatureVersion: STAND_IN_SIGNATURE_VERSION,
+        signature: ENCRYPTED_PDF_SIGNATURE,
+      });
+    }
+  });
+
+  // Break caught: a stand-in that flags every PDF, or any file that merely names the word.
+  it('calls a PDF that is not encrypted clean, and a file that is not a PDF', async () => {
+    const plain = ENCRYPTED_PDF_TEST_FILE.replace('/Encrypt 4 0 R ', '');
+    expect(plain).not.toContain('/Encrypt');
+    for (const frames of [[plain], ['JFIF /Encrypt ' + plain], ['%PDF-1.4\n%%EOF\n']]) {
+      expect((await scanner.scan(framesOf(...frames))).verdict).toBe('CLEAN');
     }
   });
 
