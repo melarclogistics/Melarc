@@ -869,7 +869,7 @@ describe('submitHubHandover: two handovers of one run end as one would', () => {
       submit(handed.rider, handed.manifest.id, body, { etag, key }),
     ]);
     expect(sent.map((response) => response.status)).toEqual([201, 201]);
-    expect(sent[1]?.text).toBe(sent[0]?.text);
+    expect(sent[1].text).toBe(sent[0].text);
     expect(await intakeRows(handed.manifest.id)).toHaveLength(2);
     expect(await events('hub.handover.submitted', handed.manifest.id)).toHaveLength(1);
   });
