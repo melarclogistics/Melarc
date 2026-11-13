@@ -110,9 +110,7 @@ export async function excusePhotos(routes: VendorRoutes, stopId: string): Promis
       `select id from staff_identity order by created_at limit 1`,
     )
   ).rows[0]?.id;
-  if (officer === undefined) {
-    officer = (await routes.actor(BUNDLE_IDS.opsStaff, HUB_A)).identity.id;
-  }
+  officer ??= (await routes.actor(BUNDLE_IDS.opsStaff, HUB_A)).identity.id;
   await routes.admin.query('begin');
   try {
     await routes.admin.query('set local session_replication_role = replica');

@@ -520,8 +520,9 @@ describe('the R2 adapter, through a fake transport (no network)', () => {
     );
     const object = await store.read(KEY);
     if (object === undefined) throw new Error('the object was there');
+    const frames: Uint8Array[] = [];
     const reading = (async () => {
-      for await (const frame of object) void frame;
+      for await (const frame of object) frames.push(frame);
     })();
     const error = await reading.then(
       () => undefined,

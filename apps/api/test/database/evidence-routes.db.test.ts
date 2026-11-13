@@ -720,7 +720,9 @@ describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; mig
       .mockRejectedValueOnce(new ContentScannerError('SCANNER_UNAVAILABLE', 'timeout'));
     const down = await complete(arranged.rider, ticket.evidence.id, etag);
     expect(down.status).toBe(503);
-    expect(down.json()).toEqual({ message: 'Service unavailable', request_id: expect.any(String) });
+    // The platform's fixed answer: a message and the request's identifier, and no code.
+    expect(down.json()).toMatchObject({ message: 'Service unavailable' });
+    expect(down.json()).not.toHaveProperty('code');
     expect(await scanOf(ticket.evidence.id)).toMatchObject({
       state: 'PENDING_UPLOAD',
       scanner: null,
@@ -743,7 +745,8 @@ describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; mig
       .mockRejectedValue(new ContentScannerError('SCANNER_NOT_CONFIGURED', 'none'));
     const done = await complete(arranged.rider, ticket.evidence.id, etag);
     expect(done.status).toBe(503);
-    expect(done.json()).toEqual({ message: 'Service unavailable', request_id: expect.any(String) });
+    expect(done.json()).toMatchObject({ message: 'Service unavailable' });
+    expect(done.json()).not.toHaveProperty('code');
     expect((await scanOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
     expect(counted).toHaveBeenCalledWith('evidence_scans_total', { outcome: 'NOT_CONFIGURED' });
     scanning.mockRestore();

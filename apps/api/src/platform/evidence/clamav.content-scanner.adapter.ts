@@ -116,7 +116,14 @@ class Connection {
         else reject(this.#failure ?? unavailable('connection'));
       });
     });
-    if (this.#failure !== undefined) throw this.#failure;
+    // The connection may have failed while the bytes were leaving: read again, not as the check above left it.
+    const failed = this.#failureNow();
+    if (failed !== undefined) throw failed;
+  }
+
+  /** What has gone wrong with the connection, read at this moment (a check made before an await may be out of date after it). */
+  #failureNow(): ContentScannerError | undefined {
+    return this.#failure;
   }
 
   /** The reply, without its terminator, once the daemon has ended it (or closed the connection having sent it). */

@@ -119,7 +119,8 @@ describe('evidence:smoke', () => {
   it('fails when the scanner does not flag the EICAR test file', async () => {
     const calm: ContentScanner = {
       scan: async (object) => {
-        for await (const chunk of object) void chunk;
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of object) chunks.push(chunk);
         return {
           verdict: 'CLEAN',
           scanner: 'clamav',

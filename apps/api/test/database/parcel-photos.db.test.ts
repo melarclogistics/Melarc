@@ -325,7 +325,7 @@ describe('recordCollection: only a stored photo of this rider and this stop coun
       'the proof of a collection, which is not a parcel',
       async (arranged, stopId) => (await photoOf(routes, arranged.rider, stopId)).id,
     ],
-    ['a record that does not exist', async () => randomUUID()],
+    ['a record that does not exist', () => Promise.resolve(randomUUID())],
     [
       'a photo already attached to a count',
       async (arranged, stopId) => {

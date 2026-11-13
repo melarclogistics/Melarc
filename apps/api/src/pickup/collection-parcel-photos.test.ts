@@ -22,7 +22,7 @@ function refusalOf(work: () => unknown): { code: string; rule?: string } | undef
     const violations = (error.details as { violations?: { rule?: string }[] } | undefined)
       ?.violations;
     const rule = violations?.[0]?.rule;
-    return { code: String(error.code), ...(rule === undefined ? {} : { rule }) };
+    return { code: error.code, ...(rule === undefined ? {} : { rule }) };
   }
 }
 

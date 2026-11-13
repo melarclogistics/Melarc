@@ -107,7 +107,11 @@ async function fakeClamd(options: {
   if (address === null || typeof address === 'string') throw new Error('no port');
   const stop = async (): Promise<void> => {
     for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
   };
   const made = Object.assign(fake, { port: address.port, stop });
   running.push(made);

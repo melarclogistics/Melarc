@@ -140,6 +140,8 @@ export class InProcessEvidenceStore implements EvidenceStore {
     return Promise.resolve(
       (async function* frames(): AsyncGenerator<Uint8Array, void, undefined> {
         for (let at = 0; at < bytes.length; at += READ_FRAME_BYTES) {
+          // A frame arrives on a turn of its own, as it would from a store.
+          await Promise.resolve();
           yield bytes.subarray(at, at + READ_FRAME_BYTES);
         }
       })(),
