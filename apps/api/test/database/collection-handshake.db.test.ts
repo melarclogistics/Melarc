@@ -10,7 +10,7 @@ import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import { NOTIFICATION_LANE_PRINCIPAL_ID } from '../../src/platform/notifications/notification-store.js';
 import { MIGRATIONS_FOLDER } from '../../src/tools/database/run-migrations.js';
-import { excusePhotos } from './support/evidence-photo.js';
+import { excusePhotos, parcelPhotosOf } from './support/evidence-photo.js';
 import { waitUntilBlockedBy } from './support/lock-wait.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
@@ -18,7 +18,7 @@ import { insertAdHocSender, insertPickupRequest, pickupRequestRow } from './supp
 import { arrangeRun, arrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { buildService } from './support/service.js';
-import { HUB_A, HUB_B } from './support/staff-routes.js';
+import { API, HUB_A, HUB_B } from './support/staff-routes.js';
 import { clientFor } from './support/test-database.js';
 import {
   startVendorRoutes,
@@ -309,6 +309,52 @@ async function counted(
     recordId,
   };
 }
+
+/**
+ * A vendor's pickup the rider has arrived at and counted **as a rider counts it** (Run B, Part 1, item 5): through `recordCollection`, with the photo of each parcel counted, which the
+ * database holds to the number of the count. `counted` inserts the record of a stop that Ops let through without photos (`insertRecordFor`), so that no test of this file had a count
+ * with photos.
+ */
+async function countedWithPhotos(variance: 'MATCH' | 'SHORT'): Promise<Counted> {
+  const arranged = await arrangeRun(routes.kit, routes.admin, {
+    vendorOrganizationId: vendorA.row.organizationId,
+    serviceDate: days.today,
+    state: 'IN_PROGRESS',
+    stops: 1,
+    stopStates: ['ARRIVED'],
+  });
+  const stop = arranged.stops[0];
+  if (stop === undefined) throw new Error('stop');
+  const collected = variance === 'MATCH' ? 3 : 2;
+  const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, collected);
+  const read = await arranged.rider.client.get(`${API}/pickup-stops/${stop.id}`);
+  const response = await arranged.rider.client.post(
+    `${API}/pickup-stops/${stop.id}/collect`,
+    {
+      collected_count: collected,
+      ...(variance === 'SHORT' ? { variance_reason_code: 'SOME_PARCELS_NOT_READY' } : {}),
+      parcel_photo_ids: photos,
+    },
+    { headers: { 'If-Match': read.header('etag') ?? '', 'Idempotency-Key': randomUUID() } },
+  );
+  if (response.status !== 200) {
+    throw new Error(`recordCollection answered ${String(response.status)}: ${response.text}`);
+  }
+  return {
+    arranged,
+    riderId: arranged.rider.id,
+    stopId: stop.id,
+    requestId: stop.requestId,
+    recordId: (response.json() as { id: string }).id,
+  };
+}
+
+/** The links of a count to its photos, as the table keeps them. */
+const photoLinksOf = (stopId: string) =>
+  routes.rows<{ evidence_id: string; collection_record_id: string; attached_at: Date }>(
+    `select evidence_id, collection_record_id, attached_at from collection_parcel_photo where pickup_stop_id = $1 order by evidence_id`,
+    [stopId],
+  );
 
 /** An individual sender's pickup, arrived at and counted: the code goes to the sender by SMS and the rider enters it. */
 async function countedIndividual(variance: 'MATCH' | 'SHORT' = 'MATCH'): Promise<Counted> {
@@ -1476,6 +1522,62 @@ describe('the officer’s override and resolution', () => {
     );
     expect(await resolve(staffCtx(RESOLVE, [HUB_B]), none.stopId)).toEqual(refused('42501'));
   });
+});
+
+/**
+ * The close of a stop whose count has its photos (Run B, Part 1, item 5). Every test above counts a stop that Ops let through without photos, so the path a real count takes had no
+ * test of the handshake: the close must leave the count's photos attached as they were made, and must not be refused for them.
+ */
+describe('the close of a stop whose count has its photos (D-A10, AC-SLICE-001-23, -86)', () => {
+  // Break caught: a close that is refused, or that detaches, moves or changes a photo of the count, when the count has them (the three ways of closing a counted stop: the vendor's code of a
+  // clean count and of a short one, and the officer's override).
+  it.each([
+    [
+      'the vendor enters the code of a clean count',
+      'MATCH',
+      async (s: Counted) => {
+        await issue(riderCtx(s.riderId), s.stopId, '4321');
+        return verify(vendorCtx(vendorA), s.stopId, '4321');
+      },
+      'COLLECTED',
+    ],
+    [
+      'the vendor enters the code of a short count',
+      'SHORT',
+      async (s: Counted) => {
+        await issue(riderCtx(s.riderId), s.stopId, '4321');
+        return verify(vendorCtx(vendorA), s.stopId, '4321');
+      },
+      'PARTIALLY_COLLECTED',
+    ],
+    [
+      'an officer overrides the handshake of a short count',
+      'SHORT',
+      (s: Counted) => override(staffCtx(OVERRIDE, [HUB_A]), s.stopId),
+      'PARTIALLY_COLLECTED',
+    ],
+  ] as const)(
+    'closes the stop when %s, and leaves the photos attached to the count as they were',
+    async (_what, variance, act, closed) => {
+      const stop = await countedWithPhotos(variance);
+      const before = await photoLinksOf(stop.stopId);
+      expect(before).toHaveLength(variance === 'MATCH' ? 3 : 2);
+      expect(new Set(before.map((link) => link.collection_record_id))).toEqual(
+        new Set([stop.recordId]),
+      );
+
+      expect(rowOf(await act(stop))).toMatchObject({ out_state: 'VERIFIED' });
+
+      expect(await stopState(stop.stopId)).toBe(closed);
+      expect((await recordOf(stop.stopId))?.handshake_confirmed_at).toBeInstanceOf(Date);
+      expect(await photoLinksOf(stop.stopId)).toEqual(before);
+      const states = await routes.rows<{ state: string }>(
+        `select state from evidence where id = any($1::uuid[])`,
+        [before.map((link) => link.evidence_id)],
+      );
+      expect(states.map((each) => each.state)).toEqual(before.map(() => 'STORED'));
+    },
+  );
 });
 
 describe('the delivery of a code (the notification lane)', () => {

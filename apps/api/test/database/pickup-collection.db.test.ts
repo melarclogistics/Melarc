@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
-import { excusePhotos } from './support/evidence-photo.js';
+import { excusePhotos, parcelPhotosOf } from './support/evidence-photo.js';
 import { backendPidOf, waitUntilBlockedBy } from './support/lock-wait.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
@@ -797,6 +797,88 @@ describe('recordCollection: replay (AC-SLICE-001-29)', () => {
     );
     expect(answers.map((each) => each.status).toSorted()).toEqual([200, 409]);
     expect(await recordsOf(stop.id)).toHaveLength(1);
+  });
+});
+
+/**
+ * The replay and the race again, on a count **with its photos** (Run B, Part 1, item 5 of the review of Run A2). Every test above counts a stop that Ops let through without photos
+ * (`collect` excuses it, D-A10), so the path a real count takes had no replay test and no race test: the photos, which each belong to one count only, are what a replay must not attach a
+ * second time and what two counts must not both take.
+ */
+describe('recordCollection: replay and race on a count with photos (AC-SLICE-001-29, -86)', () => {
+  const linksOf = (stopId: string) =>
+    routes.rows<{ evidence_id: string; collection_record_id: string }>(
+      `select evidence_id, collection_record_id from collection_parcel_photo where pickup_stop_id = $1 order by evidence_id`,
+      [stopId],
+    );
+  const photosOfAnswer = (response: TestResponse): readonly string[] | undefined =>
+    (response.json() as { parcel_photo_ids?: string[] }).parcel_photo_ids;
+
+  // Break caught: an answer, or its replay, that does not state the photos the count attached (the contract's `CollectionRecord.parcel_photo_ids`; neither did on 809817b); a replay that attaches
+  // them a second time, makes a second record or event, or takes the same key for the same count with its photos left out.
+  it('returns the original answer with its photos for the same key and body, attaches them once, and refuses the count without them under the key', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, 3);
+    const key = randomUUID();
+    const etag = await tokenOf(arranged.rider, stop.id);
+    const body = { collected_count: 3, parcel_photo_ids: photos };
+
+    const original = await collect(arranged.rider, stop.id, body, { key, etag, unexcused: true });
+    expect(original.status, original.text).toBe(200);
+    expect(photosOfAnswer(original)).toEqual(photos);
+
+    const replay = await collect(arranged.rider, stop.id, body, { key, etag, unexcused: true });
+    expect(replay.status, replay.text).toBe(200);
+    expect(replay.json()).toEqual(original.json());
+    expect(photosOfAnswer(replay)).toEqual(photos);
+
+    const [record, ...more] = await recordsOf(stop.id);
+    expect(more).toEqual([]);
+    const links = await linksOf(stop.id);
+    expect(links.map((link) => link.evidence_id)).toEqual([...photos].toSorted());
+    expect(new Set(links.map((link) => link.collection_record_id))).toEqual(new Set([record?.id]));
+    expect(await countAndCloseEventsOf(stop.id)).toEqual([
+      { event_code: 'pickup.collection.recorded' },
+    ]);
+
+    const other = await collect(
+      arranged.rider,
+      stop.id,
+      { collected_count: 3 },
+      { key, etag, unexcused: true },
+    );
+    expect(outcome(other)).toEqual([409, 'IDEMPOTENCY_KEY_CONFLICT']);
+    expect(await linksOf(stop.id)).toHaveLength(3);
+  });
+
+  // Break caught: two counts of the same photos at the same moment, under different keys, that both record, take a photo twice, or leave one of them with a server error: the stop's lock and the
+  // photo's one link hold it, and the answer of the count that was made names the photos that were attached.
+  it('makes one record and one set of links of two counts that name the same photos at the same moment', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, 3);
+    const etag = await tokenOf(arranged.rider, stop.id);
+
+    const answers = await Promise.all(
+      [0, 1].map(() =>
+        collect(
+          arranged.rider,
+          stop.id,
+          { collected_count: 3, parcel_photo_ids: photos },
+          { etag, unexcused: true },
+        ),
+      ),
+    );
+
+    expect(answers.map((each) => each.status).toSorted()).toEqual([200, 409]);
+    const made = answers.find((each) => each.status === 200);
+    const [record, ...more] = await recordsOf(stop.id);
+    expect(more).toEqual([]);
+    expect(made?.json()).toMatchObject({ id: record?.id, parcel_photo_ids: photos });
+    const links = await linksOf(stop.id);
+    expect(links.map((link) => link.evidence_id)).toEqual([...photos].toSorted());
+    expect(new Set(links.map((link) => link.collection_record_id))).toEqual(new Set([record?.id]));
   });
 });
 
