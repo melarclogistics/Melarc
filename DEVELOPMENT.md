@@ -288,14 +288,36 @@ and nobody else can do it for you:
 
 4. Start the worker with `start:worker:local` (it loads `.env.sms` after `.env`). The lane then sends a real text for an
    event only if the number is on the allow-list, the window is open and has a free place, the day's limits allow it (10 for a
-   number and 500 in all, settings you can change) and **the wording of that message is approved**. You approved the two
-   wordings built so far (the confirmation text and the vendor's feed entry) on 30 October 2026, for exactly those words; the
-   wording of every later message is a draft until you approve it in `apps/api/src/platform/notifications/templates.ts`, and the
-   lane holds its real messages back as `WORDING_NOT_APPROVED` (the capture folder still gets them). The worker says at its start
-   which mode it composed (`notification lane composed`: the sender, and whether the wording gate stands in front of it).
+   number and 500 in all, settings you can change) and **the wording of that message is approved**. You approved the wordings
+   built so far, for exactly those words: the confirmation text and the vendor's feed entry on 30 October 2026, the rider's run
+   text on 2 November 2026 and the seven drafts of the handshake codes, the failures and the short count on 12 November 2026
+   (with the second wording of the vendor's feed entry for a skip that asks nothing); the wording of every later message is a
+   draft until you approve it in `apps/api/src/platform/notifications/templates.ts`, and the lane holds its real messages back
+   as `WORDING_NOT_APPROVED` (the capture folder still gets them). The worker says at its start which mode it composed
+   (`notification lane composed`: the sender, and whether the wording gate stands in front of it).
 
 Hubtel's request and answer forms are built from what is known of its API and marked unverified in
 `hubtel-sms-client.ts`; the first message you send confirms them or shows what to correct.
+
+#### The evidence store and the content scanner: your first contact with a bucket
+
+A record of evidence is stored only on a clean verdict of a malicious-content check (your decision D-A6 of 12 November 2026), so
+the store and the scanner are met together. With `EVIDENCE_STORE` and `EVIDENCE_SCANNER` unset the API uses the in-process
+stand-ins (the scanner flags only the EICAR test file), and the command below is a dry run that says so. For a bucket and a
+scanner of your own (a restricted R2 token for a non-production bucket, a ClamAV daemon on a private address; the keys are in
+DEPLOYMENT_AND_ENVIRONMENTS.md §12.5 and `apps/api/.env.example`), fill `apps/api/.env` yourself and run:
+
+```text
+pnpm run build
+pnpm --filter @melarc/api run evidence:smoke
+```
+
+It composes the same store and scanner the API is composed with, uploads a clean JPEG and the EICAR test file with the
+capability the platform makes, puts each through the platform's own judgement of a stored object, and checks that the store
+refuses an upload longer than the one signed or whose hash is not the signed one. It prints the mode (REAL or DRY RUN), one line
+for each check and the result, and **never a credential, a signed address, an object key or a host**; it removes the objects it
+made. The checks to make on the bucket itself (CORS for a handset's direct upload, a lifecycle rule for objects never completed)
+are in the plan's section 7.5.
 
 #### The private metrics endpoints
 

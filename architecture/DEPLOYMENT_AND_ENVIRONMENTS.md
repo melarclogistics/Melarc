@@ -299,6 +299,12 @@ Each browser surface calls the API on **its own origin** through a reverse-proxi
 
 **Why the R1 wording could not stand.** *No public ingress* plus *nothing else may be a public entry point* describes a deployment in which **no client can redeem a presigned URL** — which is not a hardening of `MSC-DEC-291`, it is a contradiction of it. The two halves had to be named separately: the **container** is closed, the **endpoint** is reachable, and the capability is what bridges them for one object for a few minutes.
 
+**A scanner beside the API is a release gate (Run A2, the Product Owner's decision D-A6).** Production stores no evidence without a clean verdict from a malicious-content check ([SECURITY_DESIGN.md](SECURITY_DESIGN.md) §14.18c), so a deployment that stores evidence needs:
+
+- **A ClamAV daemon (`clamd`) beside the API**, on a private network that the API alone reaches (the daemon has no authentication): the **official image**, its signatures kept current by **`freshclam`** (a daemon with old signatures still answers, and the verdict records the version it used, so staleness is visible on the record), **at least 3 GiB of memory, 4 GiB preferred** (the signature database is held in memory), and **`StreamMaxLength` above `evidence_upload_max_bytes`**, so that the platform's limit on the file decides and not the daemon's.
+- **The configuration**: `EVIDENCE_SCANNER=clamav`, with `EVIDENCE_CLAMAV_HOST`, `EVIDENCE_CLAMAV_PORT` and `EVIDENCE_CLAMAV_TIMEOUT_MS` (§12.5). Production refuses `in-process` (the stand-in flags only the EICAR test file), and a production with no scanner **starts** and refuses every completion with the platform's retryable `503` and an alert until one is configured.
+- **The owner's check before release**: `pnpm --filter @melarc/api run evidence:smoke` against the real bucket and the real daemon. A clean JPEG is stored (and the bucket returns the SHA-256 that was signed), the EICAR test file is refused as malicious content and its object is gone, and an upload longer than the signed length, or whose hash differs, is refused by the store. It prints no credential, signed address or object key. The first contact with a bucket is written in the plan's section 7.5.
+
 ### 12.2 Transport and browser baseline
 
 **TLS 1.3 preferred · TLS 1.2 for compatibility only · TLS 1.0 and 1.1 disabled · HTTPS everywhere · HSTS once the domain and certificates are validated.**
