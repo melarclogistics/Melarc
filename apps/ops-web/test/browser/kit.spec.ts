@@ -1,7 +1,14 @@
-import { chromium, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
-import { settled, stepIncludingLinks, watchPage, wcagViolations } from './support/page';
+import {
+  animationsDone,
+  settled,
+  stepIncludingLinks,
+  watchPage,
+  wcagViolations,
+} from './support/page';
+import { withScrollbars } from './support/scrollbars';
 import { expectWholeInTheWindow } from './support/whole';
 import { wordsOf } from './support/words';
 
@@ -844,6 +851,8 @@ test.describe('SidePanel, RecordHeader, DescriptionList, Panel and StatTile in a
       await row.click();
       const sheet = page.getByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
       await expect(sheet).toBeVisible();
+      // The sheet slides in: its heading is read where it stands when it has arrived, and not where it was a few frames before (the Product Owner's review of ba9a18c, item 6).
+      await animationsDone(sheet);
       expect(Math.round((await box(sheet)).width)).toBe(width);
       // The header is a row with the code at its start, as the docked panel's is, and not a centred column (the primitive's header is a column).
       expect((await box(sheet.getByRole('heading', { level: 2 }))).x).toBeLessThan(width / 4);
@@ -1460,7 +1469,8 @@ test.describe('Tooltip, Popover and Dialog in a browser', () => {
     await confirm(page).focus();
     await expect(tooltip(page)).toBeVisible();
 
-    // Measured once the tooltip has finished coming in (it slides and grows into place).
+    // Measured once the tooltip has finished coming in (it slides and grows into place): its animations are done, and the position the engine computes for it has been applied.
+    await animationsDone(tooltip(page));
     await expect
       .poll(async () => {
         const button = await box(confirm(page));
@@ -1489,6 +1499,8 @@ test.describe('Tooltip, Popover and Dialog in a browser', () => {
     await expect(popover).toBeVisible();
 
     expect(await focusIn(page, '[data-slot="popover-content"]')).toBe(true);
+    // Measured once the popover has finished coming in: its animations are done, and the position the engine computes for it has been applied.
+    await animationsDone(popover);
     await expect
       .poll(async () => {
         const button = await box(service(page));
@@ -2421,6 +2433,50 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     expect(seen.problems).toEqual([]);
   });
 
+  // Break caught (the Product Owner's review of ba9a18c; WebKit on Linux reported "ResizeObserver loop completed with undelivered notifications" in the test above): a table that changes its rows,
+  // its columns or its cards inside the callback of a ResizeObserver, which draws a layout the observers are then told of again in the very frame that is delivering them. Every callback of every
+  // observer the page makes is wrapped, and the nodes put in or taken out of a table while it runs are listed: as the box narrows to cards and widens to the table again, none is, in any engine.
+  test('puts nothing in a table or takes nothing out of it inside the callback of a ResizeObserver', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const inside: string[] = [];
+      (window as unknown as { __inside: string[] }).__inside = inside;
+      const watcher = new MutationObserver(() => undefined);
+      watcher.observe(document, { childList: true, subtree: true });
+      const Native = window.ResizeObserver;
+      window.ResizeObserver = class extends Native {
+        constructor(callback: ResizeObserverCallback) {
+          super((entries, observer) => {
+            // What happened before the callback is not its doing: what is taken after it is.
+            watcher.takeRecords();
+            callback(entries, observer);
+            for (const record of watcher.takeRecords()) {
+              if (!(record.target instanceof Element)) continue;
+              if (record.target.closest('.ui-data-table') === null) continue;
+              inside.push(
+                `${record.target.className}: ${String(record.addedNodes.length)} in, ${String(record.removedNodes.length)} out`,
+              );
+            }
+          });
+        }
+      };
+    });
+    await openKit(page, 'example-queue', { width: 1280, height: 900 });
+    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(page.locator('.ui-data-table__cards').first()).toBeVisible();
+    await expect(page.locator('.ui-data-table__table')).toHaveCount(0);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
+    await expect(page.locator('.ui-data-table__cards')).toHaveCount(0);
+
+    expect(
+      await page.evaluate(() => (window as unknown as { __inside: string[] }).__inside),
+    ).toEqual([]);
+  });
+
   // Break caught (run 7, Stage 1.3): a table that watches its box and not itself, so that what is in it growing wider (a cell that gets its words later, a face wider than the first) is never seen: the
   // box scrolls sideways until the window is resized. No resize is made here: a cell grows by itself and the table takes the lesser column away.
   test('takes a lesser column away when what is in the table grows, with no change of the window', async ({
@@ -2454,61 +2510,59 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     await expect(wide.getByRole('columnheader', { name: 'Request' })).toBeVisible();
   });
 
-  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing): the table's change to cards left to when React next renders, so that the frame in which the window became
-  // narrow still draws the table. A second observer of the same box, made later than the table's, is told in the same frame after it: by then the cards are drawn and no table is.
-  test('draws the cards in the frame in which the box became narrow, and never the table for a frame', async ({
+  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing; the Product Owner's review of ba9a18c, which moved the change a live resize brings to the next animation frame
+  // so that no observer's callback changes the layout, and so accepts one frame of the earlier layout there): the first measure of a table left to an observer, a timer or a frame, so that the
+  // first frame it shows in a narrow box is the table and the cards come a render later. The first measure is a layout effect, which React finishes before the first paint: every frame that
+  // shows the list in a box of 320px shows cards, sampled before each frame is painted from the first frame of the page.
+  test('draws the cards in every frame it shows in a narrow box, and never the table for a frame', async ({
     page,
   }) => {
-    await openKit(page, 'example-queue', { width: 1280, height: 900 });
-    await expect(page.locator('.ui-data-table__table').first()).toBeVisible();
-    await page.evaluate(() => {
-      const root = document.querySelector('.ui-data-table');
-      const probe = root?.querySelector('.ui-data-table__probe');
-      if (root === null || probe === null || probe === undefined) {
-        throw new Error('no table in the page');
-      }
-      const seen: { width: number; table: boolean }[] = [];
-      (window as unknown as { __frames: typeof seen }).__frames = seen;
-      // The probe is what the table watches, and this observer was made after the table's own: it is told in the same frame, after them.
-      new ResizeObserver(() => {
-        seen.push({
-          width: root.clientWidth,
-          table: root.querySelector('.ui-data-table__table') !== null,
-        });
-      }).observe(probe);
+    await page.addInitScript(() => {
+      const drawn: { table: boolean; cards: boolean }[] = [];
+      (window as unknown as { __drawn: typeof drawn }).__drawn = drawn;
+      const sample = (): void => {
+        const table = document.querySelector('.ui-data-table__table') !== null;
+        const cards = document.querySelector('.ui-data-table__cards') !== null;
+        if (table || cards) drawn.push({ table, cards });
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
     });
-
-    await page.setViewportSize({ width: 320, height: 800 });
+    await openKit(page, 'example-queue', { width: 320, height: 800 });
     await expect(page.locator('.ui-data-table__cards').first()).toBeVisible();
     await expect(page.locator('.ui-data-table__table')).toHaveCount(0);
-
-    const frames = await page.evaluate(
-      () => (window as unknown as { __frames: { width: number; table: boolean }[] }).__frames,
+    // Two frames more, so that a table that came later than the cards would be sampled.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              resolve();
+            });
+          });
+        }),
     );
-    const narrow = frames.filter((frame) => frame.width > 0 && frame.width < 640);
-    expect(narrow.length).toBeGreaterThan(0);
-    expect(narrow.filter((frame) => frame.table)).toEqual([]);
+
+    const drawn = await page.evaluate(
+      () => (window as unknown as { __drawn: { table: boolean; cards: boolean }[] }).__drawn,
+    );
+    expect(drawn.filter((frame) => frame.cards).length).toBeGreaterThan(0);
+    expect(drawn.filter((frame) => frame.table)).toEqual([]);
   });
 
   // Break caught (run 7, Stage 1.4; the Product Owner suspected that the fit oscillates with the page's scrollbar on his Windows, whose scrollbars take room: a column dropped shortens the rows, the page
-  // no longer needs its scrollbar, the box widens by its width, every column comes back, the page grows past the window again, and so on). Not reproduced: the fit restarts and measures in one
-  // synchronous flush (a layout effect inside `flushSync`), and the layout it reads already has the scrollbar the restarted rows bring, so it drops the column again before anything is drawn and the
-  // widening it settles on starts nothing. The page here is about as tall as the window with the lesser column and shorter without it, and the box holds the table with the scrollbar away and not with
-  // it: the header is changed in the first moments (two restarts, each in one flush) and then not at all, in the next second and a half. A fit that restarted outside that flush (an update left to the next render) is the break this holds.
+  // no longer needs its scrollbar, the box widens by its width, every column comes back, the page grows past the window again, and so on). Not reproduced: the fit restarts, in the frame after the
+  // observer was told, and measures in one synchronous flush (a layout effect inside `flushSync`), and the layout it reads already has the scrollbar the restarted rows bring, so it drops the column again
+  // before anything is drawn and the widening it settles on starts nothing. The page here is about as tall as the window with the lesser column and shorter without it, and the box holds the table
+  // with the scrollbar away and not with it: the header is changed in the first moments (two restarts, each in one flush) and then not at all, in the next ninety frames. A fit that restarted outside
+  // that flush (an update left to the next render), or one that started itself again each frame, is the break this holds.
   test('settles when the page is about as tall as the window, and then leaves its columns alone', async ({
     page: provided,
     baseURL,
     browserName,
   }) => {
-    // Playwright hides the scrollbars of a headless Chromium (`--hide-scrollbars`); the Product Owner's Windows draws them and gives them room, so Chromium is started here as that machine runs it. The
-    // other engines are run as they are, and the test is skipped where their scrollbar takes no room.
-    const own =
-      browserName === 'chromium'
-        ? await chromium.launch({ channel: 'chromium', ignoreDefaultArgs: ['--hide-scrollbars'] })
-        : undefined;
-    try {
-      const page =
-        own === undefined ? provided : await (await own.newContext({ baseURL })).newPage();
+    // Chromium is started as the Product Owner's Windows runs it, with the scrollbars drawn; the other engines are run as they are, and the test is skipped where their scrollbar takes no room.
+    await withScrollbars(provided, browserName, baseURL, async (page) => {
       const url = (ballast: number) => `${KIT}/data?ballast=${String(ballast)}`;
       const list = () => specimen(page, 'A list near the height of the window');
       // The page is taller than the window to begin with, so it has its scrollbar: its width, the box's room beside it, what the table needs and the height of the page (the ballast changes none of them).
@@ -2556,28 +2610,46 @@ test.describe('the fix round of task R5.2 in a browser', () => {
         .locator('thead')
         .evaluate((head) => {
           const seen: number[] = [];
-          (window as unknown as { __fit: number[] }).__fit = seen;
-          const start = performance.now();
-          // Every time a heading cell is put in or taken out, and when (a column that went and came back in one flush is still seen).
+          const drawn = { frames: 0 };
+          const watch = window as unknown as { __fit: number[]; __drawn: { frames: number } };
+          watch.__fit = seen;
+          watch.__drawn = drawn;
+          const count = (): void => {
+            drawn.frames += 1;
+            requestAnimationFrame(count);
+          };
+          requestAnimationFrame(count);
+          // Every time a heading cell is put in or taken out, and in which frame (a column that went and came back in one flush is still seen).
           new MutationObserver((records) => {
             for (const record of records) {
               const cells = [...record.addedNodes, ...record.removedNodes];
-              if (cells.some((node) => node.nodeName === 'TH')) {
-                seen.push(Math.round(performance.now() - start));
-              }
+              if (cells.some((node) => node.nodeName === 'TH')) seen.push(drawn.frames);
             }
           }).observe(head, { childList: true, subtree: true });
         });
 
       // The window becomes a little shorter than the page: the page needs its scrollbar, and the box is narrower by its width.
       await page.setViewportSize({ width: 1100, height: measured.height - 80 });
-      await page.waitForTimeout(3000);
 
-      const times = await page.evaluate(() => (window as unknown as { __fit: number[] }).__fit);
-      // The fit was started by the window: it changed the header (at least the column that went) ...
-      expect(times.length).toBeGreaterThan(0);
-      // ... and, after the first moments (the restart the window starts and the one the widening starts after it, on a loaded machine a second at the most), did not touch it again.
-      expect(times.filter((time) => time > 1500)).toEqual([]);
+      // The fit was started by the window: it changed the header (at least the column that went) ... and, after the first moments (the restart the window starts and the one the widening starts after
+      // it, a frame each), left it alone: ninety frames in a row, a second and a half at 60 a second, without a heading cell put in or taken out. It is frames that are counted and not milliseconds: a
+      // frame after a resize takes a few hundred milliseconds where a window this size is drawn in software (the Product Owner's Windows), and the same few frames settle the fit there as anywhere. A
+      // fit that never settles never has such a run, and fails with the length of its last one. The budget is the machine's, for a page that is being changed every frame draws slowly.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const watch = window as unknown as { __fit: number[]; __drawn: { frames: number } };
+              const last = watch.__fit.at(-1);
+              return last === undefined ? 0 : watch.__drawn.frames - last;
+            }),
+          {
+            message:
+              'the window changed the header, and then it went ninety frames in a row untouched (the frames since its last change)',
+            timeout: 20_000,
+          },
+        )
+        .toBeGreaterThanOrEqual(90);
       // It settled with the column away and the box not scrolling sideways.
       await expect(list().getByRole('columnheader', { name: 'Notes' })).toHaveCount(0);
       expect(
@@ -2585,9 +2657,53 @@ test.describe('the fix round of task R5.2 in a browser', () => {
           .locator('.ui-data-table__scroller')
           .evaluate((box) => box.scrollWidth - box.clientWidth),
       ).toBeLessThanOrEqual(0);
-    } finally {
-      await own?.close();
-    }
+    });
+  });
+
+  // Break caught (the hosted WebKit runs of 12 and 13 November 2026): a helper that waits for the animations of an element to finish waits for ever when the page's animation clock has stopped, which a
+  // hosted WebKit does for seconds (two tooltip tests waited on an animation until the page was closed). It ends them, so that what a test reads next is where they were going, whatever the clock does.
+  // An animation of a minute stands for a clock that has stopped: no clock would finish it inside the test.
+  test('the wait for the animations of an element ends them at once, so that a clock that has stopped cannot hold a test', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays', { reducedMotion: true });
+    const heading = page.getByRole('heading', { level: 1, name: 'Kit showcase' });
+    await heading.evaluate((element) => {
+      element.animate([{ opacity: 1 }, { opacity: 0.5 }], { duration: 60_000 });
+    });
+    expect(await heading.evaluate((element) => element.getAnimations().length)).toBe(1);
+
+    const began = Date.now();
+    await animationsDone(heading);
+
+    expect(Date.now() - began).toBeLessThan(5_000);
+    expect(await heading.evaluate((element) => element.getAnimations().length)).toBe(0);
+    expect(await heading.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
+  });
+
+  // Break caught (the Product Owner's review of ba9a18c, item 5): a words check that finds a card too tall only when it has room that nothing fills, so that a card whose body is squeezed narrower than
+  // the room it has (a column it cannot use) wraps its words onto lines that the card then holds, and passes. The body is laid out again, in a copy, at the room it could have (from its own left edge,
+  // so a card with a box beside it is counted right, to the card's inner edge), and a card whose body is more than a line taller than that fails. Squeezing one card's body is what proves the check.
+  test('the words check fails a card whose body is squeezed narrower than the room it has, and no other', async ({
+    page,
+  }) => {
+    await openKit(page, 'data', { width: 1440, height: 900 });
+    const cards = specimen(page, 'Cards, where the box is narrow');
+    await cards.scrollIntoViewIfNeeded();
+    const region = cards.locator('.ui-data-table__scroller');
+    await expect(region.locator('.ui-data-table__card').first()).toBeVisible();
+    expect((await wordsOf(region)).tall).toEqual([]);
+
+    await region
+      .locator('.ui-data-table__card-body')
+      .first()
+      .evaluate((body) => {
+        body.style.maxWidth = '5rem';
+      });
+
+    const squeezed = (await wordsOf(region)).tall;
+    expect(squeezed).toHaveLength(1);
+    expect(squeezed[0]).toContain('at the room it has');
   });
 
   // Break caught (the Product Owner, 10 November 2026): a status that breaks at its words ("Waiting for / confirmation") in a table cell or in a card, which makes the row taller and the badge harder

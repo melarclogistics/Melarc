@@ -599,42 +599,47 @@ test.describe('the theme', () => {
 });
 
 test.describe('the top bar and its menus, accessibility', () => {
+  // One scan to a test, by state (the Product Owner's review of ba9a18c, item 6): the four tests that scanned the bar closed and with each of its menus open did up to five scans each, which is over the
+  // 30 seconds of a test in WebKit as soon as the machine has anything else to do (the hosted run of 12 November 2026: 29.5s at 390px, and the same test at 1280px in the run before it, ending in "Target
+  // page, context or browser has been closed" inside the wait for the page to stop moving). A scan that fails now names its state in the title of its test.
   for (const scheme of ['light', 'dark'] as const) {
     for (const width of [1280, 390] as const) {
-      // Break caught: a bar, or a menu opened from it, that fails contrast, naming or target size in either theme, at the width of a desktop or of a
-      // phone, or that makes the page scroll sideways.
-      test(`has no WCAG 2.2 A or AA violation at ${String(width)} px in the ${scheme} theme, closed and with each menu open`, async ({
+      const menus = [
+        ['the hub menu', hubButton],
+        ['the New menu', newButton],
+        ['the account menu', accountButton],
+        // The theme control is in the bar from 768px up; under it the sidebar's sheet holds it.
+        ...(width >= 768 ? ([['the theme menu', themeButton]] as const) : []),
+      ] as const;
+
+      // Break caught: a bar that fails contrast, naming or target size in either theme, at the width of a desktop or of a phone, or that makes the page scroll sideways.
+      test(`has no WCAG 2.2 A or AA violation at ${String(width)} px in the ${scheme} theme, closed`, async ({
         page,
       }) => {
         await page.emulateMedia({ colorScheme: scheme });
         await page.setViewportSize({ width, height: 800 });
         await open(page, { hubs: [HUB_A, HUB_B], permissions: CREATORS });
 
-        expect(await wcagViolations(page), 'closed').toEqual([]);
-        expect(await overflowOf(page), 'closed').toBeLessThanOrEqual(0);
+        expect(await wcagViolations(page)).toEqual([]);
+        expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+      });
 
-        for (const [name, button] of [
-          ['the hub menu', hubButton(page)],
-          ['the New menu', newButton(page)],
-          ['the account menu', accountButton(page)],
-        ] as const) {
-          await button.click();
+      for (const [name, button] of menus) {
+        // Break caught: a menu opened from the bar that fails contrast, naming or target size in either theme, at the width of a desktop or of a phone.
+        test(`has no WCAG 2.2 A or AA violation at ${String(width)} px in the ${scheme} theme, with ${name} open`, async ({
+          page,
+        }) => {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.setViewportSize({ width, height: 800 });
+          await open(page, { hubs: [HUB_A, HUB_B], permissions: CREATORS });
+
+          await button(page).click();
           await expect(page.getByRole('menu')).toBeVisible();
           // axe does not take a Radix menu for the modal it is (it holds no `dialog` or `aria-modal`), so it reports the page behind it as hidden but
           // focusable; the page cannot be reached while the menu is open, which the tests above ("hold focus while they are open") prove for each menu.
-          expect(await wcagViolations(page, { disable: ['aria-hidden-focus'] }), name).toEqual([]);
-          await page.keyboard.press('Escape');
-          await expect(page.getByRole('menu')).toHaveCount(0);
-        }
-        if (width >= 768) {
-          await themeButton(page).click();
-          await expect(page.getByRole('menu')).toBeVisible();
-          expect(
-            await wcagViolations(page, { disable: ['aria-hidden-focus'] }),
-            'the theme menu',
-          ).toEqual([]);
-        }
-      });
+          expect(await wcagViolations(page, { disable: ['aria-hidden-focus'] })).toEqual([]);
+        });
+      }
     }
   }
 

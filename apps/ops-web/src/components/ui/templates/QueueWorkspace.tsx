@@ -288,7 +288,8 @@ export function QueueWorkspace<Item>({
               onOpen(item);
             },
           })}
-      // A row's own act that opens the panel (the queue's Confirm) is a way to open it as the row's button is: the way back is the row, and not the act, which the act itself may take away.
+      // A row's own act that opens the panel (the queue's Confirm) is a way to open it as the row's button is: the way back is that act while it is still drawn, and else the button that opens the row
+      // (a confirmation takes its own act away): `controlOf`.
       {...(rowAction === undefined
         ? {}
         : {

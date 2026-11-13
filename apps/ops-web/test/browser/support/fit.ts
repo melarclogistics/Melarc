@@ -6,8 +6,22 @@ import { expect } from './guarded-test';
  * A list drawn as cards by the table's **fit** and not by the width of its box (the Product Owner, 11 November 2026: where a table runs out of room it is cards): the box is as wide as a table needs
  * (40rem) and the cards are drawn all the same. These are the cards that the table used to draw again, in place of the cards, to measure them, and that stay now. Give it the list's region
  * (`getByRole('region', { name })`).
+ *
+ * **It looks at the result the page reaches, not at the first thing it draws**: a table's first measure is made in the fallback face and is made again when the faces are in (`useColumnFit`, which does
+ * it a frame later), so a list read in between is a table in one run and cards in another (the hosted run of 12 November 2026: the approver's queue at 768px, a table in the development-server WebKit).
+ * It waits for the faces and for the frames the restart takes (`frames`) before it looks. A test that holds the faces back and asks for the cards drawn meanwhile says `facesLoading`, and is not made to
+ * wait for what it is holding.
  */
-export async function expectCardsOfTheFit(region: Locator): Promise<void> {
+export async function expectCardsOfTheFit(
+  region: Locator,
+  options: { readonly facesLoading?: boolean } = {},
+): Promise<void> {
+  if (options.facesLoading !== true) {
+    await region.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    await frames(region.page());
+  }
   const drawn = await region.evaluate((box) => {
     const list = box.closest('.ui-data-table');
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
@@ -63,16 +77,21 @@ export async function disturbTheFit(
   await frames(page);
 }
 
-/** Two frames, so that what the observers were told and what React drew for it are behind us. */
-async function frames(page: Page): Promise<void> {
+/**
+ * Four frames, so that what the observers were told, the change the table makes for it in the frame after (`nextFrame` in `DataTable`: no layout is changed inside an observer's callback) and what
+ * the page drew for it are behind us. Fewer would let a table that is about to draw every card again pass a check that nothing was.
+ */
+export async function frames(page: Page): Promise<void> {
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            resolve();
-          });
-        });
+        let left = 4;
+        const next = (): void => {
+          left -= 1;
+          if (left === 0) resolve();
+          else requestAnimationFrame(next);
+        };
+        requestAnimationFrame(next);
       }),
   );
 }

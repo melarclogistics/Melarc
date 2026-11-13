@@ -61,16 +61,13 @@ export function searchOf(filters: {
  */
 const MODAL_SURFACE = 'dialog, [role="alertdialog"], [role="dialog"]:not([aria-modal="false"])';
 
-/** The panel docked beside the queue, which does not take the page (`aria-modal="false"`): the rows stay in reach beside it. */
-const DOCKED_PANEL = '[role="dialog"][aria-modal="false"]';
-
 /** What the page knows that the element alone does not say. */
 export interface UnclaimedOptions {
   /**
-   * The panel that is open shows another request than the one an act was made on a moment ago: the officer has moved on to it, and whatever has focus in it is theirs, the panel's region among it.
-   * Left out, the open panel is the one the act was made in.
+   * The officer pressed or typed something after the act was done with: whatever has focus now is theirs, wherever it is (the panel's region, its text, a heading, the page's main region). Left out,
+   * the page knows nothing of an act and only the mark decides, as when a position is given back (`restoreQueuePlace`).
    */
-  readonly panelIsAnotherRequests?: boolean;
+  readonly touchedSinceAct?: boolean;
 }
 
 /**
@@ -82,20 +79,35 @@ export interface UnclaimedOptions {
  * it is where an officer is after opening another request while the queue was read again (run 7, Stage 2.1). Focus anywhere else, on a control or on a heading, is the officer's.
  *
  * **Focus inside a surface that holds the person's focus is theirs, whatever holds it** (the Product Owner's review of 67bc979): the mark counts only outside such a surface. A question and the sheet
- * the panel becomes are modal, always. The panel docked beside the queue is the person's when it shows another request than the one the act was made on: a click on plain text in it focuses
- * the nearest element that can have focus (Chromium and Firefox), which is that panel's read-state region, marked, and the read that lands must not take focus from there back to the row of the request
- * they acted on a moment ago. It is not the person's in the panel of the request the act was made in, where the mark is what the press of the act left behind (the targeted run of 11 November 2026 on
- * WebKit: the panel of a confirmed request in Safari's engine, whose row must be given focus).
+ * the panel becomes are modal, always.
+ *
+ * **Focus is the officer's, wherever it is, once they have pressed or typed since the act** (the Product Owner's review of ba9a18c, which replaced the rule that a docked panel showing another request
+ * is theirs): the page notes a press or a key after the act was done with (`touchedSinceAct`), and then whatever has focus when the read lands is the officer's, a click on plain text in a panel among
+ * it (it focuses the nearest element that can have focus, the read-state region, marked), whichever request the panel shows. It is the press that is noted and not a change of the focused element,
+ * because the element does not change in every engine: Safari's engine gives a pressed button no focus and the press on plain text in the panel of the request just confirmed leaves focus on the
+ * region the confirmation left it on, with no event, and puts it there at times of its own (the development server and the production build differ) after the question has closed, so that an
+ * element compared with the one at the act is "moved" by the engine as much as by the officer (the targeted run of 11 November 2026 on WebKit: the panel of a confirmed request, whose row must be given
+ * focus when the officer has done nothing, and the trace of 12 November 2026). Where they have done nothing since the act, the document is nobody's and the marked region is what the press left behind.
  */
 export function isUnclaimed(active: Element | null, options: UnclaimedOptions = {}): boolean {
   if (active === null || active === document.body || active === document.documentElement) {
     return true;
   }
+  if (options.touchedSinceAct === true) return false;
   if (active.closest(MODAL_SURFACE) !== null) return false;
-  if (options.panelIsAnotherRequests === true && active.closest(DOCKED_PANEL) !== null) {
-    return false;
-  }
   return active.matches(`main, h1, ${UNCLAIMED_FOCUS_SELECTOR}`);
+}
+
+/**
+ * Whether a surface that holds the officer's focus is open above the page now: a question (a `dialog` opened as a modal, or an `alertdialog`), or the sheet the panel becomes at 768px and below (a
+ * `dialog` that does not say `aria-modal="false"`, as the docked panel does). A native dialog counts only while it is open; the others are drawn only while they are. **Nothing behind such a
+ * surface is given focus by the page** (the hosted WebKit runs of 12 November 2026): a question that closes over the sheet leaves Safari's engine with focus on the document, which is nobody's, and
+ * the row that changed is behind the sheet. The surface keeps the officer's focus, and the table gives the row focus when the sheet is closed.
+ */
+export function modalSurfaceIsOpen(): boolean {
+  return [...document.querySelectorAll(MODAL_SURFACE)].some(
+    (surface) => !(surface instanceof HTMLDialogElement) || surface.open,
+  );
 }
 
 /** What gives focus back, as the queue workspace and a table offer it (`QueueWorkspaceHandle`): a page asks the table and never looks for a class of the kit's markup. */

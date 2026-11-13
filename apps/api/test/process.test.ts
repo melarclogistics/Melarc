@@ -47,6 +47,17 @@ function records(text: string): Record<string, unknown>[] {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+/** Whether a line of the process's output, written whole so far, is the log record with this message: the last line may still be arriving, and is not one yet. */
+function logged(text: string, message: string): boolean {
+  return text.split('\n').some((line) => {
+    try {
+      return (JSON.parse(line) as { msg?: unknown }).msg === message;
+    } catch {
+      return false;
+    }
+  });
+}
+
 const nothingListening = (port: number) => bounded(`http://127.0.0.1:${String(port)}/livez`);
 
 describe('startup refusals', () => {
@@ -312,6 +323,14 @@ describe('a running API process', () => {
       await running.waitUntilLive(baseUrl);
 
       running.signal('SIGTERM');
+      // The signal and the request go from this process to another, and nothing orders them: a request made at once can be answered as the API was before it took the signal (the
+      // hosted unit job of 12 November 2026 failed on that in about one run in eight, on main's code as well). The API says it has taken the signal and begun to drain by writing
+      // "shutdown started", which it does after its state has become `draining`: the request is made then, and what it is answered is the API's, not the race's.
+      await running.waitForOutput(
+        (output) => logged(output, 'shutdown started'),
+        DEADLINES.stop,
+        'the API did not log "shutdown started" after SIGTERM',
+      );
       const draining = await bounded(`${baseUrl}/readyz`);
       // The database is absent in this test, so a bare 503 is also what an API that never drained would
       // return. The reason is what proves the drain.

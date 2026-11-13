@@ -1,9 +1,9 @@
 import type { Locator, Page, Route } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
-import { watchPage, wcagViolations } from './support/page';
+import { animationsDone, scrollSettled, watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
-import { disturbTheFit, expectCardsOfTheFit, markNode, stillThere } from './support/fit';
+import { disturbTheFit, expectCardsOfTheFit, frames, markNode, stillThere } from './support/fit';
 import { wordsOf } from './support/words';
 import { expectWholeInTheWindow } from './support/whole';
 import { expectNoTableScrollsSideways } from './support/tables';
@@ -593,25 +593,44 @@ test.describe('the queue: the parts that stay in view, long text and the room it
 
   // Break caught (the review of 5edada2, M5): a cell that never wraps, so that a long address or a long name runs out of its box, is cut with an ellipsis or makes the box scroll sideways
   // (the old table's guards, which run 3 removed): the text is on the page whole, in the box it has, at every width and with the panel open.
-  for (const size of [WIDE, { width: 1280, height: 800 }, { width: 768, height: 1024 }]) {
+  //
+  // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). The result is one, and named, at every
+  // width, on every engine, in both builds and on every platform, whenever the face arrives (a decision to go to cards made while the face was on its way is measured again when it is in:
+  // `useColumnFit`, the Product Owner's answer of 12 November 2026; the test below holds that with the face held back). Wider than 960px the table draws the address. **At 832px it is the table with its
+  // address column taken away**, and no address is on the page. **At 768px (a box of 41rem, 654px) it is cards**, which carry every fact of a request, the address among them: the table of five columns
+  // needs 677 to 678px, on the Product Owner's Windows and on the hosted Linux runner alike (measured on both on 12 November 2026). A page read before the face has arrived and the table has
+  // measured again is a table at 768px (the hosted run of that day found the approver's queue so in the development-server WebKit): a test of the result waits for the face and for the frames the
+  // restart takes (`expectCardsOfTheFit`), and then looks.
+  for (const size of [
+    WIDE,
+    { width: 1280, height: 800 },
+    { width: 832, height: 1024 },
+    { width: 768, height: 1024 },
+  ]) {
     test(`wraps a long address, name and note whole, and never cuts it off or scrolls the box sideways, at ${String(size.width)} px`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
       await open(page, '/pickup-requests', longWorld());
 
-      // The address is a lesser column: where the box has not the room for it the table takes it away and does not scroll (the Product Owner, 10 November 2026). At 768px the table either fits
-      // without it, and then no address is on the page, or has nothing more to give, and then the requests are cards, which carry every fact of a request, the address among them. Which of the
-      // two the page reaches depends on the face the table was first measured in (that measure is made in the fallback face, and a list that went to cards stays cards: `useColumnFit`): the
-      // production build reached the table and the development server, which sends the face later, reached cards (the hosted run of 12 November 2026). Both keep the rule, so both are held here,
-      // and so is what matters in either: wherever the address is drawn, it is drawn whole. Wider than 768px it is drawn, in the table or in the cards of a table that ran out of room.
       await page.evaluate(async () => {
         await document.fonts.ready;
       });
+      // The faces are in, and the table has measured again for them (`nextFrame`): what is read now is the page's result.
+      await frames(page);
       await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
       const address = page.getByText(LONG_ADDRESS).locator('visible=true');
-      if (size.width > 768) await expect(address).toHaveCount(2);
-      else await expect.poll(async () => [0, 2].includes(await address.count())).toBe(true);
+      if (size.width === 768) {
+        await expect(queueCards(page)).toBeVisible();
+        await expect(queueTable(page)).toHaveCount(0);
+        await expect(address).toHaveCount(2);
+      } else if (size.width === 832) {
+        await expect(queueTable(page)).toBeVisible();
+        await expect(queueCards(page)).toHaveCount(0);
+        await expect(address).toHaveCount(0);
+      } else {
+        await expect(address).toHaveCount(2);
+      }
       const drawsAddress = (await address.count()) > 0;
       // No table scrolls sideways, at 768px either (restored: the narrowed check of 7aa6135 let the box scroll there and held only that no cell cut its words off), and the page never does.
       expect(await overflowingInQueue(page)).toEqual([]);
@@ -625,6 +644,55 @@ test.describe('the queue: the parts that stay in view, long text and the room it
       }
     });
   }
+
+  // Break caught (the Product Owner's answer to the note of 7325628, 12 November 2026): a first decision to go to cards, made while the face was on its way, and kept until the box grew, so that which of
+  // two results the queue reached depended on when the face arrived. The face is held back here, so that the first measure is made while the faces are loading on every machine, and in a room too small
+  // for the table (a rule that gives each cell 16rem, taken away again before the face is let go): the queue is cards while the face is on its way, and, when it is in, the table with its address column
+  // taken away, as in the test above, where the face was in before the first measure. The width is 832px, where the real face makes a table (it needs 677 to 678px of 718): at 768px it makes cards, which
+  // a decision kept from the first measure could not be told from the right one by. A wide fallback face was tried for the first measure and does not do: a plain monospace is only some 10% wider than
+  // Inter, and Firefox does not apply a face made on the spot (`local()`) in time for it.
+  test('reaches the table at 832 px when the face arrives after the first measure', async ({
+    page,
+  }) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\.woff2(\?.*)?$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const wide = document.createElement('style');
+        wide.setAttribute('data-test-wide', '');
+        wide.textContent =
+          '.ui-data-table__table th, .ui-data-table__table td { min-width: 16rem; }';
+        document.head.append(wide);
+      });
+    });
+    const watch = watchPage(page);
+    await stubPickupApi(page, world(longWorld()));
+    await page.setViewportSize({ width: 832, height: 1024 });
+    await page.goto('/pickup-requests', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(LONG_SENDER).locator('visible=true')).toHaveCount(2);
+    // The first measure was made while the face was on its way, in a room too small for the table: it had nothing more to give, and the list went to cards.
+    await expectCardsOfTheFit(queueRegion(page), { facesLoading: true });
+    expect(await page.evaluate(() => document.fonts.status)).toBe('loading');
+
+    // The rule goes first, and the face after it: the cards are not drawn again by that (there is no table to read it), and the table that is drawn when the face is in is measured as it is.
+    await page.evaluate(() => {
+      document.querySelector('[data-test-wide]')?.remove();
+    });
+    release();
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    await expect(queueTable(page)).toBeVisible();
+    await expect(queueCards(page)).toHaveCount(0);
+    await expect(page.getByText(LONG_ADDRESS).locator('visible=true')).toHaveCount(0);
+    expect(watch.problems).toEqual([]);
+  });
 
   test('keeps a long name and address whole with a request open beside the queue', async ({
     page,
@@ -921,12 +989,10 @@ test.describe('the queue: confirming in the panel', () => {
   });
 
   /**
-   * Confirms the request in its panel and, while the queue is read again for it (the read is held until `release`), opens another request in the panel: the officer is working in that one when the
-   * read lands. `settled` waits for the end of the read and for the effect it runs.
+   * Confirms the request in its panel. From then the queue's read, which the act asks for, is held until `settled` lets it go; `settled` waits for the end of the read and for the effect it runs.
    */
-  async function confirmThenOpenAnother(page: Page) {
+  async function confirmWithTheReadHeld(page: Page) {
     await page.setViewportSize(WIDE);
-    const other = 'ACC-PR-9WXH4T';
     const { api, watch } = await open(page, '/pickup-requests');
     await page.getByRole('button', { name: `Confirm ${CODE}` }).click();
     const panel = page.getByRole('dialog', { name: CODE });
@@ -953,15 +1019,9 @@ test.describe('the queue: confirming in the panel', () => {
     await expect.poll(() => held).toBe(1);
     await expect(busy).toHaveCount(1);
 
-    // The officer moves on while the queue is read again: another request opens in the panel, and its heading has focus.
-    await opener(page, other).click();
-    const next = page.getByRole('dialog', { name: other });
-    await expect(next.getByRole('heading', { name: other })).toBeFocused();
-
     return {
       watch,
-      other,
-      next,
+      panel,
       settled: async () => {
         release();
         await expect(busy).toHaveCount(0);
@@ -978,6 +1038,19 @@ test.describe('the queue: confirming in the panel', () => {
         );
       },
     };
+  }
+
+  /** Confirms the request in its panel and, while the queue is read again for it, opens another request in the panel: the officer is working in that one when the read lands. */
+  async function confirmThenOpenAnother(page: Page) {
+    const other = 'ACC-PR-9WXH4T';
+    const { watch, settled } = await confirmWithTheReadHeld(page);
+
+    // The officer moves on while the queue is read again: another request opens in the panel, and its heading has focus.
+    await opener(page, other).click();
+    const next = page.getByRole('dialog', { name: other });
+    await expect(next.getByRole('heading', { name: other })).toBeFocused();
+
+    return { watch, other, next, settled };
   }
 
   // Break caught (run 7, Stage 2.1; a regression of 765e873): the page took every container at tabindex -1 that is no control for focus nobody chose, and the panel's heading is one. An officer who
@@ -1014,6 +1087,33 @@ test.describe('the queue: confirming in the panel', () => {
 
     // A press on a fact of the request: text that is no control. The nearest element that can have focus is the panel's region.
     await next.getByRole('definition').first().click();
+    expect(await inThePanel()).toBe(true);
+
+    await settled();
+    expect(await inThePanel()).toBe(true);
+    await expect(rowButton(page)).not.toBeFocused();
+    expect(watch.problems.filter((problem) => !problem.includes('HTTP 4'))).toEqual([]);
+  });
+
+  // Break caught (the Product Owner's review of ba9a18c, item 4): the exemption was written for "a docked panel that shows another request", so that a press on plain text in the panel of the request
+  // JUST CONFIRMED, before the queue was read again, was still taken for nobody's (the press focuses the panel's read-state region, which carries the mark) and the read that landed took focus from
+  // there back to the row. Focus that moved after the act is the officer's, wherever it is: the act's own press left focus where it left it (the test above this block, and the WebKit case of 765e873,
+  // where the press leaves it on the region and the row must be given it), and a press made afterwards moved it.
+  test('leaves focus in the panel of the request just confirmed, where the officer pressed on its text before the queue was read again', async ({
+    page,
+  }) => {
+    const { watch, panel, settled } = await confirmWithTheReadHeld(page);
+    await expect(panel.getByText('Confirmed').first()).toBeVisible();
+    const inThePanel = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return (
+          active !== null && active !== document.body && active.closest('[role="dialog"]') !== null
+        );
+      });
+
+    // A press on a fact of the request: text that is no control. The nearest element that can have focus is the panel's region.
+    await panel.getByRole('definition').first().click();
     expect(await inThePanel()).toBe(true);
 
     await settled();
@@ -1582,10 +1682,17 @@ test.describe('the queue: coming back from a request', () => {
       // The place that is left is the one the officer leaves from: the page as it stands when they press the panel's link (the panel is in view where it is, and the page is not
       // moved to it), which is where Playwright would otherwise scroll to before its click.
       await far.click();
-      const link = page
-        .getByRole('dialog', { name: codeOf(10) })
-        .getByRole('link', { name: 'Open full page' });
+      const panel = page.getByRole('dialog', { name: codeOf(10) });
+      const link = panel.getByRole('link', { name: 'Open full page' });
+      // The place is read where the page rests, and the panel has to be at rest too: it fades and slides in over some 600ms, and opening it narrows the queue's box, so the page can still be growing
+      // or shifting its scroll for a few frames (the Product Owner's review of ba9a18c, item 6: the hosted WebKit run of 12 November 2026 read a place 147px from the one the page came back to).
+      // **The click must not be what moves the page.** Playwright scrolls an element into view before it clicks it, once the element has stopped moving: with the panel still arriving, that scroll
+      // came after the place was read, in about one run in twelve of Chromium on the production build (every frame, scroll and focus of the page recorded on 12 November 2026: read at 596px, left
+      // from at 449px or at 242px, given back with the row in view 147px or 148px from the place read). The page gave back the place it was left from; the test had read another. With the panel at
+      // rest that scroll moves nothing (40 runs: the page at 596px through the call and through the click).
+      await animationsDone(panel);
       await link.scrollIntoViewIfNeeded();
+      await scrollSettled(page);
       const before = await page.evaluate(() => window.scrollY);
       await link.click();
       await expect(page.getByRole('heading', { level: 1, name: codeOf(10) })).toBeVisible();
@@ -1593,6 +1700,7 @@ test.describe('the queue: coming back from a request', () => {
       await back(page);
 
       await expect(far).toBeFocused();
+      await scrollSettled(page);
       const after = await page.evaluate(() => window.scrollY);
       expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
       const box = await far.boundingBox();

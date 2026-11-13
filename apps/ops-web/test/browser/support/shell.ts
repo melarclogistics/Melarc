@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 import { SIGNED_IN_SESSION } from './api';
+import { animationsDone } from './page';
 
 /**
  * Where the browser tests find the parts of the signed-in shell (redesign step R4): the sidebar, the top bar and the menus of the top bar. One
@@ -99,10 +100,17 @@ export async function openSheet(page: Page): Promise<Locator> {
   return sheet;
 }
 
-/** The sheet has stopped sliding and is at the left edge: what a screenshot, an axe run and a click should wait for. */
+/**
+ * The sheet has stopped sliding and is at the left edge: what a screenshot, an axe run and a click should wait for. Its slide is brought to its end (`animationsDone`) and not waited for: the
+ * hosted WebKit run of 13 November 2026 found it 5.15px short of its end for the whole five seconds of the poll, a hosted WebKit's animation clock having stopped.
+ */
 export async function sheetSettled(page: Page): Promise<void> {
+  const sheet = page.locator('[data-slot="sheet-content"]');
   await expect
-    .poll(async () => (await page.locator('[data-slot="sheet-content"]').boundingBox())?.x ?? -1)
+    .poll(async () => {
+      if ((await sheet.count()) > 0) await animationsDone(sheet.first());
+      return (await sheet.first().boundingBox())?.x ?? -1;
+    })
     .toBe(0);
 }
 

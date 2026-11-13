@@ -46,7 +46,13 @@ import {
   queueFactsOf,
   type QueueFacts,
 } from './pickup-queue-view';
-import { isUnclaimed, requestOfClick, restoreQueuePlace, searchOf } from './queue-return';
+import {
+  isUnclaimed,
+  modalSurfaceIsOpen,
+  requestOfClick,
+  restoreQueuePlace,
+  searchOf,
+} from './queue-return';
 import './pickup-pages.css';
 
 /** A state from the address, or nothing: an address is the person's to edit, and a value that is not a state is no filter. */
@@ -192,17 +198,40 @@ export function PickupRequestListPage() {
   const restored = useRef(arrival === undefined);
 
   // Once the rows that were read again after an act are drawn, focus goes to the row that changed (the request's own button), else to the results: the officer is not left on nothing.
-  // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c).
-  // The panel that is open when the read lands may be another request's: the officer opened it while the queue was read again, and whatever has focus in it, a click on its text among it, is theirs.
-  const openedId = opened?.id;
+  // Only where nobody has put it: a person who moved on while the queue was read again keeps their focus (the review of 499399c). **Once the officer has pressed or typed since the act, focus is theirs,
+  // wherever it is** (the review of ba9a18c): a press or a key is noted from the moment the read begins to the moment it lands, and then a click on plain text in a panel, whichever request it shows, is
+  // not taken for nobody's though it leaves focus on the panel's marked region (`isUnclaimed` says why it is the press that is noted and not a change of the focused element).
+  const touchedSinceAct = useRef(false);
   useEffect(() => {
-    if (afterAct || returnTo.current === undefined) return;
+    if (!afterAct) return;
+    touchedSinceAct.current = false;
+    const note = (): void => {
+      touchedSinceAct.current = true;
+    };
+    document.addEventListener('pointerdown', note, true);
+    document.addEventListener('keydown', note, true);
+    return () => {
+      document.removeEventListener('pointerdown', note, true);
+      document.removeEventListener('keydown', note, true);
+    };
+  }, [afterAct]);
+  // **When the rows are drawn is told by the read itself and not inferred from the page's state or the read's timestamp** (the hosted WebKit runs of 12 November 2026: 22 failures in 60 of the first
+  // confirmation's test on `ba9a18c`). The effect used to run when `afterAct` went from true to false or when `list.dataUpdatedAt` changed. A read answered before React had drawn that it was reading
+  // makes the two one render with no change in either, and a clock that does not move (every browser test freezes it) never changes the timestamp: the effect did not run, the row was never
+  // given focus, and the officer was left on the document. The read ends in a state of its own (`readAfterAct`, always a new object), and focus goes to the row when the rows that read delivered are
+  // the rows drawn (`list.data` is the read's data): the read answers a moment before the query hands its rows to this page, and a row that has left the list is not focused in its place.
+  const [readAfterAct, setReadAfterAct] = useState<{ readonly data: unknown } | undefined>();
+  useEffect(() => {
+    if (afterAct || readAfterAct === undefined || returnTo.current === undefined) return;
+    if (list.data !== readAfterAct.data) return;
     const id = returnTo.current;
     returnTo.current = undefined;
-    const panelIsAnotherRequests = openedId !== undefined && openedId !== id;
-    if (!isUnclaimed(document.activeElement, { panelIsAnotherRequests })) return;
+    // The officer is in a surface that holds focus (the sheet the panel becomes at 768px and below, or a question): the row is behind it. A question closed over the sheet leaves Safari's engine with
+    // focus on the document, and the row must not take it from the sheet (the hosted WebKit runs of 12 November 2026); the row is given focus when the sheet is closed.
+    if (modalSurfaceIsOpen()) return;
+    if (!isUnclaimed(document.activeElement, { touchedSinceAct: touchedSinceAct.current })) return;
     if (workspace.current?.focusRow(id) !== true) workspace.current?.focusResults();
-  }, [afterAct, list.dataUpdatedAt, openedId]);
+  }, [afterAct, readAfterAct, list.data]);
 
   /**
    * The queue is read again after an act, its rows kept. If that read fails the rows stay, with a line that says they may be out of date and the way to read them again; any other read that
@@ -210,11 +239,13 @@ export function PickupRequestListPage() {
    */
   function readAgainAfterAct(): void {
     setStaleAfterAct(undefined);
+    setReadAfterAct(undefined);
     setAfterAct(true);
     void list
       .refetch()
       .then((read) => {
         if (read.isError) setStaleAfterAct(pageKey);
+        setReadAfterAct({ data: read.data });
       })
       .finally(() => {
         setAfterAct(false);

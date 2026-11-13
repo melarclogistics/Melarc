@@ -1306,6 +1306,73 @@ describe('the queue: the request beside it', () => {
       ).toBeVisible();
     });
 
+    // Break caught (the hosted WebKit runs of 12 November 2026: this was 22 failures in 60 of the first confirmation's test on `ba9a18c`, and 9 in 60 on the branch that mended the table): the
+    // focus was given to the row by an effect that ran when the read after the act ended, which the page inferred from `afterAct` going true and then false and from the read's
+    // timestamp. A read answered before React had drawn that it was reading makes the two one render with no change in either, and a clock that does not move (every browser test freezes it)
+    // never changes the timestamp: the effect did not run, the confirmed request's row was never given focus, and the officer was left on the document. The page now notes that the read has ended
+    // (a state of its own, set when the read answers, which always changes) and gives focus when the rows that read delivered are the rows drawn.
+    it('gives focus to the row that changed though the clock does not move and the read after the act is answered at once', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-03T08:00:00.000Z'));
+      try {
+        const view = openConfirmer();
+        await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+        const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+        await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+        const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+        await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+        await waitFor(() => {
+          expect(
+            screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+          ).toHaveFocus();
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // Break caught (the hosted WebKit runs of 12 November 2026 after the row's focus was mended to be given every time, run 43283834708: "at 768 px, confirms from the card, and focus is in the sheet
+    // afterwards" failed in both builds, and in 4 runs in 10 of the development server on the Product Owner's WebKit): at 768px the panel is a sheet, a modal surface, and a question closed over it
+    // leaves Safari's engine with focus on the document (the control that opened the question has left the panel, which now says "Confirmed"). The page took the document for nobody's and gave the row
+    // focus when the read landed, and the row is behind the sheet: the officer was left on the page under it, and the sheet's own hold on focus could not take it back. The test had passed before only
+    // because the effect did not run under its frozen clock. A modal surface is open here (a stand-in: jsdom draws no layout to make the panel a sheet); the document has focus when the read lands.
+    it('does not give the row focus while a modal surface is open above the queue, though focus has fallen to the document', async () => {
+      let listReads = 0;
+      const view = openConfirmer(undefined, undefined, () => {
+        listReads += 1;
+        return page([pending, late]);
+      });
+      await view.user.click(await screen.findByRole('button', { name: 'Confirm ACC-PR-7KQ2MZ' }));
+      const panel = await screen.findByRole('dialog', { name: 'ACC-PR-7KQ2MZ' });
+      await view.user.click(await within(panel).findByRole('button', { name: 'Confirm pickup' }));
+      const question = await screen.findByRole('alertdialog', { name: 'Confirm this pickup?' });
+      const sheet = document.createElement('div');
+      sheet.setAttribute('role', 'dialog');
+      sheet.setAttribute('aria-label', 'A sheet');
+      document.body.append(sheet);
+      await view.user.click(within(question).getByRole('button', { name: 'Confirm the pickup' }));
+
+      // The queue is read again, and the rows are drawn.
+      await waitFor(() => {
+        expect(listReads).toBe(2);
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Pickup requests' })).not.toHaveAttribute(
+          'aria-busy',
+          'true',
+        );
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByRole('button', { name: 'Open ACC-PR-7KQ2MZ, Demo Fabrics Ltd' }),
+      ).not.toHaveFocus();
+      sheet.remove();
+    });
+
     // Break caught (the review of 499399c): focus taken back to the row that changed from a person who has moved on while the queue was read again.
     it('does not take focus from a person who has moved it while the queue was read again after a confirmation', async () => {
       const reads = byHand();

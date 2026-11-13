@@ -1203,23 +1203,40 @@ describe('DataTable: the room a table has (the Product Owner, 10 November 2026: 
     expect(drawsCards(16)).toBe(true);
   });
 
-  // Break caught (run 7, Stage 1.7; the run 6 reading leaned on React's own timing): the change to cards left to when React next renders, so that the frame in which the box became narrow still
-  // draws the table. The observer's callback flushes it: the cards are in the page when the callback returns. (`kit.spec.ts` measures the same in a browser frame.)
-  it('draws the cards inside the observer’s callback, and not a render later', () => {
+  // Break caught (the Product Owner's review of ba9a18c; WebKit on Linux reported "ResizeObserver loop completed with undelivered notifications" in `kit.spec.ts`): a table that flushed its change
+  // to cards inside the callback of the observer that told it the box had narrowed, so that the layout it changed was one the observer was told of again in the frame it was delivering. The
+  // callback only asks; the cards are drawn in the next animation frame, in one flush, so that no render is left to when React next decides to.
+  it('draws nothing inside the observer’s callback, and the cards in the next animation frame', () => {
     const room = tableRoom(1200);
     render(<Table card={cardOf} cardTitle={(item) => item.code} />);
     expect(screen.getByRole('table')).toBeInTheDocument();
-    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
-    environment.IS_REACT_ACT_ENVIRONMENT = false;
-    try {
+
+    act(() => {
       room.resize(400);
 
+      // The callback has returned and the page is as it was: a layout it changed would be one the observer is told of in this very delivery.
+      expect(screen.getByRole('table')).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+
+      room.frame();
+
+      // The frame draws the cards in one flush: they are in the page when it returns, and no render is left to come.
       expect(screen.queryByRole('table')).toBeNull();
       expect(screen.getByRole('list', { name: 'Pickup requests' })).toBeInTheDocument();
-    } finally {
-      environment.IS_REACT_ACT_ENVIRONMENT = true;
-      restoreTableRoom();
-    }
+    });
+    restoreTableRoom();
+  });
+
+  // Break caught: the first measure left to a frame, so that the first paint of a table in a narrow box is the table for one frame (the first measure is a layout effect, which React finishes
+  // before it paints, and it waits for no frame).
+  it('draws the cards in its first render where its box is narrow, with no frame to wait for', () => {
+    const room = tableRoom(400);
+    render(<Table card={cardOf} cardTitle={(item) => item.code} />);
+
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('list', { name: 'Pickup requests' })).toBeInTheDocument();
+    expect(room.framesAsked()).toBe(0);
+    restoreTableRoom();
   });
 
   // Break caught: the lesser columns taken away in an order the screen did not mean: the most lesser first, the later of two equals before the earlier, and never the row header or a column the screen did not mark.
@@ -1321,6 +1338,7 @@ describe('DataTable: the room a table has (the Product Owner, 10 November 2026: 
 
       act(() => {
         room.resize(1200);
+        room.frame();
       });
       await waitFor(() => {
         expect(headers()).toHaveLength(5);
@@ -1328,10 +1346,80 @@ describe('DataTable: the room a table has (the Product Owner, 10 November 2026: 
 
       act(() => {
         room.resize(900);
+        room.frame();
       });
       await waitFor(() => {
         expect(headers()).toEqual(['Request / sender', 'State', 'Service date', 'Pickup address']);
       });
+    });
+
+    // Break caught (the Product Owner's review of ba9a18c; the same report as above): the restart of the fit flushed inside the callback of the observer of the box, so that the columns it put
+    // back changed the layout in the middle of the delivery. The callback asks; the next animation frame measures again from every column, and the layout it reads is final when it returns.
+    it('puts the columns back in the next animation frame, and draws nothing inside the observer’s callback', () => {
+      const room = tableRoom(700);
+      render(<Table columns={LESSER} />);
+      expect(headers()).toEqual(['Request / sender', 'State', 'Service date']);
+
+      act(() => {
+        room.resize(1200);
+
+        expect(headers()).toEqual(['Request / sender', 'State', 'Service date']);
+
+        room.frame();
+
+        expect(headers()).toHaveLength(5);
+      });
+    });
+
+    // Break caught (the same): the faces' signal, which a browser may send at any moment (a promise that settles can be told in the middle of the delivery of the observers' callbacks), changed
+    // the layout where it was told. It asks as well, and the next animation frame measures again, whichever of the two signals said the faces are in.
+    it('measures again from every column in the next animation frame when the faces finish loading, and not inside the signal', () => {
+      const room = tableRoom(900);
+      render(<Table columns={LESSER} />);
+      expect(headers()).toHaveLength(4);
+      room.setNeed(150);
+
+      act(() => {
+        room.fontsLoaded();
+
+        expect(headers()).toHaveLength(4);
+
+        room.frame();
+
+        expect(headers()).toHaveLength(5);
+      });
+    });
+
+    it('does the same when only `ready` says the faces are in', async () => {
+      const room = tableRoom(900);
+      render(<Table columns={LESSER} />);
+      expect(headers()).toHaveLength(4);
+      room.setNeed(150);
+
+      await act(async () => {
+        await room.fontsReadyWithoutEvent();
+
+        expect(headers()).toHaveLength(4);
+
+        room.frame();
+
+        expect(headers()).toHaveLength(5);
+      });
+    });
+
+    // Break caught: work left for a frame by a table that is gone, which draws into a tree that was taken away, or a frame asked for by every width the box passes through.
+    it('asks nothing more of the animation frame once the table is gone', () => {
+      const room = tableRoom(700);
+      const view = render(<Table columns={LESSER} />);
+
+      act(() => {
+        room.resize(1200);
+      });
+      expect(room.framesAsked()).toBeGreaterThan(0);
+
+      view.unmount();
+
+      expect(room.framesAsked()).toBe(0);
     });
 
     // Break caught: the fit measured once, when the table was first drawn, so that rows that arrive later (a page, a refresh) or a column that changes are never fitted.
@@ -1472,6 +1560,7 @@ describe('DataTable: words wrap at their words, and a column keeps its room (run
 
       act(() => {
         room.resize(1200);
+        room.frame();
       });
 
       await waitFor(() => {
@@ -1529,6 +1618,7 @@ describe('DataTable: words wrap at their words, and a column keeps its room (run
     room.setNeed(150);
     act(() => {
       room.fontsLoaded();
+      room.frame();
     });
 
     expect(headers()).toHaveLength(5);
@@ -1544,6 +1634,7 @@ describe('DataTable: words wrap at their words, and a column keeps its room (run
     room.setNeed(150);
     await act(async () => {
       await room.fontsReadyWithoutEvent();
+      room.frame();
     });
 
     expect(headers()).toHaveLength(5);
@@ -1643,7 +1734,8 @@ describe('DataTable: where a table runs out of room it is cards, and stays cards
   });
 
   // Break caught (the review of 67bc979: a revoke, a Remove or a Confirm made from a card): every change of rows, any `loadingdone` and any change of the box's width drew the table again in place
-  // of the cards to measure it, which unmounted every card, so that focus on a card's control fell to the body and a dialog opened from it lost its way back.
+  // of the cards to measure it, which unmounted every card, so that focus on a card's control fell to the body and a dialog opened from it lost its way back. The cards are kept once the list
+  // went to cards **with the faces in** (a decision made while they were loading is provisional: "a list that went to cards while the faces were loading", below).
   describe('stays cards, and the card that has focus is the same node, when', () => {
     it('its rows change', () => {
       tableRoom(700, 250);
@@ -1658,17 +1750,17 @@ describe('DataTable: where a table runs out of room it is cards, and stays cards
       expect(confirm).toHaveFocus();
     });
 
-    it('the faces finish loading, with either signal', async () => {
+    it('another face finishes loading', () => {
       const room = tableRoom(700, 250);
+      // The faces were in when the list was measured: this is the real face.
+      room.fontsLoaded();
       render(opening());
       const confirm = confirmOf(SECOND);
       confirm.focus();
 
       act(() => {
         room.fontsLoaded();
-      });
-      await act(async () => {
-        await room.fontsReadyWithoutEvent();
+        room.frame();
       });
 
       expect(screen.queryByRole('table')).toBeNull();
@@ -1678,15 +1770,80 @@ describe('DataTable: where a table runs out of room it is cards, and stays cards
 
     it('its box narrows, and widens again to no more than it was', () => {
       const room = tableRoom(700, 250);
+      room.fontsLoaded();
       render(opening());
       const confirm = confirmOf(SECOND);
       confirm.focus();
 
       act(() => {
         room.resize(660);
+        room.frame();
       });
       act(() => {
         room.resize(700);
+        room.frame();
+      });
+
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(confirmOf(SECOND)).toBe(confirm);
+      expect(confirm).toHaveFocus();
+    });
+  });
+
+  // Break caught (the Product Owner's answer to the note of 7325628, 12 November 2026): a first decision to go to cards made in the fallback face (`font-display: swap`: the face the browser shows
+  // first is not the one that stays), and kept until the box grows. Where the real face would have fitted the table, the queue stayed cards for the visit, and which of the two a page reached
+  // depended on when the face arrived (the development server sends it later than a production build). A decision made while the faces are loading is provisional: the fit begins again from
+  // every column when they are in, and only a decision made with them in is kept.
+  describe('a list that went to cards while the faces were loading', () => {
+    const headersOf = () => screen.getAllByRole('columnheader').map((cell) => cell.textContent);
+
+    it('is a table when the faces are in and its columns fit them', () => {
+      const room = tableRoom(700, 250);
+      render(opening());
+      expect(screen.queryByRole('table')).toBeNull();
+
+      // The fallback face was the wider one: with the face that arrived, four columns need 600 of the 700.
+      room.setNeed(150);
+      act(() => {
+        room.fontsLoaded();
+        room.frame();
+      });
+
+      expect(headersOf()).toEqual(['Request / sender', 'State', 'Service date', 'Actions']);
+      expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
+    });
+
+    it('is a table when only `ready` says the faces are in', async () => {
+      const room = tableRoom(700, 250);
+      render(opening());
+      expect(screen.queryByRole('table')).toBeNull();
+
+      room.setNeed(150);
+      await act(async () => {
+        await room.fontsReadyWithoutEvent();
+        room.frame();
+      });
+
+      expect(headersOf()).toEqual(['Request / sender', 'State', 'Service date', 'Actions']);
+    });
+
+    it('is cards again, and is kept from then on, when the real face needs the room as well', () => {
+      const room = tableRoom(700, 250);
+      render(opening());
+
+      act(() => {
+        room.fontsLoaded();
+        room.frame();
+      });
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(screen.getByRole('list', { name: 'Pickup requests' })).toBeInTheDocument();
+
+      // Measured in the real face, the decision stays: another face arriving draws no card again.
+      const confirm = confirmOf(SECOND);
+      confirm.focus();
+      act(() => {
+        room.fontsLoaded();
+        room.frame();
       });
 
       expect(screen.queryByRole('table')).toBeNull();
@@ -1696,13 +1853,14 @@ describe('DataTable: where a table runs out of room it is cards, and stays cards
   });
 
   // Break caught: cards that never come back, so that a person who widens the window or closes the panel keeps cards where the table has room again.
-  it('draws the table again when its box grows wider than it was when the list went to cards', async () => {
+  it('draws the table again when its box grows to what the table needs', async () => {
     const room = tableRoom(700, 250);
     render(opening());
     expect(screen.queryByRole('table')).toBeNull();
 
     act(() => {
       room.resize(1300);
+      room.frame();
     });
 
     await waitFor(() => {
@@ -1711,25 +1869,47 @@ describe('DataTable: where a table runs out of room it is cards, and stays cards
     expect(screen.queryByRole('list', { name: 'Pickup requests' })).toBeNull();
   });
 
-  // Break caught: a width remembered forever, so that a box that grew a little (a scrollbar gone) but not enough for the table is a table for a frame and cards again with every card new.
-  it('is cards again at its new width when it grew and the table still does not fit, and then stays cards at the widths under it', () => {
+  // Break caught (the Product Owner's review of ba9a18c, on Windows, where a scrollbar takes 17px): the width remembered was the box's, so that a box that grew by a scrollbar that went (a revoke
+  // leaves the page shorter) was "wider than it was": the table was drawn again to be measured, found no room, and every card was drawn anew, with the one that held focus. What is remembered is
+  // the width the table needed when the list went to cards (the scroll width of its box with every lesser column gone): the table is drawn again only when the box reaches it.
+  it('stays cards, the same node with its focus, when its box grows by a scrollbar that went but not to the width the table needed', () => {
     const room = tableRoom(700, 250);
+    room.fontsLoaded();
     render(opening());
-
-    act(() => {
-      room.resize(720);
-    });
-    expect(screen.queryByRole('table')).toBeNull();
     const confirm = confirmOf(SECOND);
     confirm.focus();
 
     act(() => {
-      room.resize(710);
+      room.resize(717);
+      room.frame();
     });
 
     expect(screen.queryByRole('table')).toBeNull();
     expect(confirmOf(SECOND)).toBe(confirm);
     expect(confirm).toHaveFocus();
+  });
+
+  // Break caught: a table that waits for more than it needs, or one that comes back before it fits (three columns need 750, and the fit takes a pixel of scroll for a fit).
+  it('draws the table again when its box reaches the width the table needed, and not before', () => {
+    const room = tableRoom(700, 250);
+    room.fontsLoaded();
+    render(opening());
+
+    act(() => {
+      room.resize(748);
+      room.frame();
+    });
+    expect(screen.queryByRole('table')).toBeNull();
+
+    act(() => {
+      room.resize(749);
+      room.frame();
+    });
+    expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Request / sender',
+      'State',
+      'Actions',
+    ]);
   });
 
   // Break caught: columns that change under a list of cards and are never fitted, so that a list with room for its one column is cards for the visit.
@@ -1796,6 +1976,23 @@ describe('DataTable: a mistake of the page that it can do without is a throw in 
       logged.mockRestore();
     },
   );
+
+  // Break caught (the Product Owner's review of ba9a18c, item 5): a production table whose cards have no title, which the check above only tells, drew cards with no way to open their record (the card's
+  // title is its button that opens). The row-header cell, which a row of the table opens its record from, is the card's opener then, so that a card can always open its record.
+  it('a card in production that has no title opens its record by the row-header cell', async () => {
+    vi.stubEnv('PROD', true);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const onOpen = vi.fn();
+    const user = userEvent.setup();
+    render(<Table card={cardOf} cardTitle={undefined} layout="cards" onOpen={onOpen} />);
+
+    const cards = within(screen.getByRole('list', { name: 'Pickup requests' }));
+    await user.click(cards.getByRole('button', { name: `Open ${FIRST.code}, ${FIRST.sender}` }));
+
+    expect(onOpen).toHaveBeenCalledWith(FIRST);
+    expect(cards.getAllByRole('button', { name: /^Open / })).toHaveLength(REQUESTS.length);
+    logged.mockRestore();
+  });
 });
 
 describe('DataTable: what a page may ask of it (the review of 5edada2, M3 and M4)', () => {
