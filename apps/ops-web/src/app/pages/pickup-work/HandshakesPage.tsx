@@ -29,6 +29,7 @@ import {
   HANDSHAKE_STATE_MAP,
   ROUTED_WORDS,
   counterText,
+  countOfText,
   isSettledByOps,
   settledText,
 } from './pickup-work-presentation';
@@ -93,11 +94,11 @@ function HandshakeCard({
         { label: 'Why', value: whyOf(handshake, principalId) },
         {
           label: 'Attempts',
-          value: counterText(handshake.attempts, handshake.attempt_limit, 'Attempts'),
+          value: countOfText(handshake.attempts, handshake.attempt_limit),
         },
         {
-          label: 'Text messages',
-          value: counterText(handshake.fallback_sends, handshake.fallback_limit, 'Sent'),
+          label: 'Text messages sent',
+          value: countOfText(handshake.fallback_sends, handshake.fallback_limit),
         },
         {
           label: 'Stop',
@@ -131,11 +132,11 @@ function Facts({
         { label: 'Why it needs Ops', value: whyOf(handshake, principalId) },
         {
           label: 'Attempts',
-          value: counterText(handshake.attempts, handshake.attempt_limit, 'Attempts used'),
+          value: countOfText(handshake.attempts, handshake.attempt_limit),
         },
         {
-          label: 'Text messages',
-          value: counterText(handshake.fallback_sends, handshake.fallback_limit, 'Sent'),
+          label: 'Text messages sent',
+          value: countOfText(handshake.fallback_sends, handshake.fallback_limit),
         },
         ...(handshake.expires_at === null
           ? []
@@ -204,7 +205,7 @@ function Acts({
   };
 
   return (
-    <section className="work-panel__section" aria-label="Acts">
+    <section className="work-panel__section work-panel__section--acts" aria-label="Acts">
       <h3 className="work-panel__heading">What to do</h3>
       <div className="work-panel__acts">
         {mayOverride ? (

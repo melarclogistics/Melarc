@@ -96,7 +96,7 @@ function Facts({ failure }: { readonly failure: PickupFailureView }) {
             {failure.contact_attempts.map((attempt, index) => (
               <li key={`${String(index)}:${attempt.attempted_at}`}>
                 <strong>{CONTACT_METHOD_WORDS[attempt.method]}</strong>
-                {` · ${formatInstant(attempt.attempted_at) ?? ''} · ${attempt.outcome}`}
+                <span>{`${formatInstant(attempt.attempted_at) ?? ''} · ${attempt.outcome}`}</span>
                 {attempt.note === undefined ? null : (
                   <span className="work-panel__support">{attempt.note}</span>
                 )}
@@ -184,7 +184,7 @@ function Acts({
       : ` ${CHARGE_OUTCOME_LABELS[answer.cancellation_charge_outcome]}`;
 
   return (
-    <section className="work-panel__section" aria-label="Acts">
+    <section className="work-panel__section work-panel__section--acts" aria-label="Acts">
       <h3 className="work-panel__heading">What to do</h3>
       <div className="work-panel__acts">
         {mayCancel ? (

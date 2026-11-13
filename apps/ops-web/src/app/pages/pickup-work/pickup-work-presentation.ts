@@ -120,11 +120,16 @@ export const CHANNEL_WORDS: Readonly<Record<HandshakeChannel, string>> = {
   OPS_OVERRIDE: 'Ops established the collection as an exception.',
 };
 
-/** A counter beside the limit the platform holds. A limit the platform has no usable value for is said to be unknown, and never filled in with a default. */
-export function counterText(used: number, limit: number | null, what: string): string {
+/** A counter beside the limit the platform holds: "0 of 5". A limit the platform has no usable value for is said to be unknown, and never filled in with a default. */
+export function countOfText(used: number, limit: number | null): string {
   return limit === null
-    ? `${what}: ${String(used)} (the limit is not known)`
-    : `${what}: ${String(used)} of ${String(limit)}`;
+    ? `${String(used)} (the limit is not known)`
+    : `${String(used)} of ${String(limit)}`;
+}
+
+/** The same counter with what it counts, for a cell that holds two of them. */
+export function counterText(used: number, limit: number | null, what: string): string {
+  return `${what}: ${countOfText(used, limit)}`;
 }
 
 /** Whether Ops has settled a handshake: an officer resolved it by hand, or overrode it. */

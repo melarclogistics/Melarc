@@ -65,3 +65,15 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/*
+ * The acts are the last section of a record that can be taller than the window (a failure has its facts, what the rider did and what was decided): they stay at the foot of the panel as it
+ * scrolls, on the panel's own surface and set off by a rule, so that the officer never has to scroll to the end of a record to act on it.
+ */
+.work-panel__section--acts {
+  position: sticky;
+  bottom: 0;
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-surface-default);
+}
