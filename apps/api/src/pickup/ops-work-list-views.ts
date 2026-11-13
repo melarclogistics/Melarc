@@ -248,6 +248,56 @@ export function shortfallViewOf(row: CollectionShortfallRow): CollectionShortfal
 
 // ---- The failure decision queue -----------------------------------------------------------------------------------------------------------------------
 
+/**
+ * Who escalated a failure's request (S1.30; section 17.3 makes it mandatory on the queue): `PERSON` an officer who escalated by hand, `BACKSTOP` the scheduled backstop (S1.28),
+ * which records no actor, and `UNKNOWN` where the ledger holds no event for an escalation that the request's moment says happened. The officer is not named: that would need a read
+ * of the staff directory, which is another key.
+ */
+export const ESCALATION_ACTORS = ['PERSON', 'BACKSTOP', 'UNKNOWN'] as const;
+export type EscalationActor = (typeof ESCALATION_ACTORS)[number];
+
+/** The audit event of an escalation as the statement reads it: the trigger its detail records, and the backstop's threshold and wait (the officer's event has neither). */
+export interface EscalationEventRow {
+  readonly trigger: string | null;
+  readonly threshold_hours: number | string | null;
+  readonly waited_seconds: number | string | null;
+}
+
+export interface EscalationView {
+  readonly by: EscalationActor;
+  readonly threshold_hours: number | null;
+  readonly waited_seconds: number | null;
+}
+
+/** A figure of an event's `detail` as a whole number, or `null` for anything that is not one (a ledger value is never trusted to be a number). */
+const wholeNumber = (value: number | string | null | undefined): number | null => {
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  return typeof value === 'string' && /^\d+$/.test(value) && Number.isSafeInteger(Number(value))
+    ? Number(value)
+    : null;
+};
+
+/**
+ * The escalation of a request: `null` while the request has none (`escalated_at` is null). The trigger of the event decides who: `BACKSTOP` is the backstop, with the threshold and the wait
+ * it recorded (a threshold below one hour is no threshold the backstop can have set, and reads as none); any other trigger an officer's own act, which records neither, so the view carries
+ * neither; no event at all is `UNKNOWN`.
+ */
+export function escalationViewOf(
+  escalatedAt: string | Date | null,
+  event: EscalationEventRow | null,
+): EscalationView | null {
+  if (escalatedAt === null) return null;
+  if (event === null) return { by: 'UNKNOWN', threshold_hours: null, waited_seconds: null };
+  if (event.trigger !== 'BACKSTOP')
+    return { by: 'PERSON', threshold_hours: null, waited_seconds: null };
+  const threshold = wholeNumber(event.threshold_hours);
+  return {
+    by: 'BACKSTOP',
+    threshold_hours: threshold !== null && threshold >= 1 ? threshold : null,
+    waited_seconds: wholeNumber(event.waited_seconds),
+  };
+}
+
 export interface PickupFailureRow extends ListedRow {
   readonly pickup_stop_id: string;
   readonly pickup_manifest_id: string;
@@ -263,6 +313,8 @@ export interface PickupFailureRow extends ListedRow {
   readonly attempt_number: number;
   readonly attempt_extended: boolean;
   readonly escalated_at: string | Date | null;
+  /** The audit event of the escalation (the latest `pickup.request.escalated` of the request), or `null` where the request was not escalated or the ledger holds none. */
+  readonly escalation_event: EscalationEventRow | null;
   readonly decided_at: string | Date | null;
   readonly replacement_request_id: string | null;
   readonly rider_id: string | null;
@@ -294,6 +346,8 @@ export interface PickupFailureView extends PickupContext {
   /** Whether Senior Ops force-extended the request's attempts. */
   readonly attempt_extended: boolean;
   readonly escalated_at: string | null;
+  /** Who escalated the request and, for the backstop, the threshold and the wait: `null` while it has not been escalated. */
+  readonly escalation: EscalationView | null;
   readonly decided_at: string | null;
   readonly replacement_request_id: string | null;
   readonly rider_id: string | null;
@@ -337,6 +391,7 @@ export function failureViewOf(row: PickupFailureRow): PickupFailureView {
     attempt_number: row.attempt_number,
     attempt_extended: row.attempt_extended,
     escalated_at: iso(row.escalated_at),
+    escalation: escalationViewOf(row.escalated_at, row.escalation_event),
     decided_at: iso(row.decided_at),
     replacement_request_id: row.replacement_request_id,
     rider_id: row.rider_id,

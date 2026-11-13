@@ -370,7 +370,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**199 operations: 117 `CRITICAL_WRITE` · 0 `ASYNC` · 82 `NORMAL`.**
+**200 operations: 117 `CRITICAL_WRITE` · 0 `ASYNC` · 83 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -387,7 +387,8 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `listCollectionShortfalls`| `NORMAL`| — A read: the short counts flagged to the office (D-A3, Run A; `pickup.handshake.override`)|
 | `listHandshakesForOps`| `NORMAL`| — A read: the handshakes that need Ops now (D-A3, Run A; `pickup.handshake.override`)|
 | `listNotifications`| `NORMAL`| — A read: the Ops message log (S1.12e)|
-| `listPickupFailures`| `NORMAL`| — A read: the failure decision queue (D-A3, Run A; `pickup.failure.resolve`)|
+| `listPickupFailures`| `NORMAL`| — A read: the failure decision queue (D-A3, Run A; `pickup.failure.resolve`); since S1.30 each escalated item also reads the audit event of its escalation (a statement of the same transaction, the latest `pickup.request.escalated` of the request)|
+| `listPickupStopEvidence`| `NORMAL`| — A read: the evidence of one stop with the progress of its parcel photos, cursor-paged, for Ops (S1.30; `pickup.read`). Three statements of one snapshot (the page, the counts of the parcel photos, the exception); a stop of 200 photos is two reads of the largest page and no image: the image of a record is read with `createEvidenceRetrievalAuthorization`, only when it is shown. A read of a stop in another hub writes one `auth.hub_boundary.crossed`|
 | `listVendorPickupLocations`| `NORMAL`| — A read|
 | `recordIntakeCondition`| `CRITICAL_WRITE`| the condition is authoritative once recorded and routes liability to Senior Ops|
 | `requestPayerCorrection`| `CRITICAL_WRITE`| money — asks to change who pays a frozen price|
