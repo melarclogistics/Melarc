@@ -1,4 +1,8 @@
-import type { ContentScanner, ScanVerdict } from '../auth/ports/content-scanner.port.js';
+import type {
+  ContentScanner,
+  ObjectBytes,
+  ScanVerdict,
+} from '../auth/ports/content-scanner.port.js';
 import type { EvidenceStore } from '../auth/ports/evidence-store.port.js';
 import type { Metrics } from '../auth/ports/metrics.port.js';
 import { ContentScannerError } from './content-scanner-error.js';
@@ -8,7 +12,12 @@ import {
   signatureOf,
   type SignatureKind,
 } from './evidence-vocabulary.js';
-import { StreamMismatchError, verifiedBytes } from './object-bytes.js';
+import {
+  lazyObject,
+  MissingObjectError,
+  StreamMismatchError,
+  verifiedBytes,
+} from './object-bytes.js';
 
 /**
  * Whether the object the store holds for a record is the one the record declared, and clean (Run A2; SECURITY_DESIGN.md sections 14.18 and 14.18b). **The one place that decides it**:
@@ -75,18 +84,34 @@ export async function judgeStoredObject(
     return refused('content_type');
   }
 
-  // 2. The bytes themselves, to the scanner, with their size and hash counted on the way. Only a clean verdict goes on; the scanner that cannot answer is raised.
-  const object = await store.read(declared.storageRef);
-  if (object === undefined) return refused('missing');
+  // 2. The bytes themselves, to the scanner, with their size and hash counted on the way. Only a clean verdict goes on; the scanner that cannot answer is raised. **The scanner is asked first**:
+  // the store's body is opened when the scanner reads its first byte and not before (a scanner that is not configured, or whose version is not answered, never reads it), and it is let go of
+  // whatever the scan does, so that no body is left holding the store's connection (Run B, Part 1, item 5 of the review of Run A2).
+  const object = lazyObject(() => store.read(declared.storageRef));
+  const verified = verifiedBytes(object.bytes, {
+    byteSize: declared.byteSize,
+    checksumSha256: declared.checksumSha256,
+  });
+  // A verdict is about the object only if the stream turned out to be the declared one, which is known at the stream's end: a scanner that answers without having read to it has not decided.
+  const progress = { reachedEnd: false };
+  const source: ObjectBytes = {
+    [Symbol.asyncIterator]: () => {
+      const iterator = verified[Symbol.asyncIterator]();
+      return {
+        next: async (): Promise<IteratorResult<Uint8Array>> => {
+          const step = await iterator.next();
+          if (step.done === true) progress.reachedEnd = true;
+          return step;
+        },
+        return: (): Promise<IteratorResult<Uint8Array>> => iterator.return(undefined),
+      };
+    },
+  };
   let verdict: ScanVerdict;
   try {
-    verdict = await scanner.scan(
-      verifiedBytes(object, {
-        byteSize: declared.byteSize,
-        checksumSha256: declared.checksumSha256,
-      }),
-    );
+    verdict = await scanner.scan(source);
   } catch (error) {
+    if (error instanceof MissingObjectError) return refused('missing');
     if (error instanceof StreamMismatchError) return refused(error.rule);
     if (error instanceof ContentScannerError) {
       metrics.increment('evidence_scans_total', {
@@ -94,6 +119,15 @@ export async function judgeStoredObject(
       });
     }
     throw error;
+  } finally {
+    object.release();
+  }
+  if (!progress.reachedEnd) {
+    metrics.increment('evidence_scans_total', { outcome: 'UNAVAILABLE' });
+    throw new ContentScannerError(
+      'SCANNER_UNAVAILABLE',
+      'The content scanner answered without reading the whole object',
+    );
   }
   if (verdict.verdict === 'FLAGGED') {
     metrics.increment('evidence_scans_total', { outcome: 'FLAGGED' });
@@ -105,6 +139,15 @@ export async function judgeStoredObject(
       metrics.increment('evidence_object_removals_total', { outcome: 'FAILED' });
     }
     return refused('malicious_content');
+  }
+  // Only `CLEAN` is a clean verdict, explicitly: a scanner that gave another word (a defect, or a verdict nobody here handles) did not decide, and nothing is stored on it.
+  const word: string = verdict.verdict;
+  if (word !== 'CLEAN') {
+    metrics.increment('evidence_scans_total', { outcome: 'UNAVAILABLE' });
+    throw new ContentScannerError(
+      'SCANNER_UNAVAILABLE',
+      'The content scanner gave a verdict the platform does not know',
+    );
   }
   metrics.increment('evidence_scans_total', { outcome: 'CLEAN' });
 
