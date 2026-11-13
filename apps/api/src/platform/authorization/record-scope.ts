@@ -111,6 +111,14 @@ export const RECORD_ENTITIES: RecordEntities = Object.freeze({
     table: 'run_custody_handover',
     hubScoped: true,
   },
+  // A pickup intake (S1.31, read by id from S1.32's `getHubIntake`): hub-scoped by its responsible hub for staff under `hub.read`, with the probe policy beside its read policy
+  // (migration 0092). A rider reads only the intakes of its own handover, under the key of the handover, and a vendor none; a staff member's miss on another hub's intake is
+  // HUB_SCOPE_VIOLATION, and a rider's, a vendor's and an id that matches nothing are NOT_FOUND by one code path.
+  pickup_intake: {
+    schema: 'public',
+    table: 'pickup_intake',
+    hubScoped: true,
+  },
   // A vendor organisation (S1.14, `listVendorPickupLocations`): hub-scoped by its responsible hub, with the probe policy beside its read
   // policy (migration 0049). A vendor sees its own and another's is answered as an id that matches nothing.
   vendor_organization: {

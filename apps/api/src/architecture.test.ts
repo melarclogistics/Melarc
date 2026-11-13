@@ -1561,16 +1561,67 @@ describe('pickup and fleet meet only through ports', () => {
     expect(importedFrom('pickup', 'fleet')).toEqual([]);
   });
 
-  // Break caught: a third file wiring one domain to the other, or a domain reaching into fleet or pickup from outside the composition root.
+  // Break caught: a third file wiring one domain to the other, or a domain reaching into fleet or pickup from outside the composition root. The one other file that names a file of
+  // pickup is the hub's table, for its foreign keys (`HUB_MAY_REFERENCE_FROM_PICKUP`, held by the rules of the hub below).
   it('lets only the composition root, and the domain itself, import fleet or pickup', () => {
     const offenders = production()
       .filter((source) => !COMPOSITION_ROOT.includes(source.path))
       .filter((source) => !source.path.startsWith('fleet/') && !source.path.startsWith('pickup/'))
+      .filter((source) => source.path !== 'hub/pickup-intake.schema.ts')
       .filter((source) =>
         importsOf(source.text).some((path) => /(^|\/)(fleet|pickup)\//.test(path)),
       )
       .map((source) => source.path);
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * The hub domain (S1.31) is the third that meets the run, and it meets it **through the same two ports**: `RunAccess` (the run, its stops and its completion) and `RunCustody` (who holds
+   * the parcels). It imports nothing of `pickup` or `fleet` but the schema of the tables its own table names for a foreign key (a decision of the Product Owner's to add to), it names no
+   * table of the run, of its stops, of the collection or of the custody in a statement, and neither of those domains imports it.
+   */
+  const HUB_MAY_REFERENCE_FROM_PICKUP = ['pickup-manifest.schema', 'pickup-request.schema'];
+  const HUB_NAMES_ANOTHER_DOMAINS_TABLE =
+    /\b(?:from|join|update|into)\s+(?:public\.)?(?:pickup_(?:manifest|stop|request)|collection_record|run_custody_handover)\b|\bmelarc\.run_custody_holder\b/i;
+  const hubFiles = (): SourceFile[] =>
+    production().filter((source) => source.path.startsWith('hub/'));
+
+  // Break caught: a file of the hub using a file of the run's or the custody's domain (the loader of a manifest, the completion, the custody service), which is the coupling the ports replace.
+  it('has no file of hub import a file of pickup or fleet but the schemas a foreign key names', () => {
+    const offenders = hubFiles()
+      .flatMap((source) =>
+        importsOf(source.text)
+          .filter((path) => /^\.\.\/(pickup|fleet)\//.test(path))
+          .map((path) => ({ file: source.path, path })),
+      )
+      .filter(
+        ({ file, path }) =>
+          !(
+            file.endsWith('.schema.ts') &&
+            HUB_MAY_REFERENCE_FROM_PICKUP.some((name) => path === `../pickup/${name}.js`)
+          ),
+      );
+    expect(offenders).toEqual([]);
+  });
+
+  // Break caught: the coupling moved from the imports to the SQL: the hub reading the run's, its stops', the collection's or the custody's tables by their names.
+  it('has the hub name no table of the run or of its custody in a statement', () => {
+    expect(
+      hubFiles()
+        .filter((source) => !source.path.endsWith('.schema.ts'))
+        .filter((source) => HUB_NAMES_ANOTHER_DOMAINS_TABLE.test(codeOf(source.text)))
+        .map((source) => source.path),
+    ).toEqual([]);
+    expect(HUB_NAMES_ANOTHER_DOMAINS_TABLE.test('select 1 from collection_record c')).toBe(true);
+    expect(HUB_NAMES_ANOTHER_DOMAINS_TABLE.test('insert into pickup_intake (id) values ($1)')).toBe(
+      false,
+    );
+  });
+
+  // Break caught: the run's or the custody's domain importing the hub, which would put the three in a circle.
+  it('has no file of pickup or fleet import a file of hub', () => {
+    expect(importedFrom('pickup', 'hub')).toEqual([]);
+    expect(importedFrom('fleet', 'hub')).toEqual([]);
   });
 
   // Break caught: the detector going blind, so that the rule below passes because it can see nothing. A table is named in a statement when it follows
