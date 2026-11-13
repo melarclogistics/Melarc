@@ -33,6 +33,7 @@ import {
   settledText,
 } from './pickup-work-presentation';
 import { WorkList, type PanelTools, type WorkView } from './WorkList';
+import './pickup-work-pages.css';
 
 const VIEWS: readonly [WorkView, ...WorkView[]] = [
   {

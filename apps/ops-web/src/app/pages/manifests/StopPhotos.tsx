@@ -21,6 +21,7 @@ import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { actorText } from '../pickup/pickup-presentation';
 import { EVIDENCE_STATE_MAP, countText } from '../pickup-work/pickup-work-presentation';
+import './stop-photos.css';
 
 /** What a read of a stop's evidence is, as the infinite query gives it: the pages read so far, each with the progress of the whole stop. */
 export type EvidenceRead = UseInfiniteQueryResult<

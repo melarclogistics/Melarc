@@ -28,6 +28,7 @@ import {
   waitText,
 } from './pickup-work-presentation';
 import type { PanelTools } from './WorkList';
+import './pickup-work-pages.css';
 
 /** The four acts of a failure, each with its own question. */
 type Act = 'reschedule' | 'cancel' | 'escalate' | 'extend';
