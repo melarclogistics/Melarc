@@ -118,21 +118,28 @@ export async function expectLanding(page: Page, name?: string): Promise<void> {
 }
 
 /**
- * Opens the account menu of the top bar and waits until it has come in. The menu slides and grows into place, and Playwright presses an item only when its box has stood still for two frames: in
+ * Opens the account menu of the top bar and brings it to rest. The menu slides and grows into place, and Playwright presses an item only when its box has stood still for two frames: in
  * WebKit on a loaded runner "Sign out" was "not stable" for the 20 seconds an action may take (the hosted run of 12 November 2026, the journey of row 6, in two runs of four; a probe of the same
- * clicks in WebKit settled in under two and a half seconds every time, and the cause was not found). The wait is for the menu's own animations to finish and not for a time; motion is not what a
- * journey checks.
+ * clicks in WebKit settled in under two and a half seconds every time, and the cause was not found). The menu's own animations are brought to their end (`finish()`), and **not waited for**
+ * (the hosted run of 13 November 2026: the wait for `animation.finished` of a menu in WebKit never returned, until the page was closed; a hosted WebKit's animation clock stops for seconds). Motion
+ * is not what a journey checks.
  */
 export async function openAccountMenu(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Account menu' }).click();
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
-  await menu.evaluate(async (element) => {
-    const moving = element.getAnimations({ subtree: true }).filter((animation) => {
+  await menu.evaluate((element) => {
+    for (const animation of element.getAnimations({ subtree: true })) {
       const end = animation.effect?.getComputedTiming().endTime;
-      return animation.playState === 'running' && typeof end === 'number' && Number.isFinite(end);
-    });
-    await Promise.allSettled(moving.map((animation) => animation.finished));
+      if (animation.playState !== 'running' || typeof end !== 'number' || !Number.isFinite(end)) {
+        continue;
+      }
+      try {
+        animation.finish();
+      } catch {
+        // One that cannot be finished is left to run.
+      }
+    }
   });
 }
 
