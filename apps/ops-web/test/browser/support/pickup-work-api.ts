@@ -73,7 +73,8 @@ export const photoId = (n: number): string =>
   `0c1d2e3f-4a5b-4c6d-8e7f-${n.toString(16).padStart(12, '0')}`;
 
 type Failure = ReturnType<typeof failureFixture>;
-type OpsHandshake = ReturnType<typeof opsHandshakeFixture>;
+/** (Not named like the contract's `OpsHandshake`: `test/no-duplicate-wire-types.test.ts` refuses a declared type with a schema's name, even one derived from a fixture.) */
+type HandshakeFixture = ReturnType<typeof opsHandshakeFixture>;
 type Photo = ReturnType<typeof evidenceItemFixture>;
 
 interface FailureRow {
@@ -85,7 +86,7 @@ interface FailureRow {
 export interface World {
   permissions: string[];
   failures: FailureRow[];
-  handshakes: OpsHandshake[];
+  handshakes: HandshakeFixture[];
   shortfalls: ReturnType<typeof shortfallFixture>[];
   disputes: ReturnType<typeof disputeFixture>[];
   /** The evidence of the stop of the world, oldest first. */
