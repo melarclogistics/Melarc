@@ -215,6 +215,7 @@ const SERVED_TO_A_RIDER_WITH_A_BODY = [
   'recordCollection',
   'reportPickupFailure',
   'requestSmsHandshakeFallback',
+  'submitHubHandover',
   'verifyHandshake',
 ] as const;
 

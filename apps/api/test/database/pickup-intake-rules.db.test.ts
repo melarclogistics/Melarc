@@ -179,6 +179,11 @@ interface IntakeValues {
   readonly manifestId?: string;
   readonly hubId?: string;
   readonly handedOverAt?: string;
+  /**
+   * Whether the statement asks for the row back (the handover does). **A statement that asks for it is judged by the read policy as well as by the insert policy**, so a test of the insert policy
+   * alone says no.
+   */
+  readonly returning?: boolean;
 }
 /** The columns the application's login may insert are named, and the state and the receipt only where the test gives them (the handover gives neither: the database does). */
 const insertIntakeSql = (fixture: Fixture, values: IntakeValues): string =>
@@ -186,7 +191,7 @@ const insertIntakeSql = (fixture: Fixture, values: IntakeValues): string =>
    values ('${values.id ?? randomUUID()}', '${code()}', '${values.hubId ?? fixture.hubId}', '${values.requestId}', '${values.manifestId ?? fixture.manifest.id}',
            '${values.by ?? fixture.holderId}', ${values.handedOverAt === undefined ? '' : `'${values.handedOverAt}', `}'2026-11-03T15:00:00Z', ${values.state === undefined ? '' : `'${values.state}', `}
            ${String(values.declared ?? 3)}, ${String(values.prefilled ?? 3)})
-   returning id`;
+   ${values.returning === false ? '' : 'returning id'}`;
 
 /**
  * A custody handover of the run that was accepted: arranged as the administrator with the guards of the handover table off for the statement (the guard opens a handover pending and on a
@@ -487,9 +492,10 @@ describe('an intake is opened only by a handover, as the database holds it for e
     await custodyAccepted(fixture);
     // The assigned rider has handed the custody over: it still reads its run under the key, so the guard sees the whole truth. In the receiver's name (the holder's) the guard passes and the
     // policy alone refuses it; in its own name the guard refuses it, whoever holds the policy.
+    // (The statements that follow do not ask for the row back: one that does is judged by the read policy too, which says the same, and the insert policy would not be shown by itself.)
     const inTheHoldersName = await attempt(
       rider(fixture.holderId, HANDOVER),
-      insertIntakeSql(fixture, { requestId, by: fixture.receiverId }),
+      insertIntakeSql(fixture, { requestId, by: fixture.receiverId, returning: false }),
     );
     expect(codeOf(inTheHoldersName)).toBe('42501');
     const inItsOwnName = await attempt(
@@ -505,14 +511,17 @@ describe('an intake is opened only by a handover, as the database holds it for e
       codeOf(
         await attempt(
           rider(holderRun.holderId, 'pickup.run.execute'),
-          insertIntakeSql(holderRun, { requestId: holderRequest }),
+          insertIntakeSql(holderRun, { requestId: holderRequest, returning: false }),
         ),
       ),
     ).toBe('42501');
     // (The guard reads the run as the writer, and a staff context is shown none under this key: it is refused there, before the policy is asked.)
     expect(
       codeOf(
-        await attempt(staff(HANDOVER), insertIntakeSql(holderRun, { requestId: holderRequest })),
+        await attempt(
+          staff(HANDOVER),
+          insertIntakeSql(holderRun, { requestId: holderRequest, returning: false }),
+        ),
       ),
     ).toMatch(/^(23514|42501)$/);
     expect(
@@ -650,6 +659,44 @@ describe('the intakes of a handover are exactly the run’s collected requests, 
         ])
       ).length,
     ).toBe(0);
+  });
+
+  const swapContext = `select set_config('melarc.principal_type', 'VENDOR', true), set_config('melarc.authorization_key', 'pickup.read', true)`;
+
+  // Break caught: the check on the side of the intake that opens passing because it cannot find the intake it was asked to judge (the run was completed before, so the check of the run does
+  // not fire: this is the intake's alone). Each side fails closed by itself, and each is shown by a transaction the other side does not take part in.
+  it('is not passed, on the side of the intake, by a writer that opens the intakes of a completed run and changes its context', async () => {
+    const fixture = await run('COMPLETED', ['COLLECTED']);
+    const result = await attemptAll(rider(fixture.holderId, HANDOVER), [
+      insertIntakeSql(fixture, { requestId: fixture.stops[0]?.requestId ?? '' }),
+      swapContext,
+    ]);
+    expect(codeOf(result)).toBe('23514');
+    expect(messageOf(result)).toMatch(/the intake that was opened is not there to be judged/);
+    expect(
+      await routes.rows(`select id from pickup_intake where pickup_manifest_id = $1`, [
+        fixture.manifest.id,
+      ]),
+    ).toEqual([]);
+  });
+
+  // Break caught: the check on the side of the run passing because it cannot find the run: a writer completes a run that collected something, opens no intake, and changes its context
+  // before the end (nothing is read, so no intake is owed). The check of the intake does not fire here: there is none.
+  it('is not passed, on the side of the run, by a writer that completes a run and changes its context', async () => {
+    const fixture = await run('IN_PROGRESS', ['COLLECTED']);
+    const result = await attemptAll(rider(fixture.holderId, HANDOVER), [
+      `update pickup_manifest set state = 'COMPLETED', completed_at = clock_timestamp() where id = '${fixture.manifest.id}'`,
+      swapContext,
+    ]);
+    expect(codeOf(result)).toBe('23514');
+    expect(messageOf(result)).toMatch(/the run of the intakes is not there to be judged/);
+    expect(
+      (
+        await routes.rows<{ state: string }>(`select state from pickup_manifest where id = $1`, [
+          fixture.manifest.id,
+        ])
+      )[0],
+    ).toMatchObject({ state: 'IN_PROGRESS' });
   });
 });
 
@@ -811,13 +858,16 @@ describe('the key of the hub handover completes a run, and the database holds wh
     const fixture = await run('IN_PROGRESS', ['COLLECTED']);
     await custodyAccepted(fixture);
     const stranger = (await insertRider(routes.admin, riderRow({ hubId: HUB_A }))).id;
+    // The assigned rider reads its run under the key, so the policy admits the row, and it is the guard that refuses: the parcels are the receiver's.
+    const former = await attempt(rider(fixture.holderId, HANDOVER), complete(fixture));
+    expect(codeOf(former)).toBe('23514');
+    expect(messageOf(former)).toMatch(/completed by the one who holds its parcels/);
     for (const [who, context] of [
-      ['the assigned rider who handed custody over', rider(fixture.holderId, HANDOVER)],
       ['a rider with no relation', rider(stranger, HANDOVER)],
       ['staff', staff(HANDOVER)],
     ] as const) {
       const result = await attempt(context, complete(fixture));
-      // Either the policy shows the writer no row to change or the guard refuses it: the run is not completed.
+      // The policy shows the writer no row to change: the run is not completed.
       expect('rows' in result ? result.rows.length : 0, who).toBe(0);
     }
     expect(
@@ -857,6 +907,33 @@ describe('the key of the hub handover completes a run, and the database holds wh
     expect(codeOf(refused)).toBe('23514');
     expect(messageOf(refused)).toMatch(/still to be worked/);
   });
+
+  // Break caught: the key writing to a run in progress without completing it. The transition table of the guard lets a statement that leaves the state alone through, so the branch of the key is the
+  // one rule that holds the key to completing and to nothing else.
+  it('writes nothing to a run it does not complete', async () => {
+    const fixture = await run('IN_PROGRESS', ['COLLECTED']);
+    for (const assignment of [
+      `started_at = started_at + interval '1 minute'`,
+      `assigned_rider_id = '${fixture.receiverId}'`,
+    ]) {
+      const refused = await attempt(
+        rider(fixture.holderId, HANDOVER),
+        `update pickup_manifest set ${assignment} where id = '${fixture.manifest.id}'`,
+      );
+      expect(codeOf(refused), assignment).toBe('23514');
+      expect(messageOf(refused), assignment).toMatch(
+        /completes a run in progress and does nothing else/,
+      );
+    }
+    expect(
+      (
+        await routes.rows<{ state: string; assigned_rider_id: string }>(
+          `select state, assigned_rider_id from pickup_manifest where id = $1`,
+          [fixture.manifest.id],
+        )
+      )[0],
+    ).toMatchObject({ state: 'IN_PROGRESS', assigned_rider_id: fixture.holderId });
+  });
 });
 
 describe('the ledger takes the events of the handover with the facts of the act', () => {
@@ -873,6 +950,7 @@ describe('the ledger takes the events of the handover with the facts of the act'
       previous: string | null;
       resulting: string | null;
       surface: string;
+      detail: string;
     }> = {},
   ): string => {
     const related =
@@ -882,9 +960,10 @@ describe('the ledger takes the events of the handover with the facts of the act'
       value === undefined || value === null ? 'null' : `'${value}'`;
     // What the event says of itself, as the application writes it: the handover names how many intakes it opened (never a count of parcels), the completion says who completed the run and why.
     const detail =
-      (over.code ?? 'hub.handover.submitted') === 'hub.handover.submitted'
+      over.detail ??
+      ((over.code ?? 'hub.handover.submitted') === 'hub.handover.submitted'
         ? `jsonb_build_object('intakes_opened', (select count(*) from pickup_intake i where i.pickup_manifest_id = '${fixture.manifest.id}' and i.handed_over_by = '${over.actor ?? fixture.holderId}'))`
-        : `jsonb_build_object('completed_by', 'CUSTODY_HOLDER', 'cause', 'HUB_HANDOVER')`;
+        : `jsonb_build_object('completed_by', 'CUSTODY_HOLDER', 'cause', 'HUB_HANDOVER')`);
     return `insert into audit_event (id, event_code, occurred_at, actor_type, actor_id, surface_context, object_type, object_id, correlation_id, responsible_hub_id, previous_state, resulting_state,
                                      related_ids, detail, outcome, enhanced, serialisation_version)
             values (gen_random_uuid(), '${over.code ?? 'hub.handover.submitted'}', now(), 'RIDER', '${over.actor ?? fixture.holderId}', '${over.surface ?? 'RIDER_ANDROID'}',
@@ -921,6 +1000,28 @@ describe('the ledger takes the events of the handover with the facts of the act'
       ['enhanced', event(done, { enhanced: true }), rider(done.holderId, HANDOVER)],
       ['rejected', event(done, { outcome: 'REJECTED' }), rider(done.holderId, HANDOVER)],
       ['another surface', event(done, { surface: 'OPS_PORTAL' }), rider(done.holderId, HANDOVER)],
+      // Before the blind count no event carries a count of parcels: a member the arm does not name is refused, and so is a number of intakes the rows do not hold.
+      [
+        'a count in the detail',
+        event(done, { detail: `jsonb_build_object('intakes_opened', 2, 'declared_count', 3)` }),
+        rider(done.holderId, HANDOVER),
+      ],
+      [
+        'another number of intakes',
+        event(done, { detail: `jsonb_build_object('intakes_opened', 99)` }),
+        rider(done.holderId, HANDOVER),
+      ],
+      [
+        'a state change the handover does not make',
+        event(done, { previous: 'IN_PROGRESS', resulting: 'COMPLETED' }),
+        rider(done.holderId, HANDOVER),
+      ],
+      // (The run's own identifier under another object type: the rule on the type is shown by itself, and not by there being no run of that identifier.)
+      [
+        'another object type',
+        event(done, { objectType: 'PickupIntake' }),
+        rider(done.holderId, HANDOVER),
+      ],
     ] as const) {
       expect(codeOf(await attempt(context, text)), name).toBe('42501');
     }
@@ -961,6 +1062,32 @@ describe('the ledger takes the events of the handover with the facts of the act'
         ),
       ),
       'a rider that holds nothing',
+    ).toBe('42501');
+    // A count in the detail, and a run whose intakes the rider did not open (a run the system completed has none).
+    expect(
+      codeOf(
+        await attempt(
+          rider(done.holderId, HANDOVER),
+          event(done, {
+            code: 'pickup.manifest.completed',
+            previous: 'IN_PROGRESS',
+            resulting: 'COMPLETED',
+            related: `jsonb_build_object('rider_id', '${done.holderId}')`,
+            detail: `jsonb_build_object('completed_by', 'CUSTODY_HOLDER', 'cause', 'HUB_HANDOVER', 'collected', 3)`,
+          }),
+        ),
+      ),
+      'a count in the detail',
+    ).toBe('42501');
+    const settled = await run('COMPLETED', ['FAILED']);
+    expect(
+      codeOf(
+        await attempt(
+          rider(settled.holderId, HANDOVER),
+          completed(settled.holderId, settled.manifest.id),
+        ),
+      ),
+      'a run that has no intake of the rider',
     ).toBe('42501');
   });
 });

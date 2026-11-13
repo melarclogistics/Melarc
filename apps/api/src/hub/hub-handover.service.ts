@@ -27,6 +27,12 @@ const OPERATION = 'submitHubHandover';
 /** The attempts at an operational code that no other intake holds (the table's unique index decides; a draw that collides is drawn again). */
 const CODE_ATTEMPTS = 8;
 
+/**
+ * The most a row may declare: the largest the column holds. The contract bounds a declaration below by zero and above by nothing, so a count past the column's range would pass the schema and
+ * reach the insert and be answered `500`; it is the malformed body it is (`VALIDATION_FAILED`, rule `range`), as the parcel count of a custody handover is (`MAX_PARCEL_COUNT_TAKEN`).
+ */
+const MAX_DECLARED_COUNT = 2_147_483_647;
+
 export interface HubHandoverOptions {
   readonly runner: Pick<OperationRunner, 'mutate'>;
   readonly audit: AuditWriter;
@@ -158,6 +164,9 @@ export class HubHandovers {
     for (const [at, row] of body.rows.entries()) {
       if (!Number.isSafeInteger(row.declared_count) || row.declared_count < 0) {
         throw invalid(`/rows/${String(at)}/declared_count`, 'integer');
+      }
+      if (row.declared_count > MAX_DECLARED_COUNT) {
+        throw invalid(`/rows/${String(at)}/declared_count`, 'range');
       }
     }
     let note: string | undefined;

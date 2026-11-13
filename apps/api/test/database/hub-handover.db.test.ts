@@ -427,6 +427,8 @@ describe('submitHubHandover: one intake for each collected request, and the run 
       { rows, captured_at: capturedNow(), extra: true },
       { rows: [{ ...rows[0], declared_count: -1 }], captured_at: capturedNow() },
       { rows: [{ ...rows[0], declared_count: 1.5 }], captured_at: capturedNow() },
+      // Past the column's range: it passes the contract's schema (a minimum and no maximum) and would reach the insert; the service refuses it.
+      { rows: [{ ...rows[0], declared_count: 2_147_483_648 }], captured_at: capturedNow() },
       { rows: [{ pickup_request_id: rows[0]?.pickup_request_id }], captured_at: capturedNow() },
       { rows: [{ ...rows[0], note: 'x' }], captured_at: capturedNow() },
     ]) {
@@ -815,5 +817,94 @@ describe('submitHubHandover: only the custody holder hands over', () => {
     const completed = await events('pickup.manifest.completed', handed.manifest.id);
     expect(completed).toHaveLength(1);
     expect(completed[0]).toMatchObject({ actor_id: receiver.id });
+  });
+});
+
+describe('submitHubHandover: a run in progress that has nothing to hand over', () => {
+  // Break caught: a handover that goes on to judge the rows of a run on which nothing was collected and refuses each as a request not collected (VALIDATION_FAILED), instead of saying that such a
+  // run has no handover at all. The system completes such a run when its last stop turns terminal, so the run is left in progress here as the administrator can, which is the only way to reach it.
+  it('is STATE_CONFLICT (nothing_collected) for a run whose stops are all failed or skipped', async () => {
+    const handed = await handedRun([{ state: 'FAILED' }, { state: 'SKIPPED' }]);
+    const response = await submit(handed.rider, handed.manifest.id, {
+      rows: [{ pickup_request_id: randomUUID(), declared_count: 1 }],
+      captured_at: capturedNow(),
+    });
+    expect(refusalOf(response)).toMatchObject({ status: 409, code: 'STATE_CONFLICT' });
+    expect((response.json() as { details?: { rule?: string } }).details?.rule).toBe(
+      'nothing_collected',
+    );
+    expect((await manifestOf(handed.manifest.id))?.state).toBe('IN_PROGRESS');
+    expect(await intakeRows(handed.manifest.id)).toHaveLength(0);
+  });
+});
+
+describe('submitHubHandover: two handovers of one run end as one would', () => {
+  // Break caught: a second handover let through while the first is in flight (two sets of intakes, a run completed twice), a deadlock between the two, or a refusal that is not the first's
+  // having won. The two ask under two keys and the same token, as a double tap of two taps would: whichever wins, the other is STATE_CONFLICT, and one set results.
+  it('lets one of two handovers of one run, under two keys, win and refuses the other as STATE_CONFLICT', async () => {
+    const handed = await handedRun([{ state: 'COLLECTED' }, { state: 'COLLECTED' }]);
+    const etag = await riderEtag(handed.rider, handed.manifest.id);
+    const body = { rows: rowsFor(handed), captured_at: capturedNow() };
+    const sent = await Promise.all([
+      submit(handed.rider, handed.manifest.id, body, { etag }),
+      submit(handed.rider, handed.manifest.id, body, { etag }),
+    ]);
+    expect(sent.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([201, 409]);
+    const refused = sent.find((response) => response.status === 409);
+    expect(refused === undefined ? undefined : codeOf(refused)).toBe('STATE_CONFLICT');
+    expect(await intakeRows(handed.manifest.id)).toHaveLength(2);
+    expect(await events('hub.handover.submitted', handed.manifest.id)).toHaveLength(1);
+    expect(await events('pickup.manifest.completed', handed.manifest.id)).toHaveLength(1);
+  });
+
+  // Break caught: a retry that arrives while the first request is still in flight answered with a refusal, a second set of intakes, or another answer. The store makes the second wait for the
+  // first and answers it with the first's answer.
+  it('answers two requests that carry one key, sent at the same moment, with one answer, and opens one set', async () => {
+    const handed = await handedRun([{ state: 'COLLECTED' }, { state: 'COLLECTED' }]);
+    const etag = await riderEtag(handed.rider, handed.manifest.id);
+    const key = randomUUID();
+    const body = { rows: rowsFor(handed), captured_at: capturedNow() };
+    const sent = await Promise.all([
+      submit(handed.rider, handed.manifest.id, body, { etag, key }),
+      submit(handed.rider, handed.manifest.id, body, { etag, key }),
+    ]);
+    expect(sent.map((response) => response.status)).toEqual([201, 201]);
+    expect(sent[1]?.text).toBe(sent[0]?.text);
+    expect(await intakeRows(handed.manifest.id)).toHaveLength(2);
+    expect(await events('hub.handover.submitted', handed.manifest.id)).toHaveLength(1);
+  });
+});
+
+describe('submitHubHandover: the declaration is nowhere the application can say it', () => {
+  // Break caught: the declaration reaching the answer, the ledger or a log line before the blind count exists to compare it. The numbers are ones that a uuid, a port or a moment cannot hold
+  // by chance (above 65535 and in no group of a uuid), and the whole of what the run wrote to the ledger is read, every column.
+  it('puts the declaration in no answer, no event and no log line', async () => {
+    const handed = await handedRun([
+      { state: 'COLLECTED' },
+      { state: 'PARTIALLY_COLLECTED', collected: 2 },
+    ]);
+    const response = await submit(handed.rider, handed.manifest.id, {
+      rows: rowsFor(handed, [71234, 83456]),
+      captured_at: capturedNow(),
+      note: 'Counted twice at the gate',
+    });
+    expect(response.status).toBe(201);
+    const stored = await intakeRows(handed.manifest.id);
+    expect(stored.map((row) => row.rider_declared_count).toSorted((a, b) => a - b)).toEqual([
+      71234, 83456,
+    ]);
+    const ledger = JSON.stringify(
+      await routes.rows(
+        `select * from audit_event where object_id = $1 or related_ids::text like '%' || $1::text || '%'`,
+        [handed.manifest.id],
+      ),
+    );
+    for (const [where, text] of [
+      ['the answer', response.text],
+      ['the ledger', ledger],
+      ['the log', routes.kit.app.logs.text()],
+    ] as const) {
+      expect(text, where).not.toMatch(/\b(71234|83456)\b/);
+    }
   });
 });
