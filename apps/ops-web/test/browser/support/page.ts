@@ -254,18 +254,27 @@ export async function settled(page: Page): Promise<void> {
 }
 
 /**
- * Waits until the animations of one element, and of everything in it, have finished: a panel that slides in, a tooltip that grows into place. A place or a size read before that is a read of the
+ * Brings the animations of one element, and of everything in it, to their end: a panel that slides in, a tooltip that grows into place. A place or a size read before that is a read of the
  * middle of a movement (the Product Owner's review of ba9a18c, item 6: the heading of a sheet read at the place it had a few frames before it arrived, a tooltip a few pixels short of its
- * gap). Like `settled`, which waits for the whole page, it does not wait for an animation that never ends, or for one that is paused. Where motion is not what a test checks, the test may
- * ask for reduced motion instead (`openKit(..., { reducedMotion: true })`) and have nothing to wait for.
+ * gap). **It finishes them and does not wait for them** (the hosted WebKit runs of 12 and 13 November 2026): a page whose animation clock has stopped, which a hosted WebKit does for seconds
+ * (a sheet five pixels short of its end for the five seconds of a poll; two tooltip tests that waited on an animation until the page was closed), never finishes an animation, and a test
+ * that waits for one waits for ever. What the test reads next is the place the movement was going to, which is what it asked for. Like `settled`, it leaves alone an animation that never
+ * ends (a spinner, a caret) and one that is paused. A test of the movement itself reads it as it comes and does not call this; where motion is not what a test checks it may also ask for
+ * reduced motion (`openKit(..., { reducedMotion: true })`) and have nothing to finish.
  */
 export async function animationsDone(target: Locator): Promise<void> {
-  await target.evaluate(async (element) => {
-    const moving = element.getAnimations({ subtree: true }).filter((animation) => {
+  await target.evaluate((element) => {
+    for (const animation of element.getAnimations({ subtree: true })) {
       const end = animation.effect?.getComputedTiming().endTime;
-      return animation.playState === 'running' && typeof end === 'number' && Number.isFinite(end);
-    });
-    await Promise.allSettled(moving.map((animation) => animation.finished));
+      if (animation.playState !== 'running' || typeof end !== 'number' || !Number.isFinite(end)) {
+        continue;
+      }
+      try {
+        animation.finish();
+      } catch {
+        // One that cannot be finished is left to run: the read that follows is of the page as it is.
+      }
+    }
   });
 }
 

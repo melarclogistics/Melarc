@@ -2660,6 +2660,27 @@ test.describe('the fix round of task R5.2 in a browser', () => {
     });
   });
 
+  // Break caught (the hosted WebKit runs of 12 and 13 November 2026): a helper that waits for the animations of an element to finish waits for ever when the page's animation clock has stopped, which a
+  // hosted WebKit does for seconds (two tooltip tests waited on an animation until the page was closed). It ends them, so that what a test reads next is where they were going, whatever the clock does.
+  // An animation of a minute stands for a clock that has stopped: no clock would finish it inside the test.
+  test('the wait for the animations of an element ends them at once, so that a clock that has stopped cannot hold a test', async ({
+    page,
+  }) => {
+    await openKit(page, 'overlays', { reducedMotion: true });
+    const heading = page.getByRole('heading', { level: 1, name: 'Kit showcase' });
+    await heading.evaluate((element) => {
+      element.animate([{ opacity: 1 }, { opacity: 0.5 }], { duration: 60_000 });
+    });
+    expect(await heading.evaluate((element) => element.getAnimations().length)).toBe(1);
+
+    const began = Date.now();
+    await animationsDone(heading);
+
+    expect(Date.now() - began).toBeLessThan(5_000);
+    expect(await heading.evaluate((element) => element.getAnimations().length)).toBe(0);
+    expect(await heading.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
+  });
+
   // Break caught (the Product Owner's review of ba9a18c, item 5): a words check that finds a card too tall only when it has room that nothing fills, so that a card whose body is squeezed narrower than
   // the room it has (a column it cannot use) wraps its words onto lines that the card then holds, and passes. The body is laid out again, in a copy, at the room it could have (from its own left edge,
   // so a card with a box beside it is counted right, to the card's inner edge), and a card whose body is more than a line taller than that fails. Squeezing one card's body is what proves the check.
