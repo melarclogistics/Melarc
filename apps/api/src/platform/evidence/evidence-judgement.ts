@@ -51,7 +51,18 @@ export type Judgement =
       /** The clean verdict, whose scanner and signature version the record keeps. */
       readonly verdict: ScanVerdict;
     }
-  | { readonly accepted: false; readonly rule: RefusalRule };
+  | {
+      readonly accepted: false;
+      readonly rule: RefusalRule;
+      /** For a flagged file (`malicious_content`) only: what the audit event of it says (Run B, D-B3). */
+      readonly flagged?: FlaggedFacts;
+    };
+
+/** What a flagged upload leaves for the audit event: the name of the signature that matched, as the scanner gave it, and whether the object could be removed. */
+export interface FlaggedFacts {
+  readonly signature: string;
+  readonly removed: boolean;
+}
 
 export interface JudgementPorts {
   readonly store: Pick<EvidenceStore, 'inspect' | 'read' | 'remove'>;
@@ -132,13 +143,20 @@ export async function judgeStoredObject(
   if (verdict.verdict === 'FLAGGED') {
     metrics.increment('evidence_scans_total', { outcome: 'FLAGGED' });
     // The refusal stands whether or not the object could be taken away; a failure to remove is counted, and the owner's lifecycle rule takes the object in the end.
+    let removed = false;
     try {
       await store.remove(declared.storageRef);
       metrics.increment('evidence_object_removals_total', { outcome: 'REMOVED' });
+      removed = true;
     } catch {
       metrics.increment('evidence_object_removals_total', { outcome: 'FAILED' });
     }
-    return refused('malicious_content');
+    // What the audit event of a flagged upload says (D-B3): the signature that matched and whether the object could be taken away. Never the object's key, which the platform alone holds.
+    return {
+      accepted: false,
+      rule: 'malicious_content',
+      flagged: { signature: verdict.signature ?? 'UNNAMED', removed },
+    };
   }
   // Only `CLEAN` is a clean verdict, explicitly: a scanner that gave another word (a defect, or a verdict nobody here handles) did not decide, and nothing is stored on it.
   const word: string = verdict.verdict;

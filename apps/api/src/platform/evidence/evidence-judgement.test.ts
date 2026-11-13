@@ -185,4 +185,52 @@ describe('the verdict', () => {
       expect(store.removed).toBe(0);
     },
   );
+
+  // Break caught (Run B, D-B3): a refusal that does not say what the audit event of a flagged upload says, the signature that matched and whether the object could be taken away.
+  it('refuses a flagged file, removes its object, and gives back the signature and the removal for the audit event', async () => {
+    const store = fakeStore();
+    const scanner: ContentScanner = {
+      scan: async (object) => {
+        await drain(object);
+        return { ...CLEAN, verdict: 'FLAGGED', signature: 'Eicar-Test-Signature' };
+      },
+    };
+    expect(await judge(store, scanner)).toEqual({
+      accepted: false,
+      rule: 'malicious_content',
+      flagged: { signature: 'Eicar-Test-Signature', removed: true },
+    });
+    expect(store.removed).toBe(1);
+  });
+
+  it('refuses a flagged file all the same when its object cannot be removed, and says it was not', async () => {
+    const store = fakeStore();
+    store.remove = () => Promise.reject(new Error('the store is down'));
+    const scanner: ContentScanner = {
+      scan: async (object) => {
+        await drain(object);
+        return { ...CLEAN, verdict: 'FLAGGED', signature: 'Heuristics.Encrypted.PDF' };
+      },
+    };
+    expect(await judge(store, scanner)).toEqual({
+      accepted: false,
+      rule: 'malicious_content',
+      flagged: { signature: 'Heuristics.Encrypted.PDF', removed: false },
+    });
+  });
+
+  it('names a flagged file whose scanner gave no signature as UNNAMED, and refuses it all the same', async () => {
+    const store = fakeStore();
+    const scanner: ContentScanner = {
+      scan: async (object) => {
+        await drain(object);
+        return { ...CLEAN, verdict: 'FLAGGED' };
+      },
+    };
+    expect(await judge(store, scanner)).toMatchObject({
+      accepted: false,
+      rule: 'malicious_content',
+      flagged: { signature: 'UNNAMED' },
+    });
+  });
 });

@@ -27,6 +27,7 @@ export const ENHANCED_CODES = [
   'pickup.cancellation_charge.waived',
   'pickup.handshake.fallback_override',
   'pickup.collection.photo_exception_authorised',
+  'pickup.evidence.flagged',
   'pickup.exception.approved',
   'fleet.custody.initiated',
   'fleet.custody.accepted',
