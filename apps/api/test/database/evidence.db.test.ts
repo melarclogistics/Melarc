@@ -544,6 +544,65 @@ describe('stored means a clean verdict is on the record, for every writer (migra
     ).rejects.toMatchObject({ code: '23514' });
   });
 
+  // Break caught: a record inserted already stored, already expired, or pending with the facts of a later state, so that nothing was uploaded, validated or scanned. The checks of the table
+  // accept a stored record that carries every fact of one, so the guard's refusal of any other declaration is the wall, and it holds for the owner's statement as for the rider's. The
+  // typed reason is the guard's own: a check of the table refuses with none.
+  it('declares a record pending its upload and nothing else, for every writer', async () => {
+    const arranged = await run();
+    const variants: Column[] = [
+      {
+        state: `'STORED'`,
+        uploaded_at: 'now()',
+        validated_signature: `'JPEG'`,
+        scanner: `'clamav'`,
+        scanner_signature_version: `'v'`,
+        scanned_at: 'now()',
+      },
+      { state: `'EXPIRED'` },
+      { uploaded_at: 'now()' },
+      { validated_signature: `'JPEG'` },
+      { scanner: `'clamav'` },
+      { scanner_signature_version: `'v'` },
+      { scanned_at: 'now()' },
+    ];
+    for (const over of variants) {
+      const text = declaration(arranged.rider.id, stopOf(arranged), {
+        responsible_hub_id: `'${HUB_A}'`,
+        vendor_organization_id: 'null',
+        ...over,
+      }).replace(/\s+returning[\s\S]*$/, '');
+      await expect(routes.admin.query(text), JSON.stringify(over)).rejects.toMatchObject({
+        code: '23514',
+        detail: 'reason=VALIDATION_FAILED',
+      });
+    }
+  });
+
+  // Break caught: a record that expired carrying a verdict, so that a capture which was never stored seems to have been cleared. The guard lets an expiry through once the window has passed
+  // and looks at nothing else of the row, so the check that holds the three facts together (all when stored, none otherwise) is the wall, and it is the owner's statement it holds.
+  it('lets an expiring record carry no verdict', async () => {
+    const arranged = await run();
+    const { id } = await declared(arranged);
+    await aged(id);
+    for (const over of [
+      `, scanner = 'clamav'`,
+      `, scanner_signature_version = 'v'`,
+      `, scanner = 'clamav', scanner_signature_version = 'v'`,
+      `, scanned_at = now()`,
+    ]) {
+      await expect(
+        routes.admin.query(`update evidence set state = 'EXPIRED'${over} where id = $1`, [id]),
+        over,
+      ).rejects.toMatchObject({ code: '23514' });
+    }
+    const still = await routes.admin.query<{ state: string }>(
+      `select state from evidence where id = $1`,
+      [id],
+    );
+    expect(still.rows[0]?.state).toBe('PENDING_UPLOAD');
+    await routes.admin.query(`update evidence set state = 'EXPIRED' where id = $1`, [id]);
+  });
+
   it('keeps the verdict a short token and a bounded line, and final with the record', async () => {
     const arranged = await run();
     const { id } = await declared(arranged);
