@@ -211,6 +211,8 @@ describe('the generated description of the real application', () => {
       // S1.22: the rider's two acts on a run, the first operations of the pickup domain that only a rider performs.
       ['/pickup-manifests/{id}/start', ['post'], ['startRun']],
       ['/pickup-stops/{id}', ['get'], ['getPickupStop']],
+      // S1.30: the evidence of a stop with the progress of its parcel photos, for Ops staff alone.
+      ['/pickup-stops/{id}/evidence', ['get'], ['listPickupStopEvidence']],
       ['/pickup-stops/{id}/arrive', ['post'], ['arriveAtPickupStop']],
       ['/pickup-stops/{id}/skip', ['post'], ['skipPickupStop']],
       // S1.28: the rider's report that a stop failed.

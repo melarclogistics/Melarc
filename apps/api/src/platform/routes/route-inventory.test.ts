@@ -64,6 +64,7 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/pickup-requests' },
       { method: 'GET', path: '/api/v1/pickup-requests/:id' },
       { method: 'GET', path: '/api/v1/pickup-stops/:id' },
+      { method: 'GET', path: '/api/v1/pickup-stops/:id/evidence' },
       { method: 'GET', path: '/api/v1/reason-definitions' },
       { method: 'GET', path: '/api/v1/run-custody-handovers' },
       { method: 'GET', path: '/api/v1/run-custody-handovers/:id' },
@@ -373,6 +374,19 @@ describe('the real application', () => {
           record: { entity: 'pickup_stop', param: 'id' },
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.30: the evidence of a stop with the progress of its parcel photos, for Ops staff alone (a browser session; the stop is the record the scope probe is asked about).
+      {
+        method: 'GET',
+        path: '/api/v1/pickup-stops/:id/evidence',
+        access: 'permission',
+        permission: 'pickup.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_stop', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
       },
       {
         method: 'GET',

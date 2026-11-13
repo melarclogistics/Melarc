@@ -230,7 +230,12 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
       header: 'Stop',
       rowHeader: true,
       align: 'end',
-      cell: (row) => String(row.stop.sequence),
+      // The stop's own page, where its parcel photos open one at a time (S1.30).
+      cell: (row) => (
+        <Link to={`/manifests/${manifest.id}/stops/${row.stop.id}`}>
+          {String(row.stop.sequence)}
+        </Link>
+      ),
     },
     { id: 'pickup', header: 'Pickup', cell: (row) => <PickupCell facts={row} /> },
     { id: 'place', header: 'Place', cell: (row) => placeOf(row) },
@@ -365,7 +370,11 @@ export function StopsSection({ record, flagged, onSaved, onReload }: StopsSectio
             rowId={(row) => row.stop.id}
             density="two-line"
             cardHeadingLevel={3}
-            cardTitle={(row) => `Stop ${String(row.stop.sequence)}`}
+            cardTitle={(row) => (
+              <Link
+                to={`/manifests/${manifest.id}/stops/${row.stop.id}`}
+              >{`Stop ${String(row.stop.sequence)}`}</Link>
+            )}
             card={(row) => (
               <span className="manifest-stop-line">
                 <PickupCell facts={row} />

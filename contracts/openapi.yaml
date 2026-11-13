@@ -1,7 +1,7 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.102.0 with the photo of every parcel at the door and Ops's exception for the day the camera fails, 13 November 2026)
+# Version: see `info.version` below (5.103.0 with Run B, the Ops half of SLICE-001 Stage 5, 13 November 2026)
 # Date:    13 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
@@ -16,6 +16,7 @@
 #   5.100.0 C4    `created_at` (required, a `date-time`) on `PickupManifest`: the moment the run was made, from the table's own column, on a read, on every item of a list and on every answer that carries a run (it is not part of the run's `ETag`: it never changes, and a rolling release serves a build that does not state it beside one that does, so the `ETag` of a run is the one the build before computed). The moment a run was cancelled is not stored and is not stated (OB-S1-79)
 #   5.101.0 A     Run A (SLICE-001, Stage 5): `createEvidence`, `completeEvidenceUpload` and `createEvidenceRetrievalAuthorization` (the evidence store: `x-permission: owner` on three self routes, the first owner a pickup stop; the first two on the Rider host); `listCollectionDisputes`, `listHandshakesForOps`, `listCollectionShortfalls` and `listPickupFailures` (the Ops reads of the collection and the failure, each item of the last with its `photo_count`); `evidence_ids` of `reportPickupFailure` (a stored photo, at most ten, each once) with its refusals `EVIDENCE_NOT_STORED` and `VALIDATION_FAILED` for a reason that is not of the category named (rule `category`); the four message kinds of a failure and of a short count; `escalatePickupRequest` escalates only a request whose stop failed (`STATE_CONFLICT`, rule `no_failed_stop`), and its trigger `BACKSTOP` is the scheduled lane of the delivery worker
 #   5.102.0 A2    Run A2 (SLICE-001, Stage 5, the Product Owner's decisions of 12 November 2026): `authoriseParcelPhotoException` (Ops lets a stop's count through without parcel photos: `pickup.handshake.override`, once for a stop, before the count, with a required note); `parcel_photo_ids` on `recordCollection` and `CollectionRecord` (exactly `collected_count` stored photos of this rider and this stop, or none for a stop let through; `VALIDATION_FAILED` with the rules `parcel_photo_count` and `duplicate`, `EVIDENCE_NOT_STORED` for a photo that cannot be counted; `evidence_ids` is now the photo a short count's reason asks for); the purpose `PARCEL_PHOTO` of `EvidenceCreate` (declared under `pickup.collection.confirm`, a failure's proof under `pickup.failure.report`); `Cache-Control: no-store` on the answer of `createEvidence` (the upload instruction is a bearer capability); the text of `completeEvidenceUpload` and `recordCollection` as built
+#   5.103.0 B    Run B (SLICE-001, Stage 5, the Ops half: the Product Owner's review of Run A2 and S1.30): the text of `recordCollection` says that the database holds the photo a short count's reason asks for, for every writer, at the end of the transaction, and that the answer and its replay state the `parcel_photo_ids` the count attached (in the order the rider named them; absent for a stop let through without photos); **S1.30 adds `listPickupStopEvidence`** (`GET /pickup-stops/{id}/evidence`, `pickup.read`: the evidence of a stop with the progress of its parcel photos as the server counts it and the exception that let its count through without them; no object key and no address) **and the `escalation` of an item of `listPickupFailures`** (who escalated the failure's request, a person or the backstop, with the backstop's threshold and wait)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -26,7 +27,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.102.0
+  version: 5.103.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -1499,6 +1500,63 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /pickup-stops/{id}/evidence:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: listPickupStopEvidence
+      # SAFE READ. No CSRF: a read changes nothing.
+      security:
+        - browserSession: []
+      x-permission: pickup.read
+      x-error-codes:
+        [
+          HUB_SCOPE_VIOLATION,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          VALIDATION_FAILED,
+        ]
+      tags: [pickup-stops]
+      summary: List the evidence of a pickup stop, with the progress of its parcel photos
+      description: |
+        The stop's parcel photos as they arrive (the Product Owner's decision D-A10, 12 November 2026; `AC-SLICE-001-86` to `-88`; plan S1.30; `OB-S1-80`): one item for each
+        evidence record of the stop, oldest first (the moment the platform made the record, then its identifier, so that a page does not move under a reader who is paging, and a
+        photo that arrives while the officer is reading comes last). **For Ops staff alone**, under `pickup.read`, by the hubs of the grant: a staff member who asks for an existing
+        stop outside their hubs is `HUB_SCOPE_VIOLATION` and one who asks for a stop that does not exist is `NOT_FOUND`, as for `getPickupStop`; a vendor and a rider are refused.
+        An authorised staff read of a stop in another hub is audited, without contents.
+
+        **An item is a closed projection**: the record's identifier, its purpose (`PARCEL_PHOTO`, the photo of a parcel counted, or `COLLECTION_PROOF`, the photo of a failure or of a
+        short count's reason), its state, when it was captured on the device and when its upload was completed, its type, and whether the malicious-content check found it clean.
+        **It carries no object key, no address and no signed operation**: the image of one record is read with `createEvidenceRetrievalAuthorization`, one at a time and only when it
+        is shown, and a stop of two hundred photos costs a reader this list and nothing else.
+
+        **`parcel_photos` is the progress, as the server counts it for the whole stop and not for the page**: the records of purpose `PARCEL_PHOTO` that are `STORED`, those still
+        `PENDING_UPLOAD` and those that `EXPIRED` (never uploaded), and `declared`, the first two together, which is what the rider has made and is sending (*12 of 12 uploaded*).
+        An expired record is told apart and never counted as uploaded. **`parcel_photo_exception`** is the exception that let the stop's count through without parcel photos
+        (`authoriseParcelPhotoException`), with who, when and why, or `null`.
+
+        `purpose` narrows the items and never the counts. `page_size` and `page_token` are those of every list.
+      parameters:
+        - name: purpose
+          in: query
+          required: false
+          schema: { type: string, enum: [PARCEL_PHOTO, COLLECTION_PROOF] }
+          description: Only the evidence of this purpose; left out, all of the stop's.
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StopEvidenceList' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /pickup-stops/{id}/arrive:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     post:
@@ -1665,7 +1723,12 @@ paths:
         writer, at the end of the transaction, and holds that a photo is attached once and only to the count
         of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
         `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
-        any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer.
+        any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer. The database holds that
+        photo for every writer, at the end of the transaction: a short count whose reason asks for a photo has
+        attached to its stop a stored `COLLECTION_PROOF` record of that stop, captured by the rider who counted.
+        **The answer states the photos it attached**: `parcel_photo_ids`, in the order the rider named them, as
+        `CollectionRecord` declares it. A stop Ops let through without photos states none, and the member is then
+        absent, never an empty list. A replay returns the original answer, its photos included.
 
         **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
         `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake
@@ -14184,6 +14247,67 @@ components:
           format: date-time
           description: Set when the shortfall flag reached the Ops surface.
 
+    StopEvidenceItem:
+      type: object
+      required: [id, purpose, state, captured_at, uploaded_at, content_type, scanned_clean]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        purpose:
+          type: string
+          enum: [PARCEL_PHOTO, COLLECTION_PROOF]
+          description: The photo of a parcel counted, or the photo of a failure or of a short count's reason.
+        state: { type: string, enum: [PENDING_UPLOAD, STORED, EXPIRED] }
+        captured_at:
+          type: string
+          format: date-time
+          description: When the device says the photo was taken.
+        uploaded_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the upload was completed and the record stored, by the platform's clock; null until then.
+        content_type: { type: string, description: 'The declared type of the file, without parameters.' }
+        scanned_clean:
+          type: boolean
+          description: Whether the malicious-content check found the stored file clean (a verdict is on the record); false while it is not stored.
+      description: >-
+        One evidence record of a pickup stop as Ops reads it (`listPickupStopEvidence`). **No object key, no address and no signed operation**: the image is read with
+        `createEvidenceRetrievalAuthorization`, one record at a time.
+
+    StopEvidenceList:
+      type: object
+      required: [items, next_page_token, parcel_photos, parcel_photo_exception]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/StopEvidenceItem' }
+        next_page_token: { type: [string, 'null'] }
+        parcel_photos:
+          type: object
+          required: [declared, stored, pending, expired]
+          additionalProperties: false
+          properties:
+            declared:
+              type: integer
+              minimum: 0
+              description: The parcel photos the rider has made and is sending, `stored` and `pending` together.
+            stored: { type: integer, minimum: 0 }
+            pending: { type: integer, minimum: 0 }
+            expired:
+              type: integer
+              minimum: 0
+              description: Records whose upload window ran out with nothing stored; never counted as uploaded and not part of `declared`.
+          description: >-
+            The progress of the stop's parcel photos as the server counts it for the whole stop, whatever the page and the `purpose` filter (*12 of 12 uploaded*).
+        parcel_photo_exception:
+          oneOf:
+            - $ref: '#/components/schemas/ParcelPhotoException'
+            - type: 'null'
+          description: Who let the stop's count through without parcel photos, when and why; `null` where nobody did.
+      description: >-
+        A page of the evidence of a pickup stop, with the progress of its parcel photos and the exception that let its count through without them.
+
     ParcelPhotoExceptionCreate:
       type: object
       required: [note]
@@ -14760,6 +14884,7 @@ components:
         - attempt_number
         - attempt_extended
         - escalated_at
+        - escalation
         - decided_at
         - replacement_request_id
         - rider_id
@@ -14827,6 +14952,29 @@ components:
           type: boolean
           description: Whether Senior Ops force-extended the attempts of the request.
         escalated_at: { type: [string, 'null'], format: date-time }
+        escalation:
+          type: [object, 'null']
+          required: [by, threshold_hours, waited_seconds]
+          additionalProperties: false
+          properties:
+            by:
+              type: string
+              enum: [PERSON, BACKSTOP, UNKNOWN]
+              description: >-
+                Who escalated the request, from the audit event of the escalation: `PERSON` an officer who did it by hand (`escalatePickupRequest`), `BACKSTOP` the scheduled
+                backstop, which records no actor, and `UNKNOWN` where the ledger holds no event for it (the page then says it was escalated and no more). The officer is not
+                named: a staff directory is another key.
+            threshold_hours:
+              type: [integer, 'null']
+              minimum: 1
+              description: The hub's `stale_failure_backstop_hours` the backstop judged by, as its event recorded it; null unless `by` is `BACKSTOP`.
+            waited_seconds:
+              type: [integer, 'null']
+              minimum: 0
+              description: How long the failure had waited when the backstop escalated it, as its event recorded it; null unless `by` is `BACKSTOP`.
+          description: >-
+            Who escalated the failure's request and, for the backstop, the threshold and the wait: what section 17.3 makes mandatory beside the moment. `null` while the request
+            has not been escalated (`escalated_at` is null). Read from the ledger by the same statement as the rest of the item, in the caller's own hub scope.
         decided_at:
           type: [string, 'null']
           format: date-time

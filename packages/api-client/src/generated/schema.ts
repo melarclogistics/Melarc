@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.102.0
- *   SHA-256 f8b69098b8a84b4b7ce5ae393e332958715e2465995a0e5f224af3d9d6905b79 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.103.0
+ *   SHA-256 09c512dcd8b74e42ae3feceb1dd91ee10fe1314012631c429176db62752f38eb (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -786,6 +786,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pickup-stops/{id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the evidence of a pickup stop, with the progress of its parcel photos
+         * @description The stop's parcel photos as they arrive (the Product Owner's decision D-A10, 12 November 2026; `AC-SLICE-001-86` to `-88`; plan S1.30; `OB-S1-80`): one item for each
+         *     evidence record of the stop, oldest first (the moment the platform made the record, then its identifier, so that a page does not move under a reader who is paging, and a
+         *     photo that arrives while the officer is reading comes last). **For Ops staff alone**, under `pickup.read`, by the hubs of the grant: a staff member who asks for an existing
+         *     stop outside their hubs is `HUB_SCOPE_VIOLATION` and one who asks for a stop that does not exist is `NOT_FOUND`, as for `getPickupStop`; a vendor and a rider are refused.
+         *     An authorised staff read of a stop in another hub is audited, without contents.
+         *
+         *     **An item is a closed projection**: the record's identifier, its purpose (`PARCEL_PHOTO`, the photo of a parcel counted, or `COLLECTION_PROOF`, the photo of a failure or of a
+         *     short count's reason), its state, when it was captured on the device and when its upload was completed, its type, and whether the malicious-content check found it clean.
+         *     **It carries no object key, no address and no signed operation**: the image of one record is read with `createEvidenceRetrievalAuthorization`, one at a time and only when it
+         *     is shown, and a stop of two hundred photos costs a reader this list and nothing else.
+         *
+         *     **`parcel_photos` is the progress, as the server counts it for the whole stop and not for the page**: the records of purpose `PARCEL_PHOTO` that are `STORED`, those still
+         *     `PENDING_UPLOAD` and those that `EXPIRED` (never uploaded), and `declared`, the first two together, which is what the rider has made and is sending (*12 of 12 uploaded*).
+         *     An expired record is told apart and never counted as uploaded. **`parcel_photo_exception`** is the exception that let the stop's count through without parcel photos
+         *     (`authoriseParcelPhotoException`), with who, when and why, or `null`.
+         *
+         *     `purpose` narrows the items and never the counts. `page_size` and `page_token` are those of every list.
+         */
+        get: operations["listPickupStopEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pickup-stops/{id}/arrive": {
         parameters: {
             query?: never;
@@ -905,7 +944,12 @@ export interface paths {
          *     writer, at the end of the transaction, and holds that a photo is attached once and only to the count
          *     of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
          *     `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
-         *     any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer.
+         *     any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer. The database holds that
+         *     photo for every writer, at the end of the transaction: a short count whose reason asks for a photo has
+         *     attached to its stop a stored `COLLECTION_PROOF` record of that stop, captured by the rider who counted.
+         *     **The answer states the photos it attached**: `parcel_photo_ids`, in the order the rider named them, as
+         *     `CollectionRecord` declares it. A stop Ops let through without photos states none, and the member is then
+         *     absent, never an empty list. A replay returns the original answer, its photos included.
          *
          *     **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
          *     `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake
@@ -9084,6 +9128,48 @@ export interface components {
              */
             office_notified_at?: string | null;
         };
+        /** @description One evidence record of a pickup stop as Ops reads it (`listPickupStopEvidence`). **No object key, no address and no signed operation**: the image is read with `createEvidenceRetrievalAuthorization`, one record at a time. */
+        StopEvidenceItem: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description The photo of a parcel counted, or the photo of a failure or of a short count's reason.
+             * @enum {string}
+             */
+            purpose: "PARCEL_PHOTO" | "COLLECTION_PROOF";
+            /** @enum {string} */
+            state: "PENDING_UPLOAD" | "STORED" | "EXPIRED";
+            /**
+             * Format: date-time
+             * @description When the device says the photo was taken.
+             */
+            captured_at: string;
+            /**
+             * Format: date-time
+             * @description When the upload was completed and the record stored, by the platform's clock; null until then.
+             */
+            uploaded_at: string | null;
+            /** @description The declared type of the file, without parameters. */
+            content_type: string;
+            /** @description Whether the malicious-content check found the stored file clean (a verdict is on the record); false while it is not stored. */
+            scanned_clean: boolean;
+        };
+        /** @description A page of the evidence of a pickup stop, with the progress of its parcel photos and the exception that let its count through without them. */
+        StopEvidenceList: {
+            items: components["schemas"]["StopEvidenceItem"][];
+            next_page_token: string | null;
+            /** @description The progress of the stop's parcel photos as the server counts it for the whole stop, whatever the page and the `purpose` filter (*12 of 12 uploaded*). */
+            parcel_photos: {
+                /** @description The parcel photos the rider has made and is sending, `stored` and `pending` together. */
+                declared: number;
+                stored: number;
+                pending: number;
+                /** @description Records whose upload window ran out with nothing stored; never counted as uploaded and not part of `declared`. */
+                expired: number;
+            };
+            /** @description Who let the stop's count through without parcel photos, when and why; `null` where nobody did. */
+            parcel_photo_exception: components["schemas"]["ParcelPhotoException"] | null;
+        };
         /** @description The officer's note and nothing else: the stop is the path's, and the officer, the moment and the hub are the database's (D-A10). */
         ParcelPhotoExceptionCreate: {
             /** @description Why the stop is let through without parcel photos (the camera failed, the photos cannot be sent). Required; a blank note is `REASON_REQUIRED`. Held to the screening of every note. */
@@ -9487,6 +9573,18 @@ export interface components {
             attempt_extended: boolean;
             /** Format: date-time */
             escalated_at: string | null;
+            /** @description Who escalated the failure's request and, for the backstop, the threshold and the wait: what section 17.3 makes mandatory beside the moment. `null` while the request has not been escalated (`escalated_at` is null). Read from the ledger by the same statement as the rest of the item, in the caller's own hub scope. */
+            escalation: {
+                /**
+                 * @description Who escalated the request, from the audit event of the escalation: `PERSON` an officer who did it by hand (`escalatePickupRequest`), `BACKSTOP` the scheduled backstop, which records no actor, and `UNKNOWN` where the ledger holds no event for it (the page then says it was escalated and no more). The officer is not named: a staff directory is another key.
+                 * @enum {string}
+                 */
+                by: "PERSON" | "BACKSTOP" | "UNKNOWN";
+                /** @description The hub's `stale_failure_backstop_hours` the backstop judged by, as its event recorded it; null unless `by` is `BACKSTOP`. */
+                threshold_hours: number | null;
+                /** @description How long the failure had waited when the backstop escalated it, as its event recorded it; null unless `by` is `BACKSTOP`. */
+                waited_seconds: number | null;
+            } | null;
             /**
              * Format: date-time
              * @description The moment the request was cancelled (a cancellation or a reschedule); null while it waits.
@@ -14373,6 +14471,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PickupStop"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listPickupStopEvidence: {
+        parameters: {
+            query?: {
+                /** @description Only the evidence of this purpose; left out, all of the stop's. */
+                purpose?: "PARCEL_PHOTO" | "COLLECTION_PROOF";
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopEvidenceList"];
                 };
             };
             400: components["responses"]["ValidationFailed"];

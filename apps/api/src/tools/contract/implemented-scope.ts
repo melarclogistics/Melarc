@@ -63,6 +63,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'listPickupFailures',
   'listPickupManifests',
   'listPickupRequests',
+  'listPickupStopEvidence',
   'listReasonDefinitions',
   'listRiders',
   'listRunCustodyHandovers',

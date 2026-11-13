@@ -440,6 +440,44 @@ export const ALERT_RULES: readonly AlertRule[] = Object.freeze([
       }),
   },
   {
+    id: 'evidence_scan_flagged',
+    alert: 'Evidence scanner',
+    // Run B, D-B3 (the Product Owner, 13 November 2026): any flagged scan. SEV-2 is this task's reading, recorded for the Product Owner, as the scanner's other rules are: a rider's handset sent a
+    // file the scanner flagged, which is a security fact for a person to look at (the platform refused the file, removed its object and wrote the event `pickup.evidence.flagged`), not an outage.
+    severity: 'SEV-2',
+    summary:
+      'The content scanner flagged an uploaded file: the platform refused it and removed its object, and wrote the enhanced event pickup.evidence.flagged. Look at whose handset sent it.',
+    runbook: '§4.3b',
+    fires: (history) =>
+      anyInstance(
+        history,
+        (scrapes) =>
+          increase(
+            scrapes,
+            (scrape) => total(scrape, 'evidence_scans_total', { outcome: 'FLAGGED' }),
+            15 * MINUTE,
+          ) > 0,
+      ),
+  },
+  {
+    id: 'evidence_flagged_object_not_removed',
+    alert: 'Evidence scanner',
+    severity: 'SEV-2',
+    summary:
+      'The platform could not remove an object the scanner flagged: it may still be in the bucket. The upload was refused all the same; remove the object or let the lifecycle rule take it.',
+    runbook: '§4.3b',
+    fires: (history) =>
+      anyInstance(
+        history,
+        (scrapes) =>
+          increase(
+            scrapes,
+            (scrape) => total(scrape, 'evidence_object_removals_total', { outcome: 'FAILED' }),
+            15 * MINUTE,
+          ) > 0,
+      ),
+  },
+  {
     id: 'attestation_trust_data_aging_warning',
     alert: 'Attestation trust data aging',
     severity: 'SEV-3',

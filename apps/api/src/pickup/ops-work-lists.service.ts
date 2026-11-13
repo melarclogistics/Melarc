@@ -246,6 +246,9 @@ export class PickupOpsWorkLists {
    * replacement when it was rescheduled. **The waiting time is the database's:** from the moment the failure was reported until the decision where there
    * is one, and until the read where there is not. **`photo_count`** is how many photos the rider attached to the failure (`pickup_stop_evidence`, read under the
    * same key and hub scope as the stop): a count and never an address, the photo itself being read with `createEvidenceRetrievalAuthorization`.
+   * **`escalation`** (S1.30, section 17.3) says who escalated the request, from the audit event of the escalation, which the caller's own hub scope shows (the ledger's read policy
+   * is the hub's, and the statement names no key beside it): an officer's event records the trigger `OPS` and an actor, the backstop's the trigger `BACKSTOP` with the threshold
+   * in hours and the seconds the failure had waited and no actor; the officer is not named, because that is a read of the staff directory.
    */
   listPickupFailures(
     authorized: AuthorizedRequest,
@@ -268,7 +271,16 @@ export class PickupOpsWorkLists {
                  when r.escalated_at is not null then 'ESCALATED'
                  else 'PENDING'
                end as decision,
-               r.attempt_number, (r.attempt_extension_id is not null) as attempt_extended, r.escalated_at, r.cancelled_at as decided_at,
+               r.attempt_number, (r.attempt_extension_id is not null) as attempt_extended, r.escalated_at,
+               case when r.escalated_at is null then null else (
+                 select jsonb_build_object('trigger', a.detail ->> 'trigger', 'threshold_hours', a.detail -> 'threshold_hours',
+                                           'waited_seconds', a.detail -> 'waited_seconds')
+                   from audit_event a
+                  where a.object_type = 'PickupRequest' and a.object_id = r.id and a.event_code = 'pickup.request.escalated' and a.outcome = 'SUCCEEDED'
+                  order by a.recorded_at desc, a.id desc
+                  limit 1
+               ) end as escalation_event,
+               r.cancelled_at as decided_at,
                r.replacement_request_id, m.assigned_rider_id as rider_id,
                (select count(*) from pickup_stop_evidence e where e.pickup_stop_id = s.id)::integer as photo_count,
                s.resolved_at::text as position_text, s.id as position_id

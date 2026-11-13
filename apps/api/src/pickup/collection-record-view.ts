@@ -36,6 +36,8 @@ export interface CollectionRecordView {
   readonly variance: 'MATCH' | 'SHORT';
   readonly variance_reason_code?: string;
   readonly variance_note?: string;
+  /** The photo of each parcel counted, as the rider named them (D-A10); absent, and never an empty list, for a stop Ops let through without photos. */
+  readonly parcel_photo_ids?: readonly string[];
   readonly captured_at?: string;
   readonly office_notified_at: string | null;
 }
@@ -46,8 +48,13 @@ const iso = (value: string | Date | null): string | null =>
 /**
  * The record as the contract states it: the members it names and no other, so that what the table keeps beside them (the hub, the rider, the direction
  * of the handshake to come) is never on the wire. The label and the attribution of the reason are the catalogue's and are not repeated to the rider.
+ * `parcelPhotoIds` are the photos the count attached, in the order the rider named them (the record's own row does not hold them: they are links to it); the answer states them as the
+ * contract's `CollectionRecord.parcel_photo_ids` declares, and the stored answer that a replay returns carries them with it. None attached (a stop Ops let through without photos) states none.
  */
-export function collectionRecordViewOf(row: CollectionRecordRow): CollectionRecordView {
+export function collectionRecordViewOf(
+  row: CollectionRecordRow,
+  parcelPhotoIds: readonly string[] = [],
+): CollectionRecordView {
   const reason = row.variance_reason_snapshot;
   const captured = iso(row.captured_at);
   return {
@@ -58,6 +65,7 @@ export function collectionRecordViewOf(row: CollectionRecordRow): CollectionReco
     variance: row.variance,
     ...(reason === null ? {} : { variance_reason_code: reason.reason_code }),
     ...(reason?.note === undefined ? {} : { variance_note: reason.note }),
+    ...(parcelPhotoIds.length === 0 ? {} : { parcel_photo_ids: parcelPhotoIds }),
     ...(captured === null ? {} : { captured_at: captured }),
     office_notified_at: iso(row.office_notified_at),
   };

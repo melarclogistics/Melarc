@@ -166,6 +166,18 @@ export const QUEUE_NEUTRAL_CALLS: readonly QueueNeutralCall[] = [
     ['PUT', '/pickup-manifests/{id}/stops', 'setManifestStopOrder'],
     ['POST', '/pickup-manifests/{id}/custody-handover', 'initiateRunCustodyHandover'],
   ]),
+  ...neutral(
+    'Settles a handshake, or lets a stop’s count through without photos, and no queue counts either: a run that collected something is closed by the hub’s handover and never completed by the system (`pickup-run-completion.ts`), so none of the three turns a stop terminal that a run waits on.',
+    [
+      ['POST', '/pickup-stops/{id}/handshake/ops-override', 'authoriseHandshakeOverride'],
+      ['POST', '/pickup-stops/{id}/handshake/resolve', 'resolveHandshake'],
+      ['POST', '/pickup-stops/{id}/parcel-photo-exception', 'authoriseParcelPhotoException'],
+    ],
+  ),
+  ...neutral(
+    'A read that is a `POST` (the authorization to read one stored photo): the server changes nothing, and it is a query of the screen that opens the photo and not an act.',
+    [['POST', '/evidence/{id}/retrieval-authorization', 'createEvidenceRetrievalAuthorization']],
+  ),
   ...neutral('Acts on a rider’s device, which no queue counts.', [
     ['POST', '/ops/riders/{riderId}/device/register', 'registerRiderDevice'],
     ['POST', '/ops/riders/{riderId}/device/reregister', 'reregisterRiderDevice'],

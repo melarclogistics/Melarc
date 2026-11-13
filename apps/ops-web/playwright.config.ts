@@ -9,12 +9,29 @@ const SHOWCASE_PORT = 4174;
 const SHOWCASE_ORIGIN = `http://127.0.0.1:${String(SHOWCASE_PORT)}`;
 const SHOWCASE_BUILD = 'node_modules/.showcase-build';
 
+/**
+ * Whether WebKit is launched headed: MELARC_WEBKIT_HEADED, `1`, or not set (empty and `0` are not set). CI sets it for the jobs that hold WebKit's runs and runs them under a virtual display (xvfb-run, in
+ * .github/workflows/ci.yml, which says why: the Product Owner's decision D-B4 of 13 November 2026); no developer's machine sets it, and Chromium and Firefox are never launched headed by it. It is the one value
+ * that e2e/playwright.config.ts reads as well. Any other value is refused and not read as "not set", so that a typo never leaves WebKit headless in the run that was meant to be headed.
+ */
+function webkitHeaded(value: string | undefined): boolean {
+  const named = value?.trim() ?? '';
+  if (named === '' || named === '0') return false;
+  if (named === '1') return true;
+  throw new Error(
+    `MELARC_WEBKIT_HEADED is "${named}", which is not a value here. Use 1 to launch WebKit headed (CI does, under xvfb-run) or leave it unset.`,
+  );
+}
+
+const WEBKIT_HEADED = webkitHeaded(process.env.MELARC_WEBKIT_HEADED);
+
 const ENGINES = {
   // The full Chromium in its new headless mode, not the separate stripped-down headless shell: it is
   // the browser engine users run, and `playwright install chromium` is all a machine needs.
   chromium: { ...devices['Desktop Chrome'], channel: 'chromium' },
   firefox: { ...devices['Desktop Firefox'] },
-  webkit: { ...devices['Desktop Safari'] },
+  // Headed only where MELARC_WEBKIT_HEADED says so (above): headless WebKit stalls in the hosted runs.
+  webkit: { ...devices['Desktop Safari'], ...(WEBKIT_HEADED ? { headless: false } : {}) },
 } as const;
 
 type Engine = keyof typeof ENGINES;
@@ -95,6 +112,8 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *   pickup      the four pickup screens (S1.19), the same two ways, with a stateful stand-in for the API.
  *   manifests   the four manifest screens (S1.25), the same two ways, with a stateful stand-in for the API (its custody half is written from
  *               the contract and answered by the stand-in).
+ *   pickup-work the failed pickups, the handshakes that need Ops, the short counts, the collection disputes, a stop with its photos and the form that lets a count through
+ *               without them (S1.30), the same two ways, with a stateful stand-in for the API that plants a code, a digest, a phone number and an object key in answers that never carry them.
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
  *   queue-summary the counts of the queues (task C1), the same two ways: the sidebar's counts, My work's cards, a failed read and the read again on
@@ -260,6 +279,19 @@ export default defineConfig({
       // The same file against the development server (strict mode runs every effect twice).
       name: `manifests-dev-${engine}`,
       testMatch: 'manifests.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The screens of the door and the failure (S1.30) against the production build, with a stateful stand-in for the API that plants a handshake's code, digest and override note, a failure's phone
+      // number, and an object key and an address on every piece of evidence, in answers that never carry them. A photo is served from the page's own origin (the policy is `img-src 'self'`).
+      name: `pickup-work-${engine}`,
+      testMatch: 'pickup-work.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice).
+      name: `pickup-work-dev-${engine}`,
+      testMatch: 'pickup-work.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
     {

@@ -19,7 +19,8 @@ import {
 /**
  * The run of the integrated harness over the trusted HTTPS origin (S0.23): `pnpm run test:e2e:https`, one command that does everything
  * the proofs need and leaves nothing behind. It is the whole of a mandatory CI step (the workflow rules require each mandatory command
- * to be the whole script of its step, and allow no step that runs "always"), so the cleanup is here, in a `finally`:
+ * to be the whole script of its step, with the one prefix that puts WebKit's runs under a virtual display, and allow no step that runs
+ * "always"), so the cleanup is here, in a `finally`:
  *
  * 1. refuse unless it is allowed to make key material (below);
  * 2. make a directory of its own outside the checkout, and in it the disposable CA and leaf (`test-ca.ts`: the CA's key is deleted as

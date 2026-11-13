@@ -7,6 +7,7 @@ import { refusalText } from './capability-words';
 import { MANIFEST_COPY } from './manifest-copy';
 import { NOTIFICATION_COPY } from './notification-copy';
 import { PICKUP_COPY } from './pickup-copy';
+import { PICKUP_WORK_COPY } from './pickup-work-copy';
 import { RIDER_COPY } from './rider-copy';
 import { STAFF_COPY } from './staff-copy';
 import { RATE_LIMITED_MESSAGE, rateLimitWaitSeconds } from './rate-limit';
@@ -279,6 +280,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   ...RIDER_COPY,
   ...PICKUP_COPY,
   ...MANIFEST_COPY,
+  ...PICKUP_WORK_COPY,
   ...NOTIFICATION_COPY,
 ];
 

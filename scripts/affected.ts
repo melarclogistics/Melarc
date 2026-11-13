@@ -379,6 +379,12 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/app/pages/manifests/',
     'apps/ops-web/src/app/pages/pickup/',
   ],
+  // The screens of the door and the failure: the lists, and the stop's page and form, which live in the manifests folder; the act dialogs of a failure are the pickup screens'.
+  'pickup-work.spec.ts': [
+    'apps/ops-web/src/app/pages/pickup-work/',
+    'apps/ops-web/src/app/pages/manifests/',
+    'apps/ops-web/src/app/pages/pickup/',
+  ],
   'messages.spec.ts': [
     'apps/ops-web/src/app/pages/messages/',
     'apps/ops-web/src/app/pages/pickup/',

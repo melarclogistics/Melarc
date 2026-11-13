@@ -65,6 +65,23 @@ describe('the collection record as the contract states it (S1.26)', () => {
     expect(JSON.stringify(view)).not.toContain('CUSTOMER');
   });
 
+  // Break caught (Run B, Part 1, item 5): the photos a count attached left out of the answer that the contract declares them in (`CollectionRecord.parcel_photo_ids`), or named in
+  // another order than the one the rider named them in.
+  it('states the photos the count attached, in the order the rider named them', () => {
+    const named = [
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e12',
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e11',
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e13',
+    ];
+    expect(collectionRecordViewOf(ROW, named).parcel_photo_ids).toEqual(named);
+  });
+
+  // Break caught: an empty list stated for a stop that Ops let through without photos, which would say that a count was made with photos and none were counted.
+  it('leaves the photos out when the count attached none', () => {
+    expect(Object.keys(collectionRecordViewOf(ROW))).not.toContain('parcel_photo_ids');
+    expect(Object.keys(collectionRecordViewOf(ROW, []))).not.toContain('parcel_photo_ids');
+  });
+
   // Break caught: a note that is absent written as an empty one.
   it('leaves out a note that was not given', () => {
     const view = collectionRecordViewOf({

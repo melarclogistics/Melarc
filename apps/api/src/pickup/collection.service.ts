@@ -451,7 +451,8 @@ export class Collections {
       // and an event the ledger cannot take undoes the promotion with the rest of the act.
       await tx.execute(sql`select melarc.promote_collected_sender(${stop.id}::uuid)`);
 
-      const view = collectionRecordViewOf(row);
+      // The answer states the photos it attached, in the order the rider named them, and the stored answer that a replay returns is this one (Run B, Part 1, item 5).
+      const view = collectionRecordViewOf(row, parcelPhotos);
       const answer: StoredCollection = { record: view };
       await idempotency.complete(handle, scope, {
         status: 200,

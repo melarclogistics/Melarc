@@ -5,7 +5,11 @@ import {
   HANDSHAKE_CHANNELS,
   HANDSHAKE_TYPES,
 } from './collection-record.schema.js';
-import { FAILURE_DECISIONS, HANDSHAKE_ROUTED_BECAUSE } from './ops-work-list-views.js';
+import {
+  ESCALATION_ACTORS,
+  FAILURE_DECISIONS,
+  HANDSHAKE_ROUTED_BECAUSE,
+} from './ops-work-list-views.js';
 import { PICKUP_MANIFEST_STATES } from './pickup-manifest.schema.js';
 import { PICKUP_REQUEST_STATES } from './pickup-request.schema.js';
 import { PICKUP_STOP_STATES } from './pickup-stop.schema.js';
@@ -175,6 +179,7 @@ export const PICKUP_FAILURE_QUEUE_ITEM_SCHEMA = described({
     'attempt_number',
     'attempt_extended',
     'escalated_at',
+    'escalation',
     'decided_at',
     'replacement_request_id',
     'rider_id',
@@ -207,6 +212,16 @@ export const PICKUP_FAILURE_QUEUE_ITEM_SCHEMA = described({
     attempt_number: { type: 'integer', minimum: 1 },
     attempt_extended: { type: 'boolean' },
     escalated_at: nullableMoment,
+    escalation: {
+      type: ['object', 'null'],
+      required: ['by', 'threshold_hours', 'waited_seconds'],
+      additionalProperties: false,
+      properties: {
+        by: { type: 'string', enum: [...ESCALATION_ACTORS] },
+        threshold_hours: { type: ['integer', 'null'], minimum: 1 },
+        waited_seconds: { type: ['integer', 'null'], minimum: 0 },
+      },
+    },
     decided_at: nullableMoment,
     replacement_request_id: { type: ['string', 'null'], format: 'uuid' },
     rider_id: { type: ['string', 'null'], format: 'uuid' },

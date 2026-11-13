@@ -2077,6 +2077,23 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `VENDOR_DEVICE` | `ACTIVE` | success | Active |
 | `VENDOR_DEVICE` | `REVOKED` | neutral | Revoked |
 | `VENDOR_DEVICE` | `REPLACED` | neutral | Replaced |
+| `PICKUP_FAILURE` | `PENDING` | waiting | Waiting for Ops |
+| `PICKUP_FAILURE` | `ESCALATED` | waiting | Escalated, still waiting |
+| `PICKUP_FAILURE` | `RESCHEDULED` | success | Rescheduled |
+| `PICKUP_FAILURE` | `CANCELLED` | neutral | Cancelled |
+| `HANDSHAKE` | `PENDING` | neutral | Not asked for yet |
+| `HANDSHAKE` | `CODE_GENERATED` | info | Code made |
+| `HANDSHAKE` | `CODE_DELIVERED` | info | Code with the vendor |
+| `HANDSHAKE` | `VERIFIED` | success | Confirmed |
+| `HANDSHAKE` | `EXPIRED` | waiting | Code ran out |
+| `HANDSHAKE` | `EXHAUSTED` | waiting | Attempts used up |
+| `HANDSHAKE` | `DISPUTED` | danger | Disputed |
+| `HANDSHAKE` | `MANUALLY_RESOLVED` | success | Settled by Ops |
+| `COLLECTION_DISPUTE` | `OPEN` | waiting | Open |
+| `COLLECTION_DISPUTE` | `RESOLVED` | success | Resolved |
+| `STOP_EVIDENCE` | `STORED` | success | Stored |
+| `STOP_EVIDENCE` | `PENDING_UPLOAD` | waiting | Waiting to upload |
+| `STOP_EVIDENCE` | `EXPIRED` | danger | Never uploaded |
 
 
 The same state name in two domains (`PENDING`, `ACTIVE`, `CANCELLED`) is two different states of two different records. The words are sentence case and plain, with no raw value and no full stop.

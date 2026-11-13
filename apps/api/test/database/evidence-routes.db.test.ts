@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -8,13 +9,15 @@ import {
 } from '../../src/platform/auth/ports/content-scanner.port.js';
 import { EVIDENCE_STORE } from '../../src/platform/auth/ports/evidence-store.port.js';
 import { METRICS, type Metrics } from '../../src/platform/auth/ports/metrics.port.js';
+import { serverErrorIn } from '../../src/platform/database/database-failures.js';
+import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { ContentScannerError } from '../../src/platform/evidence/content-scanner-error.js';
 import { EICAR_TEST_FILE } from '../../src/platform/evidence/eicar-test-file.js';
 import type { InProcessEvidenceStore } from '../../src/platform/evidence/in-process.evidence-store.adapter.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
-import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
+import { arrangeRun, arrangedRider, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { API, HUB_A, HUB_B, OPS, codeOf, type Actor } from './support/staff-routes.js';
 import {
@@ -708,6 +711,220 @@ describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; mig
     expect((await scanOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
     removing.mockRestore();
     counted.mockRestore();
+  });
+
+  // Run B, Part 1, item 4 (D-B3, the Product Owner's decision of 13 November 2026): a flagged upload is a security fact, so it writes an enhanced event of its own, committed although the
+  // upload is refused. Each of the next tests fails on 6547d90, where nothing was written.
+  const flaggedEventsOf = (id: string) =>
+    routes.rows<{
+      enhanced: boolean;
+      outcome: string;
+      actor_type: string;
+      actor_id: string | null;
+      surface_context: string;
+      responsible_hub_id: string | null;
+      object_type: string;
+      previous_state: string | null;
+      resulting_state: string | null;
+      related_ids: Record<string, string> | null;
+      detail: Record<string, unknown> | null;
+      before_after: unknown;
+      note: string | null;
+    }>(
+      `select enhanced, outcome, actor_type, actor_id, surface_context, responsible_hub_id, object_type, previous_state, resulting_state, related_ids, detail, before_after, note
+         from audit_event where event_code = 'pickup.evidence.flagged' and object_id = $1 order by recorded_at, id`,
+      [id],
+    );
+
+  // Break caught: a flagged upload that leaves no trace in the ledger, an event rolled back with the refusal, one that names the object's key or carries more than the facts, or a retry that writes a second.
+  it('writes one enhanced event for a flagged upload, committed although the upload is refused, naming the record, the rider, the stop and the signature, and never the object key', async () => {
+    const arranged = await run();
+    const eicar = new TextEncoder().encode(EICAR_TEST_FILE);
+    const { ticket, etag } = await uploaded(arranged, eicar);
+    const key = await storageRefOf(ticket.evidence.id);
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    // The upload is refused, and the event is there all the same.
+    expect(ruleOf(done)).toBe('malicious_content');
+    const events = await flaggedEventsOf(ticket.evidence.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      enhanced: true,
+      outcome: 'REJECTED',
+      actor_type: 'RIDER',
+      actor_id: arranged.rider.id,
+      surface_context: 'RIDER_ANDROID',
+      responsible_hub_id: HUB_A,
+      object_type: 'Evidence',
+      previous_state: 'PENDING_UPLOAD',
+      resulting_state: 'PENDING_UPLOAD',
+      before_after: null,
+      note: null,
+      related_ids: { pickup_stop_id: stopId(arranged), rider_id: arranged.rider.id },
+      detail: { threat: 'Eicar-Test-Signature', object_removed: true },
+    });
+    expect(JSON.stringify(events)).not.toContain(key);
+    expect(JSON.stringify(events)).not.toContain('X-Amz');
+    // The retry finds the object gone, refuses it as missing and writes nothing more.
+    expect(ruleOf(await complete(arranged.rider, ticket.evidence.id, etag))).toBe('missing');
+    expect(await flaggedEventsOf(ticket.evidence.id)).toHaveLength(1);
+  });
+
+  // Break caught: the event left out, or saying the object is gone, when the store could not remove it (what the alert for a failed removal pairs with).
+  it('says in the event that the object could not be removed when it could not', async () => {
+    const arranged = await run();
+    const eicar = new TextEncoder().encode(EICAR_TEST_FILE);
+    vi.spyOn(store, 'remove').mockRejectedValueOnce(new Error('the store is down'));
+    const { ticket, etag } = await uploaded(arranged, eicar);
+    const done = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(ruleOf(done)).toBe('malicious_content');
+    const events = await flaggedEventsOf(ticket.evidence.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.detail).toEqual({ threat: 'Eicar-Test-Signature', object_removed: false });
+  });
+
+  // Break caught: an event written for every upload, or for one the scanner could not decide.
+  it('writes no event for a clean upload, nor for one the scanner could not decide', async () => {
+    const arranged = await run();
+    const clean = await uploaded(arranged);
+    expect((await complete(arranged.rider, clean.ticket.evidence.id, clean.etag)).status).toBe(200);
+    expect(await flaggedEventsOf(clean.ticket.evidence.id)).toEqual([]);
+
+    const undecided = await uploaded(arranged);
+    vi.spyOn(scanner, 'scan').mockRejectedValueOnce(
+      new ContentScannerError('SCANNER_UNAVAILABLE', 'timeout'),
+    );
+    expect(
+      (await complete(arranged.rider, undecided.ticket.evidence.id, undecided.etag)).status,
+    ).toBe(503);
+    expect(await flaggedEventsOf(undecided.ticket.evidence.id)).toEqual([]);
+  });
+
+  // Break caught: the event a writer can forge. The ledger admits it to the rider's evidence keys alone, for the rider's own pending record, in the record's hub, bound to its stop, and
+  // only as the enhanced rejection the application writes (migration 0091). Written as the runtime login, which row-level security applies to.
+  describe('the ledger admits the event only as the application writes it', () => {
+    const CODE = 'pickup.evidence.flagged';
+    const contextOf = (riderId: string, key: string): SecurityContext => ({
+      principalType: 'RIDER',
+      principalId: riderId,
+      sessionId: randomUUID(),
+      surface: 'RIDER_ANDROID',
+      riderId,
+      authorizationKey: key,
+      hubScopeMode: 'SET',
+      authorizedHubIds: [],
+      correlationId: 'evidence-flagged-event',
+    });
+    const eventSql = (o: {
+      readonly evidence: string;
+      readonly rider: string;
+      /** The actor the event names, when it is not the rider it is about. */
+      readonly actor?: string;
+      readonly stop: string;
+      readonly hub?: string;
+      readonly outcome?: string;
+      readonly enhanced?: boolean;
+      readonly related?: Record<string, string>;
+      readonly code?: string;
+    }): string =>
+      `insert into audit_event (id, event_code, occurred_at, actor_type, actor_id, surface_context, responsible_hub_id, object_type, object_id, correlation_id,
+                               previous_state, resulting_state, outcome, enhanced, related_ids, detail, serialisation_version)
+       values (gen_random_uuid(), '${o.code ?? CODE}', now(), 'RIDER', '${o.actor ?? o.rider}'::uuid, 'RIDER_ANDROID', '${o.hub ?? HUB_A}'::uuid, 'Evidence', '${o.evidence}'::uuid,
+               'evidence-flagged-event', 'PENDING_UPLOAD', 'PENDING_UPLOAD', '${o.outcome ?? 'REJECTED'}', ${String(o.enhanced ?? true)},
+               '${JSON.stringify(o.related ?? { pickup_stop_id: o.stop, rider_id: o.rider })}'::jsonb, '{"threat":"Eicar-Test-Signature","object_removed":true}'::jsonb, 1)`;
+    async function writtenAs(context: SecurityContext, statement: string): Promise<string | null> {
+      try {
+        await routes.built.service.transactionWithContext(context, async (tx) => {
+          await tx.execute(sql.raw(statement));
+        });
+        return null;
+      } catch (error) {
+        return serverErrorIn(error)?.code ?? 'other';
+      }
+    }
+
+    it('refuses what the application does not write, and takes what it does', async () => {
+      const arranged = await run({ stops: 2, stopStates: ['ARRIVED', 'ARRIVED'] });
+      const other = await arrangedRider(routes.kit, routes.admin);
+      const stop = stopId(arranged);
+      const otherStop = stopId(arranged, 1);
+      const pending = await uploaded(arranged);
+      const proof = pending.ticket.evidence.id;
+      // A parcel's photo, declared under the count's key and not yet completed.
+      const parcel = await declare(arranged.rider, body(stop, JPEG, { purpose: 'PARCEL_PHOTO' }));
+      expect(parcel.status, parcel.text).toBe(200);
+      const parcelId = (parcel.json() as Ticket).evidence.id;
+      const done = await stored(arranged);
+      const rider = arranged.rider.id;
+      const FAILURE = 'pickup.failure.report';
+      const CONFIRM = 'pickup.collection.confirm';
+      const genuine = { evidence: proof, rider, stop };
+
+      const refused: readonly (readonly [string, SecurityContext, string])[] = [
+        ['another rider’s record', contextOf(other.id, FAILURE), eventSql(genuine)],
+        // Each tie to the session's rider is held by its own conjunct, so each is shown alone: the actor the event names (the record and the related ids are the session's own), and another
+        // rider who names itself everywhere and a record that is not its own (only the record's capturer refuses it).
+        [
+          'an actor that is not the session’s rider',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, actor: other.id }),
+        ],
+        [
+          'a rider naming itself for a record that is not its own',
+          contextOf(other.id, FAILURE),
+          eventSql({ ...genuine, rider: other.id }),
+        ],
+        ['the key that runs a stop', contextOf(rider, 'pickup.run.execute'), eventSql(genuine)],
+        ['the count’s key for a failure’s proof', contextOf(rider, CONFIRM), eventSql(genuine)],
+        [
+          'the failure’s key for a parcel’s photo',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, evidence: parcelId }),
+        ],
+        [
+          'a record that is already stored',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, evidence: done.id }),
+        ],
+        [
+          'a hub that is not the record’s',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, hub: HUB_B }),
+        ],
+        [
+          'another stop in the related ids',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, related: { pickup_stop_id: otherStop, rider_id: rider } }),
+        ],
+        [
+          'another rider in the related ids',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, related: { pickup_stop_id: stop, rider_id: other.id } }),
+        ],
+        [
+          'an outcome of success',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, outcome: 'SUCCEEDED' }),
+        ],
+        ['an ordinary tier', contextOf(rider, FAILURE), eventSql({ ...genuine, enhanced: false })],
+        [
+          'another event of the catalogue',
+          contextOf(rider, FAILURE),
+          eventSql({ ...genuine, code: 'pickup.stop.arrived' }),
+        ],
+      ];
+      for (const [what, context, statement] of refused) {
+        expect(await writtenAs(context, statement), what).toBe('42501');
+      }
+      expect(await flaggedEventsOf(proof)).toEqual([]);
+
+      // The same writer, the same record, the facts the application writes: taken, for a failure's proof under the failure's key and for a parcel's photo under the count's.
+      expect(await writtenAs(contextOf(rider, FAILURE), eventSql(genuine))).toBeNull();
+      expect(
+        await writtenAs(contextOf(rider, CONFIRM), eventSql({ ...genuine, evidence: parcelId })),
+      ).toBeNull();
+      expect(await flaggedEventsOf(proof)).toHaveLength(1);
+      expect(await flaggedEventsOf(parcelId)).toHaveLength(1);
+    });
   });
 
   // Break caught (fail closed): a scanner that cannot answer read as clean, or as "skipped", or a record left in a state from which the retry cannot store it.

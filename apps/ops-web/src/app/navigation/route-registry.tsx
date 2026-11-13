@@ -7,6 +7,8 @@ import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
 import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
 import { ManifestDetailPage } from '../pages/manifests/ManifestDetailPage';
 import { ManifestListPage } from '../pages/manifests/ManifestListPage';
+import { StopExceptionPage } from '../pages/manifests/StopExceptionPage';
+import { StopPage } from '../pages/manifests/StopPage';
 import { StopSkipPage } from '../pages/manifests/StopSkipPage';
 import { MessageLogPage } from '../pages/messages/MessageLogPage';
 import { ApprovalsPage } from '../pages/pickup/ApprovalsPage';
@@ -14,6 +16,10 @@ import { PickupExceptionPage } from '../pages/pickup/PickupExceptionPage';
 import { PickupRequestCreatePage } from '../pages/pickup/PickupRequestCreatePage';
 import { PickupRequestDetailPage } from '../pages/pickup/PickupRequestDetailPage';
 import { PickupRequestListPage } from '../pages/pickup/PickupRequestListPage';
+import { DisputesPage } from '../pages/pickup-work/DisputesPage';
+import { FailedPickupsPage } from '../pages/pickup-work/FailedPickupsPage';
+import { HandshakesPage } from '../pages/pickup-work/HandshakesPage';
+import { ShortfallsPage } from '../pages/pickup-work/ShortfallsPage';
 import { SessionsPage } from '../pages/staff/SessionsPage';
 import { StaffCreatePage } from '../pages/staff/StaffCreatePage';
 import { StaffDetailPage } from '../pages/staff/StaffDetailPage';
@@ -113,6 +119,22 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       description: 'Approve the single-package pickups waiting for a one-package exception.',
     },
   },
+  // The handshakes that need Ops (S1.30), in the Today group beside Decisions: what waits on a decision the session may give. Behind the key of the list's own operation, `pickup.handshake.override`, and
+  // never a role; resolving by hand is the act of a second key, offered inside. It draws no count: `getQueueSummary` states none for it.
+  {
+    path: '/handshakes',
+    element: <HandshakesPage />,
+    access: { permission: 'pickup.handshake.override' },
+    menu: {
+      place: 'sidebar',
+      group: 'today',
+      label: 'Handshakes',
+      icon: 'handshakes',
+      order: 2,
+      description:
+        'Settle the handshakes whose code could not be entered, by an override or by hand.',
+    },
+  },
   // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
   // `notification.read`, and never a role. It is reached from the menu and, for one request, from that request's page.
   {
@@ -164,6 +186,59 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     path: '/manifests/:id',
     element: <ManifestDetailPage />,
     access: { permission: 'pickup.read', capability: 'see pickup runs' },
+    menu: null,
+  },
+  // The failed pickups and the collections that came to a short count or a dispute (S1.30): three work lists of the Pickups group, each behind the key of its own operation. None draws a count:
+  // `getQueueSummary` states none for them.
+  {
+    path: '/pickup-failures',
+    element: <FailedPickupsPage />,
+    access: { permission: 'pickup.failure.resolve' },
+    menu: {
+      place: 'sidebar',
+      group: 'pickups',
+      label: 'Failed pickups',
+      icon: 'failed-pickups',
+      order: 2,
+      description: 'Decide what becomes of the pickups a rider could not collect.',
+    },
+  },
+  {
+    path: '/collection-shortfalls',
+    element: <ShortfallsPage />,
+    access: { permission: 'pickup.handshake.override' },
+    menu: {
+      place: 'sidebar',
+      group: 'pickups',
+      label: 'Short counts',
+      icon: 'short-counts',
+      order: 3,
+      description: 'See the counts where a rider collected fewer parcels than were declared.',
+    },
+  },
+  {
+    path: '/collection-disputes',
+    element: <DisputesPage />,
+    access: { permission: 'pickup.read', capability: 'see collection disputes' },
+    menu: {
+      place: 'sidebar',
+      group: 'pickups',
+      label: 'Disputes',
+      icon: 'collection-disputes',
+      order: 4,
+      description: 'See the collections a vendor disputes, beside what the rider counted.',
+    },
+  },
+  {
+    path: '/manifests/:id/stops/:stopId',
+    element: <StopPage />,
+    access: { permission: 'pickup.read', capability: 'see pickup runs' },
+    menu: null,
+  },
+  {
+    path: '/manifests/:id/stops/:stopId/photo-exception',
+    element: <StopExceptionPage />,
+    access: { permission: 'pickup.handshake.override' },
     menu: null,
   },
   {

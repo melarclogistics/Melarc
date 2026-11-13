@@ -32,6 +32,13 @@
 # diagnostics kept on a failure and on a cancellation, the browsers cached) and scripts/browser-shards.test.ts proves, from
 # Playwright's own list of tests, that each kind of run runs every test of the engines it must, once.
 #
+# WebKit is launched headed, under a virtual display, in CI and nowhere else (the Product Owner's decision D-B4 of 13 November 2026). Headless WebKit stalls in the hosted runs, in WebKit alone
+# (pull request #41 found the stalls and set out the ways to meet them; this is the one chosen), and no retry, no timeout and no test is changed for it. So the jobs that hold WebKit's runs (the Firefox and WebKit shards of the browser tests, and the HTTPS journeys) install Xvfb and run the step of their tests
+# under xvfb-run, with MELARC_WEBKIT_HEADED=1, the one value that both Playwright configurations (apps/ops-web/playwright.config.ts and e2e/playwright.config.ts) read to launch WebKit headed. The
+# display costs the other engines nothing: the configurations, not the display, decide who opens a window, and only WebKit does, only where the value is set, which no developer's machine sets, so
+# a developer's WebKit, Chromium and Firefox stay headless. scripts/ci-workflow.test.ts holds the wrapper, the value and the install to exactly those jobs (the wrapper is the one prefix a mandatory
+# command may have: xvfb-run returns the status of what it runs). The proof is a hosted run of every engine, and then the nightly runs of main.
+#
 # To see the verdict turn red without breaking anything, run this workflow by hand with "rehearse-failure"
 # ticked: the static job fails on purpose and "CI result" must fail with it.
 
@@ -479,6 +486,11 @@ jobs:
       - name: Install the NSS tools
         run: sudo apt-get install --no-install-recommends --yes libnss3-tools
 
+      # WebKit is launched headed, under a virtual display (the header says why): Xvfb, run by xvfb-run, which also needs xauth (Debian and Ubuntu only recommend it, and this install leaves
+      # recommendations out). The runner image carries Xvfb today; this step is what the job does not leave to the image. The install of the browsers above has updated the package index.
+      - name: Install the virtual display
+        run: sudo apt-get install --no-install-recommends --yes xvfb xauth
+
       # JIT is off on this disposable server too, as in the database job (the evidence is in the comment of the step there): the rider
       # and vendor list reads of these journeys took 4.2 to 6.5 s with it on, and three journeys failed on a 503 at the 5 s time-out.
       - name: Turn off JIT in the disposable database server
@@ -489,11 +501,15 @@ jobs:
             -c "alter system set jit = off" \
             -c "select pg_reload_conf()"
 
+      # Under the display, with the one value that turns WebKit headed (e2e/playwright.config.ts reads it for the WebKit projects alone): shards 1 and 2 run Chromium and Firefox, which stay
+      # headless, and shard 3 runs WebKit's refusal and then its proofs, headed. The harness runs inside the wrapper, so every run it makes and the `sudo` that puts the CA in the system store are
+      # its children, as before.
       - name: Browser, API and database journey over the trusted HTTPS origin
         timeout-minutes: 26
         env:
           MELARC_HTTPS_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
-        run: pnpm run test:e2e:https
+          MELARC_WEBKIT_HEADED: '1'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" pnpm run test:e2e:https
 
       # Logs of every process, the outbound-connection record and traces of the failed run, of each run of the shard
       # (e2e/harness/https-run.ts gives each an output directory of its own below e2e/test-results), kept when the job failed and when it
@@ -644,12 +660,19 @@ jobs:
       - name: Install the browser
         run: pnpm --filter @melarc/e2e exec playwright install --with-deps ${{ matrix.engine }}
 
+      # WebKit's shards are launched headed, under a virtual display (the header says why); the Firefox shards of this job have the display too and stay headless. The install of the browser
+      # above has updated the package index, and xvfb-run needs xauth, which `--no-install-recommends` would leave out.
+      - name: Install the virtual display
+        run: sudo apt-get install --no-install-recommends --yes xvfb xauth
+
+      # Under the display, with the one value that turns WebKit headed (apps/ops-web/playwright.config.ts reads it for the WebKit projects alone, so a Firefox shard is headless whatever it is).
       - name: Browser tests of the Ops shell and components
         timeout-minutes: 26
         env:
           MELARC_BROWSERS: ${{ matrix.engine }}
           MELARC_BROWSER_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
-        run: pnpm run test:browser
+          MELARC_WEBKIT_HEADED: '1'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" pnpm run test:browser
 
       # Traces of the failed tests, as in the Chromium job, kept when the job failed and when it was cancelled; the name carries the
       # engine and the shard.

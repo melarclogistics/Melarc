@@ -389,12 +389,43 @@ export class EvidenceService {
       },
     );
     if (!judged.accepted) {
-      throw new ApiException(
+      const refusal = new ApiException(
         ErrorCode.ValidationFailed,
         400,
         'The uploaded object is not the one declared',
         { violations: [{ in: 'body', pointer: '/object', rule: judged.rule }] },
       );
+      // A flagged upload is a security fact (D-B3, 13 November 2026): its enhanced event is written in a transaction of its own that **commits**, and the refusal is answered after the commit,
+      // in the shape of `commitThenRefuse` (the work gives back the error to answer, the transaction commits, and only then is it raised). The record stays `PENDING_UPLOAD`; the event
+      // names the record, the rider, the stop and the signature, and never the object's key.
+      if (judged.flagged !== undefined) {
+        const flagged = judged.flagged;
+        const raised = await this.#options.runner.mutate(
+          decision,
+          correlationId,
+          async (handle) => {
+            await this.#options.audit.write(handle, {
+              code: 'pickup.evidence.flagged',
+              enhanced: true,
+              outcome: 'REJECTED',
+              object: { type: 'Evidence', id: row.id },
+              ...(row.responsible_hub_id === null
+                ? {}
+                : { responsibleHubId: row.responsible_hub_id }),
+              previousState: 'PENDING_UPLOAD',
+              resultingState: 'PENDING_UPLOAD',
+              relatedIds: {
+                pickup_stop_id: row.owner_id,
+                rider_id: authorized.session.principalId.toLowerCase(),
+              },
+              detail: { threat: flagged.signature, object_removed: flagged.removed },
+            });
+            return refusal;
+          },
+        );
+        throw raised;
+      }
+      throw refusal;
     }
     const { signature: kind, verdict } = judged;
 
