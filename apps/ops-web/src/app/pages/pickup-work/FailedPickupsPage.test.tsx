@@ -7,7 +7,11 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
-import { PICKUP_HUB_ID, pickupRequestFixture } from '../../../test-support/pickup-fixture';
+import {
+  PICKUP_HUB_ID,
+  cancellationReasonFixture,
+  pickupRequestFixture,
+} from '../../../test-support/pickup-fixture';
 import {
   WORK_REQUEST_ID,
   WORK_STOP_ID,
@@ -417,6 +421,99 @@ describe('a failure opened beside the queue', () => {
 
     expect(await panel.findByText(/no longer confirmed/)).toBeVisible();
     expect(panel.queryByRole('button', { name: 'Escalate' })).toBeNull();
+  });
+});
+
+describe('rescheduling and cancelling a failed pickup', () => {
+  const REASONS = 'GET /reason-definitions';
+  const CANCEL = `POST /pickup-requests/${WORK_REQUEST_ID}/cancel`;
+  const catalogue = () => json(200, [cancellationReasonFixture()]);
+  const cancelled = (version: string, overrides: Record<string, unknown> = {}): Response =>
+    json(
+      200,
+      pickupRequestFixture({ id: WORK_REQUEST_ID, state: 'CANCELLED', ...overrides }),
+      etag(version),
+    );
+
+  // Break caught: a reschedule sent without the new attempt (create_replacement), on a version that is not the one read, under a key that is not fresh, or one that does not lead to the new request.
+  it('reschedules with create_replacement on the version read under a fresh key, and links the new request', async () => {
+    const { user } = open(undefined, OFFICER, {
+      [READ]: () => request('v4'),
+      [REASONS]: catalogue,
+      [CANCEL]: () => cancelled('v5', { replacement_request_id: OTHER_REQUEST }),
+    });
+    const panel = within(await openRow(user));
+
+    await user.click(await panel.findByRole('button', { name: 'Reschedule' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Reschedule this pickup?' });
+    await user.selectOptions(
+      await within(dialog).findByRole('combobox', { name: /^Reason/ }),
+      'DEMO_CUSTOMER_CHANGED_MIND',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Reschedule the pickup' }));
+
+    expect(
+      await screen.findByText(
+        'The pickup ACC-PR-7KQ2MZ is rescheduled: its request is cancelled and its next attempt is booked.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Open the new request' })).toHaveAttribute(
+      'href',
+      `/pickup-requests/${OTHER_REQUEST}`,
+    );
+    const [act] = sent(CANCEL);
+    expect(act?.headers.get('If-Match')).toBe('"v4"');
+    expect(act?.headers.get('Idempotency-Key')).toMatch(KEY);
+    expect(await act?.clone().json()).toMatchObject({
+      reason_code: 'DEMO_CUSTOMER_CHANGED_MIND',
+      create_replacement: true,
+    });
+  });
+
+  // Break caught: a cancellation that books a new attempt, or one sent on the wrong version.
+  it('cancels without a replacement', async () => {
+    const { user } = open(undefined, OFFICER, {
+      [READ]: () => request('v2'),
+      [REASONS]: catalogue,
+      [CANCEL]: () => cancelled('v3'),
+    });
+    const panel = within(await openRow(user));
+
+    await user.click(await panel.findByRole('button', { name: 'Cancel the pickup' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Cancel this pickup request?' });
+    await user.selectOptions(
+      await within(dialog).findByRole('combobox', { name: /Reason/ }),
+      'DEMO_CUSTOMER_CHANGED_MIND',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel the request' }));
+
+    expect(await screen.findByText('The request ACC-PR-7KQ2MZ is cancelled.')).toBeVisible();
+    const [act] = sent(CANCEL);
+    expect(act?.headers.get('If-Match')).toBe('"v2"');
+    expect(await act?.clone().json()).toMatchObject({ create_replacement: false });
+  });
+
+  // Break caught: the cap told as a generic failure, or as if the request had been cancelled (the surface says the cap is "told as it is" by the refusal, never drawn as a state).
+  it('tells the cap as the refusal says it, and nothing was cancelled', async () => {
+    const { user } = open(() => page([failureFixture({ attempt_number: 3 })]), OFFICER, {
+      [READ]: () => request('v2'),
+      [REASONS]: catalogue,
+      [CANCEL]: () => refusal(422, 'PICKUP_ATTEMPT_LIMIT_REACHED'),
+    });
+    const panel = within(await openRow(user));
+
+    await user.click(await panel.findByRole('button', { name: 'Reschedule' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Reschedule this pickup?' });
+    await user.selectOptions(
+      await within(dialog).findByRole('combobox', { name: /^Reason/ }),
+      'DEMO_CUSTOMER_CHANGED_MIND',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Reschedule the pickup' }));
+
+    const alert = await within(dialog).findByRole('alert');
+    expect(within(alert).getByText(/^Nothing was cancelled/)).toBeVisible();
+    expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
+    expect(screen.queryByText(/is rescheduled/)).toBeNull();
   });
 });
 

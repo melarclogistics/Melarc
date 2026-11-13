@@ -120,6 +120,19 @@ const ready = async () => {
 };
 
 describe('the manifest: what it shows', () => {
+  // Break caught (S1.30): the number of a stop in the run's table not linking to the stop's own page, so that a stop's photos could not be reached from its run.
+  it('links each stop, by its number, to the stop’s own page', async () => {
+    open();
+    await ready();
+
+    const table = await stopsTable();
+    expect(within(table).getByRole('link', { name: '1' })).toHaveAttribute(
+      'href',
+      `${PATH}/stops/${STOP_ONE_ID}`,
+    );
+    expect(within(table).getAllByRole('link', { name: /^[123]$/ })).toHaveLength(3);
+  });
+
   it('shows where the run stands, in words, with its day, hub and rider', async () => {
     open();
     await ready();
@@ -325,6 +338,11 @@ describe('the manifest: what it shows', () => {
     expect(
       within(first ?? document.body).getByRole('heading', { level: 3, name: 'Stop 1' }),
     ).toBeVisible();
+    // The card's title is the link to the stop's own page (S1.30).
+    expect(within(first ?? document.body).getByRole('link', { name: 'Stop 1' })).toHaveAttribute(
+      'href',
+      `${PATH}/stops/${STOP_ONE_ID}`,
+    );
     expect(
       within(first ?? document.body).getByRole('link', { name: 'ACC-PR-7KQ2MZ' }),
     ).toHaveAttribute('href', `/pickup-requests/${REQUEST_ONE_ID}`);
