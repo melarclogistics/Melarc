@@ -7,7 +7,10 @@ import type { EvidenceOwnerType, EvidencePurpose } from './evidence-vocabulary.j
  * an arm of the table's policies (migration 0080 for the first); an owner type with no row is denied, never defaulted.
  *
  * The first owner is a pickup stop whose failure the rider reports: `pickup.failure.report` writes (the rider that arrived at the stop), and the staff of the stop's hub read under
- * `pickup.read`, the read of the subject. A later owner (S1.34's handover, S1.36's itemisation) adds its row and its arms in the migration that builds it.
+ * `pickup.read`, the read of the subject. **One owner type may have more than one act, told apart by the purpose** (D-A10, 12 November 2026): the same stop is also the owner of the
+ * photo of each parcel the rider counts at the door (`PARCEL_PHOTO`), which belongs to the count and is written under `pickup.collection.confirm`, so the rider's permission to declare a
+ * photo is the count's and not the failure's (the policies of migration 0088 pair each purpose with its key). A later owner (S1.34's handover, S1.36's itemisation) adds its row and its
+ * arms in the migration that builds it.
  */
 export interface OwnerAct {
   readonly ownerType: EvidenceOwnerType;
@@ -31,11 +34,27 @@ export const OWNER_ACTS: readonly OwnerAct[] = Object.freeze([
     write: Object.freeze({ principal: 'RIDER', key: 'pickup.failure.report' } as const),
     read: Object.freeze({ principal: 'STAFF', key: 'pickup.read' } as const),
   }),
+  Object.freeze({
+    ownerType: 'PICKUP_STOP',
+    purposes: Object.freeze(['PARCEL_PHOTO'] as const),
+    accessRule: 'SUBJECT_READERS',
+    retentionPolicy: 'PICKUP_STOP_EVIDENCE',
+    write: Object.freeze({ principal: 'RIDER', key: 'pickup.collection.confirm' } as const),
+    read: Object.freeze({ principal: 'STAFF', key: 'pickup.read' } as const),
+  }),
 ]);
 
-/** The act an owner type belongs to, or nothing: an owner with no act is denied. */
-export function ownerActOf(ownerType: string): OwnerAct | undefined {
-  return OWNER_ACTS.find((act) => act.ownerType === ownerType);
+/**
+ * The act an owner type and a purpose belong to, or nothing: an owner with no act is denied. A purpose the owner has no act for is answered with the owner's first act, so that the
+ * caller's permission is still asked of before anything else is said (a caller without the key learns nothing of the schema) and the purpose is then refused as not one of the owner's.
+ */
+export function ownerActOf(ownerType: string, purpose?: string): OwnerAct | undefined {
+  const acts = OWNER_ACTS.filter((act) => act.ownerType === ownerType);
+  const forPurpose =
+    purpose === undefined
+      ? undefined
+      : acts.find((act) => (act.purposes as readonly string[]).includes(purpose));
+  return forPurpose ?? acts[0];
 }
 
 /** The acts the caller could be writing evidence for, by principal: every act whose writer is of that kind. */

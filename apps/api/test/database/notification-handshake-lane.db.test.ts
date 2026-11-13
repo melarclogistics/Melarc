@@ -18,6 +18,7 @@ import { NotificationStore } from '../../src/platform/notifications/notification
 import { OPEN_SETTINGS } from '../../src/platform/notifications/lane-policy.js';
 import { templateOf, type Template } from '../../src/platform/notifications/templates.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { insertAdHocSender, insertPickupRequest, pickupRequestRow } from './support/pickups.js';
@@ -122,12 +123,15 @@ function laneOf(
 
 const tokenOf = async (rider: ArrangedRider, stopId: string): Promise<string> =>
   (await rider.client.get(STOP(stopId))).header('etag') ?? '';
-const count = async (rider: ArrangedRider, stopId: string): Promise<TestResponse> =>
-  rider.client.post(
+const count = async (rider: ArrangedRider, stopId: string): Promise<TestResponse> => {
+  // The texts of the code are about the handshake, not the photos (D-A10): the stop is let through without them.
+  await excusePhotos(routes, stopId);
+  return rider.client.post(
     `${STOP(stopId)}/collect`,
     { collected_count: 3 },
     { headers: { 'If-Match': await tokenOf(rider, stopId), 'Idempotency-Key': randomUUID() } },
   );
+};
 const initiate = (rider: ArrangedRider, stopId: string): Promise<TestResponse> =>
   rider.client.post(`${STOP(stopId)}/handshake`, undefined, {
     headers: { 'Idempotency-Key': randomUUID() },

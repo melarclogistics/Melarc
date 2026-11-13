@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { insertAdHocSender, insertPickupRequest, pickupRequestRow } from './support/pickups.js';
@@ -123,6 +124,8 @@ const tokenOf = async (rider: ArrangedRider, stopId: string): Promise<string> =>
 
 /** The rider's count of the stop (S1.26), as the rider makes it. */
 async function count(rider: ArrangedRider, stopId: string, collected = 3): Promise<TestResponse> {
+  // The handshake is about the close of a counted stop, not the photos (D-A10): the stop is let through without them.
+  await excusePhotos(routes, stopId);
   return rider.client.post(
     `${STOP(stopId)}/collect`,
     collected < 3

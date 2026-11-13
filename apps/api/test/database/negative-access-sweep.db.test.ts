@@ -474,6 +474,7 @@ describe('the existence rule is asked about records that are real (the control o
       arriveAtPickupStop: 'pickupStop',
       assignRider: 'pickupManifest',
       authoriseHandshakeOverride: 'pickupStop',
+      authoriseParcelPhotoException: 'pickupStop',
       cancelPickupManifest: 'pickupManifest',
       cancelPickupRequest: 'pickupRequest',
       completeEvidenceUpload: 'evidence',

@@ -128,6 +128,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/resolve' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/sms-fallback' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/verify' },
+      { method: 'POST', path: '/api/v1/pickup-stops/:id/parcel-photo-exception' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/skip' },
       { method: 'POST', path: '/api/v1/staff-identities' },
       { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
@@ -1033,6 +1034,19 @@ describe('the real application', () => {
         access: 'permission',
         permission: 'pickup.collection.confirm',
         authenticated: { surfaces: ['VENDOR_PWA', 'RIDER_ANDROID'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // D-A10: Ops lets a stop's count through without parcel photos, with the stop found or refused by the record-scope guard, as the handshake override is.
+      {
+        method: 'POST',
+        path: '/api/v1/pickup-stops/:id/parcel-photo-exception',
+        access: 'permission',
+        permission: 'pickup.handshake.override',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_stop', param: 'id' },
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.23: Ops skips a stop. The Ops Portal alone (no rider bundle holds the key), the stop found or refused by the record-scope guard.

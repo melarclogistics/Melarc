@@ -21,6 +21,7 @@ import { NotificationStore } from '../../src/platform/notifications/notification
 import { templateOf, type Template } from '../../src/platform/notifications/templates.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { insertAdHocSender, insertPickupRequest, pickupRequestRow } from './support/pickups.js';
@@ -119,6 +120,8 @@ const vendorStop = async (
   const arranged = await run(over);
   const stop = arranged.stops[0];
   if (stop === undefined) throw new Error('stop');
+  // The counts of this file are about the messages they write, not the photos (D-A10): the stop is let through without them.
+  await excusePhotos(routes, stop.id);
   return {
     rider: arranged.rider,
     stopId: stop.id,
@@ -159,6 +162,7 @@ async function adHocStop(over: { hubId?: string } = {}): Promise<Arranged> {
     routes.admin,
     stopRow(manifest, request.id, 1, { state: 'ARRIVED', pickupSummary: summaryOf(request.code) }),
   );
+  await excusePhotos(routes, stop.id);
   return {
     rider,
     stopId: stop.id,

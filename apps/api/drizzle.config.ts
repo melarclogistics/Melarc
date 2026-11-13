@@ -41,6 +41,9 @@ export default defineConfig({
     './src/pickup/collection-dispute.schema.ts',
     // SLICE-001 (S1.28): the evidence photo of a failed stop, attached to the failure the rider reports (the evidence table is the platform's, S1.11).
     './src/pickup/pickup-stop-evidence.schema.ts',
+    // SLICE-001 (Run A2, D-A10): the photo of every parcel at the door, attached to the count, and Ops's exception for the day the camera fails.
+    './src/pickup/collection-parcel-photo.schema.ts',
+    './src/pickup/parcel-photo-exception.schema.ts',
   ],
   out: './migrations',
   strict: true,

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { guardReasonIn, serverErrorIn } from '../../src/platform/database/database-failures.js';
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { arrangeRun, arrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -353,6 +354,8 @@ describe('the report of a failure: the one writer', () => {
   it('never fails a stop that has a count: the key reads the rider’s own record, so the trigger finds it', async () => {
     const arranged = await run();
     const stop = first(arranged);
+    // The test is about a failure of a counted stop, not the photos (D-A10): the stop is let through without them.
+    await excusePhotos(routes, stop.id);
     const token =
       (await arranged.rider.client.get(`/api/v1/pickup-stops/${stop.id}`)).header('etag') ?? '';
     const counted = await arranged.rider.client.post(

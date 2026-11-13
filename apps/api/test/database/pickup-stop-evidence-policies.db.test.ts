@@ -297,7 +297,6 @@ describe('pickup_stop_evidence: the link is made by the rider and judged by the 
   it.each([
     ['another rider under the same key', 'otherRider', FAILURE],
     ['the same rider under the key of the arrival', 'rider', 'pickup.run.execute'],
-    ['the same rider under the key of the count', 'rider', 'pickup.collection.confirm'],
     ['staff presenting the rider’s key', 'staff', FAILURE],
     ['a vendor presenting the rider’s key', 'vendor', FAILURE],
   ] as const)('does not let %s attach', async (_who, who, key) => {
@@ -315,6 +314,29 @@ describe('pickup_stop_evidence: the link is made by the rider and judged by the 
             : vendor();
     refused(await attempt(context, attachSql(photo.id, stop.id)));
     expect(await linksOf(stop.id)).toEqual([]);
+  });
+
+  // Break caught (D-A10; fails on ac9f613, where only the key of the failure attached): a short count's reason that asks for a photo has nowhere to put it, because the rider counts
+  // under the key of the count. The same guard holds the same things under either key: the link is the rider's own, of a stored failure-kind photo of this very stop.
+  it('lets the same rider attach under the key of the count, for the photo a short count’s reason asks for, and judges it by the same guard', async () => {
+    const arranged = await run();
+    const stop = stopAt(arranged);
+    const photo = await photoOf(routes, arranged.rider, stop.id);
+    const parcel = await photoOf(routes, arranged.rider, stop.id, { purpose: 'PARCEL_PHOTO' });
+    // A parcel's photo is not the proof of a collection, under either key.
+    refused(
+      await attempt(
+        rider(arranged.rider.id, 'pickup.collection.confirm'),
+        attachSql(parcel.id, stop.id),
+      ),
+    );
+    reached(
+      await attempt(
+        rider(arranged.rider.id, 'pickup.collection.confirm'),
+        attachSql(photo.id, stop.id),
+      ),
+    );
+    expect(await linksOf(stop.id)).toHaveLength(1);
   });
 });
 

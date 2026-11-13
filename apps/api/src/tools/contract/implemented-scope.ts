@@ -22,6 +22,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'approveStaffIdentity',
   'arriveAtPickupStop',
   'recordCollection',
+  'authoriseParcelPhotoException',
   'reportPickupFailure',
   'initiateHandshake',
   'verifyHandshake',

@@ -6,7 +6,7 @@ import type { TestClient, TestResponse } from '../../src/test-support/test-clien
 import { refusalReleasedFor } from '../../src/pickup/attempt-ceiling.js';
 import { PICKUP_FAILURE_CATEGORIES } from '../../src/pickup/pickup-vocabulary.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
-import { photoOf } from './support/evidence-photo.js';
+import { excusePhotos, photoOf } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { arrangeRun, arrangedRider, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -746,6 +746,8 @@ describe('reportPickupFailure: whose stop, which run, which state, which version
   it('never fails a stop that has a record of a count', async () => {
     const arranged = await run();
     const stop = first(arranged);
+    // The test is about a failure of a counted stop, not the photos (D-A10): the stop is let through without them.
+    await excusePhotos(routes, stop.id);
     const counted = await arranged.rider.client.post(
       COLLECT(stop.id),
       { collected_count: 3 },

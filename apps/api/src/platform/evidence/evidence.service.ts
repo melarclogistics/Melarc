@@ -188,7 +188,7 @@ export class EvidenceService {
   ): Promise<{ readonly ticket: EvidenceTicket; readonly etag: string }> {
     const { body } = request;
     // The permission comes first and costs the database nothing: a caller without the act's key learns nothing of the schema.
-    const act = ownerActOf(body.owner_type);
+    const act = ownerActOf(body.owner_type, body.purpose);
     if (act === undefined) throw denied();
     const decision = this.#grantFor(authorized, 'write', act);
     if (!isIdempotencyKey(request.idempotencyKey)) {

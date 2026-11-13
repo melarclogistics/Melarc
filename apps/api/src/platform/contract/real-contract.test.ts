@@ -38,12 +38,15 @@ const headerViolations = (operationId: string, headers: Record<string, unknown>,
 
 describe('Cache-Control: no-store (audit C-cache)', () => {
   // The answers that carry a raw credential or secret and so are never to be cached: two retrieval
-  // authorizations (a bearer capability over stored evidence or a payment-ledger package), the two rider
+  // authorizations (a bearer capability over stored evidence or a payment-ledger package), the upload
+  // instruction of a declared evidence record (a bearer capability to write one object: Run A2, finding L3 of
+  // the review of Run A), the two rider
   // enrolment grants, the three answers that put a secret in the body (an authenticator seed with its
   // continuation grant, twice, and the rider's bearer credential) and the six that issue a session or a device
   // credential in Set-Cookie (decision C-03, 8 October 2026). The header is declared once in the shared
   // component and referenced from each. The status is the answer that carries the secret.
   const NO_STORE: readonly (readonly [string, number])[] = [
+    ['createEvidence', 200],
     ['createEvidenceRetrievalAuthorization', 200],
     ['createAccountingExportRetrievalAuthorization', 200],
     ['registerRiderDevice', 200],

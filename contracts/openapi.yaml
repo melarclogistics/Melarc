@@ -1635,7 +1635,7 @@ paths:
         **A short count** requires `variance_reason_code`, a code of the `PICKUP_SHORT_COUNT` catalogue,
         or `REASON_REQUIRED` (and `REASON_NOT_ACTIVE` for a code the catalogue refuses); the reason's
         own metadata may make a note mandatory in turn, and a reason that makes a photo mandatory is
-        `REASON_REQUIRED` (`details.rule` `photo`) until evidence can be stored. The record keeps the
+        `REASON_REQUIRED` (`details.rule` `photo`) unless `evidence_ids` names the photo. The record keeps the
         reason as the catalogue holds it **at the moment it is made**, and the database holds the record to
         that for every writer: a catalogue that changes between the reading of the reason and the record
         (its label, its attribution, its being active) is `REASON_NOT_ACTIVE`, nothing is kept, the
@@ -1650,8 +1650,21 @@ paths:
         (`COLLECTION_SHORT_OPS_FEED`: the reason as a closed token, no count and no note), which the
         staff of that hub read under `notification.read`. A count that matches queues nothing.
 
-        **Evidence**: `evidence_ids` names records that must be `STORED`; none can be yet, so any
-        reference is `EVIDENCE_NOT_STORED`.
+        **The photo of every parcel** (the Product Owner's decision D-A10, 12 November 2026; pickup-collection.md
+        5.5): `parcel_photo_ids` names **exactly `collected_count`** records of purpose `PARCEL_PHOTO`, each
+        `STORED`, captured by this rider and of this stop, each attached to one count only (no cap: a pickup
+        of two hundred parcels has two hundred photos). The photos are judged after every other refusal
+        of this operation. A different number - none at all included - is `VALIDATION_FAILED` (`details.violations`
+        `/parcel_photo_ids`, rule `parcel_photo_count`), and the same photo named twice is `VALIDATION_FAILED`
+        (rule `duplicate`). A photo that is still `PENDING_UPLOAD`, has `EXPIRED`, is another rider's, is of
+        another stop or another purpose, or is already attached to a count is **one answer**,
+        `EVIDENCE_NOT_STORED`, so that the reply tells a rider nothing about a record that is not its own.
+        **For a stop Ops let through without photos** (`authoriseParcelPhotoException`) the count takes none, and a
+        count that names some is refused (`parcel_photo_count`). The database holds the number for every
+        writer, at the end of the transaction, and holds that a photo is attached once and only to the count
+        of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
+        `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
+        any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer.
 
         **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
         `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake
@@ -1700,6 +1713,69 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/RuleViolation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /pickup-stops/{id}/parcel-photo-exception:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: authoriseParcelPhotoException
+      x-permission: pickup.handshake.override
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
+          IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          REASON_REQUIRED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [pickup-stops]
+      summary: Let a stop's count through without parcel photos
+      description: |
+        **The photo of every parcel at the door** (the Product Owner's decision D-A10, 12 November 2026;
+        pickup-collection.md 5.5): a count takes one `PARCEL_PHOTO` for each parcel counted
+        (`parcel_photo_ids` of `recordCollection`). When the camera fails or the photos cannot be sent, the
+        rider tells Ops and **Ops lets that stop's count through without them**, as a recorded exception, before
+        the count. This is that exception.
+
+        `pickup.handshake.override` - Ops's override authority at the door (`MSC-DEC-204`), widened by this
+        decision to cover it: an officer of the stop's hub, with a **note that says why** (required:
+        `REASON_REQUIRED`). The stop the path names is found in the officer's hubs or refused
+        (`HUB_SCOPE_VIOLATION` for another hub's, `NOT_FOUND` for an id that matches nothing) before the
+        request is validated. From a stop the rider has arrived at, on a run in progress, with no count yet:
+        one that has not been arrived at, or has been closed, is `STATE_CONFLICT` (`stop_not_arrived`), and one that
+        already has a count `STATE_CONFLICT` (`collection_recorded`). **It is made once for a stop, and never
+        changed or removed, by any writer**: a second is `STATE_CONFLICT` (`exception_exists`).
+
+        Once it exists the stop's count takes no parcel photos, and a count that names some is refused
+        (`VALIDATION_FAILED`, rule `parcel_photo_count`); a stop that was not let through cannot be counted
+        without them. The officer, the moment (the database's clock) and the hub are the database's, never the
+        request's. The exception is written by one operation of the database, with the stop's lock taken first,
+        as the count takes it, so the exception and the count meet in either order. The enhanced event
+        `pickup.collection.photo_exception_authorised` records the note. A retry with the same
+        `Idempotency-Key` replays the answer.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParcelPhotoExceptionCreate' }
+      responses:
+        '200':
+          description: The stop is let through without parcel photos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParcelPhotoException' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -5910,10 +5986,11 @@ paths:
         reading (OQ-098 closed): `evidence` is not a permission domain, and `x-permission: owner`
         stands as the stricter option.
 
-        **As built (S1.11).** The permission is that of the act the evidence is about, found from `owner_type`: the first owner is a pickup stop (`PICKUP_STOP`, purpose
-        `COLLECTION_PROOF`) whose failure the rider reports, so the caller is a rider holding `pickup.failure.report`, and the stop is one it has arrived at on a run in progress
-        that is assigned to it (`NOT_FOUND` for work that is not its own, `STATE_CONFLICT` for a stop not arrived at). An owner type the platform has no act for is
-        `PERMISSION_DENIED`, never defaulted. `content_type` must be one of the platform setting `evidence_upload_allowed_mime_types` and `byte_size` at most
+        **As built (S1.11).** The permission is that of the act the evidence is about, found from `owner_type` and `purpose`: the first owner is a pickup stop (`PICKUP_STOP`) with two
+        acts, told apart by the purpose. `COLLECTION_PROOF` is the photo of a stop whose failure the rider reports (or a short count's reason asks for), so the caller is a rider holding
+        `pickup.failure.report`; **`PARCEL_PHOTO` (D-A10, 12 November 2026) is the photo of one parcel at the door, which belongs to the count**, so the caller is a rider holding
+        `pickup.collection.confirm`. In both the stop is one the rider has arrived at on a run in progress that is assigned to it (`NOT_FOUND` for work that is not its own,
+        `STATE_CONFLICT` for a stop not arrived at). An owner type the platform has no act for is `PERMISSION_DENIED`, never defaulted. `content_type` must be one of the platform setting `evidence_upload_allowed_mime_types` and `byte_size` at most
         `evidence_upload_max_bytes` (development values: JPEG, PNG or PDF, 10 MB), and `checksum_sha256` is the 64 hex digits of the SHA-256 of the bytes. The answer carries
         the capability to upload that one object: the store itself refuses an upload whose type, exact size or hash is not the one declared. A retry with the same
         `Idempotency-Key` is told the same record and the same capability, made again from the record.
@@ -14037,6 +14114,13 @@ components:
           items: { type: string, format: uuid }
           description: |
             Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise).
+        parcel_photo_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: >-
+            The photo of each parcel counted: exactly `collected_count` ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only;
+            none when Ops let the stop through without photos. A different number, or an id named twice, is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that
+            cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each.
         captured_at:
           type: string
           format: date-time
@@ -14072,6 +14156,13 @@ components:
           items: { type: string, format: uuid }
           description: |
             Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise).
+        parcel_photo_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: >-
+            The photo of each parcel counted: exactly `collected_count` ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only;
+            none when Ops let the stop through without photos. A different number, or an id named twice, is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that
+            cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each.
         captured_at:
           type: string
           format: date-time
@@ -14091,6 +14182,37 @@ components:
           type: [string, 'null']
           format: date-time
           description: Set when the shortfall flag reached the Ops surface.
+
+    ParcelPhotoExceptionCreate:
+      type: object
+      required: [note]
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          description: >-
+            Why the stop is let through without parcel photos (the camera failed, the photos cannot be sent). Required; a blank note is `REASON_REQUIRED`. Held to the screening of every note.
+      description: |
+        The officer's note and nothing else: the stop is the path's, and the officer, the moment and the hub are the database's (D-A10).
+
+    ParcelPhotoException:
+      type: object
+      required: [id, pickup_stop_id, authorised_by, authorised_at, note]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        pickup_stop_id: { type: string, format: uuid }
+        authorised_by:
+          type: string
+          format: uuid
+          description: 'The officer who let the stop through: the session, never the request.'
+        authorised_at:
+          type: string
+          format: date-time
+          description: The database’s clock.
+        note: { type: string }
+      description: |
+        The exception for a stop whose count takes no parcel photos (D-A10, 12 November 2026): made once, before the count, and never changed or removed.
 
     IndicativeEstimate:
       type: object
@@ -18088,6 +18210,7 @@ components:
           enum:
             [
               COLLECTION_PROOF,
+              PARCEL_PHOTO,
               CONDITION,
               OSD,
               HANDOFF_RECEIPT,

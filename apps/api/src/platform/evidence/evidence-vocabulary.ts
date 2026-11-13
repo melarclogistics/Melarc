@@ -21,9 +21,13 @@ export const EVIDENCE_OWNER_TYPES = [
 ] as const;
 export type EvidenceOwnerType = (typeof EVIDENCE_OWNER_TYPES)[number];
 
-/** Why it was captured (`EvidenceCreate.purpose` of the contract). */
+/**
+ * Why it was captured (`EvidenceCreate.purpose` of the contract). `PARCEL_PHOTO` is the photo of one parcel at the door (D-A10, 12 November 2026): a collection record keeps exactly
+ * one for each parcel counted (`collection_parcel_photo`), and it is told from `COLLECTION_PROOF`, the photo a failure or a short count's reason asks for.
+ */
 export const EVIDENCE_PURPOSES = [
   'COLLECTION_PROOF',
+  'PARCEL_PHOTO',
   'CONDITION',
   'OSD',
   'HANDOFF_RECEIPT',

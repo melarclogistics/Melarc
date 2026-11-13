@@ -6,7 +6,7 @@ import { fileContractSource } from '../../src/platform/contract/contract-source.
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
-import { photoOf } from './support/evidence-photo.js';
+import { excusePhotos, photoOf } from './support/evidence-photo.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -170,6 +170,8 @@ const stopAt = (run: ArrangedRun, at: number): string => {
 
 /** The rider's count of a stop (S1.26): three declared, so fewer than three is a shortfall with its reason. */
 async function count(rider: ArrangedRider, stopId: string, collected = 3): Promise<void> {
+  // The work lists are about what the count leaves for Ops, not the photos (D-A10): the stop is let through without them.
+  await excusePhotos(routes, stopId);
   const response = await rider.client.post(
     `${STOP(stopId)}/collect`,
     collected < 3

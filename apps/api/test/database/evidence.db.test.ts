@@ -238,6 +238,27 @@ describe('the rider declares evidence for a stop it has arrived at', () => {
     refused(await attempt(own, declaration(arranged.rider.id, randomUUID())));
   });
 
+  // Break caught (D-A10; fails on ac9f613, where PARCEL_PHOTO was no purpose): the photo of a parcel declared under the key of a failure, or a failure's proof under the key of the
+  // count, so that the permission to report a failure could write the evidence of a count and the other way about. Each purpose is written under its own key.
+  it('pairs each purpose with the key of its act: a parcel’s photo under the count, a failure’s proof under the failure, and neither under the other’s', async () => {
+    const arranged = await run();
+    const id = arranged.rider.id;
+    const stop = stopOf(arranged);
+    const COUNT = 'pickup.collection.confirm';
+    const parcel = { purpose: `'PARCEL_PHOTO'` };
+    // The photo of a parcel is declared by the rider under the key of the count, with the scope derived from the stop as for any evidence of a stop.
+    const row = reached(await attempt(rider(id, COUNT), declaration(id, stop, parcel)));
+    expect(row.responsible_hub_id).toBe(HUB_A);
+    expect(row.vendor_organization_id).toBe(vendorA.row.organizationId);
+    // Not under the key of a failure, nor of a run, and not by another principal.
+    refused(await attempt(rider(id, FAILURE), declaration(id, stop, parcel)));
+    refused(await attempt(rider(id, 'pickup.run.execute'), declaration(id, stop, parcel)));
+    refused(await attempt(staff(COUNT), declaration(id, stop, parcel)));
+    // And a failure's proof is not declared under the key of the count.
+    refused(await attempt(rider(id, COUNT), declaration(id, stop)));
+    reached(await attempt(rider(id, FAILURE), declaration(id, stop)));
+  });
+
   it('is refused when the writer is not the rider under the key of the act, or says something else of the record', async () => {
     const arranged = await run();
     const id = arranged.rider.id;

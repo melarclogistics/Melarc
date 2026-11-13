@@ -9,6 +9,7 @@ import {
   toContextSettings,
   type SecurityContext,
 } from '../../src/platform/database/transaction-context.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { waitUntilBlockedBy } from './support/lock-wait.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
@@ -178,8 +179,12 @@ const promotionEventSql = (
            ${hub === null ? 'null' : `'${hub}'::uuid`}, 'AdHocSender', '${object}'::uuid, 'collection-record-policies', 'PROVISIONAL', 'REUSABLE',
            'SUCCEEDED', false, ${related === null ? 'null' : `'${related}'::jsonb`}, 1)`;
 
-const run = (over: Partial<Parameters<typeof arrangeRun>[2]> = {}): Promise<ArrangedRun> =>
-  arrangeRun(routes.kit, routes.admin, {
+/**
+ * A run in progress whose first stop is arrived at. **Its arrived stops are let through without parcel photos** (D-A10, `excusePhotos`): this file is about who may write a record and
+ * what it must be, and the database's rule on the number of photos (checked at the end of the transaction of every record made here) has its own file, `parcel-photos.db.test.ts`.
+ */
+const run = async (over: Partial<Parameters<typeof arrangeRun>[2]> = {}): Promise<ArrangedRun> => {
+  const arranged = await arrangeRun(routes.kit, routes.admin, {
     vendorOrganizationId: vendorA.row.organizationId,
     serviceDate: days.today,
     state: 'IN_PROGRESS',
@@ -187,6 +192,9 @@ const run = (over: Partial<Parameters<typeof arrangeRun>[2]> = {}): Promise<Arra
     stopStates: ['ARRIVED', 'PENDING'],
     ...over,
   });
+  for (const stop of arranged.stops) await excusePhotos(routes, stop.id);
+  return arranged;
+};
 const first = (arranged: ArrangedRun): ArrangedRun['stops'][number] => {
   const stop = arranged.stops[0];
   if (stop === undefined) throw new Error('stop');
@@ -1150,6 +1158,8 @@ async function individual(
       },
     }),
   );
+  // The counts of this file are not about the photos (D-A10): the stop is let through without them.
+  await excusePhotos(routes, stop.id);
   return { arranged, sender, request, stop };
 }
 

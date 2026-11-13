@@ -38,6 +38,7 @@ export const AUDIT_EVENT_CODES = [
   'pickup.manifest.cancelled',
   'pickup.stop.arrived',
   'pickup.collection.recorded',
+  'pickup.collection.photo_exception_authorised',
   'pickup.stop.collected',
   'pickup.stop.partially_collected',
   'pickup.stop.failed',

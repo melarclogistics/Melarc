@@ -368,7 +368,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**198 operations: 116 `CRITICAL_WRITE` · 0 `ASYNC` · 82 `NORMAL`.**
+**199 operations: 117 `CRITICAL_WRITE` · 0 `ASYNC` · 82 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -404,6 +404,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `assignRider`| `CRITICAL_WRITE`| dispatch allocation|
 | `authoriseDeliveryWithoutOtp`| `CRITICAL_WRITE`| authorised override of the delivery verification gate|
 | `authoriseHandshakeOverride`| `CRITICAL_WRITE`| authorised override of a verification gate|
+| `authoriseParcelPhotoException`| `CRITICAL_WRITE`| authorised exception to the evidence gate of a count (D-A10): the stop is let through without parcel photos, once, as a recorded exception|
 | `authorizePaymentFallbackWhileUnresolved`| `CRITICAL_WRITE`| authorised money path while a demand is unresolved|
 | `beginMfaReenrolment`| `CRITICAL_WRITE`| security authority — begins re-enrolment|
 | `cancelPickupRequest`| `CRITICAL_WRITE`| may raise a cancellation charge|
