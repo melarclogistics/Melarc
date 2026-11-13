@@ -36,6 +36,23 @@ export interface VersionedRun extends RunFacts {
   readonly etag: string;
 }
 
+/** A pickup request that was collected on a run, with what the rider counted for it at the door (the collection record's count). */
+export interface CollectedRequest {
+  readonly pickupRequestId: string;
+  readonly collectedCount: number;
+}
+
+/**
+ * What the hub handover (S1.31, the `hub` domain) needs to judge of a run's stops: how many are still to be worked, and the requests that were collected or
+ * partly collected on it, **in the order of the run's stops**. The count of each is the collection record's, read so that a correction of the rider's pre-fill is
+ * recorded; it is never an input of the declaration.
+ */
+export interface HandoverFacts {
+  /** The stops still to be worked (`PENDING` or `ARRIVED`). */
+  readonly stopsToWork: number;
+  readonly collected: readonly CollectedRequest[];
+}
+
 export interface RunAccess {
   /**
    * The run as the caller may see it, with no lock. `undefined` when there is none such for the caller (it does not exist, or it is out of the
@@ -68,6 +85,27 @@ export interface RunAccess {
     runId: string,
     cause: RunCompletionCause,
   ): Promise<boolean>;
+
+  /**
+   * The stops of the run as the hub handover judges them (S1.31): the stops still to be worked and the requests collected, with their counts. Read under the caller's
+   * own context (a rider that holds the run's parcels reads its stops and their records under the key of the handover), after the run's lock is held.
+   */
+  handoverFacts(handle: TransactionHandle, runId: string): Promise<HandoverFacts>;
+
+  /**
+   * Completes the run **by the hub handover** (S1.31) and answers the moment it was completed (the database's own, which is the receipt of the handover). The run is in progress
+   * and held under its lock; the database holds that the writer is the custody holder, that nothing is still to be worked, none is pending and something was collected, and, at the
+   * end of the transaction, that the intakes the handover opens are exactly the run's collected requests. It writes the state and its moment and nothing else, and no event: the
+   * caller writes the handover's own, then `recordHandoverCompletion`.
+   */
+  completeByHandover(handle: TransactionHandle, runId: string): Promise<Date>;
+
+  /** Writes the event of the run's completion by the hub handover, in the name of the custody holder who handed over (`pickup.manifest.completed`), after the act's own events. */
+  recordHandoverCompletion(
+    handle: TransactionHandle,
+    run: RunFacts,
+    holderId: string,
+  ): Promise<void>;
 }
 
 /** The injection token of the port; bound once, by the composition root. */

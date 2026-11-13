@@ -110,6 +110,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/custody-handover/accept' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/custody-handover/fail' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/dispatch' },
+      { method: 'POST', path: '/api/v1/pickup-manifests/:id/hub-handover' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/start' },
       { method: 'POST', path: '/api/v1/pickup-requests' },
       { method: 'POST', path: '/api/v1/pickup-requests/:id/attempt-extension' },
@@ -825,6 +826,16 @@ describe('the real application', () => {
           // R76: the dispatch texts the rider and the vendors, so the sub-ceiling of the provider-initiating operations applies.
           providerInitiating: true,
         },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.31: the custody holder hands the run's collected parcels to the hub, which completes the run. The Rider app alone, and **no record scope**, for the reason given at `startRun`: a
+      // rider who is not the run's, and an id that matches nothing, are told `NOT_ASSIGNED_RIDER` by the use case, and one that does not hold the parcels `NOT_CUSTODY_HOLDER`.
+      {
+        method: 'POST',
+        path: '/api/v1/pickup-manifests/:id/hub-handover',
+        access: 'permission',
+        permission: 'hub.handover.submit',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.22: the rider starts the run it was given. It declares **no record scope**: a rider who is not the run's rider is told

@@ -1,6 +1,7 @@
 import { DispatchModule } from './dispatch/dispatch.module.js';
 import { DomainPortsModule } from './domain-ports.module.js';
 import { FleetModule } from './fleet/fleet.module.js';
+import { HubModule } from './hub/hub.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { PermissionModule } from './permission/permission.module.js';
 import { PickupModule } from './pickup/pickup.module.js';
@@ -881,6 +882,7 @@ const DOMAIN_MODULES = [
   DispatchModule,
   DomainPortsModule,
   FleetModule,
+  HubModule,
   NotificationsModule,
   PermissionModule,
   PickupModule,

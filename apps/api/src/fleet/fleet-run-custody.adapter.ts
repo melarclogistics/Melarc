@@ -16,4 +16,14 @@ export class FleetRunCustody implements RunCustody {
     );
     return found.rows.length > 0;
   }
+
+  async holderOf(handle: TransactionHandle, runId: string): Promise<string | null> {
+    // `melarc.run_custody_holder` reads the custody table and the run under the caller's own row-level security. The caller of the hub handover sees the handovers it is a party to
+    // (the key is given that read), and a transfer out of a holder is always one it is a party to, so what it reads is enough to know whether it is the holder.
+    const found = await transactionOf(handle).execute(
+      sql`select melarc.run_custody_holder(${runId}::uuid) as holder`,
+    );
+    const holder = (found.rows[0] as { holder: string | null } | undefined)?.holder;
+    return holder ?? null;
+  }
 }

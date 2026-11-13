@@ -193,6 +193,8 @@ describe('the generated description of the real application', () => {
       ['/pickup-manifests/{id}/custody-handover/fail', ['post'], ['failRunCustodyHandover']],
       ['/run-custody-handovers', ['get'], ['listRunCustodyHandovers']],
       ['/run-custody-handovers/{id}', ['get'], ['getRunCustodyHandover']],
+      // S1.31: the custody holder's hub handover (the `hub` domain), which completes the run and opens one intake for each collected request.
+      ['/pickup-manifests/{id}/hub-handover', ['post'], ['submitHubHandover']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.

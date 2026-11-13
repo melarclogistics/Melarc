@@ -98,6 +98,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'skipPickupStop',
   'staffSignIn',
   'startRun',
+  'submitHubHandover',
   'vendorSignIn',
   'waiveCancellationCharge',
 ];
