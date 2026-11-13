@@ -26,7 +26,7 @@ import {
   requireStoredParcelPhotos,
   stopIsExcused,
 } from './collection-parcel-photos.js';
-import { momentOf } from './device-moment.js';
+import { momentOf } from '../platform/time/device-moment.js';
 import { attachEvidence, requireStoredEvidence } from './pickup-failure-evidence.js';
 import { stopViewOf, STOP_COLUMNS, type PickupStopRow } from './pickup-manifest-view.js';
 import { reasonRefusedByGuard, validatedReason } from './pickup-reason-validation.js';

@@ -13,7 +13,7 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import type { ReasonValidator, ValidatedReason } from '../platform/settings/reason-validator.js';
 import { hubToday } from './pickup-hub-day.js';
-import { hubCodeOf, operationalCode } from './operational-code.js';
+import { hubCodeOf, operationalCode } from '../platform/records/operational-code.js';
 import {
   carryoverSnapshotOf,
   judgeCarryover,

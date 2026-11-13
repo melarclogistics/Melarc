@@ -14,7 +14,7 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import type { ConfigurationReader } from '../platform/settings/configuration-reader.js';
 import { declarationOf, payerOf, requireMinimum, requireServiceDay } from './booking-rules.js';
-import { hubCodeOf, operationalCode } from './operational-code.js';
+import { hubCodeOf, operationalCode } from '../platform/records/operational-code.js';
 import { estimateOf } from './estimate-view.js';
 import { normalisePhone } from './phone.js';
 import { walkInHubChoice } from './walk-in-hub.js';

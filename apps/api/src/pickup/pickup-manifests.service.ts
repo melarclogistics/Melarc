@@ -23,7 +23,7 @@ import {
   type PickupStopRow,
   type PickupStopView,
 } from './pickup-manifest-view.js';
-import { isCalendarDay } from './calendar-day.js';
+import { isCalendarDay } from '../platform/time/calendar-day.js';
 import { decodePageToken, encodePageToken } from '../platform/http/page-token.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import { pickupStopEtagOf } from './pickup-stop-etag.js';
