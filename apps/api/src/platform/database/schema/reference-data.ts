@@ -97,6 +97,16 @@ export const IDENTITY_REASON_DOMAINS = [
 export const REASON_DOMAINS = [...WORKFLOW_REASON_DOMAINS, ...IDENTITY_REASON_DOMAINS] as const;
 export const REASON_ATTRIBUTIONS = ['CUSTOMER', 'MELARC', 'EXTERNAL'] as const;
 export const REASON_CHECKPOINTS = ['PRE_DISPATCH', 'NEXT_STOP', 'DOORSTEP'] as const;
+/**
+ * The four fixed categories of a failed pickup visit (section 21.5), as the catalogue binds a `PICKUP_FAILURE` reason to one of them (D-A4, the Product Owner, 11 November
+ * 2026; migration 0083). The platform keeps its own copy because it may not import the pickup domain's vocabulary; `pickup-vocabulary.test.ts` holds the two lists equal.
+ */
+export const REASON_FAILURE_CATEGORIES = [
+  'VENDOR_UNAVAILABLE',
+  'ACCESS_DENIED',
+  'PARCEL_NOT_READY',
+  'REFUSED_COLLECTION',
+] as const;
 
 const quoted = (values: readonly string[]): string =>
   values.map((value) => `'${value}'`).join(', ');
@@ -263,6 +273,11 @@ export const reasonCode = pgTable(
     requiresEscalation: boolean('requires_escalation').notNull().default(false),
     active: boolean('active').notNull().default(true),
     permittedOperations: text('permitted_operations').array(),
+    /**
+     * The one failure category a `PICKUP_FAILURE` reason belongs to (D-A4; migration 0083): the catalogue's data, so that the door wait of the category `VENDOR_UNAVAILABLE`
+     * and the escalation-only rule of `REFUSED_COLLECTION` cannot be stepped around by pairing a reason with another category. Mandatory for that domain, null for every other.
+     */
+    failureCategory: text('failure_category'),
   },
   (table) => [
     check('reason_code_code_grammar', sql`${table.code} ~ '^[A-Z][A-Z0-9_]*$'`),
@@ -292,6 +307,13 @@ export const reasonCode = pgTable(
       'reason_code_operations_by_domain',
       sql.raw(
         `("reason_code"."domain" IN (${quoted(IDENTITY_REASON_DOMAINS)}) AND "reason_code"."permitted_operations" IS NOT NULL AND cardinality("reason_code"."permitted_operations") >= 1 AND "reason_code"."permitted_operations"::text ~ '^\\{${PERMITTED_OPERATION}(,${PERMITTED_OPERATION})*\\}$') OR ("reason_code"."domain" NOT IN (${quoted(IDENTITY_REASON_DOMAINS)}) AND "reason_code"."permitted_operations" IS NULL)`,
+      ),
+    ),
+    // A failure reason belongs to one of the four fixed failure categories, and no other reason has one (D-A4).
+    check(
+      'reason_code_failure_category_by_domain',
+      sql.raw(
+        `("reason_code"."domain" = 'PICKUP_FAILURE' AND "reason_code"."failure_category" IS NOT NULL AND "reason_code"."failure_category" IN (${quoted(REASON_FAILURE_CATEGORIES)})) OR ("reason_code"."domain" <> 'PICKUP_FAILURE' AND "reason_code"."failure_category" IS NULL)`,
       ),
     ),
   ],

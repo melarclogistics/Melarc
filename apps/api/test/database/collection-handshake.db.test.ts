@@ -10,6 +10,7 @@ import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import { NOTIFICATION_LANE_PRINCIPAL_ID } from '../../src/platform/notifications/notification-store.js';
 import { MIGRATIONS_FOLDER } from '../../src/tools/database/run-migrations.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { waitUntilBlockedBy } from './support/lock-wait.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
@@ -247,6 +248,8 @@ const insertRecordFor = async (
   recordedBy: string = arranged.rider.id,
 ): Promise<string> => {
   const id = randomUUID();
+  // The count is not about the photos (D-A10): the stop is let through without them, so that the database's rule on their number holds for this record.
+  await excusePhotos(routes, stopId);
   await routes.admin.query(
     `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot, handshake_type, recorded_by)
      values ($1, $2, $3, 3, $4, $5, $6::jsonb, $7, $8)`,

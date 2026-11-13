@@ -48,6 +48,9 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/auth/sessions' },
       { method: 'GET', path: '/api/v1/auth/staff/trusted-browsers' },
       { method: 'GET', path: '/api/v1/auth/vendor/devices' },
+      { method: 'GET', path: '/api/v1/collection-disputes' },
+      { method: 'GET', path: '/api/v1/collection-shortfalls' },
+      { method: 'GET', path: '/api/v1/handshakes-for-ops' },
       { method: 'GET', path: '/api/v1/notifications' },
       { method: 'GET', path: '/api/v1/ops/queue-summary' },
       { method: 'GET', path: '/api/v1/ops/riders' },
@@ -55,6 +58,7 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/ops/staff/:id/trusted-browsers' },
       { method: 'GET', path: '/api/v1/ops/vendors' },
       { method: 'GET', path: '/api/v1/ops/vendors/:id' },
+      { method: 'GET', path: '/api/v1/pickup-failures' },
       { method: 'GET', path: '/api/v1/pickup-manifests' },
       { method: 'GET', path: '/api/v1/pickup-manifests/:id' },
       { method: 'GET', path: '/api/v1/pickup-requests' },
@@ -85,6 +89,9 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/auth/vendor/devices/:id/revoke' },
       { method: 'POST', path: '/api/v1/auth/vendor/setup/credential' },
       { method: 'POST', path: '/api/v1/auth/vendor/sign-in' },
+      { method: 'POST', path: '/api/v1/evidence' },
+      { method: 'POST', path: '/api/v1/evidence/:id/complete' },
+      { method: 'POST', path: '/api/v1/evidence/:id/retrieval-authorization' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
@@ -121,6 +128,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/resolve' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/sms-fallback' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/verify' },
+      { method: 'POST', path: '/api/v1/pickup-stops/:id/parcel-photo-exception' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/skip' },
       { method: 'POST', path: '/api/v1/staff-identities' },
       { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
@@ -195,6 +203,31 @@ describe('the real application', () => {
         authenticated: { surfaces: ['VENDOR_PWA'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE']),
       },
+      // D-A3 (OB-S1-70): the Ops work lists of the collection and the failure, each under an existing key of the pickup domain, on the browser surface alone.
+      {
+        method: 'GET',
+        path: '/api/v1/collection-disputes',
+        access: 'permission',
+        permission: 'pickup.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/collection-shortfalls',
+        access: 'permission',
+        permission: 'pickup.handshake.override',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/handshakes-for-ops',
+        access: 'permission',
+        permission: 'pickup.handshake.override',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
       // S1.12e: the Ops message log, `notification.read` at the hubs of the grant, on the browser surface alone.
       {
         method: 'GET',
@@ -267,6 +300,14 @@ describe('the real application', () => {
           activity: 'qualifying',
           record: { entity: 'vendor_account', param: 'id' },
         },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/pickup-failures',
+        access: 'permission',
+        permission: 'pickup.failure.resolve',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE']),
       },
       // S1.20: the reads of a manifest. A Rider holds the key for the runs assigned to it and reads one from its dispatch, so the Rider app is
@@ -535,6 +576,29 @@ describe('the real application', () => {
         access: 'anonymous',
         bucket: 'rate_limit_vendor_signin',
         client: VENDOR_BROWSER,
+      },
+      // S1.11: the evidence operations (`x-permission: owner`): a `self` route whose use case asks for the grant of the act the record is about. The rider declares and completes the record of a
+      // stop it has arrived at (the Rider app); the staff of the hub are given a way to read it (the Ops Portal). The route states `owner`, and no permission key.
+      {
+        method: 'POST',
+        path: '/api/v1/evidence',
+        access: 'self',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/evidence/:id/complete',
+        access: 'self',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/evidence/:id/retrieval-authorization',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
       // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
@@ -883,7 +947,12 @@ describe('the real application', () => {
         path: '/api/v1/pickup-stops/:id/collect',
         access: 'permission',
         permission: 'pickup.collection.confirm',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
+        // OB-S1-51: a short count writes an envelope for the notification lane (the Ops feed entry), so the sub-ceiling of the operations that write one applies.
+        authenticated: {
+          surfaces: ['RIDER_ANDROID'],
+          activity: 'qualifying',
+          providerInitiating: true,
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.29: the vendor disputes the collection of its own pickup; the Vendor app alone, and no record scope (the operation answers a stop that is not the vendor's as one that does not exist).
@@ -901,7 +970,12 @@ describe('the real application', () => {
         path: '/api/v1/pickup-stops/:id/fail',
         access: 'permission',
         permission: 'pickup.failure.report',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
+        // S1.28: a failure writes the envelope of the individual sender's text, so the sub-ceiling of the operations that can cause a text applies.
+        authenticated: {
+          surfaces: ['RIDER_ANDROID'],
+          activity: 'qualifying',
+          providerInitiating: true,
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.27: the collection handshake. The rider asks for the code of a stop it counted, enters the code of a sender, asks for the SMS fallback; the
@@ -960,6 +1034,19 @@ describe('the real application', () => {
         access: 'permission',
         permission: 'pickup.collection.confirm',
         authenticated: { surfaces: ['VENDOR_PWA', 'RIDER_ANDROID'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // D-A10: Ops lets a stop's count through without parcel photos, with the stop found or refused by the record-scope guard, as the handshake override is.
+      {
+        method: 'POST',
+        path: '/api/v1/pickup-stops/:id/parcel-photo-exception',
+        access: 'permission',
+        permission: 'pickup.handshake.override',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_stop', param: 'id' },
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.23: Ops skips a stop. The Ops Portal alone (no rider bundle holds the key), the stop found or refused by the record-scope guard.

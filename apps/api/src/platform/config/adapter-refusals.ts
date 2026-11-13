@@ -8,7 +8,9 @@ import type { AppConfig, ConfigProblem } from './load-config.js';
  * as for one `loadConfig` made: no route into the application skips it.
  *
  * - **Production** refuses the local key substitute (there is no production key custody yet, so a production start is refused
- *   until a task builds one), the capture delivery adapter, the substitute attestation verifier and the describe composition.
+ *   until a task builds one), the capture delivery adapter, the substitute attestation verifier, the in-process stand-ins of the
+ *   evidence store and of the content scanner, and the describe composition. (Staging keeps the stand-in store until the owner's
+ *   bucket exists, D-A8, and the stand-in scanner with it.)
  * - **Staging and production** refuse the in-memory limiter, because the authoritative PostgreSQL limiter serves every
  *   integrated or deployed environment, and refuse the describe composition and the describe key custody, which are for a
  *   local run and for the tools that describe the application only.
@@ -49,6 +51,15 @@ export function adapterRefusals(config: AppConfig): ConfigProblem[] {
   }
   if (production && config.adapters.attestationVerifier.kind === 'substitute') {
     refuse('ATTESTATION_VERIFIER', EXPECTED.ATTESTATION_VERIFIER);
+  }
+  // The in-process stand-in of the evidence store reaches no bucket and keeps objects in memory: production refuses it (S1.11).
+  if (production && config.adapters.evidenceStore.kind === 'in-process') {
+    refuse('EVIDENCE_STORE', EXPECTED.EVIDENCE_STORE);
+  }
+  // The in-process stand-in of the content scanner looks for the EICAR test file and calls everything else clean: production refuses it (D-A6, Run A2). Production with **no** scanner
+  // is not refused here: the application starts, and every completion of evidence is refused until a scanner is configured (`unconfigured.content-scanner.adapter.ts`).
+  if (production && config.adapters.contentScanner.kind === 'in-process') {
+    refuse('EVIDENCE_SCANNER', EXPECTED.EVIDENCE_SCANNER);
   }
   if (deployed && config.adapters.limiter === 'memory')
     refuse('RATE_LIMITER', EXPECTED.RATE_LIMITER);

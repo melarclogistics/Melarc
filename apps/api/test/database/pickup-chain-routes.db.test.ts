@@ -6,11 +6,20 @@ import type { TestClient, TestResponse } from '../../src/test-support/test-clien
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { waitUntilBlockedBy } from './support/lock-wait.js';
 import {
+  insertManifest,
+  insertStop,
+  manifestRow,
+  stopRow,
+  type ManifestRow,
+  type StopState,
+} from './support/manifests.js';
+import {
   holdingPickupRequest,
   insertPickupRequest,
   operatingDay,
   pickupRequestRow,
 } from './support/pickups.js';
+import { arrangedRider } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { API, HUB_A, HUB_B, OPS, codeOf, type Actor } from './support/staff-routes.js';
 import {
@@ -108,6 +117,39 @@ const confirmed = async (
       }),
     )
   ).id;
+
+/** One finished run for each hub, to hold the stops the tests of the escalation arrange (a rider, a manifest, and the next place in its order). */
+const finishedRuns = new Map<string, { manifest: ManifestRow; next: number }>();
+const stopOf = async (requestId: string, hub: string, state: StopState): Promise<void> => {
+  let run = finishedRuns.get(hub);
+  if (run === undefined) {
+    const rider = await arrangedRider(routes.kit, routes.admin, hub);
+    const manifest = await insertManifest(
+      routes.admin,
+      manifestRow(hub, { state: 'COMPLETED', serviceDate: ahead, assignedRiderId: rider.id }),
+    );
+    run = { manifest, next: 1 };
+    finishedRuns.set(hub, run);
+  }
+  await insertStop(routes.admin, stopRow(run.manifest, requestId, run.next, { state }));
+  run.next += 1;
+};
+
+/**
+ * A request whose stop failed (S1.28): a confirmed request, as `confirmed` makes it, and a stop of it in the state the test names (FAILED unless it says otherwise). Escalation is
+ * a resolution of a failure (OB-S1-66), so the requests the tests escalate are these.
+ */
+const failedRequest = async (
+  attempt = 3,
+  over: Parameters<typeof pickupRequestRow>[2] = {},
+  vendor: ArrangedVendor = vendorOne,
+  hub: string = HUB_A,
+  state: StopState = 'FAILED',
+): Promise<string> => {
+  const id = await confirmed(attempt, over, vendor, hub);
+  await stopOf(id, hub, state);
+  return id;
+};
 
 const etagOf = async (client: TestClient, id: string): Promise<string> => {
   const read = await client.get(ONE(id));
@@ -497,10 +539,62 @@ describe('hub Senior Ops force-extends the cap with a reason (AC-SLICE-001-07)',
 });
 
 describe('Ops escalates a request out of its own hands, once', () => {
+  // Break caught (S1.28, OB-S1-66): an escalation of a request none of whose stops failed, which lets an officer take a request out of its own hands with no failure to resolve; or
+  // one refused with a rule that does not say why. A stop that was skipped, collected or is being worked is not a failure.
+  it('is a resolution of a failure: a confirmed request none of whose stops failed is STATE_CONFLICT, whatever else its stops did', async () => {
+    const cases: [string, string][] = [
+      ['no stop at all', await confirmed(1)],
+      ['a skipped stop', await failedRequest(1, {}, vendorOne, HUB_A, 'SKIPPED')],
+      ['a collected stop', await failedRequest(1, {}, vendorOne, HUB_A, 'COLLECTED')],
+      ['a stop being worked', await failedRequest(1, {}, vendorOne, HUB_A, 'ARRIVED')],
+    ];
+    for (const [name, id] of cases) {
+      const answer = await escalate(opsEscalating, id, { note: NOTE });
+      expect([answer.status, codeOf(answer)], name).toEqual([409, 'STATE_CONFLICT']);
+      expect((answer.json() as { details?: { rule?: string } }).details?.rule, name).toBe(
+        'no_failed_stop',
+      );
+      await expectUntouched(id);
+    }
+    // The same kind of request, once a stop of it has failed, is escalated.
+    expect((await escalate(opsEscalating, await failedRequest(1), { note: NOTE })).status).toBe(
+      200,
+    );
+  });
+
+  // Break caught: the rule held by the service alone. Any other writer (a statement under a key that may update the request, the backstop) moving the moment of a request
+  // none of whose stops failed, or of a request that is not confirmed, or moving a moment already recorded, is refused by the guard of the request.
+  it('is held by the database for every writer: the moment is recorded only for a confirmed request that has a stop that failed, and once', async () => {
+    const refused = (id: string) =>
+      routes.admin.query('update pickup_request set escalated_at = now() where id = $1', [id]);
+    await expect(refused(await confirmed(1))).rejects.toMatchObject({
+      code: '23514',
+      detail: 'reason=STATE_CONFLICT',
+    });
+    await expect(
+      refused(await failedRequest(1, {}, vendorOne, HUB_A, 'SKIPPED')),
+    ).rejects.toMatchObject({
+      code: '23514',
+      detail: 'reason=STATE_CONFLICT',
+    });
+    await expect(refused(await failedRequest(1, { state: 'CANCELLED' }))).rejects.toMatchObject({
+      code: '23514',
+      detail: 'reason=STATE_CONFLICT',
+    });
+    const withFailure = await failedRequest(1);
+    await refused(withFailure);
+    await expect(
+      routes.admin.query(
+        "update pickup_request set escalated_at = now() + interval '1 minute' where id = $1",
+        [withFailure],
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
   // Break caught: an escalation that changes the request's state (it stays confirmed, and can still be cancelled), that records no moment, or
   // that answers with a token that is not the request's.
   it('records the moment on a confirmed request, and answers with the request and its new token', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const before = await tokenOf(opsEscalating, id);
     const answer = await escalate(opsEscalating, id, { note: NOTE });
     expect(answer.status).toBe(200);
@@ -518,7 +612,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
   // Break caught: the escalation unaudited or audited as an ordinary act (it is a manual state override, section 38.5), or its actor, trigger or
   // note missing: the audit event is where they are.
   it('writes one enhanced event with the actor, the trigger and the note', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const request = bodyOf(await escalate(opsEscalating, id, { note: NOTE }));
     expect(await eventsOf(id, ESCALATED)).toEqual([
       {
@@ -539,14 +633,14 @@ describe('Ops escalates a request out of its own hands, once', () => {
 
   // Break caught: a second escalation accepted (the moment moved, a second record written), or one of a request that was never confirmed or is over.
   it('is once, and only for a request that was confirmed: any other is STATE_CONFLICT', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     expect((await escalate(opsEscalating, id, { note: NOTE })).status).toBe(200);
     const again = await escalate(opsEscalating, id, { note: 'Second look' });
     expect([again.status, codeOf(again)]).toEqual([409, 'STATE_CONFLICT']);
     expect(await eventsOf(id, ESCALATED)).toHaveLength(1);
 
     for (const state of ['PENDING', 'CANCELLED'] as const) {
-      const other = await confirmed(1, { state });
+      const other = await failedRequest(1, { state });
       const answer = await escalate(opsEscalating, other, { note: NOTE });
       expect([answer.status, codeOf(answer)], state).toEqual([409, 'STATE_CONFLICT']);
       expect((await rowOf(other)).escalated_at).toBeNull();
@@ -557,7 +651,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
   // Break caught: the request made uncancellable by escalating it (section 21.6: office cancellation remains available at every point), or the
   // moment lost with the cancellation.
   it('leaves the request cancellable, and a cancellation keeps the moment', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const escalated = bodyOf(await escalate(opsEscalating, id, { note: NOTE }));
     const cancelled = await post(opsEscalating, CANCEL(id), id, { reason_code: CANCEL_REASON });
     expect(cancelled.status).toBe(200);
@@ -570,7 +664,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
   // Break caught: an escalation that closes the way on: the documents say it changes nothing else, and the extension of a Senior Ops member
   // and the reschedule it opens are the way out of an exhausted chain.
   it('does not stop a Senior Ops extension, nor the reschedule it opens', async () => {
-    const id = await confirmed(3);
+    const id = await failedRequest(3);
     const escalated = bodyOf(await escalate(opsEscalating, id, { note: NOTE }));
     expect((await extend(senior, id, { reason: REASON })).status).toBe(200);
 
@@ -592,7 +686,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
       'VALIDATION_FAILED',
     ],
   ])('refuses %s and escalates nothing', async (_name, body, status, code) => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const answer = await escalate(opsEscalating, id, body);
     expect([answer.status, codeOf(answer)]).toEqual([status, code]);
     await expectUntouched(id);
@@ -601,7 +695,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
   // Break caught: a caller with no key escalating, an escalation outside the grant's hubs, on a stale token, of a request that is not there, for a
   // vendor or with no session.
   it('is made under the version it was read at, in the hubs of the grant, and never for a vendor', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const finance = await routes.actor(BUNDLE_IDS.finance, null);
     const without = await escalate(
       finance,
@@ -642,7 +736,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
 
   // Break caught: a retry escalating twice or answering differently, and two members of the office escalating one request at once.
   it('is made once however many times it is sent, and by one of two who race', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const etag = await tokenOf(opsEscalating, id);
     const key = randomUUID();
     const first = await escalate(opsEscalating, id, { note: NOTE }, { ifMatch: etag, key });
@@ -653,7 +747,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
     const other = await escalate(opsEscalating, id, { note: 'Another' }, { ifMatch: etag, key });
     expect([other.status, codeOf(other)]).toEqual([409, 'IDEMPOTENCY_KEY_CONFLICT']);
 
-    const raced = await confirmed(1);
+    const raced = await failedRequest(1);
     const token = await tokenOf(opsTwo, raced);
     const [one, two] = await Promise.all([
       escalate(opsTwo, raced, { note: NOTE }, { ifMatch: token }),
@@ -672,7 +766,7 @@ describe('Ops escalates a request out of its own hands, once', () => {
   // Break caught: the version compared outside the request's lock, so that a request changed while the escalation waited is escalated on the
   // token of an earlier read.
   it('compares the version under the lock: a change committed while the escalation waits is seen by it', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const etag = await tokenOf(opsTwo, id);
     const held = await holdingPickupRequest(routes.database, id);
     let escalating: Promise<TestResponse> | undefined;
@@ -726,7 +820,7 @@ describe('the act and its record stand or fall together', () => {
   });
 
   it('an escalation whose event cannot be written is not made', async () => {
-    const id = await confirmed(1);
+    const id = await failedRequest(1);
     const etag = await tokenOf(opsEscalating, id);
     const { failed, retried } = await failsWithItsRecord(
       (key, token) => escalate(opsEscalating, id, { note: NOTE }, { ifMatch: token, key }),

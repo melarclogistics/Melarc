@@ -394,9 +394,10 @@ describe('the configuration table of DEPLOYMENT_AND_ENVIRONMENTS.md §12.5', () 
     });
 
     // Break caught: a limit described as applied that nothing reads, or an applied one still described as validation only.
-    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), the HTTP limits and the request budget (S0.20) and the verifier call (S0.56), and no other', () => {
+    it('says which are applied: the shutdown budget (B0.2), the database deadlines and pool bound (S0.6), the HTTP limits and the request budget (S0.20), the verifier call (S0.56) and the content scanner call (Run A2), and no other', () => {
       const applied = (setting: string): boolean =>
         setting.includes('ATTESTATION_VERIFIER_TIMEOUT_MS') ||
+        setting.includes('EVIDENCE_CLAMAV_TIMEOUT_MS') ||
         setting.includes('SHUTDOWN_TIMEOUT_MS') ||
         setting.includes('DATABASE_') ||
         setting.includes('HTTP_') ||
@@ -720,6 +721,7 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
         KEY_CREDENTIAL_DELIVERY_MATERIAL: `1:${randomKey()}`,
         KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: '1',
         DELIVERY_CAPTURE_DIRECTORY: join(tmpdir(), 'melarc-capture'),
+        PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
         ...over,
       });
       return result.ok ? [] : result.problems;
@@ -759,6 +761,11 @@ describe('the delivery worker in the deployment document (S0.18)', () => {
     ]) {
       expect(workerRow(key)?.[2], key).toBe('with `provider`');
     }
+    // The failure backstop's cadence (S1.28, D-A1): configuration that is required and has no default in code, 15 minutes in the example every environment starts from.
+    expect(workerRow('PICKUP_BACKSTOP_INTERVAL_MINUTES')?.[2]).toBe('yes');
+    expect(workerRow('PICKUP_BACKSTOP_INTERVAL_MINUTES')?.[3]).toBe('none');
+    expect(refusedWithout('PICKUP_BACKSTOP_INTERVAL_MINUTES')).toBe(true);
+    expect(example.PICKUP_BACKSTOP_INTERVAL_MINUTES).toBe('15');
   });
 
   // Break caught: a constant changed in the code and not in the record of what was exercised.

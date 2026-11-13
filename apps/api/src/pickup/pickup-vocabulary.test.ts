@@ -3,7 +3,10 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WORKFLOW_REASON_DOMAINS } from '../platform/database/schema/reference-data.js';
+import {
+  REASON_FAILURE_CATEGORIES,
+  WORKFLOW_REASON_DOMAINS,
+} from '../platform/database/schema/reference-data.js';
 import {
   decideReason,
   ReasonRefusedError,
@@ -51,6 +54,11 @@ describe('the fixed pickup-failure categories (section 21.5)', () => {
 
   it('cannot be changed by a caller', () => {
     expect(Object.isFrozen(PICKUP_FAILURE_CATEGORIES)).toBe(true);
+  });
+
+  // Break caught (D-A4): the platform's copy of the categories, which the catalogue's check and the stop's guard hold, drifting from the pickup domain's list.
+  it('are the four the catalogue binds a failure reason to', () => {
+    expect([...REASON_FAILURE_CATEGORIES]).toEqual([...PICKUP_FAILURE_CATEGORIES]);
   });
 });
 

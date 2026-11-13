@@ -359,8 +359,9 @@ describe('DescribeServers: the hosts an operation is reachable at', () => {
     expect(operation(document, '/servers/browser', 'post').servers).toBeUndefined();
   });
 
-  // Break caught: the constant the Rider operations will state drifting from what the contract says of its nine Rider
-  // operations. Their hosts are the same-origin default and the dedicated non-browser host, in that form.
+  // Break caught: the constant the Rider operations will state drifting from what the contract says of its Rider
+  // operations (the count is the Rider host's, as the contract names it: the work of the run and the evidence a rider
+  // captures). Their hosts are the same-origin default and the dedicated non-browser host, in that form.
   it('has the hosts the contract gives each of its operations that names its own', () => {
     const named: string[][] = [];
     for (const item of Object.values(object(contract.paths, 'paths'))) {
@@ -378,7 +379,7 @@ describe('DescribeServers: the hosts an operation is reachable at', () => {
       }
     }
 
-    expect(named).toHaveLength(13);
+    expect(named).toHaveLength(15);
     for (const urls of named) expect(urls).toEqual(RIDER_SERVERS.map((server) => server.url));
     expect(RIDER_SERVERS[0]).toBe(SAME_ORIGIN_SERVER);
   });

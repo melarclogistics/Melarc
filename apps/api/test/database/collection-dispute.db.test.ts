@@ -7,6 +7,7 @@ import { guardReasonIn, serverErrorIn } from '../../src/platform/database/databa
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -84,6 +85,8 @@ async function collected(collectedCount = 3, vendor: ArrangedVendor = vendorA) {
   });
   const stop = arranged.stops[0];
   if (stop === undefined) throw new Error('stop');
+  // The disputes are about the collection, not the photos (D-A10): the stop is let through without them.
+  await excusePhotos(routes, stop.id);
   const count = await arranged.rider.client.post(
     `${STOP(stop.id)}/collect`,
     collectedCount < 3

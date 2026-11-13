@@ -176,6 +176,14 @@ describe('the generated description of the real application', () => {
       ['/ops/queue-summary', ['get'], ['getQueueSummary']],
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full (a POST that changes nothing, since 6 November 2026).
       ['/ops/lookup', ['post'], ['lookupRecords']],
+      // S1.11: the evidence operations (`x-permission: owner`): the rider declares and completes a record, the staff of the hub are given a way to read it.
+      ['/evidence', ['post'], ['createEvidence']],
+      ['/evidence/{id}/complete', ['post'], ['completeEvidenceUpload']],
+      [
+        '/evidence/{id}/retrieval-authorization',
+        ['post'],
+        ['createEvidenceRetrievalAuthorization'],
+      ],
       // S0.53a: the rider roster, the first routes of the `dispatch` module.
       ['/ops/riders', ['get'], ['listRiders']],
       ['/ops/riders/{riderId}', ['get'], ['getRider']],
@@ -209,6 +217,8 @@ describe('the generated description of the real application', () => {
       ['/pickup-stops/{id}/fail', ['post'], ['reportPickupFailure']],
       // S1.26: the rider's count at the door.
       ['/pickup-stops/{id}/collect', ['post'], ['recordCollection']],
+      // D-A10: Ops lets a stop's count through without parcel photos, the day the camera fails.
+      ['/pickup-stops/{id}/parcel-photo-exception', ['post'], ['authoriseParcelPhotoException']],
       // S1.27: the collection handshake, the two-party proof that closes a counted stop.
       ['/pickup-stops/{id}/handshake', ['post'], ['initiateHandshake']],
       ['/pickup-stops/{id}/handshake/verify', ['post'], ['verifyHandshake']],
@@ -217,6 +227,11 @@ describe('the generated description of the real application', () => {
       ['/pickup-stops/{id}/handshake/resolve', ['post'], ['resolveHandshake']],
       // S1.29: the vendor's dispute of a collection.
       ['/pickup-stops/{id}/dispute', ['post'], ['disputeCollection']],
+      // D-A3 (OB-S1-70): the Ops work lists of the collection and the failure.
+      ['/collection-disputes', ['get'], ['listCollectionDisputes']],
+      ['/handshakes-for-ops', ['get'], ['listHandshakesForOps']],
+      ['/collection-shortfalls', ['get'], ['listCollectionShortfalls']],
+      ['/pickup-failures', ['get'], ['listPickupFailures']],
       // S1.15: the confirmation of a pending request, and the decision on a booking that was confirmed past the cutoff.
       ['/pickup-requests/{id}/confirm', ['post'], ['confirmPickupRequest']],
       ['/pickup-requests/{id}/cutoff-exception', ['post'], ['resolveCutoffException']],

@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { deployedEnv, RUNTIME_URL, randomKey, validEnv } from '../../test-support/config-env.js';
 import { ENGINEERING_DEFAULTS, EXPECTED } from './config-settings.js';
 import { KEY_PURPOSES, keyEnvName } from './key-material.js';
-import { loadConfig, type AppConfig, type ConfigProblem } from './load-config.js';
+import {
+  contentScannerFrom,
+  loadConfig,
+  type AppConfig,
+  type ConfigProblem,
+} from './load-config.js';
 
 /** Problems reported for a rejected environment; fails the test if it was accepted. */
 function problemsFor(env: Record<string, string | undefined>): readonly ConfigProblem[] {
@@ -35,6 +40,12 @@ const REAL_ADAPTERS = {
   ATTESTATION_VERIFIER_TIMEOUT_MS: '3000',
   // The service is on another host, so its caller authenticates (SECURITY_DESIGN.md section 15.2.3).
   ATTESTATION_VERIFIER_CALLER_SECRET: randomKey(),
+  // The evidence store (S1.11): a real one, so that production's other refusals are judged alone. The values are made up for the test.
+  EVIDENCE_STORE: 'r2',
+  EVIDENCE_R2_ACCOUNT_ID: 'testaccount',
+  EVIDENCE_R2_BUCKET: 'test-evidence',
+  EVIDENCE_R2_ACCESS_KEY_ID: 'TESTONLYACCESSKEY',
+  EVIDENCE_R2_SECRET_ACCESS_KEY: 'TEST-ONLY-NOT-A-CREDENTIAL-0000000000',
 };
 
 describe('loadConfig: accepted environments', () => {
@@ -1100,4 +1111,106 @@ describe('the private metrics endpoint (S0.68; DEPLOYMENT_AND_ENVIRONMENTS.md §
       );
     },
   );
+});
+
+describe('the content scanner (Run A2; the Product Owner’s decision D-A6)', () => {
+  const CLAMAV = {
+    EVIDENCE_SCANNER: 'clamav',
+    EVIDENCE_CLAMAV_HOST: 'clamav.internal.example',
+    EVIDENCE_CLAMAV_PORT: '3310',
+    EVIDENCE_CLAMAV_TIMEOUT_MS: '8000',
+  } as const;
+
+  // Break caught: a local run or CI with no scanner, which would refuse every completion, or one bound to a scanner nobody configured.
+  it('gives a local run, and any environment that names none, the in-process stand-in', () => {
+    expect(configFor(validEnv()).adapters.contentScanner).toEqual({ kind: 'in-process' });
+    expect(configFor(validEnv({ EVIDENCE_SCANNER: 'in-process' })).adapters.contentScanner).toEqual(
+      {
+        kind: 'in-process',
+      },
+    );
+    // A blank value is "not set", as for the other optional keys.
+    expect(configFor(validEnv({ EVIDENCE_SCANNER: '' })).adapters.contentScanner).toEqual({
+      kind: 'in-process',
+    });
+  });
+
+  it('selects ClamAV with the daemon’s address and the time one scan may take', () => {
+    expect(configFor(validEnv(CLAMAV)).adapters.contentScanner).toEqual({
+      kind: 'clamav',
+      host: 'clamav.internal.example',
+      port: 3310,
+      timeoutMs: 8000,
+    });
+  });
+
+  // Break caught (the heart of D-A6): production with nothing configured bound to the stand-in, which calls everything clean, or refused at start for want of a scanner.
+  it('gives production, when it names none, no scanner at all, and gives staging and a local run the stand-in', () => {
+    const base = { APP_ENV: 'production' } as const;
+    expect(contentScannerFrom(base)).toEqual({ kind: 'none' });
+    expect(contentScannerFrom({ ...base, EVIDENCE_SCANNER: undefined })).toEqual({ kind: 'none' });
+    expect(contentScannerFrom({ APP_ENV: 'staging' })).toEqual({ kind: 'in-process' });
+    expect(contentScannerFrom({ APP_ENV: 'local' })).toEqual({ kind: 'in-process' });
+    expect(
+      contentScannerFrom({
+        ...base,
+        EVIDENCE_SCANNER: 'clamav',
+        EVIDENCE_CLAMAV_HOST: 'clamav.internal.example',
+        EVIDENCE_CLAMAV_PORT: 3310,
+        EVIDENCE_CLAMAV_TIMEOUT_MS: 8000,
+      }),
+    ).toEqual({ kind: 'clamav', host: 'clamav.internal.example', port: 3310, timeoutMs: 8000 });
+    // The stand-in can still be named in production, and `adapterRefusals` then refuses it (production-refusals.test.ts).
+    expect(contentScannerFrom({ ...base, EVIDENCE_SCANNER: 'in-process' })).toEqual({
+      kind: 'in-process',
+    });
+  });
+
+  // Break caught: a setting the daemon cannot be reached without, left out; or one that means nothing, left in.
+  it.each(['EVIDENCE_CLAMAV_HOST', 'EVIDENCE_CLAMAV_PORT', 'EVIDENCE_CLAMAV_TIMEOUT_MS'] as const)(
+    'requires %s with ClamAV',
+    (key) => {
+      expect(problemsFor(validEnv({ ...CLAMAV, [key]: undefined }))).toContainEqual(
+        expect.objectContaining({ key, problem: 'missing' }),
+      );
+    },
+  );
+
+  it.each(['EVIDENCE_CLAMAV_HOST', 'EVIDENCE_CLAMAV_PORT', 'EVIDENCE_CLAMAV_TIMEOUT_MS'] as const)(
+    'refuses %s when no ClamAV is selected',
+    (key) => {
+      expect(keysOf(problemsFor(validEnv({ [key]: CLAMAV[key] })))).toEqual([key]);
+      expect(
+        keysOf(problemsFor(validEnv({ EVIDENCE_SCANNER: 'in-process', [key]: CLAMAV[key] }))),
+      ).toEqual([key]);
+    },
+  );
+
+  // Break caught: a scan allowed longer than the request that makes it, which the platform would answer 503 while the scan still ran.
+  it('keeps the time of a scan inside the request’s own budget', () => {
+    const budget = Number(ENGINEERING_DEFAULTS.REQUEST_EXECUTION_BUDGET_MS);
+    expect(
+      keysOf(problemsFor(validEnv({ ...CLAMAV, EVIDENCE_CLAMAV_TIMEOUT_MS: String(budget) }))),
+    ).toEqual(['EVIDENCE_CLAMAV_TIMEOUT_MS']);
+    expect(
+      loadConfig(validEnv({ ...CLAMAV, EVIDENCE_CLAMAV_TIMEOUT_MS: String(budget - 1) })).ok,
+    ).toBe(true);
+    expect(keysOf(problemsFor(validEnv({ ...CLAMAV, EVIDENCE_CLAMAV_TIMEOUT_MS: '50' })))).toEqual([
+      'EVIDENCE_CLAMAV_TIMEOUT_MS',
+    ]);
+  });
+
+  it.each(['clam av', 'clamav:3310/', 'host name'])('refuses a daemon host written %j', (host) => {
+    expect(keysOf(problemsFor(validEnv({ ...CLAMAV, EVIDENCE_CLAMAV_HOST: host })))).toContain(
+      'EVIDENCE_CLAMAV_HOST',
+    );
+  });
+
+  it('names the setting and never the address in what it refuses', () => {
+    const text = JSON.stringify(
+      problemsFor(validEnv({ ...CLAMAV, EVIDENCE_CLAMAV_HOST: 'bad host.internal.example' })),
+    );
+    expect(text).not.toContain('bad host');
+    expect(text).not.toContain('internal.example');
+  });
 });

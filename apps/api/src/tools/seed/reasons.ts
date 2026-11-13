@@ -51,6 +51,8 @@ export function reasonCodeRow(reason: ReasonSeed): Readonly<Record<string, unkno
     requires_escalation: reason.requiresEscalation,
     active: reason.active,
     permitted_operations: [...reason.permittedOperations],
+    // An identity reason belongs to no failure category (D-A4, migration 0083): the column is named so that every reason row has the same columns.
+    failure_category: null,
   };
 }
 

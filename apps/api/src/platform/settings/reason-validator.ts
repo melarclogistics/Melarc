@@ -66,6 +66,8 @@ export interface ReasonRow {
   readonly consumes_delivery_attempt: boolean;
   readonly active: boolean;
   readonly permitted_operations: readonly string[] | null;
+  /** The failure category of a `PICKUP_FAILURE` reason (D-A4); absent where a caller builds a row without it, and null for every other domain. */
+  readonly failure_category?: string | null;
 }
 
 export interface ReasonRequest {
@@ -94,6 +96,8 @@ export interface ValidatedReason {
   readonly requiresOpsReview: boolean;
   readonly requiresEscalation: boolean;
   readonly consumesDeliveryAttempt: boolean;
+  /** The one failure category a `PICKUP_FAILURE` reason belongs to (D-A4, migration 0083), and null for every other reason. */
+  readonly failureCategory: string | null;
 }
 
 /** The grammar of `reason_code.code` (the table's `reason_code_code_grammar`), and the longest a code is. */
@@ -178,6 +182,7 @@ export function decideReason(request: ReasonRequest, row: ReasonRow | undefined)
     requiresOpsReview: row.requires_ops_review,
     requiresEscalation: row.requires_escalation,
     consumesDeliveryAttempt: row.consumes_delivery_attempt,
+    failureCategory: row.failure_category ?? null,
   };
 }
 
@@ -196,7 +201,7 @@ export class ReasonValidator {
     if (typeof code === 'string' && code.length <= MAX_CODE_LENGTH && CODE.test(code)) {
       const result = await transactionOf(transaction).execute(sql`
         select code, domain, label, requires_note, requires_photo, requires_contact_attempt, requires_approval,
-               requires_ops_review, requires_escalation, attribution, consumes_delivery_attempt, active, permitted_operations
+               requires_ops_review, requires_escalation, attribution, consumes_delivery_attempt, active, permitted_operations, failure_category
           from reason_code where code = ${code}`);
       row = result.rows[0] as unknown as ReasonRow | undefined;
     }

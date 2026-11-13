@@ -76,6 +76,7 @@ function workerEnvironment(over: Record<string, string> = {}): Record<string, st
     KEY_CREDENTIAL_DELIVERY_ACTIVE_VERSION: String(delivery.activeVersion),
     DELIVERY_CAPTURE_DIRECTORY: sink,
     DELIVERY_WORKER_POLL_INTERVAL_MS: '100',
+    PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
     SHUTDOWN_TIMEOUT_MS: '5000',
     ...over,
   };

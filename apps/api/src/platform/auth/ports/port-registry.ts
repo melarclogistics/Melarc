@@ -6,6 +6,11 @@ import {
 import { AUDIT_WRITER, AUDIT_WRITER_DESCRIPTOR, type AuditWriter } from './audit-writer.port.js';
 import { CLOCK, CLOCK_DESCRIPTOR, type Clock } from './clock.port.js';
 import {
+  CONTENT_SCANNER,
+  CONTENT_SCANNER_DESCRIPTOR,
+  type ContentScanner,
+} from './content-scanner.port.js';
+import {
   DELIVERY_PROVIDER,
   DELIVERY_PROVIDER_DESCRIPTOR,
   type DeliveryProvider,
@@ -15,6 +20,11 @@ import {
   DELIVERY_QUEUE_DESCRIPTOR,
   type DeliveryQueue,
 } from './delivery-queue.port.js';
+import {
+  EVIDENCE_STORE,
+  EVIDENCE_STORE_DESCRIPTOR,
+  type EvidenceStore,
+} from './evidence-store.port.js';
 import {
   HASH_ADMISSION,
   HASH_ADMISSION_DESCRIPTOR,
@@ -79,6 +89,8 @@ export interface PortTypes {
   DeliveryProvider: DeliveryProvider;
   TextMessageSender: TextMessageSender;
   AttestationVerifier: AttestationVerifier;
+  EvidenceStore: EvidenceStore;
+  ContentScanner: ContentScanner;
   Metrics: Metrics;
 }
 
@@ -121,5 +133,7 @@ export const PORTS: readonly PortRegistryEntry[] = [
     token: ATTESTATION_VERIFIER,
     descriptor: ATTESTATION_VERIFIER_DESCRIPTOR,
   },
+  { name: 'EvidenceStore', token: EVIDENCE_STORE, descriptor: EVIDENCE_STORE_DESCRIPTOR },
+  { name: 'ContentScanner', token: CONTENT_SCANNER, descriptor: CONTENT_SCANNER_DESCRIPTOR },
   { name: 'Metrics', token: METRICS, descriptor: METRICS_DESCRIPTOR },
 ];

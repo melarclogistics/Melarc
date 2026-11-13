@@ -55,7 +55,19 @@ export function reasonRefusedByGuard(
   details?: Readonly<Record<string, unknown>>,
 ): ApiException | undefined {
   const reason = guardReasonIn(error);
+  if (reason === 'REASON_CATEGORY_MISMATCH') return reasonOfAnotherCategory();
   return reason === 'REASON_REQUIRED' || reason === 'REASON_NOT_ACTIVE'
     ? answered(new ReasonRefusedError(reason), details)
     : undefined;
+}
+
+/**
+ * The answer to a failure reported under a category its reason does not belong to (D-A4, `OB-S1-73`): `VALIDATION_FAILED`, the reason being the field at fault, with the rule
+ * `category`. The catalogue binds each `PICKUP_FAILURE` reason to one of the four fixed categories (`reason_code.failure_category`); the service judges it before the evidence, the
+ * photo and the door wait, and the stop's guard holds it for every writer (`reason=REASON_CATEGORY_MISMATCH`). The message repeats nothing the client sent.
+ */
+export function reasonOfAnotherCategory(): ApiException {
+  return new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+    violations: [{ in: 'body', pointer: '/reason_code', rule: 'category' }],
+  });
 }

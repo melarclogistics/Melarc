@@ -20,3 +20,5 @@ export * from './recovery-request.js';
 export * from './hub-configuration.js';
 // S1.12a (SLICE-001) adds the outbox envelope a business act writes, and the notification the lane of the delivery worker keeps.
 export * from './notifications.js';
+// S1.11 (SLICE-001) adds the evidence record: a controlled object captured in the course of another act, stored behind the object-store port.
+export * from './evidence.js';

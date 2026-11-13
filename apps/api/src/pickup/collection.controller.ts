@@ -25,9 +25,19 @@ import { currentRequestContext } from '../platform/logging/request-context.js';
 import { DescribeErrors } from '../platform/openapi/described-errors.js';
 import { DescribeServers, RIDER_SERVERS } from '../platform/openapi/operation-statements.js';
 import { RequiresPermission } from '../platform/routes/access-declaration.js';
-import { COLLECTION_RECORD_CREATE_BODY, COLLECTION_RECORD_SCHEMA } from './collection-schemas.js';
+import {
+  COLLECTION_RECORD_CREATE_BODY,
+  COLLECTION_RECORD_SCHEMA,
+  PARCEL_PHOTO_EXCEPTION_CREATE_BODY,
+  PARCEL_PHOTO_EXCEPTION_SCHEMA,
+} from './collection-schemas.js';
 import type { CollectionRecordView } from './collection-record-view.js';
-import type { CollectionBody, Collections } from './collection.service.js';
+import type {
+  CollectionBody,
+  Collections,
+  ParcelPhotoExceptionBody,
+  ParcelPhotoExceptionView,
+} from './collection.service.js';
 import { PICKUP_COLLECTION } from './pickup-manifests-providers.js';
 
 const correlation = (): string => currentRequestContext()?.requestId ?? randomUUID();
@@ -74,6 +84,9 @@ export class CollectionController {
   @RequiresPermission('pickup.collection.confirm', {
     surfaces: ['RIDER_ANDROID'],
     activity: 'qualifying',
+    // A short count writes an envelope for the notification lane (OB-S1-51: an Ops feed entry, no text), and every operation that writes one carries the sub-ceiling
+    // (`provider-initiating-coverage.test.ts` holds the two sets to each other).
+    providerInitiating: true,
   })
   async record(
     @Authorized() authorized: AuthorizedRequest,
@@ -91,5 +104,56 @@ export class CollectionController {
       fingerprint: fingerprintOfRequest(request, 'recordCollection'),
     });
     return recorded.record;
+  }
+
+  /**
+   * `POST /pickup-stops/{id}/parcel-photo-exception` (D-A10, 12 November 2026): an officer of the stop's hub lets the stop's count through without parcel photos, for the day the
+   * camera fails or the photos cannot be sent. The Ops Portal alone; `pickup.handshake.override`; an `Idempotency-Key` and a required note. Once made, the stop's count takes no parcel
+   * photos; it is made once, before the count, and never changed or removed.
+   */
+  @Post(':id/parcel-photo-exception')
+  @HttpCode(200)
+  @ContractOperation('authoriseParcelPhotoException')
+  @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
+  @ApiBody({ schema: PARCEL_PHOTO_EXCEPTION_CREATE_BODY })
+  @ApiResponse({ status: 200, schema: PARCEL_PHOTO_EXCEPTION_SCHEMA })
+  @DescribeErrors(
+    ErrorCode.CsrfValidationFailed,
+    ErrorCode.HubScopeViolation,
+    ErrorCode.IdempotencyKeyConflict,
+    ErrorCode.NotFound,
+    ErrorCode.PermissionDenied,
+    ErrorCode.ReasonRequired,
+    ErrorCode.SessionInvalid,
+    ErrorCode.StateConflict,
+    ErrorCode.ValidationFailed,
+  )
+  @RequiresPermission('pickup.handshake.override', {
+    surfaces: ['OPS_PORTAL'],
+    activity: 'qualifying',
+    record: { entity: 'pickup_stop', param: 'id' },
+  })
+  async authorisePhotoException(
+    @Authorized() authorized: AuthorizedRequest,
+    @Param('id') id: string,
+    @Body() body: ParcelPhotoExceptionBody,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @Req() request: Request,
+  ): Promise<ParcelPhotoExceptionView> {
+    if (this.collections === undefined) {
+      throw new OperationUnavailableError('authoriseParcelPhotoException');
+    }
+    const authorised = await this.collections.authorisePhotoException(
+      authorized,
+      correlation(),
+      id,
+      {
+        body,
+        idempotencyKey,
+        fingerprint: fingerprintOfRequest(request, 'authoriseParcelPhotoException'),
+      },
+    );
+    return authorised.exception;
   }
 }

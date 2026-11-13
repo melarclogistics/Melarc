@@ -36,6 +36,7 @@ export function workerEnvironment(options: WorkerEnvironmentOptions): Record<str
     DELIVERY_CAPTURE_DIRECTORY: options.captureDirectory,
     // A person waits for a link that has just been queued: the worker looks at the queue five times a second, and no more than that.
     DELIVERY_WORKER_POLL_INTERVAL_MS: '200',
+    PICKUP_BACKSTOP_INTERVAL_MINUTES: '15',
     DELIVERY_WORKER_CONCURRENCY: '2',
     MELARC_E2E_CAPTURE_FILE: options.captureFile,
   };

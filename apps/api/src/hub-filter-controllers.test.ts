@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { NotificationLogController } from './notifications/notification-log.controller.js';
 import type { NotificationLogService } from './notifications/notification-log.service.js';
+import { OpsWorkListsController } from './pickup/ops-work-lists.controller.js';
+import type { PickupOpsWorkLists } from './pickup/ops-work-lists.service.js';
 import { PickupManifestsController } from './pickup/pickup-manifests.controller.js';
 import type { PickupManifestsService } from './pickup/pickup-manifests.service.js';
 import { PickupRequestsController } from './pickup/pickup-requests.controller.js';
@@ -50,6 +52,53 @@ function noting(): {
         asked.push(filter);
         return Promise.resolve(PAGE);
       },
+    },
+  };
+}
+
+/**
+ * The service of the four Ops work lists (D-A3, OB-S1-70): one object with a method for each list, every one noting what it was asked, so that the same
+ * controller test holds the four to the same account of the hub.
+ */
+function notingWorkLists(): {
+  readonly service: Record<string, unknown>;
+  readonly asked: unknown[];
+  readonly received: AuthorizedRequest[];
+} {
+  const { service, asked, received } = noting();
+  const note = (service as { list: (...given: unknown[]) => Promise<unknown> }).list;
+  return {
+    asked,
+    received,
+    service: {
+      listCollectionDisputes: note,
+      listHandshakesForOps: note,
+      listCollectionShortfalls: note,
+      listPickupFailures: note,
+    },
+  };
+}
+
+/** The subject of one of the four Ops work lists: the same four filters (`open`, `hub_id`, `page_size`, `page_token`), each handed on in its own place. */
+function workList(
+  operation: string,
+  method: 'listDisputes' | 'listHandshakes' | 'listShortfalls' | 'listFailures',
+): Subject {
+  return {
+    operation,
+    build: () => {
+      const { service, asked, received } = notingWorkLists();
+      const controller = new OpsWorkListsController(service as unknown as PickupOpsWorkLists);
+      return {
+        asked,
+        received,
+        list: (query) =>
+          Promise.resolve().then((): Promise<unknown> => controller[method](AUTHORIZED, query)),
+      };
+    },
+    everything: {
+      query: { open: 'true', hub_id: HUB, page_size: '7', page_token: 'a-position' },
+      filter: { open: 'true', hubId: HUB, pageSize: 7, pageToken: 'a-position' },
     },
   };
 }
@@ -168,6 +217,10 @@ const SUBJECTS: readonly Subject[] = [
       },
     },
   },
+  workList('listCollectionDisputes', 'listDisputes'),
+  workList('listHandshakesForOps', 'listHandshakes'),
+  workList('listCollectionShortfalls', 'listShortfalls'),
+  workList('listPickupFailures', 'listFailures'),
 ];
 
 describe.each(SUBJECTS.map((subject) => [subject.operation, subject] as const))(

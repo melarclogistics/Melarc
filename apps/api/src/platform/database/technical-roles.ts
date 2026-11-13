@@ -22,6 +22,16 @@ export const WORKER_RUNTIME_ROLE = 'melarc_worker_runtime';
 export const WORKER_CREDENTIAL_DELIVERY_ROLE = 'melarc_worker_cap_credential_delivery';
 /** The grant set of the notification lane (S1.12a): the same login, a second capability, and no more than the lane's tables. */
 export const WORKER_NOTIFICATION_ROLE = 'melarc_worker_cap_notification';
+/**
+ * The grant set of the evidence validation lane (S1.11): the same login, a third capability, and no more than the lane needs of the evidence table (it reads the id, the state and
+ * the end of the upload window, and writes the state, to expire an abandoned capture).
+ */
+export const WORKER_EVIDENCE_VALIDATION_ROLE = 'melarc_worker_cap_evidence_validation';
+/**
+ * The grant set of the failure backstop lane (S1.28, D-A1): the same login, a further capability, and the one privilege of executing `melarc.failure_backstop_escalate`. It holds no
+ * privilege on any table: the function runs as the owner and the policies that admit its statements name the capability and the owner.
+ */
+export const WORKER_PICKUP_BACKSTOP_ROLE = 'melarc_worker_cap_pickup_backstop';
 export const PROVISIONING_ROLE = 'melarc_provisioning';
 /**
  * The role migrations run as (SECURITY_DESIGN.md §14.17a). `tools/database/safety.ts` holds the same string, because it cannot

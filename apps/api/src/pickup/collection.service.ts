@@ -7,6 +7,8 @@ import type { Clock } from '../platform/auth/ports/clock.port.js';
 import type { IdempotencyStore } from '../platform/auth/ports/idempotency-store.port.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
+import { guardReasonIn, serverErrorIn } from '../platform/database/database-failures.js';
+import { timestampOf } from '../platform/database/timestamps.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
@@ -18,13 +20,21 @@ import {
   type CollectionRecordRow,
   type CollectionRecordView,
 } from './collection-record-view.js';
+import {
+  attachParcelPhotos,
+  checkedParcelPhotoIds,
+  requireStoredParcelPhotos,
+  stopIsExcused,
+} from './collection-parcel-photos.js';
 import { momentOf } from './device-moment.js';
+import { attachEvidence, requireStoredEvidence } from './pickup-failure-evidence.js';
 import { stopViewOf, STOP_COLUMNS, type PickupStopRow } from './pickup-manifest-view.js';
 import { reasonRefusedByGuard, validatedReason } from './pickup-reason-validation.js';
 import { pickupStopEtagOf } from './pickup-stop-etag.js';
 import { pickupReasonRequest } from './pickup-vocabulary.js';
 
 const OPERATION = 'recordCollection';
+const EXCEPTION_OPERATION = 'authoriseParcelPhotoException';
 
 export interface CollectionOptions {
   readonly runner: Pick<OperationRunner, 'mutate'>;
@@ -39,7 +49,10 @@ export interface CollectionBody {
   readonly collected_count: number;
   readonly variance_reason_code?: string;
   readonly variance_note?: string;
+  /** The photo a short count's reason asks for (a failure-kind photo of the stop, `COLLECTION_PROOF`), attached to the stop as a failure's is. */
   readonly evidence_ids?: readonly string[];
+  /** The photo of each parcel counted (`PARCEL_PHOTO`, D-A10): exactly `collected_count` of them, or none for a stop Ops let through without photos. */
+  readonly parcel_photo_ids?: readonly string[];
   readonly captured_at?: string;
 }
 
@@ -49,6 +62,79 @@ export interface RecordedCollection {
 
 interface StoredCollection {
   readonly record: CollectionRecordView;
+}
+
+export interface ParcelPhotoExceptionBody {
+  readonly note: string;
+}
+
+/** The contract's `ParcelPhotoException`: Ops let a stop's count through without parcel photos. */
+export interface ParcelPhotoExceptionView {
+  readonly id: string;
+  readonly pickup_stop_id: string;
+  readonly authorised_by: string;
+  readonly authorised_at: string;
+  readonly note: string;
+}
+
+export interface AuthorisedParcelPhotoException {
+  readonly exception: ParcelPhotoExceptionView;
+}
+
+/** What `melarc.authorise_parcel_photo_exception` answers. */
+interface ExceptionRow {
+  readonly out_id: string;
+  readonly out_pickup_stop_id: string;
+  readonly out_responsible_hub_id: string;
+  readonly out_authorised_by: string;
+  readonly out_authorised_at: string | Date;
+  readonly out_note: string;
+}
+
+/**
+ * The answer a refusal of the exception's operation is, by the reason it states (`DETAIL reason=`, SQLSTATE 23514), by the SQLSTATE of a privilege or a stop in another hub that it
+ * did not find (42501) or by the second exception of a stop (23505, the unique key of the table): `undefined` for anything else, which is a defect and goes up as one.
+ */
+function photoExceptionRefusalOf(error: unknown): ApiException | undefined {
+  const state = serverErrorIn(error)?.code;
+  if (state === '42501') return ApiException.of(ErrorCode.PermissionDenied, 'Not permitted');
+  if (state === '23505') {
+    return ApiException.of(
+      ErrorCode.StateConflict,
+      'This stop has already been let through without parcel photos',
+      { rule: 'exception_exists' },
+    );
+  }
+  if (state !== '23514') return undefined;
+  switch (guardReasonIn(error)) {
+    case 'REASON_REQUIRED':
+      return ApiException.of(ErrorCode.ReasonRequired, 'A note is required', { rule: 'note' });
+    case 'STOP_NOT_ARRIVED':
+      return ApiException.of(
+        ErrorCode.StateConflict,
+        'The stop has not been arrived at, or has been closed',
+        { rule: 'stop_not_arrived' },
+      );
+    case 'COLLECTION_RECORDED':
+      return ApiException.of(
+        ErrorCode.StateConflict,
+        'A collection is already recorded for this stop',
+        { rule: 'collection_recorded' },
+      );
+    default:
+      return undefined;
+  }
+}
+
+/** An officer's note: required (a blank one is `REASON_REQUIRED`), and no more than the ledger could keep. */
+function officerNote(text: unknown): string {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (trimmed === '') {
+    throw ApiException.of(ErrorCode.ReasonRequired, 'A note is required', { rule: 'note' });
+  }
+  const rule = noteRefusal(trimmed);
+  if (rule !== undefined) throw invalid('note', rule);
+  return trimmed;
 }
 
 /** The stop as the act reads it under its lock: the columns of its representation, its version, its hub, and the dispatch-time summary's count. */
@@ -74,8 +160,11 @@ const notTheRidersWork = (): ApiException =>
  * - **Judged in this order**, so that a caller learns of its own work first: the principal and the key's format; a count of zero, which is a failed
  *   pickup (`ZERO_COLLECTION_IS_FAILURE`: nothing is made, no sender is promoted, no handover is touched); then, in the transaction, the retry
  *   (`Idempotency-Key`); the stop under its lock (not the rider's: `NOT_ASSIGNED_RIDER`, one answer); the run (`MANIFEST_NOT_STARTED`,
- *   `STATE_CONFLICT`); the stop's `ETag`; that the stop was arrived at and has no record; the evidence (none can be `STORED` yet: this task builds no
- *   evidence, so a reference is `EVIDENCE_NOT_STORED`); and the count against what the stop declared.
+ *   `STATE_CONFLICT`); the stop's `ETag`; that the stop was arrived at and has no record; the count against what the stop declared and the reason of a short one; and last
+ *   the photos (D-A10, Run A2): **the photo of every parcel** (`parcel_photo_ids`: exactly `collected_count` stored photos of this rider and this stop, each attached once, or none
+ *   for a stop Ops let through without them, `authoriseParcelPhotoException`; `VALIDATION_FAILED` for the wrong number or a photo named twice, `EVIDENCE_NOT_STORED`, one answer, for
+ *   a photo that cannot be counted) and the photo a short count's reason asks for (`evidence_ids`, attached to the stop as a failure's photo is). The database holds the number of
+ *   parcel photos for every writer, at the end of the transaction (migration 0088).
  * - **The actual count, never the declared one.** The declared count is what the stop's dispatch-time summary said (the rider was shown it, and it is
  *   the one request fact the rider's context reads as itself). Fewer is a `SHORT` count and needs a reason of the `PICKUP_SHORT_COUNT` catalogue
  *   with the note and the photo its metadata asks for (`REASON_REQUIRED`); equal is `MATCH`, which has no reason; **more than was declared is not a
@@ -83,8 +172,10 @@ const notTheRidersWork = (): ApiException =>
  * - **A shortfall raises the office flag in the same transaction**: `office_notified_at` is the database's own instant, taken with `recorded_at` once the
  *   stop's lock is held (the record's guard, migration 0069, OB-S1-60: this act gives the database neither), and the count's event says that it was
  *   raised (`office_notified`). The reason of the record is held to the catalogue by the same guard, at the insert: a catalogue that changed after this
- *   act read it is `REASON_NOT_ACTIVE` (or `REASON_REQUIRED`), the act is undone and the same key is a retry. No message is queued: no document defines
- *   the office message (OB-S1-51).
+ *   act read it is `REASON_NOT_ACTIVE` (or `REASON_REQUIRED`), the act is undone and the same key is a retry. **The office is told in the system as well**
+ *   (OB-S1-51): the database writes one outbox envelope, `pickup.collection.shortfall_flagged`, from the record just made (`melarc.shortfall_envelope`: the act
+ *   gives it the stop and nothing it says), in the same transaction, and the notification lane makes the Ops feed entry `COLLECTION_SHORT_OPS_FEED`, which the staff of
+ *   the hub read under `notification.read`. A count that matches queues nothing. The entry is a draft in wording and carries no count and no note.
  * - **One event, the count's own** (`pickup.collection.recorded`, OB-S1-54), the same for a clean count and a short one: its object is the record, it
  *   names the stop, its run and request, the rider and the hub, carries the counts, the variance, the flag and the direction, and says the stop is
  *   still `ARRIVED`. It carries no note. `pickup.stop.collected` and `pickup.stop.partially_collected` are the handshake's, written when it closes
@@ -227,14 +318,6 @@ export class Collections {
         );
       }
 
-      // The evidence: none can be `STORED` in this slice yet, so a reference to any is exactly what the code says.
-      if (body.evidence_ids !== undefined && body.evidence_ids.length > 0) {
-        throw ApiException.of(
-          ErrorCode.EvidenceNotStored,
-          'A referenced evidence record is not stored',
-        );
-      }
-
       const declared = Number(stop.pickup_summary?.declared_package_count);
       if (!Number.isSafeInteger(declared) || declared < 1) {
         throw new Error('A dispatched stop carries no declared count');
@@ -257,8 +340,9 @@ export class Collections {
             pickupReasonRequest(OPERATION, body.variance_reason_code, body.variance_note),
           )
         : undefined;
-      if (reason?.requiresPhoto === true) {
-        // The photo the reason demands is evidence, and evidence cannot be stored yet (S1.11 builds it): the requirement is unmet, and said so.
+      // The photo a reason demands (`reason_code.requires_photo`) is a stored record of this stop named in `evidence_ids`, attached to the stop below as a failure's is.
+      const reasonPhotos = body.evidence_ids ?? [];
+      if (reason?.requiresPhoto === true && reasonPhotos.length === 0) {
         throw ApiException.of(ErrorCode.ReasonRequired, 'This reason needs a photo', {
           rule: 'photo',
         });
@@ -277,6 +361,17 @@ export class Collections {
       ) {
         throw new Error('The database gave no direction for the handshake of a locked stop');
       }
+
+      // The photos (D-A10), judged after every other refusal so that a count refused for another reason is told so, and before anything is written: one photo of each parcel counted,
+      // or none for a stop Ops let through without them, each a stored photo of this rider and this stop, attached once. The database holds the number for every writer.
+      const excused = await stopIsExcused(tx, stop.id);
+      const parcelPhotos = checkedParcelPhotoIds(
+        body.parcel_photo_ids,
+        body.collected_count,
+        excused,
+      );
+      await requireStoredParcelPhotos(tx, stop.id, riderId, parcelPhotos);
+      await requireStoredEvidence(tx, stop.id, riderId, reasonPhotos);
 
       const note =
         body.variance_note === undefined || body.variance_note.trim() === ''
@@ -311,6 +406,9 @@ export class Collections {
       })();
       const row = written.rows[0] as unknown as CollectionRecordRow | undefined;
       if (row === undefined) throw new Error('A collection record was not made');
+      // The photos are attached to the count in the same transaction; the database refuses at its end a count whose photos are not its number.
+      await attachParcelPhotos(tx, row.id, parcelPhotos);
+      await attachEvidence(tx, stop.id, reasonPhotos);
 
       // The count's own event (OB-S1-54), the same for a clean count and a short one: it says that a count was recorded and that the stop is still
       // `ARRIVED`. It is built from **the stored record**, not from what this act read before the insert, and the ledger admits it only when every member
@@ -341,6 +439,12 @@ export class Collections {
         },
       });
 
+      // A shortfall tells the office in the system (OB-S1-51), beside the flag: the envelope of the notification lane, written by the database from the record just made
+      // and in this transaction, so it is kept or undone with the count. The act chooses nothing the envelope says; a count that matches writes none.
+      if (row.variance === 'SHORT') {
+        await tx.execute(sql`select melarc.shortfall_envelope(${stop.id}::uuid)`);
+      }
+
       // An individual sender becomes reusable when a count is recorded for it, without waiting for the handshake. The database makes the one change
       // and writes its event in the same change (`pickup.sender.promoted`: this act has no right to update a sender and none to write that event); a
       // vendor's request and a sender already reusable promote nobody and write nothing. The operation refuses a stop that has no count of this rider,
@@ -354,6 +458,117 @@ export class Collections {
         body: new TextEncoder().encode(JSON.stringify(answer)),
       });
       return { record: view };
+    });
+  }
+
+  /**
+   * `authoriseParcelPhotoException` (D-A10, 12 November 2026; `pickup.handshake.override`; `AC-SLICE-001-88`; pickup-collection.md section 5.5): an officer of the stop's hub lets a
+   * stop's count through without parcel photos, for the day the camera fails or the photos cannot be sent. **One operation of the database**
+   * (`melarc.authorise_parcel_photo_exception`, migration 0088), which takes the stop's lock first, as the count does, so that the exception and the count meet in either order, and
+   * writes the exception once, for a stop that was arrived at and has no count yet: the officer, the moment and the hub are the database's, the note is the officer's and is
+   * required. The enhanced event of the exception is written beside it, in the same transaction, with the note. Once it exists the stop's count takes no parcel photos, and a
+   * count that names some is refused; it is never changed or removed, and a second one for the stop is `STATE_CONFLICT`. Idempotent: the same key replays the answer.
+   */
+  async authorisePhotoException(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    stopId: string,
+    request: {
+      readonly body: ParcelPhotoExceptionBody;
+      readonly idempotencyKey: string;
+      readonly fingerprint: string;
+    },
+  ): Promise<AuthorisedParcelPhotoException> {
+    const { runner, audit, idempotency, clock } = this.#options;
+    if (authorized.session.principalType !== 'STAFF') {
+      throw ApiException.of(ErrorCode.PermissionDenied, 'Not permitted');
+    }
+    if (!isIdempotencyKey(request.idempotencyKey)) {
+      throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+        violations: [{ in: 'header', pointer: 'Idempotency-Key', rule: 'format' }],
+      });
+    }
+    const note = officerNote(request.body.note);
+    const officerId = authorized.session.principalId.toLowerCase();
+
+    return runner.mutate(authorized, correlationId, async (handle) => {
+      const tx = transactionOf(handle);
+      const scope = {
+        principalType: 'STAFF',
+        principalId: officerId,
+        operationId: EXCEPTION_OPERATION,
+        key: request.idempotencyKey,
+      } as const;
+      const begun = await idempotency.begin(handle, scope, request.fingerprint);
+      if (begun.outcome === 'REPLAY') {
+        return JSON.parse(
+          Buffer.from(begun.response.body).toString('utf8'),
+        ) as AuthorisedParcelPhotoException;
+      }
+      if (begun.outcome === 'CONFLICT') {
+        throw ApiException.of(
+          ErrorCode.IdempotencyKeyConflict,
+          'That Idempotency-Key was used with a different request',
+        );
+      }
+      if (begun.outcome !== 'NEW') {
+        // A record that began and did not complete is a stranded one (OB-100): the command is not run again, and nothing is invented.
+        throw new Error('An idempotency record of this command is stranded');
+      }
+
+      const id = randomUUIDv7(clock);
+      let made: ExceptionRow | undefined;
+      try {
+        const rows = await tx.execute(
+          sql`select * from melarc.authorise_parcel_photo_exception(${id}::uuid, ${stopId}::uuid, ${note})`,
+        );
+        made = rows.rows[0] as unknown as ExceptionRow | undefined;
+      } catch (error) {
+        throw photoExceptionRefusalOf(error) ?? error;
+      }
+      if (made === undefined) throw new Error('The exception was not made');
+
+      // The enhanced event of the exception, the officer's (the database wrote the exception; the ledger's actor is the staff member). The event is about the stop, which is the
+      // thing that was excused; the exception's own identifier is among the related ones.
+      const stops = await tx.execute(
+        sql`select pickup_manifest_id, pickup_request_id from pickup_stop where id = ${stopId}::uuid`,
+      );
+      const stop = stops.rows[0] as
+        { pickup_manifest_id: string; pickup_request_id: string } | undefined;
+      if (stop === undefined) throw new Error('A stop an officer let through cannot be read');
+      await audit.write(handle, {
+        code: 'pickup.collection.photo_exception_authorised',
+        enhanced: true,
+        outcome: 'SUCCEEDED',
+        object: { type: 'PickupStop', id: stopId },
+        responsibleHubId: made.out_responsible_hub_id,
+        previousState: 'ARRIVED',
+        resultingState: 'ARRIVED',
+        note,
+        // An enhanced event states the change it records: the stop's count owed one photo for each parcel, and now owes none.
+        beforeAfter: { parcel_photos: { before: 'REQUIRED', after: 'EXCUSED' } },
+        relatedIds: {
+          parcel_photo_exception_id: made.out_id,
+          pickup_manifest_id: stop.pickup_manifest_id,
+          pickup_request_id: stop.pickup_request_id,
+        },
+        detail: { parcel_photos: 'EXCUSED' },
+      });
+
+      const kept: AuthorisedParcelPhotoException = {
+        exception: {
+          id: made.out_id,
+          pickup_stop_id: made.out_pickup_stop_id,
+          authorised_by: made.out_authorised_by,
+          authorised_at: timestampOf(made.out_authorised_at).toISOString(),
+          note: made.out_note,
+        },
+      };
+      await idempotency.complete(handle, scope, {
+        status: 200,
+        body: new TextEncoder().encode(JSON.stringify(kept)),
+      });
+      return kept;
     });
   }
 }

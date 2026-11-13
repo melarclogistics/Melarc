@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { guardReasonIn, serverErrorIn } from '../../src/platform/database/database-failures.js';
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { arrangeRun, arrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -21,8 +22,8 @@ import {
  * - **One writer**: the assigned rider's key that reports a failure, for a stop of its own run that it has arrived at, on a run in progress, in its own name.
  *   The stop becomes FAILED with its fixed category and the snapshot of its reason, and nothing else of it changes (its place, its arrival, its claim).
  *   **The facts the application takes from the catalogue and the clock are the database's**: the reason is an active reason of the PICKUP_FAILURE catalogue as
- *   the catalogue holds it, in the shape the application builds, with what its metadata asks for (a note, a contact attempt, and no photo, which cannot be given
- *   yet); and the moment is the database's own, named by the snapshot.
+ *   the catalogue holds it, in the shape the application builds, with what its metadata asks for (a note, a contact attempt, and a photo, which is evidence attached
+ *   to the stop: migration 0083) and under the category the catalogue gives it; and the moment is the database's own, named by the snapshot.
  * - **A failed stop is frozen**, whoever writes, and a stop with a count is never failed (the rider's key reads its own record, so the trigger finds it).
  * - **The run is completed by the system under the key** when its last stop is terminal and nothing was collected, and under no other conditions.
  * - **The ledger** takes the failure's event and the completion's with the facts of the rows and no others.
@@ -353,6 +354,8 @@ describe('the report of a failure: the one writer', () => {
   it('never fails a stop that has a count: the key reads the rider’s own record, so the trigger finds it', async () => {
     const arranged = await run();
     const stop = first(arranged);
+    // The test is about a failure of a counted stop, not the photos (D-A10): the stop is let through without them.
+    await excusePhotos(routes, stop.id);
     const token =
       (await arranged.rider.client.get(`/api/v1/pickup-stops/${stop.id}`)).header('etag') ?? '';
     const counted = await arranged.rider.client.post(
@@ -522,6 +525,19 @@ describe('the door wait is held by the guard for every writer (migration 0073)',
 });
 
 describe('the snapshot is held to the catalogue', () => {
+  // The category the catalogue gives the two reasons these cases name besides PARCELS_NOT_PACKED (D-A4: the guard refuses a snapshot written under another category, and the pairing
+  // itself is held, for all eight reasons, in pickup-stop-evidence-policies.db.test.ts).
+  const CATEGORY_OF: Readonly<Record<string, string>> = {
+    VENDOR_NOT_AT_LOCATION: 'VENDOR_UNAVAILABLE',
+    LOCATION_CLOSED: 'ACCESS_DENIED',
+  };
+  const categoryOfSnapshot = (snapshot: unknown): string => {
+    const code =
+      typeof snapshot === 'object' && snapshot !== null
+        ? (snapshot as { reason_code?: unknown }).reason_code
+        : undefined;
+    return (typeof code === 'string' ? CATEGORY_OF[code] : undefined) ?? 'PARCEL_NOT_READY';
+  };
   const ATTEMPT = { method: 'PHONE_CALL', attempted_at: MOMENT, outcome: 'No answer' };
   const WITH_ATTEMPTS = {
     ...GOOD,
@@ -567,7 +583,7 @@ describe('the snapshot is held to the catalogue', () => {
       REQUIRED,
     ],
     [
-      'a photo the reason asks for, which cannot be given yet',
+      'a photo the reason asks for, with none attached to the stop',
       {
         ...GOOD,
         reason_code: 'LOCATION_CLOSED',
@@ -677,7 +693,11 @@ describe('the snapshot is held to the catalogue', () => {
   ] as const)('refuses %s, and says which rule', async (_what, snapshot, reason) => {
     const arranged = await run();
     const stop = first(arranged);
-    const text = failSql({ id: stop.id, snapshot: JSON.parse(JSON.stringify(snapshot)) as never });
+    const text = failSql({
+      id: stop.id,
+      category: categoryOfSnapshot(snapshot),
+      snapshot: JSON.parse(JSON.stringify(snapshot)) as never,
+    });
     const result = await attempt(rider(arranged.rider.id), text);
     expect({ code: result.code, reason: result.reason }).toEqual({ code: '23514', reason });
     expect((await stopOf(stop.id)).state).toBe('ARRIVED');
@@ -716,7 +736,11 @@ describe('the snapshot is held to the catalogue', () => {
     reached(
       await attempt(
         rider(arranged.rider.id),
-        failSql({ id: stop.id, snapshot: JSON.parse(JSON.stringify(snapshot)) as never }),
+        failSql({
+          id: stop.id,
+          category: categoryOfSnapshot(snapshot),
+          snapshot: JSON.parse(JSON.stringify(snapshot)) as never,
+        }),
       ),
     );
     const kept = (await stopOf(stop.id)).failure_reason_snapshot ?? {};

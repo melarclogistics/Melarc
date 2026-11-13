@@ -177,6 +177,8 @@ export interface PickupCatalogueReasonRow {
   readonly requiresNote: boolean;
   readonly requiresContactAttempt: boolean;
   readonly requiresPhoto: boolean;
+  /** The failure category the table binds a `PICKUP_FAILURE` reason to (D-A4); null for the other two catalogues, whose tables have no such column. */
+  readonly failureCategory: string | null;
 }
 
 export interface CarryoverReasonRow {
@@ -245,7 +247,13 @@ export function parsePickupCatalogueReasons(markdown: string): PickupCatalogueRe
       CATALOGUE_COLUMNS[domain].forEach((name, index) => {
         flags[name] = (cells[2 + index] ?? '').includes('yes');
       });
-      rows.push({ code, domain, attribution, ...flags });
+      // The failure table's last cell is the category the reason belongs to (D-A4); the other two tables have none.
+      const failureCategory =
+        domain === 'PICKUP_FAILURE'
+          ? (/^`([A-Z][A-Z_]*)`$/.exec(cells[2 + CATALOGUE_COLUMNS[domain].length] ?? '')?.[1] ??
+            null)
+          : null;
+      rows.push({ code, domain, attribution, ...flags, failureCategory });
     }
   }
   return rows;

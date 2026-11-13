@@ -8,7 +8,9 @@ import {
 import {
   RUNTIME_LOGIN_ROLES,
   WORKER_CREDENTIAL_DELIVERY_ROLE,
+  WORKER_EVIDENCE_VALIDATION_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
 } from '../../platform/database/technical-roles.js';
 import { OWNER_ROLE } from './provisioning.js';
 import { scopeProbePolicyProblem, type PolicyCommand } from './scope-probe-rule.js';
@@ -148,7 +150,13 @@ const TECHNICAL_ROLE_CHECKS = [
   'a technical login has a power a runtime identity may not',
 ] as const;
 
-const GRANT_SET_ROLES = [OWNER_ROLE, WORKER_CREDENTIAL_DELIVERY_ROLE, WORKER_NOTIFICATION_ROLE];
+const GRANT_SET_ROLES = [
+  OWNER_ROLE,
+  WORKER_CREDENTIAL_DELIVERY_ROLE,
+  WORKER_NOTIFICATION_ROLE,
+  WORKER_EVIDENCE_VALIDATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
+];
 
 interface PolicyExpressions {
   readonly polname: string;
@@ -214,6 +222,8 @@ async function technicalRoleViolations(client: Pick<pg.Client, 'query'>): Promis
     ...RUNTIME_LOGIN_ROLES,
     WORKER_CREDENTIAL_DELIVERY_ROLE,
     WORKER_NOTIFICATION_ROLE,
+    WORKER_EVIDENCE_VALIDATION_ROLE,
+    WORKER_PICKUP_BACKSTOP_ROLE,
   ]) {
     if (!found.has(role)) continue;
     const posture = await client.query<Record<string, unknown>>(

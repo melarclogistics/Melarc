@@ -38,9 +38,10 @@ beforeAll(async () => {
     ['FIXTURE_FAILURE_ONE', 'PICKUP_FAILURE'],
     ['FIXTURE_SHORT_ONE', 'PICKUP_SHORT_COUNT'],
   ] as const) {
+    // A failure reason belongs to one of the four failure categories (D-A4); the other domains have none.
     await admin.query(
-      `insert into reason_code (code, domain, label, attribution) values ($1, $2, $3, 'CUSTOMER')`,
-      [code, domain, `Fixture ${code}`],
+      `insert into reason_code (code, domain, label, attribution, failure_category) values ($1, $2, $3, 'CUSTOMER', $4)`,
+      [code, domain, `Fixture ${code}`, domain === 'PICKUP_FAILURE' ? 'PARCEL_NOT_READY' : null],
     );
   }
 });

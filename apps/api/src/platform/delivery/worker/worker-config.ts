@@ -105,6 +105,7 @@ export const WORKER_ONLY_KEYS = [
   'DELIVERY_WORKER_METRICS_HOST',
   'DELIVERY_WORKER_METRICS_PORT',
   'DELIVERY_WORKER_METRICS_SECRET',
+  'PICKUP_BACKSTOP_INTERVAL_MINUTES',
 ] as const;
 
 type WorkerOnlyKey = (typeof WORKER_ONLY_KEYS)[number];
@@ -158,6 +159,8 @@ export const WORKER_EXPECTED: Readonly<Record<WorkerOnlyKey, string>> = {
     "an integer from 1 to 65535; absent: the worker's private metrics endpoint is off",
   DELIVERY_WORKER_METRICS_SECRET:
     'a 32-byte key as 43 unpadded base64url characters; required when DELIVERY_WORKER_METRICS_HOST is not a loopback address, absent without DELIVERY_WORKER_METRICS_PORT',
+  PICKUP_BACKSTOP_INTERVAL_MINUTES:
+    'an integer from 1 to 1440: how many minutes the failure backstop waits between its checks of the failures left undecided; required, with no default (15 in every environment, D-A1)',
 };
 
 const FORBIDDEN_EVERYWHERE = {
@@ -176,6 +179,8 @@ const FORBIDDEN_WHEN_DEPLOYED: readonly string[] = [
     keyEnvName(purpose, 'MATERIAL'),
   ),
   'ATTESTATION_VERIFIER_CALLER_SECRET',
+  // The evidence store's credential is the API's alone (S1.11): the evidence validation lane of the worker reads and writes the database and never the bucket.
+  'EVIDENCE_R2_SECRET_ACCESS_KEY',
   // The API's private metrics endpoint has a key of its own, and the worker has `DELIVERY_WORKER_METRICS_SECRET`: it holds nothing of the API's.
   'METRICS_SECRET',
 ];
@@ -255,6 +260,8 @@ const workerSchema = z.object({
   DELIVERY_WORKER_METRICS_HOST: envShape.METRICS_HOST,
   DELIVERY_WORKER_METRICS_PORT: envShape.METRICS_PORT,
   DELIVERY_WORKER_METRICS_SECRET: envShape.METRICS_SECRET,
+  // How often the failure backstop looks for a failure left undecided (S1.28, D-A1): configuration and required, with no default in code.
+  PICKUP_BACKSTOP_INTERVAL_MINUTES: integerBetween(1, 1440),
 });
 
 type ParsedEnv = z.infer<typeof workerSchema>;
@@ -291,6 +298,8 @@ export interface WorkerConfig {
   readonly delivery: WorkerDeliveryConfig;
   /** The worker's private metrics endpoint; absent when it is off. */
   readonly metrics?: MetricsEndpointConfig;
+  /** The failure backstop lane (S1.28, D-A1): how many minutes between its checks. Configuration; the Product Owner decided 15 for every environment. */
+  readonly pickupBackstop: { readonly intervalMinutes: number };
 }
 
 export type LoadWorkerConfigResult =
@@ -587,9 +596,10 @@ export function loadWorkerConfig(
     shutdown: Object.freeze({ timeoutMs: values.SHUTDOWN_TIMEOUT_MS }),
     database: Object.freeze({
       url: values.DATABASE_WORKER_URL,
-      // One connection for each lane, one to poll, one for the cleanup and one for the notification lane (S1.12), and one for the
-      // metrics endpoint's read of the queue when it is on: nothing is held across a send.
-      poolMax: values.DELIVERY_WORKER_CONCURRENCY + 3 + (metricsPort === undefined ? 0 : 1),
+      // One connection for each lane, one to poll, one for the cleanup, one for the notification lane (S1.12), one for the sweep of abandoned
+      // evidence captures (S1.11) and one for the failure backstop (S1.28), and one for the metrics endpoint's read of the queue when it is on:
+      // nothing is held across a send.
+      poolMax: values.DELIVERY_WORKER_CONCURRENCY + 5 + (metricsPort === undefined ? 0 : 1),
       deadlines: Object.freeze({
         acquireTimeoutMs: values.DATABASE_ACQUIRE_TIMEOUT_MS,
         lockTimeoutMs: values.DATABASE_LOCK_TIMEOUT_MS,
@@ -628,6 +638,7 @@ export function loadWorkerConfig(
             ...(metricsSecret === undefined ? {} : { secret: new Secret(metricsSecret) }),
           }),
         }),
+    pickupBackstop: Object.freeze({ intervalMinutes: values.PICKUP_BACKSTOP_INTERVAL_MINUTES }),
   };
 
   const refused = refusals(config);

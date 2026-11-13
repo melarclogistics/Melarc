@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { serverError } from '../test-support/fake-pg.js';
 import { ApiException } from '../platform/http/api-exception.js';
-import { reasonRefusedByGuard } from './pickup-reason-validation.js';
+import { reasonOfAnotherCategory, reasonRefusedByGuard } from './pickup-reason-validation.js';
 
 /** A check violation as the server sends it, with the DETAIL a guard trigger gave it. */
 function refusal(detail: string | undefined, code = '23514'): pg.DatabaseError {
@@ -29,6 +29,19 @@ describe('reasonRefusedByGuard', () => {
     expect(answer).toBeInstanceOf(ApiException);
     expect(answer?.getStatus()).toBe(status);
     expect(answer?.code).toBe(code);
+  });
+
+  // Break caught (D-A4): a failure reported under a category its reason does not belong to, refused by the stop's guard after the service let it through (the catalogue changed between
+  // the reading and the write), answered as a server error, or as a reason that is not active (the reason is fine: the pairing is the field at fault).
+  it('answers REASON_CATEGORY_MISMATCH as a validation failure at the reason, rule category', () => {
+    const answer = reasonRefusedByGuard(refusal('reason=REASON_CATEGORY_MISMATCH'));
+    expect(answer).toBeInstanceOf(ApiException);
+    expect(answer?.getStatus()).toBe(400);
+    expect(answer?.code).toBe('VALIDATION_FAILED');
+    expect(answer?.details).toEqual({
+      violations: [{ in: 'body', pointer: '/reason_code', rule: 'category' }],
+    });
+    expect(reasonOfAnotherCategory().details).toEqual(answer?.details);
   });
 
   // Break caught: the reason found through the wrappers the driver puts around the server's error, as the stores of the platform read it.

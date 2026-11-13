@@ -104,6 +104,11 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   requestAdditionalDeviceGrant: ['VENDOR'],
   listVendorDevices: ['VENDOR'],
   revokeVendorDevice: ['VENDOR'],
+  // S1.11: the evidence operations are `x-permission: owner` (a `self` route whose use case asks for the grant of the act the record is about): the rider declares and completes a
+  // record, the staff of the hub are given a way to read it. No key names them, so the sweep reads them with the `self` operations and names whom each serves.
+  createEvidence: ['RIDER'],
+  completeEvidenceUpload: ['RIDER'],
+  createEvidenceRetrievalAuthorization: ['STAFF'],
 };
 
 /** The keys a bundle holds, as the seed grants them. */
@@ -184,6 +189,16 @@ beforeAll(async () => {
     [manifestD.id, HUB_A, riderB.id, riderD.id],
   );
 
+  // A piece of evidence another rider captured for that stop (S1.11): "another party's" record, which the officer of that hub may be given a way to read and neither a Vendor nor an
+  // unrelated Rider may reach.
+  const evidenceB = await routes.admin.query<{ id: string }>(
+    `insert into evidence (id, owner_type, owner_id, purpose, captured_at, captured_by_actor, captured_by_principal_type, storage_ref, responsible_hub_id, vendor_organization_id,
+                           access_rule, retention_policy, content_type, byte_size, checksum_sha256, upload_ttl_seconds)
+     values (gen_random_uuid(), 'PICKUP_STOP', $1, 'COLLECTION_PROOF', now() - interval '1 minute', $2, 'RIDER', 'ev/' || replace(gen_random_uuid()::text, '-', ''), $3, $4,
+             'SUBJECT_READERS', 'PICKUP_STOP_EVIDENCE', 'image/jpeg', 12, repeat('a', 64), 900) returning id`,
+    [stopB.id, riderB.id, HUB_A, vendorC.organizationId],
+  );
+
   const vendorSession = await arrangedFixedSession(routes.kit, routes.admin, 'VENDOR', {
     principalId: vendorA.accountId,
     registeredDeviceId: deviceA.id,
@@ -246,6 +261,7 @@ beforeAll(async () => {
     pickupStop: stopB.id,
     runCustodyHandover: handoverD.rows[0]?.id ?? '',
     vendorOrganization: vendorC.organizationId,
+    evidence: evidenceB.rows[0]?.id ?? '',
   };
 });
 
@@ -265,6 +281,7 @@ function kindOf(operation: Operation): string {
   if (operation.path.startsWith('/pickup-stops/')) return 'pickupStop';
   if (operation.path.startsWith('/run-custody-handovers/')) return 'runCustodyHandover';
   if (operation.path.startsWith('/vendor-organizations/')) return 'vendorOrganization';
+  if (operation.path.startsWith('/evidence/')) return 'evidence';
   return 'staff';
 }
 
@@ -322,9 +339,14 @@ const refusalFor = (operation: Operation, scheme: 'browserSession' | 'riderSessi
 
 const authenticated = OPERATIONS.filter((operation) => operation.permission !== 'none');
 const keyed = OPERATIONS.filter(
-  (operation) => operation.permission !== 'none' && operation.permission !== 'self',
+  (operation) =>
+    operation.permission !== 'none' &&
+    operation.permission !== 'self' &&
+    operation.permission !== 'owner',
 );
-const selfOperations = OPERATIONS.filter((operation) => operation.permission === 'self');
+const selfOperations = OPERATIONS.filter(
+  (operation) => operation.permission === 'self' || operation.permission === 'owner',
+);
 const addressed = OPERATIONS.filter(
   (operation) => operation.parameter !== undefined && operation.permission !== 'none',
 );
@@ -426,6 +448,7 @@ const TABLE_OF: Readonly<Record<string, string>> = {
   pickupStop: 'pickup_stop',
   runCustodyHandover: 'run_custody_handover',
   vendorOrganization: 'vendor_organization',
+  evidence: 'evidence',
 };
 
 describe('the existence rule is asked about records that are real (the control of the rule below)', () => {
@@ -451,9 +474,12 @@ describe('the existence rule is asked about records that are real (the control o
       arriveAtPickupStop: 'pickupStop',
       assignRider: 'pickupManifest',
       authoriseHandshakeOverride: 'pickupStop',
+      authoriseParcelPhotoException: 'pickupStop',
       cancelPickupManifest: 'pickupManifest',
       cancelPickupRequest: 'pickupRequest',
+      completeEvidenceUpload: 'evidence',
       confirmPickupRequest: 'pickupRequest',
+      createEvidenceRetrievalAuthorization: 'evidence',
       dispatchManifest: 'pickupManifest',
       disputeCollection: 'pickupStop',
       escalatePickupRequest: 'pickupRequest',

@@ -171,6 +171,14 @@ export interface AuthenticatedRouteOptions {
    * and by a test that finds every operation that writes a notification envelope.
    */
   readonly providerInitiating?: true;
+  /**
+   * The contract's word `owner` (`x-permission: owner`; the evidence operations of S1.11): the permission the operation needs is **the write or the read permission of the act whose
+   * record it concerns**, which only the use case can know (evidence is captured in the course of another act, and the owner of a record is in its body or in the record itself).
+   * The route is a `self` route to the guard, which authenticates, counts, checks the surface and judges the request before anything runs, and decides **no** permission; the use case
+   * then asks for the grant of the act's key (`authorizationForKey`, as `getQueueSummary` does for each queue) and refuses with `PERMISSION_DENIED` when the session holds none, before
+   * it opens a transaction. Only a `self` route may state it, and the description then says `owner` and not `self`.
+   */
+  readonly owner?: true;
 }
 
 export interface AccessDetail {
@@ -296,6 +304,12 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
       'An operation that can cause an outbound text states it with providerInitiating: true, or states nothing',
     );
   }
+  const owner: unknown = given.owner;
+  if (owner !== undefined && owner !== true) {
+    throw new TypeError(
+      'An operation whose permission is the act’s that it evidences states it with owner: true, or states nothing',
+    );
+  }
   const record: unknown = given.record;
   if (record !== undefined) {
     const named = record as Record<string, unknown>;
@@ -340,6 +354,7 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
         }),
     ...(tier === undefined ? {} : { tier: Object.freeze({ ...(tier as TierDeclaration) }) }),
     ...(providerInitiating === true ? { providerInitiating: true as const } : {}),
+    ...(owner === true ? { owner: true as const } : {}),
   });
 }
 
@@ -355,7 +370,7 @@ export const Self = (options: AuthenticatedRouteOptions): MethodDecorator => {
   return applyDecorators(
     SetMetadata<string, AccessDeclaration>(ACCESS_DECLARATION_KEY, 'self'),
     SetMetadata<string, AccessDetail>(ACCESS_DETAIL_KEY, { authenticated }),
-    ApiExtension('x-permission', 'self'),
+    ApiExtension('x-permission', authenticated.owner === true ? 'owner' : 'self'),
   );
 };
 
@@ -374,6 +389,11 @@ export const RequiresPermission = (
     );
   }
   const authenticated = checkedOptions(options);
+  if (authenticated.owner !== undefined) {
+    throw new TypeError(
+      'An operation that names its permission key is not an owner operation: only a self route states owner',
+    );
+  }
   return applyDecorators(
     SetMetadata<string, AccessDeclaration>(ACCESS_DECLARATION_KEY, 'permission'),
     SetMetadata<string, AccessDetail>(ACCESS_DETAIL_KEY, { permission: key, authenticated }),

@@ -108,10 +108,41 @@ export type VerifierConfig =
       readonly callerSecret?: Secret;
     };
 
+/**
+ * The object store of the evidence records (S1.11). The stand-in keeps objects in the process's memory and reaches nothing; R2 is the owner's choice of 29 October 2026 and needs
+ * the account, the bucket and an API token restricted to it, whose secret is a `Secret` (it prints as `[REDACTED]`). No credential exists yet: no environment selects `r2` until the
+ * owner provides a bucket.
+ */
+export type EvidenceStoreConfig =
+  | { readonly kind: 'in-process' }
+  | {
+      readonly kind: 'r2';
+      readonly accountId: string;
+      readonly bucket: string;
+      readonly accessKeyId: string;
+      readonly secretAccessKey: Secret;
+    };
+
+/**
+ * The malicious-content check of an uploaded object (Run A2; D-A6): the stand-in of a local run and CI (production refuses it), ClamAV over TCP (the daemon's address and the time one scan
+ * may take), or **none**, which only production gets when it sets nothing: the application starts and refuses to store any evidence until a scanner is configured.
+ */
+export type ContentScannerConfig =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'in-process' }
+  | {
+      readonly kind: 'clamav';
+      readonly host: string;
+      readonly port: number;
+      readonly timeoutMs: number;
+    };
+
 export interface AdaptersConfig {
   readonly limiter: 'postgres' | 'memory';
   readonly delivery: { readonly email: DeliveryAdapterConfig; readonly sms: DeliveryAdapterConfig };
   readonly attestationVerifier: VerifierConfig;
+  readonly evidenceStore: EvidenceStoreConfig;
+  readonly contentScanner: ContentScannerConfig;
 }
 
 /**
@@ -343,6 +374,97 @@ function adapterProblems(
     if (timeout !== undefined) invalid('ATTESTATION_VERIFIER_TIMEOUT_MS');
     if (secret !== undefined) invalid('ATTESTATION_VERIFIER_CALLER_SECRET');
   }
+
+  const r2 = [
+    ['EVIDENCE_R2_ACCOUNT_ID', env.EVIDENCE_R2_ACCOUNT_ID],
+    ['EVIDENCE_R2_BUCKET', env.EVIDENCE_R2_BUCKET],
+    ['EVIDENCE_R2_ACCESS_KEY_ID', env.EVIDENCE_R2_ACCESS_KEY_ID],
+    ['EVIDENCE_R2_SECRET_ACCESS_KEY', env.EVIDENCE_R2_SECRET_ACCESS_KEY],
+  ] as const;
+  for (const [key, value] of r2) {
+    if (env.EVIDENCE_STORE === 'r2') {
+      if (value === undefined) missing(key);
+    } else if (value !== undefined) {
+      invalid(key);
+    }
+  }
+
+  // The ClamAV daemon's address and the time one scan may take are required with `clamav` and absent otherwise; the scan is one of the things a request does inside its budget, so it
+  // must end before the budget does (a scan that outlasts the request would be answered `503` while it still ran).
+  const clamav = [
+    ['EVIDENCE_CLAMAV_HOST', env.EVIDENCE_CLAMAV_HOST],
+    ['EVIDENCE_CLAMAV_PORT', env.EVIDENCE_CLAMAV_PORT],
+    ['EVIDENCE_CLAMAV_TIMEOUT_MS', env.EVIDENCE_CLAMAV_TIMEOUT_MS],
+  ] as const;
+  for (const [key, value] of clamav) {
+    if (env.EVIDENCE_SCANNER === 'clamav') {
+      if (value === undefined) missing(key);
+    } else if (value !== undefined) {
+      invalid(key);
+    }
+  }
+  if (
+    env.EVIDENCE_SCANNER === 'clamav' &&
+    env.EVIDENCE_CLAMAV_TIMEOUT_MS !== undefined &&
+    env.EVIDENCE_CLAMAV_TIMEOUT_MS >= env.REQUEST_EXECUTION_BUDGET_MS
+  ) {
+    invalid('EVIDENCE_CLAMAV_TIMEOUT_MS');
+  }
+}
+
+/**
+ * The scanner an environment gets: what it names, or, when it names none, the in-process stand-in for a local run and for staging and **no scanner** for production (the application
+ * starts, and every completion of evidence is refused until one is configured: `unconfigured.content-scanner.adapter.ts`). Exported for its test: a production configuration never
+ * loads whole while there is no production key custody, so the production default is not observable through `loadConfig`.
+ */
+export function contentScannerFrom(values: {
+  readonly APP_ENV: string;
+  readonly EVIDENCE_SCANNER?: 'in-process' | 'clamav' | undefined;
+  readonly EVIDENCE_CLAMAV_HOST?: string | undefined;
+  readonly EVIDENCE_CLAMAV_PORT?: number | undefined;
+  readonly EVIDENCE_CLAMAV_TIMEOUT_MS?: number | undefined;
+}): ContentScannerConfig {
+  const kind =
+    values.EVIDENCE_SCANNER ?? (values.APP_ENV === 'production' ? undefined : 'in-process');
+  if (
+    kind === 'clamav' &&
+    values.EVIDENCE_CLAMAV_HOST !== undefined &&
+    values.EVIDENCE_CLAMAV_PORT !== undefined &&
+    values.EVIDENCE_CLAMAV_TIMEOUT_MS !== undefined
+  ) {
+    return Object.freeze({
+      kind: 'clamav',
+      host: values.EVIDENCE_CLAMAV_HOST,
+      port: values.EVIDENCE_CLAMAV_PORT,
+      timeoutMs: values.EVIDENCE_CLAMAV_TIMEOUT_MS,
+    });
+  }
+  return Object.freeze({ kind: kind === 'in-process' ? 'in-process' : 'none' });
+}
+
+function evidenceStoreFrom(values: ParsedEnv): EvidenceStoreConfig {
+  const {
+    EVIDENCE_R2_ACCOUNT_ID: accountId,
+    EVIDENCE_R2_BUCKET: bucket,
+    EVIDENCE_R2_ACCESS_KEY_ID: accessKeyId,
+    EVIDENCE_R2_SECRET_ACCESS_KEY: secretAccessKey,
+  } = values;
+  if (
+    values.EVIDENCE_STORE !== 'r2' ||
+    accountId === undefined ||
+    bucket === undefined ||
+    accessKeyId === undefined ||
+    secretAccessKey === undefined
+  ) {
+    return Object.freeze({ kind: 'in-process' });
+  }
+  return Object.freeze({
+    kind: 'r2',
+    accountId,
+    bucket,
+    accessKeyId,
+    secretAccessKey: new Secret(secretAccessKey),
+  });
 }
 
 /** One problem per failing key. Key names and static text only, so a rejected secret is never echoed. */
@@ -495,6 +617,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): L
         ),
       }),
       attestationVerifier: verifierFrom(values),
+      evidenceStore: evidenceStoreFrom(values),
+      contentScanner: contentScannerFrom(values),
     }),
     ...metricsFrom(values),
     database: Object.freeze({

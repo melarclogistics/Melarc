@@ -79,6 +79,8 @@ export class PickupFailureController {
   @RequiresPermission('pickup.failure.report', {
     surfaces: ['RIDER_ANDROID'],
     activity: 'qualifying',
+    // A failure writes the envelope of the sender's text (S1.28), so the route carries the sub-ceiling of the operations that can cause an outbound text.
+    providerInitiating: true,
   })
   async report(
     @Authorized() authorized: AuthorizedRequest,

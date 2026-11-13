@@ -250,6 +250,54 @@ export const METRIC_DEFINITIONS = Object.freeze({
     labels: {},
     description: 'Outbox envelopes in the dead letter, waiting for a person.',
   }),
+  /**
+   * What each check of the failure backstop came to (S1.28, D-A1; OBSERVABILITY_AND_RECOVERY.md §3): `CHECKED` is a check that ran to its end, whether or not it escalated anything, and
+   * `FAILED` one that raised (the database was away, or the lane's grant is missing). A lane that fails and never checks is the *Failure backstop* row's second condition. Closed
+   * outcomes, no identifier: which request, and in which hub, is the audit event's and the worker's log, never a metric.
+   */
+  pickup_backstop_runs_total: define({
+    kind: 'counter',
+    labels: { outcome: ['CHECKED', 'FAILED'] },
+    description: 'Checks of the failure backstop, by outcome.',
+  }),
+  /** Requests the failure backstop escalated because their failure had sat undecided beyond the hub's threshold. No label: the request is in the audit event. */
+  pickup_backstop_escalations_total: define({
+    kind: 'counter',
+    labels: {},
+    description: 'Pickup requests escalated by the failure backstop.',
+  }),
+  /**
+   * How many hubs the latest check of the failure backstop could not judge, because the hub's `stale_failure_backstop_hours` is missing or not a whole number of hours from 1 to 8760
+   * while a failure waits there: nothing is escalated for such a hub and nothing is invented in its place. Read from the lane's memory when the worker's private metrics endpoint is
+   * read, and absent until a check has run to its end (a lane that has not looked yet is not a lane that found nothing). The *Failure backstop* row's first condition is on it. No label:
+   * which hub is in the worker's log.
+   */
+  pickup_backstop_unusable_hubs: define({
+    kind: 'gauge',
+    labels: {},
+    description:
+      'Hubs the failure backstop could not judge at its latest check (threshold missing or unusable); absent until a check has run.',
+  }),
+  /**
+   * What the malicious-content check came to for each object it was asked about (Run A2, D-A6; SECURITY_DESIGN.md §14.18b): `CLEAN` (the scanner found nothing: the record may be stored),
+   * `FLAGGED` (a signature matched: the file is refused and its object removed), `UNAVAILABLE` (the scanner did not answer, or answered what it should not: **the record stays unstored and
+   * the call is retried; nothing is stored unscanned**) and `NOT_CONFIGURED` (no scanner is configured, so no evidence can be stored). Served by the API's metrics endpoint. Closed outcomes,
+   * no identifier: which record, and which signature, is the process's log and never a metric.
+   */
+  evidence_scans_total: define({
+    kind: 'counter',
+    labels: { outcome: ['CLEAN', 'FLAGGED', 'UNAVAILABLE', 'NOT_CONFIGURED'] },
+    description: 'Content scans of uploaded evidence, by outcome.',
+  }),
+  /**
+   * What became of the removal of a file the scanner flagged (`REMOVED` or `FAILED`): a flagged object that could not be removed stays in the bucket until the owner's lifecycle rule takes it,
+   * and the record is refused all the same. Served by the API's metrics endpoint. No identifier.
+   */
+  evidence_object_removals_total: define({
+    kind: 'counter',
+    labels: { outcome: ['REMOVED', 'FAILED'] },
+    description: 'Removals of flagged evidence objects from the store, by outcome.',
+  }),
 }) satisfies Readonly<Record<string, MetricDefinition>>;
 
 export type MetricName = keyof typeof METRIC_DEFINITIONS;

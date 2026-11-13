@@ -89,6 +89,7 @@ The mechanism is a **blind count**: the receiver enters what is physically prese
 - **Never collapse the three OS&D dimensions.** Count, condition and dispute are independent — a `MATCH` count does not close the condition question.
 - **Never rely on the soft lock alone.** §22.8 says so in terms: a visual lock is not sufficient.
 - **Never show a vendor the internals.** §22.9 limits them to the intake-completed and order summary.
+- **Never show the parcel photos of the collection, or their number, before the hub's count commits.** The photos tell the receiving officer what the rider counted (the number of photos *is* the rider's count, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel)), so they follow the rule of the rider's declared count: in no read, response, list or page of the receiving side before the commit, and readable on the intake only in the response to the committed physical count (D-A10; Stage 6, `OB-S1-81`).
 
 ---
 
@@ -295,6 +296,17 @@ And a user without hub.read is refused with PERMISSION_DENIED.
 ```
 
 **Governs:** §22.3, §35.5.2, `MSC-DEC-416` · **Surface:** Melarc Ops · **Test level:** security · **Expected code on rejection:** `PERMISSION_DENIED`
+
+### `AC-SLICE-001-89` — The parcel photos stay out of the blind count
+
+```text
+Given an intake in AWAITING_COUNT whose collection has parcel photos,
+When any authorized Ops user reads the intake, the awaiting-receive queue or the receiving page,
+Then no response carries the photos, their identifiers or their number, as none carries rider_declared_count,
+And the photos become readable on the intake only in the response to the committed physical count.
+```
+
+**Governs:** D-A10, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel), §22.3 · **Surface:** Melarc Ops · **Test level:** API · **Status:** owed by Stage 6 (`OB-S1-81`); no receiving read exists yet.
 
 ---
 

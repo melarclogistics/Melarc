@@ -101,7 +101,7 @@ beforeAll(async () => {
     over: { requiresNote?: boolean; active?: boolean } = {},
   ): Promise<unknown> =>
     routes.admin.query(
-      `insert into reason_code (code, domain, label, attribution, requires_note, active) values ($1, $2, $3, $4, $5, $6)`,
+      `insert into reason_code (code, domain, label, attribution, requires_note, active, failure_category) values ($1, $2, $3, $4, $5, $6, $7)`,
       [
         code,
         domain,
@@ -109,6 +109,8 @@ beforeAll(async () => {
         attribution,
         over.requiresNote ?? false,
         over.active ?? true,
+        // A failure reason belongs to one of the four failure categories (D-A4); the other domains have none.
+        domain === 'PICKUP_FAILURE' ? 'PARCEL_NOT_READY' : null,
       ],
     );
   await reason(REASONS.customer, 'PICKUP_CANCELLATION', 'CUSTOMER');

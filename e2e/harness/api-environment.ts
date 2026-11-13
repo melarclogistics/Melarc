@@ -16,6 +16,8 @@ export const PROTECTED_KEYS: readonly string[] = [
   'DELIVERY_EMAIL_ADAPTER',
   'DELIVERY_SMS_ADAPTER',
   'ATTESTATION_VERIFIER',
+  'EVIDENCE_STORE',
+  'EVIDENCE_SCANNER',
 ];
 
 /** The key purposes of SECURITY_DESIGN.md section 14.9, as the API names their settings. A test compares this with the API's example. */
@@ -90,6 +92,10 @@ export function apiEnvironment(options: ApiEnvironmentOptions): Record<string, s
     DELIVERY_EMAIL_ADAPTER: 'capture',
     DELIVERY_SMS_ADAPTER: 'capture',
     ATTESTATION_VERIFIER: 'substitute',
+    // The evidence store of a run is the in-process stand-in: no run reaches a bucket (S1.11). Nor does one reach a scanner: the stand-in of the content scanner flags the EICAR test
+    // file and calls everything else clean (Run A2, D-A6).
+    EVIDENCE_STORE: 'in-process',
+    EVIDENCE_SCANNER: 'in-process',
     MELARC_E2E_CAPTURE_FILE: options.captureFile,
     ...options.extra,
   };

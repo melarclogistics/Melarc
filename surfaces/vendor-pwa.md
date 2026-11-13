@@ -190,6 +190,7 @@ Mobile-first, responsive to desktop, **installable PWA behaviour** (§10.3, §18
 | The operation-to-screen map §41.1 requires — **the seven `SLICE-000` routes name every operation they call** (Gate PD-3R1); the other slices' routes do not| D| `OQ-074`|
 | The supported mobile browsers, installability, update and cache behaviour §40.5 requires| D| `OQ-073`|
 | Customer-facing copy| D| `OQ-037`|
+| **The photos of the vendor's own stop** (D-A10, 12 November 2026): shown on the screen where the vendor enters the code and later in its pickup history; a registered vendor sees its own stop's photos and no other's, and **an individual sender sees none**. It needs a read of the vendor's own stop's photos, which does not exist (the evidence retrieval is staff-only today). The rule is [pickup-collection.md §5.5](../features/pickup/pickup-collection.md#55-the-photo-of-every-parcel), `AC-SLICE-001-91`| D| `OB-S1-83`|
 
 The boundary, the V1 capability set, the **two** pricing states and the never-do list are complete.
 

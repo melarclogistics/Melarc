@@ -14,6 +14,7 @@ import {
 import {
   PROVISIONING_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   WORKER_RUNTIME_ROLE,
 } from '../../../src/platform/database/technical-roles.js';
 import { catalogViolations } from '../../../src/tools/database/catalog-invariants.js';
@@ -706,20 +707,37 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.dispute_collection',
       // S1.28 (migration 0073): the one read of a hub's door wait, for the rider's failure key.
       'melarc.rider_door_wait_minutes',
+      // S1.11 (migration 0080): the derivation of the scope of the evidence of a stop.
+      'melarc.evidence_pickup_stop_scope',
+      // S1.28 and OB-S1-51: the outbox envelopes of the rider's failure and short count.
+      'melarc.failure_envelope',
+      'melarc.shortfall_envelope',
+      // D-A10 (migration 0088): Ops's exception for the day the camera fails, once for a stop and before its count.
+      'melarc.authorise_parcel_photo_exception',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).
-    for (const role of [WORKER_NOTIFICATION_ROLE, WORKER_RUNTIME_ROLE]) {
-      expect(APPROVED_DEFINER_EXECUTE[role], role).toEqual([
-        'melarc.handshake_mark_delivered',
-        'melarc.notification_handshake_number',
-      ]);
-    }
+    expect(APPROVED_DEFINER_EXECUTE[WORKER_NOTIFICATION_ROLE]).toEqual([
+      'melarc.handshake_mark_delivered',
+      'melarc.notification_handshake_number',
+    ]);
+    // And the failure backstop's (S1.28, migration 0084): the one operation that escalates the failures left undecided beyond their hub's threshold, executable by its
+    // capability role alone and, through it, by the worker login that inherits it.
+    expect(APPROVED_DEFINER_EXECUTE[WORKER_PICKUP_BACKSTOP_ROLE]).toEqual([
+      'melarc.failure_backstop_escalate',
+    ]);
+    // The worker login holds both lanes' operations through the two roles it inherits.
+    expect(APPROVED_DEFINER_EXECUTE[WORKER_RUNTIME_ROLE]).toEqual([
+      'melarc.handshake_mark_delivered',
+      'melarc.notification_handshake_number',
+      'melarc.failure_backstop_escalate',
+    ]);
     expect(Object.keys(APPROVED_DEFINER_EXECUTE).toSorted()).toEqual(
       [
         API_RUNTIME_ROLE,
         PROVISIONING_ROLE,
         WORKER_NOTIFICATION_ROLE,
+        WORKER_PICKUP_BACKSTOP_ROLE,
         WORKER_RUNTIME_ROLE,
       ].toSorted(),
     );

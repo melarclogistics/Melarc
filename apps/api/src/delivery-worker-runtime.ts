@@ -24,6 +24,10 @@ import {
   jobBudgetMsFor,
   leaseMsFor,
 } from './platform/delivery/delivery-parameters.js';
+import {
+  FailureBackstop,
+  failureBackstopTask,
+} from './platform/delivery/backstop/failure-backstop.js';
 import { PostgresDeliveryQueue } from './platform/delivery/postgres.delivery-queue.adapter.js';
 import { RetentionCleanup } from './platform/delivery/retention/retention-cleanup.js';
 import { retentionTask } from './platform/delivery/retention/retention-task.js';
@@ -54,6 +58,7 @@ import {
   type WorkerConfig,
 } from './platform/delivery/worker/worker-config.js';
 import { DISPOSAL_BOUND_MS } from './platform/execution/execution-parameters.js';
+import { EvidenceSweep, evidenceSweepTask } from './platform/evidence/evidence-sweep.js';
 import { ReadinessRegistry } from './platform/health/readiness.registry.js';
 import {
   createLanePolicy,
@@ -201,6 +206,10 @@ export interface RuntimeOptions {
   readonly notificationSettings?: NotificationSettings;
   /** How often the retention cleanup runs: `RETENTION_INTERVAL_MS` by default. A test gives a short one. */
   readonly retentionIntervalMs?: number;
+  /** How often the sweep of abandoned evidence captures runs (S1.11): `EVIDENCE_SWEEP_INTERVAL_MS` by default. A test gives a short one. */
+  readonly evidenceSweepIntervalMs?: number;
+  /** How often the failure backstop looks for a failure left undecided: the configuration's `PICKUP_BACKSTOP_INTERVAL_MINUTES` by default. A test gives a short one. */
+  readonly backstopIntervalMs?: number;
   /** Where to look for the checkout the sink must stay out of: the working directory and the application's own folder by default. */
   readonly startingPoints?: readonly string[];
   /** What the check that the sink's folder is private reads of the file system: the real one by default. A test gives its own. */
@@ -328,6 +337,10 @@ export function createDeliveryWorkerRuntime(
     handshakeCodes: new HandshakeCodes(config.keys),
   });
 
+  // The failure backstop (S1.28, D-A1): a lane of this process under its own capability, which escalates the failures left undecided beyond their hub's threshold and does nothing
+  // else. How often it looks is the worker's configuration. What its latest check could not judge is the worker's health, read from here by the metrics endpoint.
+  const failureBackstop = new FailureBackstop({ database, clock });
+
   const worker = new DeliveryWorker({
     queue,
     providers,
@@ -353,12 +366,26 @@ export function createDeliveryWorkerRuntime(
         metrics,
         intervalMs: options.retentionIntervalMs ?? RETENTION_INTERVAL_MS,
       }),
+      // An evidence capture nobody completed is marked expired once its upload window has passed, and kept (S1.11, the `evidence_validation` capability).
+      evidenceSweepTask({
+        sweep: new EvidenceSweep({ database, clock }),
+        logger,
+        ...(options.evidenceSweepIntervalMs === undefined
+          ? {}
+          : { intervalMs: options.evidenceSweepIntervalMs }),
+      }),
       {
         name: 'notifications',
         intervalMs: NOTIFICATION_LANE_INTERVAL_MS,
         budgetMs: notificationRunBudgetMs(notificationTimeoutMs),
         run: (stop) => notificationLane.runOnce(stop),
       },
+      failureBackstopTask({
+        backstop: failureBackstop,
+        logger,
+        metrics,
+        intervalMs: options.backstopIntervalMs ?? config.pickupBackstop.intervalMinutes * 60_000,
+      }),
     ],
   });
 
@@ -386,6 +413,10 @@ export function createDeliveryWorkerRuntime(
             name: 'notification_dead_envelopes',
             value: await notificationBacklog.deadEnvelopeCount(),
           },
+          // The hubs the failure backstop could not judge at its latest check; absent until a check has run to its end.
+          ...(failureBackstop.unusableHubs === undefined
+            ? []
+            : [{ name: 'pickup_backstop_unusable_hubs', value: failureBackstop.unusableHubs }]),
         ],
         logger,
       });

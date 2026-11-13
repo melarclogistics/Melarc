@@ -87,9 +87,10 @@ interface Command<Body> {
  *
  * **`escalatePickupRequest`** (`pickup.failure.resolve`: Ops, Senior Ops and Platform Admin; a note). The terminal Ops resolution of a failed
  * request: it records the moment once (`escalated_at`) and nothing else changes (the request can still be cancelled; a Senior Ops extension
- * still opens a further attempt). The actor, the trigger and the note are in the audit event. **A failure can be recorded now (`reportPickupFailure`, S1.28), but a
- * request still need not have failed to be escalated**: a confirmed one that was not escalated is escalable. The narrowing to a failed stop and the
- * scheduled backstop that records `trigger: BACKSTOP` are the rest of S1.28 and are not built (OB-S1-66).
+ * still opens a further attempt). The actor, the trigger and the note are in the audit event. **Only a request that is confirmed, has not been escalated and has a stop that
+ * failed is escalated** (S1.28, OB-S1-66: the third resolution of a failure, beside the reschedule and the cancellation); any other is `STATE_CONFLICT`, and `details.rule`
+ * `no_failed_stop` says it is the missing failure. The guard of the request holds the same rule for every writer. The scheduled backstop that escalates a failure left
+ * undecided beyond its hub's threshold, with `trigger: BACKSTOP`, is `src/platform/delivery/backstop/failure-backstop.ts` and migration 0084.
  */
 export class PickupRequestChain {
   readonly #options: PickupRequestChainOptions;
@@ -238,6 +239,18 @@ export class PickupRequestChain {
       }
       if (row.escalated_at !== null) {
         throw ApiException.of(ErrorCode.StateConflict, 'The request was escalated already');
+      }
+      // Escalation is a resolution of a failure (S1.28; contract, pickup-failure.md section 5.1, section 21.6, OB-S1-66): a request none of whose stops failed is not escalated.
+      // The guard of the request holds the same rule for every writer; this is the answer the officer is given.
+      const failed = await tx.execute(
+        sql`select 1 from pickup_stop where pickup_request_id = ${id}::uuid and state = 'FAILED' limit 1`,
+      );
+      if (failed.rows.length === 0) {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'Only a request whose stop failed is escalated',
+          { rule: 'no_failed_stop' },
+        );
       }
 
       const updated = await tx.execute(sql`

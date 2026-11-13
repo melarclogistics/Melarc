@@ -9,7 +9,9 @@ import { DatabaseService } from '../../../src/platform/database/database.service
 import {
   PROVISIONING_ROLE,
   WORKER_CREDENTIAL_DELIVERY_ROLE,
+  WORKER_EVIDENCE_VALIDATION_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   WORKER_RUNTIME_ROLE,
 } from '../../../src/platform/database/technical-roles.js';
 import { ReadinessRegistry } from '../../../src/platform/health/readiness.registry.js';
@@ -116,7 +118,7 @@ describe.each(LOGINS)('the login %s', (login) => {
 
   // Break caught: the login being a privileged one: a superuser, a bypass of row-level security, a creator of
   // databases or roles, a member of the owner or the migration identity, or an owner itself (GBT-J1, J3, J4). The only
-  // memberships any of them has are the delivery worker's two capability roles (S0.18, S1.12a), tested for what they are further down.
+  // memberships any of them has are the delivery worker's four capability roles (S0.18, S1.12a, S1.11, S1.28), tested for what they are further down.
   it('is not the database owner, a superuser, a bypass role or a member of any role but its own capability', async () => {
     const { rows } = await as(login).query(
       `select r.rolsuper, r.rolbypassrls, r.rolcreatedb, r.rolcreaterole, r.rolreplication,
@@ -140,7 +142,7 @@ describe.each(LOGINS)('the login %s', (login) => {
         rolreplication: false,
         member_of_owner: false,
         member_of_migration: false,
-        memberships: login === WORKER_RUNTIME_ROLE ? 2 : 0,
+        memberships: login === WORKER_RUNTIME_ROLE ? 4 : 0,
         database_owner: OWNER_ROLE,
         owned_relations: 0,
         owned_functions: 0,
@@ -238,6 +240,14 @@ describe.each(LOGINS)('the login %s', (login) => {
       'GRANT the notification capability to itself (GBT-Y9)',
       (l: string) => `grant ${WORKER_NOTIFICATION_ROLE} to ${l}`,
     ],
+    [
+      'GRANT the evidence validation capability to itself (GBT-Y9)',
+      (l: string) => `grant ${WORKER_EVIDENCE_VALIDATION_ROLE} to ${l}`,
+    ],
+    [
+      'GRANT the failure backstop capability to itself (GBT-Y9)',
+      (l: string) => `grant ${WORKER_PICKUP_BACKSTOP_ROLE} to ${l}`,
+    ],
     ['GRANT a role to another role (GBT-J5)', (l: string) => `grant ${l} to ${MIGRATION_ROLE}`],
     ['ALTER SYSTEM', () => "alter system set log_statement = 'all'"],
   ] as [string, (login: string) => string][])('refuses %s', async (_label, statement) => {
@@ -304,7 +314,12 @@ describe.each([WORKER_RUNTIME_ROLE, PROVISIONING_ROLE] as const)(
     // requested by the process, so the base identity cannot become the capability role by any statement.
     it('cannot acquire either capability at run time (GBT-Y9)', async () => {
       const client = as(login);
-      for (const capability of [WORKER_CREDENTIAL_DELIVERY_ROLE, WORKER_NOTIFICATION_ROLE]) {
+      for (const capability of [
+        WORKER_CREDENTIAL_DELIVERY_ROLE,
+        WORKER_NOTIFICATION_ROLE,
+        WORKER_EVIDENCE_VALIDATION_ROLE,
+        WORKER_PICKUP_BACKSTOP_ROLE,
+      ]) {
         expect(await sqlState(client, `set role ${capability}`)).toBe(REFUSED);
         expect(await sqlState(client, `grant ${capability} to ${login}`)).toBe(REFUSED);
       }
@@ -570,6 +585,140 @@ describe('the notification capability role', () => {
     );
     expect(facts.members).toEqual([
       { member: WORKER_RUNTIME_ROLE, inherit_option: true, set_option: false, admin_option: false },
+    ]);
+  });
+});
+
+describe('the evidence validation capability role', () => {
+  // Break caught (S1.11): the capability role being a login, owning something, holding any grant beyond the lane's (a business table, a write on
+  // the evidence record beyond its state, a read of its storage reference, a DELETE), or being given to anyone but the worker's login in a form that
+  // lets it switch into the role. It is a grant set: it expires an abandoned capture and nothing else, and its only member is the worker login,
+  // which inherits it and cannot SET ROLE.
+  it('is a grant set that reads three columns of the evidence record, writes its state, and has the worker login as its one member', async () => {
+    const facts = await withClient(database.urlFor('postgres'), async (client) => {
+      const role = await client.query<Record<string, unknown>>(
+        `select r.rolcanlogin,
+                (select count(*) from pg_class where relowner = r.oid)::int as owned,
+                (select count(*) from pg_namespace n cross join lateral aclexplode(n.nspacl) a where a.grantee = r.oid)::int as schema_grants,
+                (select count(*) from pg_proc p cross join lateral aclexplode(p.proacl) a where a.grantee = r.oid)::int as function_grants,
+                (select count(*) from pg_auth_members m where m.member = r.oid)::int as memberships_held
+           from pg_roles r where r.rolname = $1`,
+        [WORKER_EVIDENCE_VALIDATION_ROLE],
+      );
+      const tables = await client.query<Record<string, unknown>>(
+        `select c.relname as "table", a.privilege_type as privilege
+           from pg_class c cross join lateral aclexplode(c.relacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by c.relname, a.privilege_type`,
+        [WORKER_EVIDENCE_VALIDATION_ROLE],
+      );
+      const columns = await client.query<Record<string, unknown>>(
+        `select c.relname as "table", t.attname as "column", a.privilege_type as privilege
+           from pg_attribute t join pg_class c on c.oid = t.attrelid
+           cross join lateral aclexplode(t.attacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by c.relname, t.attname, a.privilege_type`,
+        [WORKER_EVIDENCE_VALIDATION_ROLE],
+      );
+      const members = await client.query<Record<string, unknown>>(
+        `select member.rolname as member, m.inherit_option, m.set_option, m.admin_option
+           from pg_auth_members m
+           join pg_roles granted on granted.oid = m.roleid
+           join pg_roles member on member.oid = m.member
+          where granted.rolname = $1`,
+        [WORKER_EVIDENCE_VALIDATION_ROLE],
+      );
+      return { role: role.rows, tables: tables.rows, columns: columns.rows, members: members.rows };
+    });
+    expect(facts.role).toEqual([
+      { rolcanlogin: false, owned: 0, schema_grants: 0, function_grants: 0, memberships_held: 0 },
+    ]);
+    // No table-wide privilege at all: the lane's grants are columns.
+    expect(facts.tables).toEqual([]);
+    expect(
+      facts.columns.map(
+        (row) => `${String(row.table)}.${String(row.column)}:${String(row.privilege)}`,
+      ),
+    ).toEqual([
+      'evidence.id:SELECT',
+      'evidence.state:SELECT',
+      'evidence.state:UPDATE',
+      'evidence.upload_expires_at:SELECT',
+    ]);
+    expect(facts.members).toEqual([
+      {
+        member: WORKER_RUNTIME_ROLE,
+        inherit_option: true,
+        set_option: false,
+        admin_option: false,
+      },
+    ]);
+  });
+});
+
+describe('the failure backstop capability role', () => {
+  // Break caught (S1.28, D-A1): the capability role being a login, owning something, holding any privilege on a table or a column (the lane reaches the requests, the stops and
+  // the audit ledger only inside the one function it may execute, which runs as the owner), holding the execution of any other function, or being given to anyone but the
+  // worker's login in a form that lets it switch into the role. It is a grant set: it escalates the failures left undecided and nothing else.
+  it('is a grant set that holds the execution of one function and no table, and has the worker login as its one member', async () => {
+    const facts = await withClient(database.urlFor('postgres'), async (client) => {
+      const role = await client.query<Record<string, unknown>>(
+        `select r.rolcanlogin,
+                (select count(*) from pg_class where relowner = r.oid)::int as owned,
+                (select count(*) from pg_namespace n cross join lateral aclexplode(n.nspacl) a where a.grantee = r.oid)::int as schema_grants,
+                (select count(*) from pg_proc p cross join lateral aclexplode(p.proacl) a where a.grantee = r.oid)::int as function_grants,
+                (select count(*) from pg_auth_members m where m.member = r.oid)::int as memberships_held
+           from pg_roles r where r.rolname = $1`,
+        [WORKER_PICKUP_BACKSTOP_ROLE],
+      );
+      const functions = await client.query<Record<string, unknown>>(
+        `select p.oid::regprocedure::text as function, a.privilege_type as privilege
+           from pg_proc p cross join lateral aclexplode(p.proacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by 1`,
+        [WORKER_PICKUP_BACKSTOP_ROLE],
+      );
+      const tables = await client.query<Record<string, unknown>>(
+        `select c.relname as "table", a.privilege_type as privilege
+           from pg_class c cross join lateral aclexplode(c.relacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by c.relname, a.privilege_type`,
+        [WORKER_PICKUP_BACKSTOP_ROLE],
+      );
+      const columns = await client.query<Record<string, unknown>>(
+        `select c.relname as "table", t.attname as "column", a.privilege_type as privilege
+           from pg_attribute t join pg_class c on c.oid = t.attrelid
+           cross join lateral aclexplode(t.attacl) a join pg_roles g on g.oid = a.grantee
+          where g.rolname = $1 order by c.relname, t.attname, a.privilege_type`,
+        [WORKER_PICKUP_BACKSTOP_ROLE],
+      );
+      const members = await client.query<Record<string, unknown>>(
+        `select member.rolname as member, m.inherit_option, m.set_option, m.admin_option
+           from pg_auth_members m
+           join pg_roles granted on granted.oid = m.roleid
+           join pg_roles member on member.oid = m.member
+          where granted.rolname = $1`,
+        [WORKER_PICKUP_BACKSTOP_ROLE],
+      );
+      return {
+        role: role.rows,
+        functions: functions.rows,
+        tables: tables.rows,
+        columns: columns.rows,
+        members: members.rows,
+      };
+    });
+    expect(facts.role).toEqual([
+      { rolcanlogin: false, owned: 0, schema_grants: 0, function_grants: 1, memberships_held: 0 },
+    ]);
+    expect(facts.functions).toEqual([
+      { function: 'melarc.failure_backstop_escalate(integer)', privilege: 'EXECUTE' },
+    ]);
+    expect(facts.tables).toEqual([]);
+    expect(facts.columns).toEqual([]);
+    expect(facts.members).toEqual([
+      {
+        member: WORKER_RUNTIME_ROLE,
+        inherit_option: true,
+        set_option: false,
+        admin_option: false,
+      },
     ]);
   });
 });

@@ -2013,6 +2013,7 @@ Offboarding a staff member or rider immediately revokes system access and creden
 | Collection completion/handshake | Registered vendor in-app or approved flow; ad-hoc SMS path |
 | Pickup failure | Ops event; registered vendor in-app/email; ad-hoc PII-safe SMS |
 | Pickup stop skipped by Ops (MSC-DEC-412) | Registered vendor: in-app feed, with the reason and the requested action; no raw note |
+| Pickup counted short (MSC-DEC-194) | Ops feed: the office is told in the system when the shortfall is recorded (AC-SLICE-001-21); no text, no count, no raw note |
 | Failure escalation | Senior Ops internal queue/notification |
 | Hub handover submitted | Ops receive queue |
 | Intake completed | Registered vendor in-app order summary; ad-hoc tracking SMS |

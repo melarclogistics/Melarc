@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.100.0
- *   SHA-256 bbc3558d6135fae151f72dafbfd81eaeb634eaf59a6ff428b0e7c70f879c8e60 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.102.0
+ *   SHA-256 f8b69098b8a84b4b7ce5ae393e332958715e2465995a0e5f224af3d9d6905b79 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -28,6 +28,135 @@ export interface paths {
          *     it, is audited without contents, as every staff read is.
          */
         get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/collection-disputes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the collection disputes of the hubs of the grant
+         * @description The Ops side of a collection dispute (21.4, `AC-SLICE-001-27`; plan S1.30; `OB-S1-70`): the reconciliation items that vendors raised with
+         *     `disputeCollection`, oldest first, each with the pickup it is about and what was counted at the door, so that Ops sees what is disputed
+         *     beside what the vendor says. **For Ops staff alone**: a vendor reads its own dispute where it raised it, and a rider reads none. A dispute never
+         *     reverses physical completion, so the stop in an item is as it closed.
+         *
+         *     **`open` is an item still `OPEN`** (`open=true`); `open=false` is the items that were resolved; left out, all of them. No operation resolves an
+         *     item in this slice, so every item is open until the reconciliation workflow exists. The note is the vendor's own words about its pickup; no
+         *     code, phone number or address is in an item.
+         *
+         *     Scoped server-side to the hubs of the caller's grant (section 37.6); filters are authorization-checked, never trusted (section 42.4). A
+         *     read of another hub, where the grant reaches it, is audited without contents, as every staff read is.
+         */
+        get: operations["listCollectionDisputes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/handshakes-for-ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the collection handshakes that route to Ops, and the ones Ops settled
+         * @description The work list of the officer who overrides or resolves a handshake (21.4, `AC-SLICE-001-24`, `AC-SLICE-001-26`; plan S1.30; `OB-S1-70`): the
+         *     handshakes whose code has run out, whose wrong attempts are used up, or whose SMS fallback has sent all it may, oldest first, each with the pickup
+         *     it is about, why it needs Ops (`routed_because`) and the counters beside the limits the platform holds. **No code and no digest is in an item**, and
+         *     neither is the Ops note of an override or a hand resolution.
+         *
+         *     **`open` is a handshake that needs Ops now** (`open=true`), as the database judges it when the list is read: its state is `EXPIRED` or `EXHAUSTED`;
+         *     or its code is still live by state but its life has passed on the database's clock (the state moves only when someone asks, so a code nobody tried is
+         *     expired all the same); or the SMS fallback has sent the platform's cap (`sms_fallback_max_per_pickup`). The first that applies is
+         *     `routed_because`. `open=false` is the handshakes Ops has settled by an override or a hand resolution, which the list keeps so that Ops can see what
+         *     it did (`routed_because` is `null`); left out, both. A handshake that closed through the portal or the SMS fallback is in neither: it never needed
+         *     Ops. The limits are the platform's settings as they stand, and `null` where the platform holds no usable value: a default is never invented, and an
+         *     unusable cap judges nothing.
+         *
+         *     **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
+         *     hub, where the grant reaches it, is audited without contents, as every staff read is.
+         */
+        get: operations["listHandshakesForOps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/collection-shortfalls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the short counts flagged to the office
+         * @description Where the office finds a shortfall in the system (21.3, `AC-SLICE-001-21`; plan S1.30; `OB-S1-51`, `OB-S1-70`): every collection counted fewer than declared,
+         *     oldest first, each with what was declared and counted, the reason the rider gave and its note, the moment the office flag was raised and the pickup it
+         *     is about. It supplements the rider's phone call and never replaces it. The key is the one the collection feature gives for working the shortfall
+         *     flag (`pickup.handshake.override`).
+         *
+         *     **`open` is a shortfall whose run is still in progress** (`open=true`): the rider is still out with the parcels the office was told are missing;
+         *     `open=false` is the shortfalls of runs that have ended; left out, all of them. Nothing yet marks a shortfall as read or worked (no acknowledgement
+         *     is built), so the state of the run is the one distinction the data supports. The rider's note is staff's own: no vendor reads it.
+         *
+         *     **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
+         *     hub, where the grant reaches it, is audited without contents, as every staff read is.
+         */
+        get: operations["listCollectionShortfalls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the failed pickups waiting for the office's decision
+         * @description The failure decision queue (21.5, 21.6, `AC-SLICE-001-30` to `-35`; plan S1.28, S1.30): one item for each stop that failed, oldest failure first, with
+         *     what the rider reported (the fixed category, the reason of the catalogue, the rider's note, its contact attempts), what became of the request
+         *     (`decision`) and how long the failure has waited. It is the Ops read of a failed stop; **the shape of a pickup request is not widened for it**, because a
+         *     request is read by vendors too and the rider's note is staff's own.
+         *
+         *     **`open` is a failure whose request is still `CONFIRMED`** (`open=true`), escalated or not: the office has yet to cancel it or reschedule it (an
+         *     escalation is a marker and decides nothing). `open=false` is the failures the office decided (the request is `CANCELLED`, with a replacement when
+         *     it was rescheduled); left out, all of them. `decision` says which: `PENDING`, `ESCALATED`, `RESCHEDULED` or `CANCELLED`.
+         *
+         *     **The waiting time is the database's own**: `waiting_seconds` runs from the moment the failure was reported until the decision where there is
+         *     one, and until the list is read where there is not; the client computes nothing. The attempts are the request's (`attempt_number`, and whether Senior
+         *     Ops force-extended them). `photo_count` is how many photos the rider attached to the failure (`reportPickupFailure`, `evidence_ids`); the photos
+         *     themselves are read one at a time with `createEvidenceRetrievalAuthorization`, and an item carries no address.
+         *
+         *     **For Ops staff alone**: a vendor and a rider are refused. Scoped server-side to the hubs of the caller's grant (section 37.6); a read of another
+         *     hub, where the grant reaches it, is audited without contents, as every staff read is.
+         */
+        get: operations["listPickupFailures"];
         put?: never;
         post?: never;
         delete?: never;
@@ -416,12 +545,23 @@ export interface paths {
          *
          *     **What it records, and what it needs (S1.18).** It sets `escalated_at` on the request once, under the
          *     `If-Match` of the request's read; the actor, the trigger (`OPS`) and the note are in the enhanced audit event.
-         *     Only a request that was `CONFIRMED` is escalated, and only once: a pending, declined or cancelled request, or
-         *     one already escalated, is `STATE_CONFLICT`. A blank note is `REASON_REQUIRED`; a note the ledger would not keep
+         *     **Only a request that is `CONFIRMED`, has not been escalated and has a stop that `FAILED` is escalated** (S1.28,
+         *     OB-S1-66: escalation is a resolution of a failure, the third beside the reschedule and the cancellation). A pending,
+         *     declined or cancelled request, one already escalated, and one none of its stops failed (it has no stop, or only a
+         *     skipped, collected or unresolved one) are `STATE_CONFLICT`, and for the last `details.rule` is `no_failed_stop`. The
+         *     database holds the same rule for every writer. A blank note is `REASON_REQUIRED`; a note the ledger would not keep
          *     (a number or an address of a person) is `VALIDATION_FAILED`. Escalating changes nothing else: the request can
-         *     still be cancelled, and a Senior Ops extension still opens a further attempt. **A failure can be recorded
-         *     now (`reportPickupFailure`, S1.28), but the request still need not have failed to be escalated**: that guard, and
-         *     the scheduled backstop that records `trigger: BACKSTOP`, are the rest of S1.28 and are not built yet.
+         *     still be cancelled, and a Senior Ops extension still opens a further attempt. The assisted review of a vendor's
+         *     complaint (AC-SLICE-001-35) is this note, on the escalated request, with the reviewer and the moment in the event.
+         *
+         *     **The scheduled backstop (S1.28, D-A1).** A lane of the delivery worker, under its own capability, makes this
+         *     transition for a request whose failed stop has sat undecided (the request still `CONFIRMED` and not escalated)
+         *     for longer than its hub's `stale_failure_backstop_hours`; it is not an operation of this API and takes no
+         *     `If-Match`. It sets `escalated_at` once, however many lanes look at once, and writes the enhanced event as the
+         *     system, with no actor and no note: `detail.trigger` is `BACKSTOP`, `detail.threshold_hours` the hub's value and
+         *     `detail.waited_seconds` how long the failure waited, and `related_ids.pickup_stop_id` names the stop. A hub whose
+         *     value is missing or not a whole number of hours from 1 to 8760 is not judged: nothing of it is escalated, and the
+         *     worker's alert and health say so.
          */
         post: operations["escalatePickupRequest"];
         delete?: never;
@@ -736,7 +876,7 @@ export interface paths {
          *     **A short count** requires `variance_reason_code`, a code of the `PICKUP_SHORT_COUNT` catalogue,
          *     or `REASON_REQUIRED` (and `REASON_NOT_ACTIVE` for a code the catalogue refuses); the reason's
          *     own metadata may make a note mandatory in turn, and a reason that makes a photo mandatory is
-         *     `REASON_REQUIRED` (`details.rule` `photo`) until evidence can be stored. The record keeps the
+         *     `REASON_REQUIRED` (`details.rule` `photo`) unless `evidence_ids` names the photo. The record keeps the
          *     reason as the catalogue holds it **at the moment it is made**, and the database holds the record to
          *     that for every writer: a catalogue that changes between the reading of the reason and the record
          *     (its label, its attribution, its being active) is `REASON_NOT_ACTIVE`, nothing is kept, the
@@ -744,10 +884,28 @@ export interface paths {
          *     A count that matches has no reason: one sent with it is `VALIDATION_FAILED` (rule `not_short`).
          *     **A short count raises the office flag in the same transaction** (`office_notified_at` is the
          *     database's own instant, the moment of the recording, and the event says that it was raised): it
-         *     supplements the rider's phone call and does not replace it.
+         *     supplements the rider's phone call and does not replace it. **The office is told in the system
+         *     as well** (OB-S1-51): in the same transaction the database writes one outbox envelope from the
+         *     record just made (`pickup.collection.shortfall_flagged`; the act gives it the stop and nothing
+         *     it says), and the notification lane makes the Ops feed entry of the request's hub
+         *     (`COLLECTION_SHORT_OPS_FEED`: the reason as a closed token, no count and no note), which the
+         *     staff of that hub read under `notification.read`. A count that matches queues nothing.
          *
-         *     **Evidence**: `evidence_ids` names records that must be `STORED`; none can be yet, so any
-         *     reference is `EVIDENCE_NOT_STORED`.
+         *     **The photo of every parcel** (the Product Owner's decision D-A10, 12 November 2026; pickup-collection.md
+         *     5.5): `parcel_photo_ids` names **exactly `collected_count`** records of purpose `PARCEL_PHOTO`, each
+         *     `STORED`, captured by this rider and of this stop, each attached to one count only (no cap: a pickup
+         *     of two hundred parcels has two hundred photos). The photos are judged after every other refusal
+         *     of this operation. A different number - none at all included - is `VALIDATION_FAILED` (`details.violations`
+         *     `/parcel_photo_ids`, rule `parcel_photo_count`), and the same photo named twice is `VALIDATION_FAILED`
+         *     (rule `duplicate`). A photo that is still `PENDING_UPLOAD`, has `EXPIRED`, is another rider's, is of
+         *     another stop or another purpose, or is already attached to a count is **one answer**,
+         *     `EVIDENCE_NOT_STORED`, so that the reply tells a rider nothing about a record that is not its own.
+         *     **For a stop Ops let through without photos** (`authoriseParcelPhotoException`) the count takes none, and a
+         *     count that names some is refused (`parcel_photo_count`). The database holds the number for every
+         *     writer, at the end of the transaction, and holds that a photo is attached once and only to the count
+         *     of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
+         *     `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
+         *     any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer.
          *
          *     **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
          *     `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake
@@ -774,8 +932,57 @@ export interface paths {
          *     handshake, and it records that the stop is still `ARRIVED`. It carries no note. The events that say
          *     a stop closed, `pickup.stop.collected` and `pickup.stop.partially_collected`, are written by the
          *     handshake that closes it, not by this operation.
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the Ops feed entry of a short count (a feed entry, and no text), so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+         *     `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["recordCollection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-stops/{id}/parcel-photo-exception": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Let a stop's count through without parcel photos
+         * @description **The photo of every parcel at the door** (the Product Owner's decision D-A10, 12 November 2026;
+         *     pickup-collection.md 5.5): a count takes one `PARCEL_PHOTO` for each parcel counted
+         *     (`parcel_photo_ids` of `recordCollection`). When the camera fails or the photos cannot be sent, the
+         *     rider tells Ops and **Ops lets that stop's count through without them**, as a recorded exception, before
+         *     the count. This is that exception.
+         *
+         *     `pickup.handshake.override` - Ops's override authority at the door (`MSC-DEC-204`), widened by this
+         *     decision to cover it: an officer of the stop's hub, with a **note that says why** (required:
+         *     `REASON_REQUIRED`). The stop the path names is found in the officer's hubs or refused
+         *     (`HUB_SCOPE_VIOLATION` for another hub's, `NOT_FOUND` for an id that matches nothing) before the
+         *     request is validated. From a stop the rider has arrived at, on a run in progress, with no count yet:
+         *     one that has not been arrived at, or has been closed, is `STATE_CONFLICT` (`stop_not_arrived`), and one that
+         *     already has a count `STATE_CONFLICT` (`collection_recorded`). **It is made once for a stop, and never
+         *     changed or removed, by any writer**: a second is `STATE_CONFLICT` (`exception_exists`).
+         *
+         *     Once it exists the stop's count takes no parcel photos, and a count that names some is refused
+         *     (`VALIDATION_FAILED`, rule `parcel_photo_count`); a stop that was not let through cannot be counted
+         *     without them. The officer, the moment (the database's clock) and the hub are the database's, never the
+         *     request's. The exception is written by one operation of the database, with the stop's lock taken first,
+         *     as the count takes it, so the exception and the count meet in either order. The enhanced event
+         *     `pickup.collection.photo_exception_authorised` records the note. A retry with the same
+         *     `Idempotency-Key` replays the answer.
+         */
+        post: operations["authoriseParcelPhotoException"];
         delete?: never;
         options?: never;
         head?: never;
@@ -802,14 +1009,23 @@ export interface paths {
          *     **As built (S1.28, the part that stands alone).** The stop becomes `FAILED`, which is
          *     terminal: nothing moves it back, and the only way forward is a new request cloned from the
          *     source by the office. `category` is one of the four fixed values and `reason_code` a code of
-         *     the `PICKUP_FAILURE` catalogue; the catalogue does not bind a reason to a category and nothing
-         *     checks the pairing. A missing note, or a contact attempt the reason asks for
+         *     the `PICKUP_FAILURE` catalogue. **A reason belongs to one category, which the catalogue holds**
+         *     (`reason_code.failure_category`; D-A4, the Product Owner, 11 November 2026): a reason reported
+         *     under another category is `VALIDATION_FAILED` (a violation at `/reason_code`, rule `category`),
+         *     judged once the reason is read and before the evidence, the photo and the door wait, so that
+         *     neither the door wait nor the escalation-only rule of a refused collection can be stepped
+         *     around by pairing. A missing note, or a contact attempt the reason asks for
          *     (`details.rule` `contact_attempt`), is `REASON_REQUIRED`, and a code the catalogue refuses is
-         *     `REASON_NOT_ACTIVE`. **Evidence:** `evidence_ids` names records that must be `STORED`; none
-         *     can be yet, so any reference is `EVIDENCE_NOT_STORED`, and a reason that makes a photo
-         *     mandatory (`details.rule` `photo`; today `ENTRY_REFUSED_BY_SECURITY` and `LOCATION_CLOSED`) is
-         *     `REASON_REQUIRED` until evidence can be stored. `contact_attempts` are at most ten, each an
-         *     instant and what came of it, and are kept on the stop.
+         *     `REASON_NOT_ACTIVE`. **Evidence:** `evidence_ids` (at most ten) names the photos the rider
+         *     took of this stop (`createEvidence`, `completeEvidenceUpload`): each must be `STORED`,
+         *     captured by this rider as the proof of this stop's collection, and not yet attached to a
+         *     failure; any other (pending, expired, unknown, another rider's, another stop's, already
+         *     attached) is `EVIDENCE_NOT_STORED`, one answer. A reason that makes a photo mandatory
+         *     (`details.rule` `photo`; today `ENTRY_REFUSED_BY_SECURITY` and `LOCATION_CLOSED`, read from
+         *     the catalogue and never hard-coded) is `REASON_REQUIRED` without at least one. The evidence is
+         *     attached to the failure in the same transaction, and the database holds all of it for every
+         *     writer. `contact_attempts` are at most ten, each an instant and what came of it, and are kept
+         *     on the stop.
          *
          *     The stop keeps the reason as the catalogue holds it **at the moment of the report**, and the
          *     database holds it to that for every writer: a catalogue that changes between the reading of
@@ -839,17 +1055,29 @@ export interface paths {
          *     `PICKUP_ATTEMPT_LIMIT_REACHED`, whatever the cap, until hub Senior Ops force-extends it
          *     (`extendPickupAttempts`; the extension's reach is provisional).
          *
+         *     **The messages of the failure (drafts: the wording is provisional and no real provider is asked to send it before the Product Owner approves it).** In the same transaction the
+         *     database writes one outbox envelope, `pickup.failure.reported`, from the stop the rider has just failed (the act gives it the stop and nothing it says), so it is kept or undone
+         *     with the failure. The notification lane then makes, for the request: a text to an individual (ad-hoc) sender (`PICKUP_FAILED_SENDER`: the request and the day it was planned for,
+         *     and nothing of why), the registered vendor's feed entry (`PICKUP_FAILED_VENDOR_FEED`: the category and the reason as closed tokens) and the Ops feed entry of the request's hub
+         *     (`PICKUP_FAILED_OPS_FEED`, read by staff under `notification.read`). None holds the rider's note, a number or an address, and each goes through the limits and the controlled
+         *     window of every other message.
+         *
+         *     **A provider-initiating operation** (settings.md 7.7, `provider_initiating_operation_ceiling_per_minute`, 20 a minute by default): it queues the individual sender's text and the feed entries of the failure, so its
+         *     request is admitted twice before anything of it runs - by the authenticated-API bucket and then by this sub-ceiling, both keyed on the caller's session. A refused one is
+         *     `RATE_LIMITED` (429) and does nothing. **How the ceiling counts:** a request takes its place when it is admitted, whatever the operation then answers; a retry with the same
+         *     `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
+         *
          *     A retried report (the same `Idempotency-Key`) replays the original answer; the same key for
          *     another body is `IDEMPOTENCY_KEY_CONFLICT`.
          *
-         *     **Not built yet:** the evidence photo (S1.11), the scheduled backstop that
-         *     escalates an undecided failure, the narrowing of `escalatePickupRequest` to a failed stop, and
-         *     the notices of a failure.
+         *     **Built with it (Run A, 12 November 2026).** A failure left undecided beyond its hub's `stale_failure_backstop_hours` is escalated by the scheduled backstop of the delivery worker
+         *     (`trigger: BACKSTOP`; see `escalatePickupRequest`), and `escalatePickupRequest` itself escalates only a request whose stop failed. **What stays the owner's:** the wording of the
+         *     messages above (drafts until approved, OQ-037), the pairing of the eight reasons with their categories (provisional: domain-model.md section 3.9), and the Rider app's screen.
          *
          *     **The door wait (review of 5 November 2026).** A failure of the category `VENDOR_UNAVAILABLE` is accepted only once the hub's `rider_door_wait_minutes` (10 at the launch hub) have
          *     passed since the rider arrived at the stop - the arrival the server recorded, measured on the database's clock; a vendor who is simply busy is no fallback trigger, the rider waits and may then
          *     fail the stop (pickup-collection.md). Before that it is `PICKUP_DOOR_WAIT_NOT_ELAPSED` (422), whose `details` say `door_wait_minutes`, `available_at` and `retry_after_seconds`, and nothing is
-         *     written. The other three categories carry no wait. The pairing of a reason with a category is not checked, so the wait follows the category the rider reports. A hub whose door wait is not set
+         *     written. The other three categories carry no wait. A reason belongs to one category (above), so the wait follows the reason and cannot be stepped around by reporting it under a category that carries none. A hub whose door wait is not set
          *     cannot be told one: the report of this category fails as an operational failure (`503`, no code) and invents no wait. **The contact attempts** are a method (`PHONE_CALL`, `SMS`,
          *     `IN_PERSON`), a moment, an outcome and an optional note; at most ten, and the wait is not among them (it is derived from the arrival).
          */
@@ -1913,8 +2141,8 @@ export interface paths {
          *     The note is required (`REASON_REQUIRED` when blank) and is bounded as the ledger bounds a note (`VALIDATION_FAILED`); a note that the ledger's
          *     screening would change (a secret that travels inside the text, such as a `token=` value or a credential inside an address) is refused whole, as
          *     `VALIDATION_FAILED` with the rule `format`, so that the item, the event and the answer hold exactly what the vendor wrote.
-         *     No operation resolves an item in `SLICE-001`, and **no operation lists or reads one yet** (Ops's side is S1.30's and the vendor's own view is a
-         *     later screen's; both need operations added to this contract first).
+         *     No operation resolves an item in `SLICE-001`. Ops lists the items with `listCollectionDisputes`; **no operation reads one for the vendor yet**
+         *     (the vendor's own view is a later screen's and needs an operation added to this contract first).
          */
         post: operations["disputeCollection"];
         delete?: never;
@@ -3575,6 +3803,15 @@ export interface paths {
          *     reading (OQ-098 closed): `evidence` is not a permission domain, and `x-permission: owner`
          *     stands as the stricter option.
          *
+         *     **As built (S1.11).** The permission is that of the act the evidence is about, found from `owner_type` and `purpose`: the first owner is a pickup stop (`PICKUP_STOP`) with two
+         *     acts, told apart by the purpose. `COLLECTION_PROOF` is the photo of a stop whose failure the rider reports (or a short count's reason asks for), so the caller is a rider holding
+         *     `pickup.failure.report`; **`PARCEL_PHOTO` (D-A10, 12 November 2026) is the photo of one parcel at the door, which belongs to the count**, so the caller is a rider holding
+         *     `pickup.collection.confirm`. In both the stop is one the rider has arrived at on a run in progress that is assigned to it (`NOT_FOUND` for work that is not its own,
+         *     `STATE_CONFLICT` for a stop not arrived at). An owner type the platform has no act for is `PERMISSION_DENIED`, never defaulted. `content_type` must be one of the platform setting `evidence_upload_allowed_mime_types` and `byte_size` at most
+         *     `evidence_upload_max_bytes` (development values: JPEG, PNG or PDF, 10 MB), and `checksum_sha256` is the 64 hex digits of the SHA-256 of the bytes. The answer carries
+         *     the capability to upload that one object: the store itself refuses an upload whose type, exact size or hash is not the one declared. A retry with the same
+         *     `Idempotency-Key` is told the same record and the same capability, made again from the record.
+         *
          *     **Step one of two.** This declares the metadata 34.7 requires and returns opaque upload
          *     instructions. The bytes are not sent here.
          *
@@ -3625,7 +3862,12 @@ export interface paths {
         put?: never;
         /**
          * Confirm the bytes landed, moving the record to STORED
-         * @description **Step two of two.** The server validates what actually arrived - content type, byte size and
+         * @description **As built (S1.11).** The server looks at the object the store holds at the record's key and compares its size, its SHA-256 and its type with what step one declared,
+         *     and the first bytes with the signature of the declared type (JPEG, PNG or PDF), judged on the bytes. Any difference leaves the record `PENDING_UPLOAD` and is
+         *     `VALIDATION_FAILED`; a window that has passed is `EVIDENCE_UPLOAD_EXPIRED`; the record of another rider, of another act, and one that does not exist are `NOT_FOUND`.
+         *     Completing a record that is already `STORED` with the version it has answers it again. The malicious-content check is the owner's open item and is not made.
+         *
+         *     **Step two of two.** The server validates what actually arrived - content type, byte size and
          *     checksum against what step one declared - and moves the record to `STORED`. Only then may the
          *     record be named in an `evidence_ids` array.
          *
@@ -3674,7 +3916,11 @@ export interface paths {
         put?: never;
         /**
          * Obtain a short-lived, single-object retrieval authorization
-         * @description **Evidence holds no authority of its own**, so this is gated exactly as `createEvidence` is:
+         * @description **As built (S1.11).** For the staff who hold `pickup.read` (the read of the subject, a pickup stop), within the hubs of the grant: a record in another hub is
+         *     `HUB_SCOPE_VIOLATION`, one that does not exist `NOT_FOUND`, an identifier that is not a UUID `VALIDATION_FAILED`, and a look at a record in a hub that is not the actor's
+         *     own is audited as every staff read is. The capability is returned to the one caller, `Cache-Control: no-store`, and is in no log, metric, event or record.
+         *
+         *     **Evidence holds no authority of its own**, so this is gated exactly as `createEvidence` is:
          *     `x-permission: owner` means the caller must hold the read permission of the subject this
          *     evidence attaches to. **No new Evidence permission is created** - 11.6's domain list is
          *     closed and evidence is always captured in the course of another act.
@@ -8783,6 +9029,8 @@ export interface components {
             variance_note?: string;
             /** @description Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
+            /** @description The photo of each parcel counted: exactly `collected_count` ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only; none when Ops let the stop through without photos. A different number, or an id named twice, is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each. */
+            parcel_photo_ids?: string[];
             /**
              * Format: date-time
              * @description Field capture time, distinct from upload time. Preserved on sync along with ordering
@@ -8810,6 +9058,8 @@ export interface components {
             variance_note?: string;
             /** @description Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
+            /** @description The photo of each parcel counted: exactly `collected_count` ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only; none when Ops let the stop through without photos. A different number, or an id named twice, is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each. */
+            parcel_photo_ids?: string[];
             /**
              * Format: date-time
              * @description Field capture time, distinct from upload time. Preserved on sync along with ordering
@@ -8833,6 +9083,29 @@ export interface components {
              * @description Set when the shortfall flag reached the Ops surface.
              */
             office_notified_at?: string | null;
+        };
+        /** @description The officer's note and nothing else: the stop is the path's, and the officer, the moment and the hub are the database's (D-A10). */
+        ParcelPhotoExceptionCreate: {
+            /** @description Why the stop is let through without parcel photos (the camera failed, the photos cannot be sent). Required; a blank note is `REASON_REQUIRED`. Held to the screening of every note. */
+            note: string;
+        };
+        /** @description The exception for a stop whose count takes no parcel photos (D-A10, 12 November 2026): made once, before the count, and never changed or removed. */
+        ParcelPhotoException: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /**
+             * Format: uuid
+             * @description The officer who let the stop through: the session, never the request.
+             */
+            authorised_by: string;
+            /**
+             * Format: date-time
+             * @description The database’s clock.
+             */
+            authorised_at: string;
+            note: string;
         };
         /**
          * @description The booking estimate of MSC-DEC-211: indicative, never a quote, never a price. The inputs
@@ -9027,6 +9300,207 @@ export interface components {
             note?: string;
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description A collection dispute as Ops reads it (`listCollectionDisputes`): the reconciliation item, the pickup it is about and what was counted at the door. It is not the `CollectionDispute` a vendor is answered with when it raises one. */
+        CollectionDisputeListItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /** Format: uuid */
+            pickup_manifest_id: string;
+            /** Format: uuid */
+            pickup_request_id: string;
+            /** Format: uuid */
+            responsible_hub_id: string;
+            /** @description The pickup's code, the one the sender is texted, by which Ops finds the pickup. */
+            request_code: string;
+            /** @description The vendor or sender as booked. Never a phone number or an address. */
+            sender_name: string;
+            /** Format: uuid */
+            vendor_organization_id: string;
+            /** @enum {string} */
+            state: "OPEN" | "RESOLVED";
+            /** @description The vendor's own words about its pickup. Staff of the hub read them; no rider does. */
+            note: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            resolved_at: string | null;
+            /**
+             * @description The stop as it closed; a dispute never changes it.
+             * @enum {string}
+             */
+            stop_state: "PENDING" | "ARRIVED" | "COLLECTED" | "PARTIALLY_COLLECTED" | "FAILED" | "SKIPPED";
+            declared_count: number;
+            collected_count: number;
+            /** @enum {string} */
+            variance: "MATCH" | "SHORT";
+        };
+        /** @description A collection handshake as Ops reads it (`listHandshakesForOps`). It holds no code, no digest and no note of Ops's. */
+        OpsHandshake: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /** Format: uuid */
+            pickup_manifest_id: string;
+            /** Format: uuid */
+            pickup_request_id: string;
+            /** Format: uuid */
+            responsible_hub_id: string;
+            /** @description The pickup's code, the one the sender is texted, by which Ops finds the pickup. */
+            request_code: string;
+            /** @description The vendor or sender as booked. Never a phone number or an address. */
+            sender_name: string;
+            /** @enum {string} */
+            direction: "VENDOR_ENTERED_RIDER_DISPLAYED" | "SENDER_SMS_RIDER_ENTERED";
+            /** @enum {string} */
+            state: "PENDING" | "CODE_GENERATED" | "CODE_DELIVERED" | "VERIFIED" | "EXPIRED" | "EXHAUSTED" | "DISPUTED" | "MANUALLY_RESOLVED";
+            /** @enum {string} */
+            stop_state: "PENDING" | "ARRIVED" | "COLLECTED" | "PARTIALLY_COLLECTED" | "FAILED" | "SKIPPED";
+            /**
+             * @description Why it needs Ops now, as the database judges it when the list is read; `null` for a handshake Ops has already settled.
+             * @enum {string|null}
+             */
+            routed_because: "CODE_EXPIRED" | "ATTEMPTS_EXHAUSTED" | "FALLBACK_LIMIT_REACHED" | null;
+            /**
+             * Format: date-time
+             * @description When the last code of the handshake runs out; null while no code was made.
+             */
+            expires_at: string | null;
+            attempts: number;
+            /** @description The platform's `handshake_max_wrong_attempts` as it stands; null where the platform holds no usable value (never a default). */
+            attempt_limit: number | null;
+            fallback_sends: number;
+            /** @description The platform's `sms_fallback_max_per_pickup` as it stands; null where the platform holds no usable value (never a default). */
+            fallback_limit: number | null;
+            /** @enum {string|null} */
+            channel: "PORTAL" | "SMS_FALLBACK" | "OPS_OVERRIDE" | null;
+            /** Format: date-time */
+            confirmed_at: string | null;
+            /**
+             * Format: uuid
+             * @description The officer who overrode or resolved by hand; null for any other way the handshake ended, and while it has not.
+             */
+            authorised_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A short count flagged to the office (`listCollectionShortfalls`). */
+        CollectionShortfall: {
+            /**
+             * Format: uuid
+             * @description The collection record.
+             */
+            id: string;
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /** Format: uuid */
+            pickup_manifest_id: string;
+            /** Format: uuid */
+            pickup_request_id: string;
+            /** Format: uuid */
+            responsible_hub_id: string;
+            /** @description The pickup's code, the one the sender is texted, by which Ops finds the pickup. */
+            request_code: string;
+            /** @description The vendor or sender as booked. Never a phone number or an address. */
+            sender_name: string;
+            declared_count: number;
+            collected_count: number;
+            /** @description The declared count less the counted one. */
+            shortfall_count: number;
+            /** @description The reason of the `PICKUP_SHORT_COUNT` catalogue the rider gave, as the catalogue held it then. */
+            reason: {
+                code: string;
+                label: string;
+                attribution: string;
+            };
+            /** @description The rider's note where the reason asked for one. Staff read it; no vendor does. */
+            note: string | null;
+            /**
+             * Format: date-time
+             * @description The moment the office flag was raised, taken by the database with the count.
+             */
+            office_notified_at: string;
+            /** Format: date-time */
+            recorded_at: string;
+            /**
+             * Format: uuid
+             * @description The rider who counted.
+             */
+            recorded_by: string;
+            /** @enum {string} */
+            stop_state: "PENDING" | "ARRIVED" | "COLLECTED" | "PARTIALLY_COLLECTED" | "FAILED" | "SKIPPED";
+            /** @enum {string} */
+            run_state: "DRAFT" | "DISPATCHED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+        };
+        /** @description A failed pickup in the decision queue (`listPickupFailures`), with the count of the photos of its failure. */
+        PickupFailureQueueItem: {
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /** Format: uuid */
+            pickup_manifest_id: string;
+            /** Format: uuid */
+            pickup_request_id: string;
+            /** Format: uuid */
+            responsible_hub_id: string;
+            /** @description The pickup's code, the one the sender is texted, by which Ops finds the pickup. */
+            request_code: string;
+            /** @description The vendor or sender as booked. Never a phone number or an address. */
+            sender_name: string;
+            /** @enum {string} */
+            category: "VENDOR_UNAVAILABLE" | "ACCESS_DENIED" | "PARCEL_NOT_READY" | "REFUSED_COLLECTION";
+            /** @description The reason of the `PICKUP_FAILURE` catalogue the rider gave, as the catalogue held it then. */
+            reason: {
+                code: string;
+                label: string;
+                attribution: string;
+            };
+            /** @description The rider's note. It is staff's own and no vendor reads it. */
+            note: string | null;
+            /** @description What the rider did to reach the sender before it failed the stop; empty where it gave none. */
+            contact_attempts: {
+                /** @enum {string} */
+                method: "PHONE_CALL" | "SMS" | "IN_PERSON";
+                /** Format: date-time */
+                attempted_at: string;
+                outcome: string;
+                note?: string;
+            }[];
+            /**
+             * Format: date-time
+             * @description The moment the failure was reported, taken by the database with the failure.
+             */
+            failed_at: string;
+            /** @description How long the failure has waited for the office, by the database's clock: until the decision where there is one, until the list is read where there is not. */
+            waiting_seconds: number;
+            /** @enum {string} */
+            request_state: "PENDING" | "CONFIRMED" | "DECLINED" | "CANCELLED";
+            /**
+             * @description `PENDING` waits for the office; `ESCALATED` has been marked out of Ops's hands and still waits; `RESCHEDULED` was cancelled with a replacement; `CANCELLED` was cancelled without one.
+             * @enum {string}
+             */
+            decision: "PENDING" | "ESCALATED" | "RESCHEDULED" | "CANCELLED";
+            attempt_number: number;
+            /** @description Whether Senior Ops force-extended the attempts of the request. */
+            attempt_extended: boolean;
+            /** Format: date-time */
+            escalated_at: string | null;
+            /**
+             * Format: date-time
+             * @description The moment the request was cancelled (a cancellation or a reschedule); null while it waits.
+             */
+            decided_at: string | null;
+            /** Format: uuid */
+            replacement_request_id: string | null;
+            /**
+             * Format: uuid
+             * @description The rider of the run.
+             */
+            rider_id: string | null;
+            /** @description How many photos the rider attached to the failure. A count and never an address: each photo is read with `createEvidenceRetrievalAuthorization`, under the evidence store's own authorization. */
+            photo_count: number;
         };
         /** @description An individual sender known by verified phone (30.x). Platform-scoped; a Vendor or Rider never reads it. */
         AdHocSender: {
@@ -11586,7 +12060,7 @@ export interface components {
             /** Format: uuid */
             owner_id: string;
             /** @enum {string} */
-            purpose: "COLLECTION_PROOF" | "CONDITION" | "OSD" | "HANDOFF_RECEIPT" | "DELIVERY_PROOF" | "RETURN_PROOF" | "MAINTENANCE" | "FUEL" | "COMPLIANCE_DOCUMENT";
+            purpose: "COLLECTION_PROOF" | "PARCEL_PHOTO" | "CONDITION" | "OSD" | "HANDOFF_RECEIPT" | "DELIVERY_PROOF" | "RETURN_PROOF" | "MAINTENANCE" | "FUEL" | "COMPLIANCE_DOCUMENT";
             /**
              * Format: date-time
              * @description **Field capture time, not upload time** (3.6). The rider app works under unreliable
@@ -12689,7 +13163,7 @@ export interface components {
          *     which is every operation that needs a session (Product Owner, 7 November 2026, A2 of the audit;
          *     `AC-SLICE-000-131`). The request was counted in the session's one bucket of authenticated API
          *     requests (`rate_limit_authenticated_api`, settings.md 7.7: the limit is that setting's and is not
-         *     restated here) or, for the five operations that cause a text, in the tighter ceiling inside it
+         *     restated here) or, for the seven operations that write an envelope for the notification lane (a text or a feed entry), in the tighter ceiling inside it
          *     (`provider_initiating_operation_ceiling_per_minute`), and the operation did not run.
          *
          *     **`Retry-After` says when to try again**: whole seconds, from 1 to 60, the time until the
@@ -12905,6 +13379,10 @@ export interface components {
         IdempotencyKey: string;
         PageSize: number;
         PageToken: string;
+        /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
+        OpenFilter: boolean;
+        /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+        WorkListHubId: string;
     };
     requestBodies: never;
     headers: {
@@ -12979,6 +13457,142 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["NotificationLogEntry"][];
+                        next_page_token: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listCollectionDisputes: {
+        parameters: {
+            query?: {
+                /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
+                open?: components["parameters"]["OpenFilter"];
+                /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: components["parameters"]["WorkListHubId"];
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CollectionDisputeListItem"][];
+                        next_page_token: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listHandshakesForOps: {
+        parameters: {
+            query?: {
+                /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
+                open?: components["parameters"]["OpenFilter"];
+                /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: components["parameters"]["WorkListHubId"];
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["OpsHandshake"][];
+                        next_page_token: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listCollectionShortfalls: {
+        parameters: {
+            query?: {
+                /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
+                open?: components["parameters"]["OpenFilter"];
+                /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: components["parameters"]["WorkListHubId"];
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CollectionShortfall"][];
+                        next_page_token: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listPickupFailures: {
+        parameters: {
+            query?: {
+                /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
+                open?: components["parameters"]["OpenFilter"];
+                /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: components["parameters"]["WorkListHubId"];
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["PickupFailureQueueItem"][];
                         next_page_token: string | null;
                     };
                 };
@@ -13895,6 +14509,72 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    authoriseParcelPhotoException: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParcelPhotoExceptionCreate"];
+            };
+        };
+        responses: {
+            /** @description The stop is let through without parcel photos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParcelPhotoException"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
@@ -17071,6 +17751,8 @@ export interface operations {
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
+                    /** @description Always `no-store`. The upload instruction is a bearer capability to write one object, and must not be cached by any intermediary */
+                    "Cache-Control": "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -17082,7 +17764,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-            422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17145,6 +17826,7 @@ export interface operations {
                     "application/json": components["schemas"]["EvidenceRetrievalAuthorization"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

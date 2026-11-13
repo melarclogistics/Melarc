@@ -281,6 +281,13 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.dispute_collection',
       // S1.28 (migration 0073): the one read of a hub's door wait, for the rider's failure key.
       'melarc.rider_door_wait_minutes',
+      // S1.11 (migration 0080): the derivation of the scope of the evidence of a stop.
+      'melarc.evidence_pickup_stop_scope',
+      // S1.28 and OB-S1-51: the outbox envelopes of the rider's failure and short count.
+      'melarc.failure_envelope',
+      'melarc.shortfall_envelope',
+      // D-A10 (migration 0088): Ops's exception for the day the camera fails, once for a stop and before its count.
+      'melarc.authorise_parcel_photo_exception',
     ]);
   });
 

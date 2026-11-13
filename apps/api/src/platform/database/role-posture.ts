@@ -2,6 +2,7 @@ import {
   API_RUNTIME_ROLE,
   PROVISIONING_ROLE,
   WORKER_NOTIFICATION_ROLE,
+  WORKER_PICKUP_BACKSTOP_ROLE,
   WORKER_RUNTIME_ROLE,
 } from './technical-roles.js';
 
@@ -159,6 +160,21 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // And the one read of a hub's door wait for the rider's failure key (migration 0073): the stop's guard asks it when a vendor-unavailable failure is reported, and the
     // application asks it to say when the report is allowed. It answers that key alone and reads the one setting; a hub that has none is a refusal, and no wait is invented.
     'melarc.rider_door_wait_minutes',
+    // And the one derivation of the scope of the evidence of a stop (migration 0080, S1.11): the hub and the vendor organisation of a record about a pickup stop, asked by the
+    // evidence guard when the rider that reports the stop's failure declares it. It answers that rider under that key, for a stop it has arrived at on a run in progress that is
+    // assigned to it, and no other caller; the scope is derived and never given.
+    'melarc.evidence_pickup_stop_scope',
+    // And the two envelopes of the rider's acts (the migration `rider_act_envelopes`, S1.28 and OB-S1-51): the outbox envelope of a failure the calling rider has just reported
+    // (`melarc.failure_envelope`, key `pickup.failure.report`) and of a short count it has just recorded (`melarc.shortfall_envelope`, key `pickup.collection.confirm`). Each
+    // answers that key of a rider alone, for a stop of this rider's that the database shows to have been failed or counted short in the caller's own transaction, and reads
+    // every member of the envelope from that stop; the policies of the outbox admit these two events only to a statement that runs as the owner, which is a statement
+    // inside these functions, so the login can write neither envelope itself.
+    'melarc.failure_envelope',
+    'melarc.shortfall_envelope',
+    // And the one operation of Ops's exception for the day the camera fails (migration 0088, D-A10): an officer of the stop's hub holding `pickup.handshake.override` lets a
+    // stop's count through without parcel photos, once, before the count, with a note. It answers that key of a staff member alone and takes the stop's lock first; the
+    // policy of the table admits the write only to a statement that runs as the owner, which is a statement inside this function, so the login can write no exception itself.
+    'melarc.authorise_parcel_photo_exception',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification
@@ -170,9 +186,14 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.handshake_mark_delivered',
     'melarc.notification_handshake_number',
   ],
+  // The failure backstop lane's grant set holds the one operation that escalates the failures left undecided beyond their hub's threshold (migration 0084, S1.28; D-A1): it
+  // answers the pickup_backstop capability alone, reads the failed stops and the hub's threshold, sets the moment of the escalation and writes its event, in one change. The
+  // worker's login holds it only through this role, and the check asks both the role and the login that inherits it, so the line is on both.
+  [WORKER_PICKUP_BACKSTOP_ROLE]: ['melarc.failure_backstop_escalate'],
   [WORKER_RUNTIME_ROLE]: [
     'melarc.handshake_mark_delivered',
     'melarc.notification_handshake_number',
+    'melarc.failure_backstop_escalate',
   ],
 };
 

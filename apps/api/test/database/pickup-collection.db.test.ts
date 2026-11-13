@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
+import { excusePhotos } from './support/evidence-photo.js';
 import { backendPidOf, waitUntilBlockedBy } from './support/lock-wait.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
@@ -108,12 +109,17 @@ const first = (arranged: ArrangedRun): ArrangedRun['stops'][number] => {
 const tokenOf = async (rider: ArrangedRider, stopId: string): Promise<string> =>
   (await rider.client.get(STOP(stopId))).header('etag') ?? '';
 
+/**
+ * The count of a stop, as the rider makes it. **The stop is let through without parcel photos first** (D-A10: `excusePhotos`), because this file is about the count and not the photos;
+ * the photos have their own file (`parcel-photos.db.test.ts`), which never uses this helper. `unexcused: true` leaves the stop as it is.
+ */
 async function collect(
   rider: ArrangedRider,
   stopId: string,
   body: Record<string, unknown> = { collected_count: 3 },
-  over: { etag?: string; key?: string } = {},
+  over: { etag?: string; key?: string; unexcused?: boolean } = {},
 ): Promise<TestResponse> {
+  if (over.unexcused !== true) await excusePhotos(routes, stopId);
   const etag = over.etag ?? (await tokenOf(rider, stopId));
   return rider.client.post(COLLECT(stopId), body, {
     headers: { 'If-Match': etag, 'Idempotency-Key': over.key ?? randomUUID() },
@@ -930,6 +936,7 @@ describe('a stop with a record is never skipped, failed or cancelled away', () =
     const arranged = await run();
     const stop = first(arranged);
     const requestBefore = await requestRow(stop.requestId);
+    await excusePhotos(routes, stop.id);
     const holder = clientFor(routes.database.urlFor('postgres'));
     await holder.connect();
     try {

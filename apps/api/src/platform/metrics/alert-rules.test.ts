@@ -437,5 +437,132 @@ describe('the alert rules of the credential path and the trust data (S0.68)', ()
     expect(document).toContain('| **Text messages** *(30 October 2026)*|');
     expect(document).toContain('| **Provider percentage thresholds**| **20 provider attempts**|');
     expect(new Set(ALERT_RULES.map((rule) => rule.id)).size).toBe(ALERT_RULES.length);
+    // The failure backstop (S1.28, D-A1; a reading recorded for the Product Owner): the document states the two conditions the rules judge.
+    expect(row('Failure backstop')).toContain('missing or unusable');
+    expect(row('Failure backstop')).toContain(
+      '**no check has completed for 30 minutes** while some failed',
+    );
+    expect(document).toContain('| **Failure backstop** *(12 November 2026)*|');
+    // The evidence scanner (Run A2, D-A6; SEV-2 is a reading recorded for the Product Owner): the document states the two conditions the rules judge.
+    expect(row('Evidence scanner')).toContain('**no scanner is configured**');
+    expect(row('Evidence scanner')).toContain(
+      'scans unavailable for **15 minutes** with **none clean** in that time',
+    );
+    expect(document).toContain('| **Evidence scanner** *(12 November 2026)*|');
+    expect(document).toContain(
+      '### 4.3b The evidence scanner cannot be reached or is not configured',
+    );
+  });
+});
+
+describe('the alert rules of the evidence scanner (Run A2, D-A6)', () => {
+  const scans = (outcome: string) => `evidence_scans_total{outcome="${outcome}"}`;
+  const at = (minutes: number, counts: Partial<Record<string, number>>, instance = 'api-1') =>
+    scrape(
+      minutes,
+      Object.fromEntries(
+        ['CLEAN', 'FLAGGED', 'UNAVAILABLE', 'NOT_CONFIGURED'].map((outcome) => [
+          scans(outcome),
+          counts[outcome] ?? 0,
+        ]),
+      ),
+      instance,
+    );
+
+  // Break caught: a production that has no scanner and stores nothing, with nobody told.
+  it('fires at once when a rider tried to complete evidence and no scanner is configured', () => {
+    expect(firing([at(0, {}), at(5, { NOT_CONFIGURED: 1 })])).toEqual([
+      'evidence_scanner_not_configured',
+    ]);
+    // And stops when no more arrive for the window: the counter only grows, the rule looks at the last fifteen minutes.
+    expect(
+      firing([
+        at(0, { NOT_CONFIGURED: 1 }),
+        at(20, { NOT_CONFIGURED: 1 }),
+        at(40, { NOT_CONFIGURED: 1 }),
+      ]),
+    ).toEqual([]);
+  });
+
+  // Break caught: a scanner that is down for a quarter of an hour, with nothing scanned clean, and nobody paged; and the reverse, a single failure that a retry cured, paging.
+  it('fires when scans were unavailable for fifteen minutes and none was clean, and not for a blip a clean scan followed', () => {
+    expect(firing([at(0, {}), at(10, { UNAVAILABLE: 1 }), at(15, { UNAVAILABLE: 3 })])).toEqual([
+      'evidence_scanner_unavailable',
+    ]);
+    expect(
+      firing([at(0, {}), at(10, { UNAVAILABLE: 1 }), at(15, { UNAVAILABLE: 1, CLEAN: 1 })]),
+    ).toEqual([]);
+    expect(firing([at(0, { CLEAN: 5 }), at(15, { CLEAN: 9 })])).toEqual([]);
+  });
+
+  // Break caught: a flagged file paging as an outage, which it is not: the scanner worked.
+  it('does not fire for flagged files, which are the scanner doing its work', () => {
+    expect(firing([at(0, {}), at(15, { FLAGGED: 7, CLEAN: 3 })])).toEqual([]);
+  });
+
+  it('reads every instance of the API and fires when any one has the fault', () => {
+    expect(
+      firing([
+        at(0, {}, 'api-1'),
+        at(0, {}, 'api-2'),
+        at(15, { CLEAN: 4 }, 'api-1'),
+        at(15, { UNAVAILABLE: 2 }, 'api-2'),
+      ]),
+    ).toEqual(['evidence_scanner_unavailable']);
+  });
+
+  it('names the runbook of the document and a severity of the Product Owner’s table', () => {
+    const rules = ALERT_RULES.filter((rule) => rule.alert === 'Evidence scanner');
+    expect(rules.map((rule) => rule.id).toSorted()).toEqual([
+      'evidence_scanner_not_configured',
+      'evidence_scanner_unavailable',
+    ]);
+    for (const rule of rules) {
+      expect(rule.runbook).toBe('§4.3b');
+      expect(rule.severity).toBe('SEV-2');
+    }
+  });
+});
+
+describe('the alert rules of the failure backstop (S1.28, D-A1)', () => {
+  const UNUSABLE = 'pickup_backstop_unusable_hubs';
+  const runs = (outcome: string) => `pickup_backstop_runs_total{outcome="${outcome}"}`;
+
+  // Break caught: a lane that cannot judge a hub and says nothing, which is the one thing the Product Owner ruled out ("never silently").
+  it('fires when the latest check could not judge a hub, and stops when a later check judges them all', () => {
+    expect(firing([scrape(0, { [UNUSABLE]: 1 })])).toEqual(['failure_backstop_threshold_unusable']);
+    expect(firing([scrape(0, { [UNUSABLE]: 2 }), scrape(15, { [UNUSABLE]: 1 })])).toEqual([
+      'failure_backstop_threshold_unusable',
+    ]);
+    expect(firing([scrape(0, { [UNUSABLE]: 1 }), scrape(15, { [UNUSABLE]: 0 })])).toEqual([]);
+  });
+
+  // Break caught: a worker that does not serve the gauge yet (the lane has not completed a check), read as one with hubs it cannot judge, or as one with none.
+  it('does not fire for a worker that serves no such gauge', () => {
+    expect(firing([scrape(0, { [AGE]: 0 })])).toEqual([]);
+    expect(firing([scrape(0, {}), scrape(15, {})])).toEqual([]);
+  });
+
+  // Break caught: a lane that raises on every check and is never noticed, or one that raised once on a blip and pages.
+  it('fires when checks have failed for half an hour and none completed, and not for a blip a later check cured', () => {
+    const history = (checked: number, failed: number): Scrape[] => [
+      scrape(0, { [runs('CHECKED')]: 0, [runs('FAILED')]: 0 }),
+      scrape(15, { [runs('CHECKED')]: 0, [runs('FAILED')]: 1 }),
+      scrape(30, { [runs('CHECKED')]: checked, [runs('FAILED')]: failed }),
+    ];
+    expect(firing(history(0, 2))).toEqual(['failure_backstop_not_checking']);
+    expect(firing(history(1, 1))).toEqual([]);
+    expect(firing(history(2, 0))).toEqual([]);
+  });
+
+  // Break caught: a counter that only grows with successful checks read as a failure.
+  it('does not fire for a lane that checks as it should', () => {
+    expect(
+      firing([
+        scrape(0, { [runs('CHECKED')]: 0, [runs('FAILED')]: 0, [UNUSABLE]: 0 }),
+        scrape(15, { [runs('CHECKED')]: 1, [runs('FAILED')]: 0, [UNUSABLE]: 0 }),
+        scrape(30, { [runs('CHECKED')]: 2, [runs('FAILED')]: 0, [UNUSABLE]: 0 }),
+      ]),
+    ).toEqual([]);
   });
 });

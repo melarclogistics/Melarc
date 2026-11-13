@@ -17,6 +17,7 @@ import {
   SessionSnapshotUnreadableError,
 } from '../auth/sessions/session-errors.js';
 import { PolicyCoordinationError } from '../database/policy-lock/coordinate.js';
+import { ContentScannerError } from '../evidence/content-scanner-error.js';
 import { BudgetClosedError, BudgetExpiredError } from '../execution/execution-budget.js';
 import { SettingInvalidError, SettingMissingError } from '../settings/settings-reader.js';
 import { classifyFailure } from './operational-failure.js';
@@ -47,6 +48,17 @@ const OPERATIONAL: readonly [string, () => Error][] = [
         'session_idle_timeout_minutes',
         'its value is not of its type object',
       ),
+  ],
+  // Run A2 (D-A6): the content scanner did not answer, or none is configured. The record stays unstored and the call is retried; the answer is the same fixed, code-less 503, and
+  // it is never read as a clean verdict (a defect would page as an unexpected 500, and a scanner that is only down is an outage).
+  [
+    'ContentScannerError (unavailable)',
+    () =>
+      new ContentScannerError('SCANNER_UNAVAILABLE', 'The content scanner did not answer: timeout'),
+  ],
+  [
+    'ContentScannerError (not configured)',
+    () => new ContentScannerError('SCANNER_NOT_CONFIGURED', 'No content scanner is configured'),
   ],
 ];
 

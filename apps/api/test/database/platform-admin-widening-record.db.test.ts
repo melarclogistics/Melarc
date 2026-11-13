@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,7 +13,7 @@ import type {
 import { AUTHENTICATION_PRINCIPAL_ID } from '../../src/platform/auth/sessions/session-parameters.js';
 import { runSeed } from '../../src/platform/database/seed/seed-helper.js';
 import { PROVISIONING_ROLE } from '../../src/platform/database/technical-roles.js';
-import { runMigrations } from '../../src/tools/database/run-migrations.js';
+import { MIGRATIONS_FOLDER, runMigrations } from '../../src/tools/database/run-migrations.js';
 import { MIGRATION_ROLE } from '../../src/tools/database/safety.js';
 import {
   BUNDLE_IDS,
@@ -67,6 +68,14 @@ const ALREADY_0077 =
 const REREGISTER = 'staff.device.reregister';
 const PLATFORM_ADMIN = BUNDLE_IDS.platformAdmin;
 const bundleIds = Object.values(BUNDLE_IDS);
+
+/** How many migrations the repository's journal holds from number `from` on: what the migrator applies to a history that stops before it. */
+function journaledFrom(from: number): number {
+  const journal = JSON.parse(
+    readFileSync(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
+  ) as { entries: { idx: number }[] };
+  return journal.entries.filter((entry) => entry.idx >= from).length;
+}
 
 /** The grants as the first lists wrote them: what a database seeded before the decisions of 5 and 6 November held after 0043 and 0057. */
 const HISTORY: readonly GrantSeed[] = [
@@ -355,10 +364,12 @@ describe('the owner’s database: seeded before the decisions, then 0043, 0057, 
       applied = (await runMigrations({ url: world.built.target.urlFor(MIGRATION_ROLE) })).applied;
     });
 
-    // 0078, and the one after it (0079, the fixed policy's widening event: task A3.4 of the audit follow-up). The history stops before 0078, and the migrator
-    // applies every file the repository holds from there on.
-    it('are the two migrations the history had left to apply: 0078 and the one after it', () => {
-      expect(applied).toBe(2);
+    // 0078, and every one after it (0079, the fixed policy's widening event: task A3.4 of the audit follow-up, and what later tasks added). The history stops before 0078, and the
+    // migrator applies every file the repository holds from there on: the number is read from the repository's own journal, so that a migration added later does not turn this test
+    // into a count that has to be edited each time (it was a literal 2 until the evidence store's first migration, and failed from then on).
+    it('are the migrations the history had left to apply: 0078 and every one after it', () => {
+      expect(applied).toBe(journaledFrom(78));
+      expect(applied).toBeGreaterThanOrEqual(2);
     });
 
     // Break caught (the finding): the widening of 0075 left no event, or an event that names other grants than the ones it widened, another
