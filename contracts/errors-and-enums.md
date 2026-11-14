@@ -142,7 +142,7 @@ Harvested from every transition table in [state-machines.md](state-machines.md) 
 
 | Code| Raised when|
 |---|---|
-| `BLIND_COUNT_VIOLATED`| The declared count was served on read, or accepted on write, before the physical count committed (§35.5.2)|
+| `BLIND_COUNT_VIOLATED`| The declared count was served on read, or accepted on write, before the physical count committed (§35.5.2)| **As built (S1.33):** declared on `submitBlindCount` as the contract's `422` and **never raised**: a body that carries the declaration is `VALIDATION_FAILED` (the request's schema is closed) and nothing is committed; the blind count is held structurally (the declaration is in no column the application can read, and one function of the database serves it after the count), so the invariant is proved as an absence
 | `PARITY_NOT_MET`| Itemized count does not reconcile to the authoritative hub count. **`PAYMENT_REQUIRED` orders count toward parity** (§35.6.11)|
 | `ORDER_UNPRICED`| Intake close attempted with an unpriced order|
 
