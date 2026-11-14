@@ -15,6 +15,7 @@ import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { UUID } from '../staff/WithProfile';
 import { intakePath } from './intake-presentation';
+import './intake-pages.css';
 import '../pickup/pickup-pages.css';
 
 /** Focus to the heading when a page replaces the one that was loading in the same place (see `WithProfile`). */

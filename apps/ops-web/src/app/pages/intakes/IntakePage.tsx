@@ -39,6 +39,7 @@ import {
   type DoneState,
 } from './intake-presentation';
 import { useFocusFallenToHeading, WithIntake } from './WithIntake';
+import './intake-pages.css';
 
 const DONE_WORDS: Readonly<Record<NonNullable<DoneState['done']>, string>> = {
   counted:

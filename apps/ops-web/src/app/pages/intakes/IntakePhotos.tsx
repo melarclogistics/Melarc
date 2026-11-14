@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { Button } from '../../../components/ui/button/Button';
 import { EvidencePhotoDialog } from '../evidence/EvidencePhotoDialog';
+import './intake-pages.css';
 
 /**
  * The photos of a **counted** intake, as a row of buttons, each opening one photo at a time: the photos of the parcels counted at the door (the intake's `parcel_photo_ids`, which a counted intake alone has) and the
