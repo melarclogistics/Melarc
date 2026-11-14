@@ -1916,6 +1916,26 @@ The facts of a card, where a table is too narrow for its columns and draws a car
 - **Anatomy.** A list of terms and definitions (`dl`), a `div` of its own around each pair, the label in `text.secondary` at the small size in a column of 5rem to 7.5rem (the longest label of the portal wraps in its column and is never cut off), the value taking the rest and wrapping at its words (an address is whole). It draws no heading and no control: the table draws the card’s heading, its one button over the card and its act around it.
 - **Do** draw the facts of every card of every list with it, each fact with the name its column has, so that a card is the same on every screen. **Do not** put a button, a link or a field in a value (the card’s one hit target is the table’s, and a second one makes two ways to open a row; a row that opens nothing is the table’s own exception), repeat the heading’s code among the facts, or leave out a fact that a lesser column of the table carries: a card shows every fact.
 
+#### LockIndicator
+
+> **Status:** IMPLEMENTING (15 November 2026) · **Code:** `apps/ops-web/src/components/ui/lock-indicator/`
+
+Who holds an **advisory** lock on a record, told in words ([surfaces/ops-portal.md §9](../surfaces/ops-portal.md#9-concurrency-is-a-first-class-interface-concern): the receiver's lock of an intake). The words do the saying and the icon (a closed padlock, an open one for a lock nobody holds) and the tone (info for the person's own, warning for another's, neutral for a free or an unknown one) support them. It decides nothing and knows nothing of the policy: it does not know what the lock is for, how long it lasts or who may take it over, and **a lock that is advisory is never drawn as a gate**.
+
+- **Props.** `holder` (`free`, `yours`, `other`, `unknown`: what the page was told), `subject?` (what the lock is on, after "on": "this intake"), `who?` (the page's words for the other holder: "Another receiver", never a name the page does not have), `since?` (when the holder last showed it was there, as the page tells a time), `note?` (one line from the page that says what the lock does and does not do) and `action?` (the page's own control: "Ask again").
+- **Anatomy.** A state line ("Held by someone else"), the sentence ("Another receiver holds the lock on this intake."), when the holder was last active, the note and the action. **Who holds it is a `status` region and the moment of the last refresh is outside it**, so that a change of holder is said once and the time, which moves every minute while a page keeps its lock, is never read out each time.
+- **Do** pass the one line that says a lock only shows who is working, and the action only where there is one. **Do not** disable a form because of it, or word it as a refusal: the server refuses a count only for the intake's facts.
+
+#### EvidenceUpload
+
+> **Status:** IMPLEMENTING (15 November 2026) · **Code:** `apps/ops-web/src/components/ui/evidence-upload/`
+
+The files a person adds as evidence of an act (the photos of a condition found at receiving), each **sent as soon as it is chosen** and told one by one. It is generic and decides no policy: it knows no operation, no owner, no limit and no address, and is given the function that sends a file and the function that words a failure.
+
+- **Props.** `label`, `help?`, `error?`, `required?`, `accept?` (what the file chooser offers: a hint, the platform judges every file), `disabled?`, `upload(file, report, signal)` (the page's: sends one file and answers with the identifier of the stored record, or throws; `report` tells where the file is, in the page's words; `signal` is aborted when the file is left out or the component goes), `failureText(error)` (the page's words), `onChange(stored)` (the identifiers of the stored files, in the order they were added) and `onBusyChange?` (whether a file is on its way, so that the page does not send its act without the evidence it was told to attach).
+- **Anatomy.** A native file input in a `Field` (the keyboard and the forced-colours drawing are the browser's), and under it one row for each file: its name and size, its state (*Sending*, *Stored*, *Not sent*) as a badge beside words, the page's words for a failure, **Try again** for a file that failed and **Leave out** for any. One polite region says each file's outcome once. **It never draws a storage key, an upload address or the identifier of a record**: the page cites the identifiers and the person sees names.
+- **Do** compute nothing here: the checksum, the declaration, the `PUT` of the bytes to the issued address and the completion are the page's (`platform/evidence/`). **Do not** let the page send its act while `onBusyChange` says a file is on its way.
+
 #### SidePanel
 
 > **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/side-panel/`
