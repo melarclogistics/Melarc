@@ -473,14 +473,16 @@ describe('completeEvidenceUpload: what arrived decides, and the record is stored
       400,
       'VALIDATION_FAILED',
     ]);
+    // A staff session is served the operation since S1.34 (the evidence of an intake), and a rider's record of a stop is no record of an act it holds the key of: the same answer as one that
+    // does not exist.
     expect(
-      (
+      outcome(
         await ops.client.post(COMPLETE(id), undefined, {
           origin: OPS,
           headers: { 'If-Match': etag },
-        })
-      ).status,
-    ).toBe(403);
+        }),
+      ),
+    ).toEqual([404, 'NOT_FOUND']);
     expect((await rowOf(id))?.state).toBe('PENDING_UPLOAD');
   });
 

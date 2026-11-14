@@ -46,11 +46,15 @@ export type EvidenceCapturePrincipal = (typeof EVIDENCE_CAPTURE_PRINCIPALS)[numb
 /**
  * `access_rule` and `retention_policy` are enums that `domain-model.md` section 3.6 names and never lists ("who may retrieve it", "category key; periods are `OQ-028`"). Each has
  * the one value this build needs, defined here and recorded for the Product Owner to confirm: **`SUBJECT_READERS`**, retrievable by those who hold the read permission of the
- * record the evidence is about, within that record's hub (and vendor, where it has one); and **`PICKUP_STOP_EVIDENCE`**, the category of evidence about a pickup stop. No period
+ * record the evidence is about, within that record's hub (and vendor, where it has one); **`PICKUP_STOP_EVIDENCE`**, the category of evidence about a pickup stop, and **`PICKUP_INTAKE_EVIDENCE`** (S1.34), the category of evidence about an intake: the photos of a condition and of an adjudication. No period
  * is stated or invented: retention is the owner's (`OQ-028`, OB-S1-05). A later owner type adds its value in its own migration.
  */
 export const EVIDENCE_ACCESS_RULES = ['SUBJECT_READERS'] as const;
-export const EVIDENCE_RETENTION_POLICIES = ['PICKUP_STOP_EVIDENCE'] as const;
+export const EVIDENCE_RETENTION_POLICIES = [
+  'PICKUP_STOP_EVIDENCE',
+  'PICKUP_INTAKE_EVIDENCE',
+] as const;
+export type EvidenceRetentionPolicy = (typeof EVIDENCE_RETENTION_POLICIES)[number];
 
 /** The kind of file a signature check can recognise from the first bytes of an object. */
 export const SIGNATURE_KINDS = ['JPEG', 'PNG', 'PDF'] as const;

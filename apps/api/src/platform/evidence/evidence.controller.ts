@@ -28,6 +28,7 @@ import { DescribeErrors } from '../openapi/described-errors.js';
 import { DescribeServers, RIDER_SERVERS } from '../openapi/operation-statements.js';
 import { Self } from '../routes/access-declaration.js';
 import { EVIDENCE_SERVICE } from './evidence-providers.js';
+import { ownerKeysOf } from './evidence-owners.js';
 import {
   EVIDENCE_CREATE_BODY,
   EVIDENCE_RETRIEVAL_SCHEMA,
@@ -45,11 +46,16 @@ import type { EvidenceView } from './evidence-view.js';
 
 const correlation = (): string => currentRequestContext()?.requestId ?? randomUUID();
 
+/** The keys of the acts a session could be doing, by kind of principal, as the guard asks them before the body is read (S1.34): the registry of acts is the source. */
+const WRITE_KEYS = ownerKeysOf('write');
+const READ_KEYS = ownerKeysOf('read');
+
 /**
  * The three evidence operations (S1.11; the contract's `createEvidence`, `completeEvidenceUpload` and `createEvidenceRetrievalAuthorization`). **Each is `x-permission: owner`**:
  * the route is a `self` route to the guard (authenticated, counted, the surface judged, and no permission decided), and the service asks for the grant of the key of the act the
  * record is about before anything is opened (`EvidenceService`). The Rider app declares and completes a record (the bearer credential, at the dedicated host as well as same-origin);
- * the Ops Portal asks for the way to read one. Where the application is composed without what the service needs, each fails closed (`503`).
+ * **the Ops Portal declares and completes the evidence of an intake** (S1.34: the receiver's photos of a condition, Senior Ops's of an adjudication; a staff session is refused every owner that
+ * is a rider's act by the service, `PERMISSION_DENIED`) and asks for the way to read one. Where the application is composed without what the service needs, each fails closed (`503`).
  */
 @Controller('evidence')
 export class EvidenceController {
@@ -84,7 +90,12 @@ export class EvidenceController {
     ErrorCode.StateConflict,
     ErrorCode.ValidationFailed,
   )
-  @Self({ surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true })
+  @Self({
+    surfaces: ['RIDER_ANDROID', 'OPS_PORTAL'],
+    activity: 'qualifying',
+    owner: true,
+    ownerKeys: WRITE_KEYS,
+  })
   async create(
     @Authorized() authorized: AuthorizedRequest,
     @Body() body: EvidenceCreateBody,
@@ -119,7 +130,12 @@ export class EvidenceController {
     ErrorCode.StateConflict,
     ErrorCode.ValidationFailed,
   )
-  @Self({ surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true })
+  @Self({
+    surfaces: ['RIDER_ANDROID', 'OPS_PORTAL'],
+    activity: 'qualifying',
+    owner: true,
+    ownerKeys: WRITE_KEYS,
+  })
   async complete(
     @Authorized() authorized: AuthorizedRequest,
     @Param('id') id: string,
@@ -151,7 +167,7 @@ export class EvidenceController {
     ErrorCode.SessionInvalid,
     ErrorCode.ValidationFailed,
   )
-  @Self({ surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true })
+  @Self({ surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true, ownerKeys: READ_KEYS })
   retrieve(
     @Authorized() authorized: AuthorizedRequest,
     @Param('id') id: string,

@@ -8,6 +8,7 @@ import { AccessFixtureModule, FixtureModule } from '../../test-support/fixtures.
 import { appWith, startTestApp, type TestApp } from '../../test-support/test-app.js';
 import { RequiresPermission } from './access-declaration.js';
 import { assertRoutesAreSound, inspectRoutes } from './route-inventory.js';
+import { ownerKeysOf } from '../evidence/evidence-owners.js';
 
 // The router class of the Express that the platform adapter runs on: the application does not depend on it directly.
 const { Router } = createRequire(
@@ -51,6 +52,8 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/collection-disputes' },
       { method: 'GET', path: '/api/v1/collection-shortfalls' },
       { method: 'GET', path: '/api/v1/handshakes-for-ops' },
+      { method: 'GET', path: '/api/v1/hub-intakes' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id' },
       { method: 'GET', path: '/api/v1/notifications' },
       { method: 'GET', path: '/api/v1/ops/queue-summary' },
       { method: 'GET', path: '/api/v1/ops/riders' },
@@ -93,6 +96,8 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/evidence' },
       { method: 'POST', path: '/api/v1/evidence/:id/complete' },
       { method: 'POST', path: '/api/v1/evidence/:id/retrieval-authorization' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/count' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/lock' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
@@ -231,6 +236,29 @@ describe('the real application', () => {
         credentialModes: new Set(['COOKIE']),
       },
       // S1.12e: the Ops message log, `notification.read` at the hubs of the grant, on the browser surface alone.
+      // S1.32: the receiving side's reads and lock, for the staff of the Ops Portal alone (the contract names the rider's session beside the browser's for the two reads; the surface gate refuses it, OB-S1-96).
+      // The intake is the record the scope probe is asked about, so another hub's intake is HUB_SCOPE_VIOLATION and one that does not exist NOT_FOUND. The lock's request is `background` activity: the page keeping
+      // its own lock is not the person acting.
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       {
         method: 'GET',
         path: '/api/v1/notifications',
@@ -598,26 +626,66 @@ describe('the real application', () => {
         method: 'POST',
         path: '/api/v1/evidence',
         access: 'self',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        authenticated: {
+          surfaces: ['RIDER_ANDROID', 'OPS_PORTAL'],
+          activity: 'qualifying',
+          owner: true,
+          ownerKeys: ownerKeysOf('write'),
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       {
         method: 'POST',
         path: '/api/v1/evidence/:id/complete',
         access: 'self',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        authenticated: {
+          surfaces: ['RIDER_ANDROID', 'OPS_PORTAL'],
+          activity: 'qualifying',
+          owner: true,
+          ownerKeys: ownerKeysOf('write'),
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       {
         method: 'POST',
         path: '/api/v1/evidence/:id/retrieval-authorization',
         access: 'self',
-        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true },
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          owner: true,
+          ownerKeys: ownerKeysOf('read'),
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
       // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
       // changes nothing (the Product Owner, 6 November 2026), so that a number typed in full is in no URL: the CSRF guard judges it like any POST.
+      // S1.33: the receiver's blind count.
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/count',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/lock',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'background',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       {
         method: 'POST',
         path: '/api/v1/ops/lookup',

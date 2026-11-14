@@ -261,7 +261,7 @@ export class EvidenceService {
       }
       if (body.byte_size > maxBytes) throw invalid('/byte_size', 'maximum');
 
-      await this.#requireOwnerReady(tx, act, body.owner_id);
+      const ownerHub = await this.#requireOwnerReady(tx, act, body.owner_id);
 
       const id = randomUUIDv7(this.#options.clock);
       const storageRef = `ev/${randomBytes(16).toString('hex')}`;
@@ -270,11 +270,11 @@ export class EvidenceService {
         inserted = await tx.execute(sql`
           insert into evidence (
             id, owner_type, owner_id, purpose, captured_at, captured_by_actor, captured_by_principal_type, device_context, storage_ref,
-            access_rule, retention_policy, content_type, byte_size, checksum_sha256, upload_ttl_seconds, upload_expires_at
+            access_rule, retention_policy, content_type, byte_size, checksum_sha256, upload_ttl_seconds, upload_expires_at, responsible_hub_id
           ) values (
             ${id}::uuid, ${body.owner_type}, ${body.owner_id}::uuid, ${body.purpose}, ${capturedAt.toISOString()}::timestamptz,
             ${principalId}::uuid, ${authorized.session.principalType}, ${deviceText}::jsonb, ${storageRef},
-            ${act.accessRule}, ${act.retentionPolicy}, ${contentType}, ${body.byte_size}, ${checksum}, ${ttlMinutes * 60}, now()
+            ${act.accessRule}, ${act.retentionPolicy}, ${contentType}, ${body.byte_size}, ${checksum}, ${ttlMinutes * 60}, now(), ${ownerHub}::uuid
           ) returning ${EVIDENCE_COLUMNS}`);
       } catch (error) {
         // The guard repeats what the application judged (the moment of a capture, the size, the owner) and holds the lifetime for every writer; the statement is aborted, so
@@ -313,7 +313,8 @@ export class EvidenceService {
     tx: ReturnType<typeof transactionOf>,
     act: OwnerAct,
     ownerId: string,
-  ): Promise<void> {
+  ): Promise<string | null> {
+    if (act.ownerType === 'PICKUP_INTAKE') return this.#requireIntakeReady(tx, ownerId);
     if (act.ownerType !== 'PICKUP_STOP') throw denied();
     if (!isUuid(ownerId)) throw notFound();
     const found = await tx.execute(sql`
@@ -332,6 +333,33 @@ export class EvidenceService {
         rule: 'stop_not_arrived',
       });
     }
+    // The scope of a stop's record is derived from the stop by the guard of the table, not given by the declarer.
+    return null;
+  }
+
+  /**
+   * The intake a receiving officer declares a record for (S1.34): one **in the hubs of the officer's grant** (the policy of the key shows it nothing else, so another hub's intake and one
+   * that does not exist are one answer, `NOT_FOUND`) and **that has been counted**: the condition the record is for is recorded only after the blind count has committed (`STATE_CONFLICT`,
+   * rule `intake_not_counted`). It gives back the intake's hub, which is the record's scope: the declarer does not choose it, and the policy of the table holds that the record's hub is the
+   * intake's. The database repeats the rule for every writer.
+   */
+  async #requireIntakeReady(
+    tx: ReturnType<typeof transactionOf>,
+    ownerId: string,
+  ): Promise<string> {
+    if (!isUuid(ownerId)) throw notFound();
+    const found = await tx.execute(
+      sql`select state, responsible_hub_id from pickup_intake where id = ${ownerId}::uuid`,
+    );
+    const row = found.rows[0] as unknown as
+      { state: string; responsible_hub_id: string } | undefined;
+    if (row === undefined) throw notFound();
+    if (row.state === 'AWAITING_COUNT') {
+      throw ApiException.of(ErrorCode.StateConflict, 'The intake has not been counted', {
+        rule: 'intake_not_counted',
+      });
+    }
+    return row.responsible_hub_id;
   }
 
   async complete(
@@ -414,10 +442,17 @@ export class EvidenceService {
                 : { responsibleHubId: row.responsible_hub_id }),
               previousState: 'PENDING_UPLOAD',
               resultingState: 'PENDING_UPLOAD',
-              relatedIds: {
-                pickup_stop_id: row.owner_id,
-                rider_id: authorized.session.principalId.toLowerCase(),
-              },
+              // The event names what the record is about and who uploaded it: a stop and the rider who reported it, or an intake and the officer who attached the photo (S1.34).
+              relatedIds:
+                row.owner_type === 'PICKUP_INTAKE'
+                  ? {
+                      pickup_intake_id: row.owner_id,
+                      staff_id: authorized.session.principalId.toLowerCase(),
+                    }
+                  : {
+                      pickup_stop_id: row.owner_id,
+                      rider_id: authorized.session.principalId.toLowerCase(),
+                    },
               detail: { threat: flagged.signature, object_removed: flagged.removed },
             });
             return refusal;
@@ -473,55 +508,64 @@ export class EvidenceService {
   ): Promise<EvidenceRetrieval> {
     const readers = this.#decisionsOf(authorized, 'read');
     if (!isUuid(id)) throw notFound();
-    // Staff of a hub that holds the read key of one act: for the owner types this build supports there is one.
-    const [first] = readers;
-    if (first === undefined) throw denied();
-    const { act, decision } = first;
-    return this.#options.runner.mutate(decision, correlationId, async (handle) => {
-      const tx = transactionOf(handle);
-      const result = await tx.execute(sql`
-        select ${EVIDENCE_COLUMNS}, (select pg_catalog.date_trunc('second', pg_catalog.clock_timestamp())) as issued_at
-          from evidence where id = ${id}::uuid and owner_type = ${act.ownerType}`);
-      const row = result.rows[0] as unknown as (EvidenceRow & { issued_at: string }) | undefined;
-      if (row === undefined) {
-        // Row-level security hides a record outside the grant exactly as it hides one that does not exist; staff are told which (SECURITY_DESIGN.md 14.4b).
-        const hub = await this.#probe(tx, 'evidence', id);
-        throw hub === undefined
-          ? notFound()
-          : ApiException.of(
-              ErrorCode.HubScopeViolation,
-              'That record is in a hub you do not reach',
-            );
-      }
-      if (row.state !== 'STORED') {
-        throw ApiException.of(ErrorCode.EvidenceNotStored, 'The evidence is not stored');
-      }
-      const ttlMinutes = await this.#options.settings.integer(
-        handle,
-        EVIDENCE_SETTINGS.retrievalTtlMinutes,
+    // A staff member holds the read key of each act it could be reading for (the key of a pickup stop's evidence and the key of an intake's): the record is looked for under the key of
+    // each act in turn, and the answer is the first act that has it. The way to read it is asked under the key of the act that has the record, and it is the last act's miss that is the answer.
+    for (const [at, { act, decision }] of readers.entries()) {
+      const lastAct = at === readers.length - 1;
+      const way = await this.#options.runner.mutate(
+        decision,
+        correlationId,
+        async (handle): Promise<EvidenceRetrieval | undefined> => {
+          const tx = transactionOf(handle);
+          const result = await tx.execute(sql`
+            select ${EVIDENCE_COLUMNS}, (select pg_catalog.date_trunc('second', pg_catalog.clock_timestamp())) as issued_at
+              from evidence where id = ${id}::uuid and owner_type = ${act.ownerType}`);
+          const row = result.rows[0] as unknown as
+            (EvidenceRow & { issued_at: string }) | undefined;
+          if (row === undefined) {
+            if (!lastAct) return undefined;
+            // Row-level security hides a record outside the grant exactly as it hides one that does not exist; staff are told which (SECURITY_DESIGN.md 14.4b).
+            const hub = await this.#probe(tx, 'evidence', id);
+            throw hub === undefined
+              ? notFound()
+              : ApiException.of(
+                  ErrorCode.HubScopeViolation,
+                  'That record is in a hub you do not reach',
+                );
+          }
+          if (row.state !== 'STORED') {
+            throw ApiException.of(ErrorCode.EvidenceNotStored, 'The evidence is not stored');
+          }
+          const ttlMinutes = await this.#options.settings.integer(
+            handle,
+            EVIDENCE_SETTINGS.retrievalTtlMinutes,
+          );
+          // A look at a record in a hub that is not the actor's own is a crossing, audited as every staff read is (audit.md 5.4). The capability itself is in no event.
+          const baseline = await primaryHubOfStaff(handle, authorized.session.principalId);
+          if (row.responsible_hub_id !== null && row.responsible_hub_id !== baseline) {
+            await this.#options.audit.write(handle, {
+              code: 'auth.hub_boundary.crossed',
+              enhanced: true,
+              outcome: 'SUCCEEDED',
+              object: { type: 'Evidence', id: row.id },
+              responsibleHubId: row.responsible_hub_id,
+            });
+          }
+          const capability = this.#options.store.presignRetrieval({
+            key: row.storage_ref,
+            issuedAt: timestampOf(row.issued_at),
+            ttlSeconds: ttlMinutes * 60,
+          });
+          return {
+            method: capability.method,
+            url: capability.url,
+            headers: capability.headers,
+            expires_at: capability.expiresAt.toISOString(),
+          };
+        },
       );
-      // A look at a record in a hub that is not the actor's own is a crossing, audited as every staff read is (audit.md 5.4). The capability itself is in no event.
-      const baseline = await primaryHubOfStaff(handle, authorized.session.principalId);
-      if (row.responsible_hub_id !== null && row.responsible_hub_id !== baseline) {
-        await this.#options.audit.write(handle, {
-          code: 'auth.hub_boundary.crossed',
-          enhanced: true,
-          outcome: 'SUCCEEDED',
-          object: { type: 'Evidence', id: row.id },
-          responsibleHubId: row.responsible_hub_id,
-        });
-      }
-      const capability = this.#options.store.presignRetrieval({
-        key: row.storage_ref,
-        issuedAt: timestampOf(row.issued_at),
-        ttlSeconds: ttlMinutes * 60,
-      });
-      return {
-        method: capability.method,
-        url: capability.url,
-        headers: capability.headers,
-        expires_at: capability.expiresAt.toISOString(),
-      };
-    });
+      if (way !== undefined) return way;
+    }
+    throw notFound();
   }
 }

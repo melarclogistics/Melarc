@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 import { expect } from 'vitest';
 
+import type { TestResponse } from '../../../src/test-support/test-client.js';
+
 import { excusePhotos, parcelPhotosOf } from './evidence-photo.js';
 import type { ManifestDays } from './manifest-days.js';
 import { arrangeRun, type ArrangedRun } from './runs.js';
-import { API, HUB_A } from './staff-routes.js';
+import { API, HUB_A, OPS, type Actor } from './staff-routes.js';
 import type { ArrangedVendor, VendorRoutes } from './vendor-routes.js';
 
 /**
@@ -152,5 +154,27 @@ export async function arrangeCounted(
             count_variance = case when $3::integer = 0 then 'MATCH' when $3::integer < 0 then 'SHORT' else 'OVER' end, count_difference = $3::integer
       where id = $1`,
     [intakeId, physicalCount, difference],
+  );
+}
+
+/**
+ * A receiver counts an intake through the real route (`submitBlindCount`): it reads the intake for its ETag, and commits the physical count with a key of its own. The answer is the
+ * response of the route, so that a test of what follows a count (a condition, an adjudication, a read) arranges it as the application does.
+ */
+export async function countIntake(
+  actor: Actor,
+  intakeId: string,
+  physicalCount: number,
+): Promise<TestResponse> {
+  const intake = `${API}/hub-intakes/${intakeId}`;
+  const read = await actor.client.get(intake);
+  expect(read.status).toBe(200);
+  return actor.client.post(
+    `${intake}/count`,
+    { physical_count: physicalCount },
+    {
+      origin: OPS,
+      headers: { 'If-Match': read.header('etag') ?? '', 'Idempotency-Key': randomUUID() },
+    },
   );
 }

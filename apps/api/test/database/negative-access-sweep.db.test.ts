@@ -106,8 +106,9 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   revokeVendorDevice: ['VENDOR'],
   // S1.11: the evidence operations are `x-permission: owner` (a `self` route whose use case asks for the grant of the act the record is about): the rider declares and completes a
   // record, the staff of the hub are given a way to read it. No key names them, so the sweep reads them with the `self` operations and names whom each serves.
-  createEvidence: ['RIDER'],
-  completeEvidenceUpload: ['RIDER'],
+  // S1.34: a receiving officer declares and completes the evidence of an intake (the photos of a condition, Senior Ops's of an adjudication), so a staff session is served them too.
+  createEvidence: ['RIDER', 'STAFF'],
+  completeEvidenceUpload: ['RIDER', 'STAFF'],
   createEvidenceRetrievalAuthorization: ['STAFF'],
 };
 

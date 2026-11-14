@@ -121,6 +121,8 @@ const MALFORMED = '{"broken": ';
 
 let routes: StaffRoutes;
 let opsStaff: Actor;
+/** A staff member whose bundle holds the key of no act of any `owner` operation (Finance reads nothing of an intake): the one the `owner` operations a staff session is served are held to. */
+let noActKeys: Actor;
 let vendorCookie: string;
 let vendorCsrf: string;
 let riderToken: string;
@@ -130,6 +132,7 @@ let displacedCsrf: string;
 beforeAll(async () => {
   routes = await startStaffRoutes();
   opsStaff = await routes.opsStaff();
+  noActKeys = await routes.actor(BUNDLE_IDS.finance, HUB_A);
   const vendor = await insertVendor(routes.admin, vendorRow({ hubId: HUB_A }));
   const device = await insertDevice(routes.admin, vendor.accountId);
   const live = await arrangedFixedSession(routes.kit, routes.admin, 'VENDOR', {
@@ -287,10 +290,12 @@ describe('a malformed body tells nothing to a caller who may not proceed (AC-SLI
       )
       .map((operation) => [operation.id, operation]),
   )('%s: from a staff member without its key, 403', async (_id, operation) => {
+    // An `owner` operation that a staff session is served (S1.34: the evidence of an intake) is decided by the keys of its acts, and Ops Staff hold one of them: the member without any is Finance.
+    const actor = RIDER_OWNER_OPERATIONS.has(operation.id) ? noActKeys : opsStaff;
     expect(
       await send(operation, {
-        cookie: `melarc_session=${opsStaff.token}; melarc_csrf=${opsStaff.csrf ?? ''}`,
-        csrf: opsStaff.csrf ?? '',
+        cookie: `melarc_session=${actor.token}; melarc_csrf=${actor.csrf ?? ''}`,
+        csrf: actor.csrf ?? '',
         origin: OPS,
         body: MALFORMED,
       }),

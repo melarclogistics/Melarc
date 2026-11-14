@@ -137,6 +137,59 @@ describe('what an authenticated route must state (S0.26)', () => {
     ).toThrow(/only a self route states owner/);
   });
 
+  // Break caught (S1.34): the keys of an owner operation's acts declared with anything the guard could misread (an empty list, a key that is no key, a kind of principal that is none, a list on a
+  // route that is not an owner's), or lost, so that the guard asks nothing of the session before the body is read.
+  it('keeps the keys of the acts of an owner operation, by kind of principal, and refuses a statement that is not one', () => {
+    const stated = detailOf(
+      Self({
+        surfaces: ['OPS_PORTAL', 'RIDER_ANDROID'],
+        activity: 'qualifying',
+        owner: true,
+        ownerKeys: {
+          STAFF: ['hub.intake.count', 'hub.osd.adjudicate'],
+          RIDER: ['pickup.failure.report'],
+        },
+      }),
+    );
+    expect(stated?.authenticated?.ownerKeys).toEqual({
+      STAFF: ['hub.intake.count', 'hub.osd.adjudicate'],
+      RIDER: ['pickup.failure.report'],
+    });
+    expect(Object.isFrozen(stated?.authenticated?.ownerKeys)).toBe(true);
+    expect(
+      detailOf(Self({ surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true }))
+        ?.authenticated,
+    ).not.toHaveProperty('ownerKeys');
+    for (const given of [
+      {},
+      { STAFF: [] },
+      { STAFF: ['not a key'] },
+      { STAFF: 'hub.read' },
+      { ROBOT: ['hub.read'] },
+      [],
+      null,
+    ]) {
+      expect(
+        () =>
+          Self({
+            surfaces: ['OPS_PORTAL'],
+            activity: 'qualifying',
+            owner: true,
+            ownerKeys: given as never,
+          }),
+        JSON.stringify(given),
+      ).toThrow(/acts an owner operation could be for/);
+    }
+    // Not on a route that is not an owner's.
+    expect(() =>
+      Self({
+        surfaces: ['OPS_PORTAL'],
+        activity: 'qualifying',
+        ownerKeys: { STAFF: ['hub.read'] },
+      }),
+    ).toThrow(/acts an owner operation could be for/);
+  });
+
   // Break caught (R76; the review of 5 November 2026): the ceiling of the operations that cause a text declared with a value that does not mean it ("false", "yes", 1), which a
   // guard testing for truth would read as a declaration and a reader of the route would read as none; or declared and lost, so that the guard never admits the counter.
   it('keeps providerInitiating when it is true, and refuses it as anything else', () => {
