@@ -148,12 +148,12 @@ Legend: **A** Ops Staff · **S** Senior Ops · **P** Platform Admin · **V** Ven
 | Key| Holders| Scope| Notes|
 |---|---|---|---|
 | `hub.handover.submit`| **R only**| owned completed run||
-| `hub.intake.count`| A S P| own hub · P: all hubs| Blind count. Guarded on read *and* write (§35.5.2). **As built (S1.33):** it commits the blind count (`submitBlindCount`: once, with the comparison made by the database). **As built (S1.32):** it takes the advisory receive lock (`acquireIntakeLock`, the two columns of the lock and no other) and reads the intakes of its hubs to show the receiver what it locked, never the declaration|
+| `hub.intake.count`| A S P| own hub · P: all hubs| Blind count. Guarded on read *and* write (§35.5.2). **As built (S1.34):** it records a condition (`recordIntakeCondition`) and declares and completes the evidence of one (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `CONDITION`). **As built (S1.33):** it commits the blind count (`submitBlindCount`: once, with the comparison made by the database). **As built (S1.32):** it takes the advisory receive lock (`acquireIntakeLock`, the two columns of the lock and no other) and reads the intakes of its hubs to show the receiver what it locked, never the declaration|
 | `hub.intake.itemize`| A S P| own hub · P: all hubs||
 | `hub.intake.close`| A S P| own hub · P: all hubs| State precondition: parity met (§35.6.11)|
 | `hub.intake.close_exception`| S P| own hub · P: all hubs| The only route to closing without parity (§35.5.5)|
 | `hub.intake.reopen`| **P only**| all hubs| Privileged, audited (§36.6)|
-| `hub.osd.adjudicate`| S P| own hub · P: all hubs| §11.4 row 12. **Not Ops Staff**|
+| `hub.osd.adjudicate`| S P| own hub · P: all hubs| §11.4 row 12. **Not Ops Staff**. **As built (S1.34):** `adjudicateDiscrepancy`, and the evidence of an adjudication (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`); a user without the key is `PERMISSION_DENIED` before the body is read (`AC-SLICE-001-42`, `-76`)|
 | `hub.setting.propose`| S| own hub| Zones, service days, boundaries (§35.10, `HUB-028`)|
 | `hub.setting.approve`| **P only**| all hubs||
 
