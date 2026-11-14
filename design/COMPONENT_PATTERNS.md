@@ -2094,6 +2094,19 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `STOP_EVIDENCE` | `STORED` | success | Stored |
 | `STOP_EVIDENCE` | `PENDING_UPLOAD` | waiting | Waiting to upload |
 | `STOP_EVIDENCE` | `EXPIRED` | danger | Never uploaded |
+| `HUB_INTAKE` | `AWAITING_COUNT` | waiting | Awaiting count |
+| `HUB_INTAKE` | `COUNTED` | info | Counted |
+| `HUB_INTAKE` | `RECONCILIATION_REQUIRED` | waiting | Needs a decision |
+| `HUB_INTAKE` | `READY_FOR_ITEMIZATION` | success | Ready to itemise |
+| `HUB_INTAKE` | `ITEMIZING` | info | Being itemised |
+| `HUB_INTAKE` | `CLOSED` | neutral | Closed |
+| `INTAKE_COUNT` | `MATCH` | success | Matches |
+| `INTAKE_COUNT` | `SHORT` | waiting | Short |
+| `INTAKE_COUNT` | `OVER` | waiting | Over |
+| `INTAKE_CONDITION` | `OK` | success | Good condition |
+| `INTAKE_CONDITION` | `DAMAGED` | danger | Damaged |
+| `INTAKE_CONDITION` | `TAMPERED` | danger | Tampered with |
+| `INTAKE_CONDITION` | `OTHER` | waiting | Another problem |
 
 
 The same state name in two domains (`PENDING`, `ACTIVE`, `CANCELLED`) is two different states of two different records. The words are sentence case and plain, with no raw value and no full stop.

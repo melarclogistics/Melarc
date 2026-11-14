@@ -4,6 +4,7 @@ import type { ForbiddenKind } from '../../components/ui/forbidden-state/Forbidde
 import { OperationFailure, type Violation } from '../api/api-response';
 import { StaleSessionError } from '../session/session-boundary';
 import { refusalText } from './capability-words';
+import { HUB_INTAKE_COPY } from './hub-intake-copy';
 import { MANIFEST_COPY } from './manifest-copy';
 import { NOTIFICATION_COPY } from './notification-copy';
 import { PICKUP_COPY } from './pickup-copy';
@@ -281,6 +282,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   ...PICKUP_COPY,
   ...MANIFEST_COPY,
   ...PICKUP_WORK_COPY,
+  ...HUB_INTAKE_COPY,
   ...NOTIFICATION_COPY,
 ];
 

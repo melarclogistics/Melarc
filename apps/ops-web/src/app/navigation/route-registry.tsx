@@ -2,6 +2,11 @@ import type { ReactElement } from 'react';
 import type { RouteObject } from 'react-router';
 
 import { RequirePermission } from '../../platform/session/RequirePermission';
+import { IntakeConditionPage } from '../pages/intakes/IntakeConditionPage';
+import { IntakeCountPage } from '../pages/intakes/IntakeCountPage';
+import { IntakeDiscrepancyPage } from '../pages/intakes/IntakeDiscrepancyPage';
+import { IntakePage } from '../pages/intakes/IntakePage';
+import { IntakeQueuePage } from '../pages/intakes/IntakeQueuePage';
 import { MyWorkPage } from '../pages/my-work/MyWorkPage';
 import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
 import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
@@ -134,6 +139,46 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       description:
         'Settle the handshakes whose code could not be entered, by an override or by hand.',
     },
+  },
+  // Receiving at a hub (S1.35): the queue of intakes, one intake's record, the blind count, the condition and the adjudication. Each is behind the key of the operation that is its point, and never a role: the
+  // queue and the record open for the read, the count and the condition for the key of the count, the adjudication for the key Ops Staff do not hold. The queue is the one entry, in the Hub group, and draws no
+  // count: `getQueueSummary` states none for intakes. Itemising and closing are later work and have no route.
+  {
+    path: '/intakes',
+    element: <IntakeQueuePage />,
+    access: { permission: 'hub.read' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Receiving',
+      icon: 'receiving',
+      order: 0,
+      description: 'Count the parcels a rider handed over at your hub, and decide what is found.',
+    },
+  },
+  {
+    path: '/intakes/:id',
+    element: <IntakePage />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/count',
+    element: <IntakeCountPage />,
+    access: { permission: 'hub.intake.count' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/condition',
+    element: <IntakeConditionPage />,
+    access: { permission: 'hub.intake.count' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/discrepancy',
+    element: <IntakeDiscrepancyPage />,
+    access: { permission: 'hub.osd.adjudicate' },
+    menu: null,
   },
   // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
   // `notification.read`, and never a role. It is reached from the menu and, for one request, from that request's page.

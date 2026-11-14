@@ -4,12 +4,15 @@ import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * **No photo of a stop, and no number of them, is on any page of the receiving side** (surfaces/ops-portal.md section 7, `/manifests/{id}/stops/{stopId}`; hub-intake.md section 5.3): the photos tell the
+ * **No photo of a stop, and no number of them, is on any page of the receiving side before the count commits** (surfaces/ops-portal.md section 7, `/manifests/{id}/stops/{stopId}`; hub-intake.md section 5.3): the photos tell the
  * receiving officer what the rider counted (the number of parcel photos *is* the rider's count), so one who counts what they receive must not see them before their own count commits: the hub's blind count
- * (MSC-DEC-194). This holds the portal's source to it in two ways. **The photos have one home**: the files outside `platform/pickup-work/` that read a stop's evidence, ask for the authorization of a
- * photo or draw the progress of its photos are the stop's pages and no others, so a page that begins to draw them must be added to the list below, on purpose and in review. **The receiving side has none**:
- * no file whose name says it is the receiving side (an intake, a receiving, a custody handover: the act of one who counts what is handed to them) names any of them. A file of the receiving side that is
- * added later is held to the same, whatever the list says.
+ * (MSC-DEC-194). **After** the count commits the photos are readable on the intake (`parcel_photo_ids` of a counted intake, D-A10, S1.33) and the intake's record shows them one at a time: that is the one
+ * thing the receiving side may draw, in the one file named below, which a counted intake alone gives the identifiers. This holds the portal's source to it in three ways. **The photos have one home**: the
+ * files outside `platform/pickup-work/` that read a stop's evidence, ask for the authorization of a photo or draw the progress of its photos are the stop's pages and the one dialog that opens a photo, so a page
+ * that begins to draw them must be added to the list below, on purpose and in review. **The receiving side has none of the stop's**: no file whose name says it is the receiving side (an intake, a receiving, a
+ * custody handover: the act of one who counts what is handed to them) names any of them. A file of the receiving side that is added later is held to the same, whatever the list says. **The one door is held in
+ * its turn**: the dialog that opens a photo is named by the stop's photos and by one file of the receiving side, the photos of a counted intake, and that file is named by the intake's record page alone: the
+ * queue, the count, the condition and the adjudication never open a photo.
  */
 const SRC = join(import.meta.dirname, '../src');
 
@@ -42,7 +45,22 @@ const HOMES = [
   `app${sep}pages${sep}manifests${sep}StopPhotos.tsx`,
   `app${sep}pages${sep}manifests${sep}StopPage.tsx`,
   `app${sep}pages${sep}manifests${sep}StopExceptionPage.tsx`,
+  `app${sep}pages${sep}evidence${sep}EvidencePhotoDialog.tsx`,
 ].map((path) => path.replaceAll('\\', '/'));
+
+/** The dialog that opens one stored photo, and who may name it: the stop's photos, and the photos of a counted intake (the one file of the receiving side that may). */
+const PHOTO_DIALOG = 'EvidencePhotoDialog';
+const DIALOG_USERS = [
+  'app/pages/manifests/StopPhotos.tsx',
+  'app/pages/evidence/EvidencePhotoDialog.tsx',
+  'app/pages/intakes/IntakePhotos.tsx',
+];
+/** The photos of a counted intake, and who may name them: the file itself and the intake's record page. */
+const INTAKE_PHOTOS = 'IntakePhotos';
+const INTAKE_PHOTOS_USERS = [
+  'app/pages/intakes/IntakePhotos.tsx',
+  'app/pages/intakes/IntakePage.tsx',
+];
 
 /** Where a failure's number of photos is drawn: the failure queue, and no other page. */
 const FAILURE_HOMES = [
@@ -95,6 +113,19 @@ export function offenders(files: readonly Source[]): string[] {
         found.push(`${file.path} is of the receiving side and names ${names.join(', ')}.`);
       }
     }
+    if (mentions(file.text, [PHOTO_DIALOG]).length > 0 && !DIALOG_USERS.includes(file.path)) {
+      found.push(
+        `${file.path} names ${PHOTO_DIALOG}: only the stop's photos and the photos of a counted intake open a photo.`,
+      );
+    }
+    if (
+      mentions(file.text, [INTAKE_PHOTOS]).length > 0 &&
+      !INTAKE_PHOTOS_USERS.includes(file.path)
+    ) {
+      found.push(
+        `${file.path} names ${INTAKE_PHOTOS}: the photos of a counted intake are drawn by the intake's record page alone.`,
+      );
+    }
     if (
       mentions(file.text, [FAILURE_PHOTO_COUNT]).length > 0 &&
       !FAILURE_HOMES.includes(file.path)
@@ -123,8 +154,11 @@ describe('the photos of a stop and the receiving side', () => {
   it('has the stop’s page drawing the photos it is the home of', () => {
     const page = real.find((file) => file.path === 'app/pages/manifests/StopPhotos.tsx');
     expect(mentions(page?.text ?? '', PHOTOS)).toEqual(
-      expect.arrayContaining(['StopPhotos', 'usePhotoAuthorization']),
+      expect.arrayContaining(['StopPhotos', 'EvidenceRead']),
     );
+    // The picture of a photo is asked for in the one dialog both the stop and a counted intake open it with.
+    const dialog = real.find((file) => file.path === 'app/pages/evidence/EvidencePhotoDialog.tsx');
+    expect(mentions(dialog?.text ?? '', PHOTOS)).toContain('usePhotoAuthorization');
     const stop = real.find((file) => file.path === 'app/pages/manifests/StopPage.tsx');
     expect(mentions(stop?.text ?? '', ['useStopEvidence', 'StopPhotos'])).toHaveLength(2);
   });
@@ -166,6 +200,58 @@ describe('the photos of a stop and the receiving side', () => {
       ],
     ])('finds %s', (_name, path, text) => {
       expect(synthetic(path, text).length).toBeGreaterThan(0);
+    });
+
+    // Break caught: the door that opens a photo named by a page of the receiving side that is not the counted intake's own photos, so that a photo is opened before the count.
+    it.each([
+      [
+        'the queue opening a photo',
+        'app/pages/intakes/IntakeQueuePage.tsx',
+        'import { EvidencePhotoDialog } from "../evidence/EvidencePhotoDialog";',
+      ],
+      [
+        'the count page opening a photo',
+        'app/pages/intakes/IntakeCountPage.tsx',
+        '<EvidencePhotoDialog evidenceId={id} />',
+      ],
+      [
+        'a page of another folder opening a photo',
+        'app/pages/pickup/PickupRequestDetailPage.tsx',
+        '<EvidencePhotoDialog evidenceId={id} />',
+      ],
+      [
+        'the count page drawing the photos of a counted intake',
+        'app/pages/intakes/IntakeCountPage.tsx',
+        '<IntakePhotos ids={ids} />',
+      ],
+      [
+        'the adjudication drawing the photos of a counted intake',
+        'app/pages/intakes/IntakeDiscrepancyPage.tsx',
+        'import { IntakePhotos } from "./IntakePhotos";',
+      ],
+    ])('finds %s', (_name, path, text) => {
+      expect(synthetic(path, text).length).toBeGreaterThan(0);
+    });
+
+    it('finds nothing in the photos of a counted intake, in the record page that draws them or in the dialog', () => {
+      expect(
+        synthetic(
+          'app/pages/intakes/IntakePhotos.tsx',
+          'import { EvidencePhotoDialog } from "../evidence/EvidencePhotoDialog"; <EvidencePhotoDialog />',
+        ),
+      ).toEqual([]);
+      expect(
+        synthetic(
+          'app/pages/intakes/IntakePage.tsx',
+          '<IntakePhotos ids={intake.parcel_photo_ids} />',
+        ),
+      ).toEqual([]);
+      expect(
+        synthetic(
+          'app/pages/evidence/EvidencePhotoDialog.tsx',
+          'usePhotoAuthorization(evidenceId, true)',
+        ),
+      ).toEqual([]);
     });
 
     it('finds nothing in the stop’s own page or in the failure queue', () => {

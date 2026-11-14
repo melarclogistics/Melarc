@@ -75,6 +75,7 @@ describe('the real registry', () => {
       groups: [
         ['Today', ['My work', 'Decisions', 'Handshakes']],
         ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
+        ['Hub', ['Receiving']],
         ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
         ['System', ['Message log']],
       ],
@@ -83,14 +84,15 @@ describe('the real registry', () => {
     });
   });
 
-  // Break caught: a group drawn for a part of the product that is not built: Hub, Dispatch and Money have no page, so a person holding every key
-  // is shown four of the seven groups.
-  it('has four of the seven groups, because three have no page yet', () => {
+  // Break caught: a group drawn for a part of the product that is not built: Dispatch and Money have no page, so a person holding every key
+  // is shown five of the seven groups.
+  it('has five of the seven groups, because two have no page yet', () => {
     const everyKey = [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS];
 
     expect(navigationFor(everyKey, SIGNED_IN_ROUTES).groups.map((group) => group.id)).toEqual([
       'today',
       'pickups',
+      'hub',
       'people',
       'system',
     ]);
@@ -164,6 +166,42 @@ describe('the real registry', () => {
     expect(exception?.access).toEqual({ permission: 'pickup.handshake.override' });
   });
 
+  // Break caught (ops-portal.md section 7, S1.35): the receiving queue offered to a session without the read, or the count, the condition and the adjudication given a menu entry (they are reached from an
+  // intake), or the adjudication behind the key Ops Staff hold, or the queue drawing a count the queue summary does not state.
+  it('offers the receiving queue to the holders of its read alone, and gives the acts on an intake no entry', () => {
+    expect(menusFor(['hub.read']).groups).toEqual([
+      ['Today', ['My work']],
+      ['Hub', ['Receiving']],
+    ]);
+    // The count and the adjudication open no queue of their own: a holder of either alone is offered nothing.
+    expect(menusFor(['hub.intake.count']).groups).toEqual([['Today', ['My work']]]);
+    expect(menusFor(['hub.osd.adjudicate']).groups).toEqual([['Today', ['My work']]]);
+    const entries = navigationFor(
+      [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS],
+      SIGNED_IN_ROUTES,
+    ).groups.flatMap((group) => group.entries);
+    expect(entries.find((entry) => entry.label === 'Receiving')?.queue).toBeUndefined();
+
+    const route = (path: string) => SIGNED_IN_ROUTES.find((candidate) => candidate.path === path);
+    expect(route('/intakes')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/intakes/:id')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/intakes/:id/count')?.access).toEqual({ permission: 'hub.intake.count' });
+    expect(route('/intakes/:id/condition')?.access).toEqual({ permission: 'hub.intake.count' });
+    expect(route('/intakes/:id/discrepancy')?.access).toEqual({ permission: 'hub.osd.adjudicate' });
+    for (const path of [
+      '/intakes/:id',
+      '/intakes/:id/count',
+      '/intakes/:id/condition',
+      '/intakes/:id/discrepancy',
+    ]) {
+      expect(route(path)?.menu, path).toBeNull();
+    }
+    // No route starts the work that comes after receiving: itemising and closing are later tasks, and a route for them would be a placeholder.
+    expect(SIGNED_IN_ROUTES.some((candidate) => /items|close|itemi/i.test(candidate.path))).toBe(
+      false,
+    );
+  });
+
   // Break caught: Decisions gathering the staff approver's count: it stays on Staff, and a merged inbox is a later page that is not built.
   it('gives each queue to one entry (the exceptions to Decisions, the confirmations to Requests, the runs to Pickup runs, the staff profiles to Staff), and no other entry carries a queue', () => {
     const queues = Object.fromEntries(
@@ -208,6 +246,7 @@ describe('the real registry', () => {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
           ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
+          ['Hub', ['Receiving']],
           ['People and access', ['Riders', 'Vendors']],
           ['System', ['Message log']],
         ],
@@ -221,6 +260,7 @@ describe('the real registry', () => {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
           ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
+          ['Hub', ['Receiving']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],
@@ -234,6 +274,7 @@ describe('the real registry', () => {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
           ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
+          ['Hub', ['Receiving']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],

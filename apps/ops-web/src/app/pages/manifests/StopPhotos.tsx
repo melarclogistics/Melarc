@@ -3,7 +3,6 @@ import { useState } from 'react';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
-import { Dialog } from '../../../components/ui/dialog/Dialog';
 import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
@@ -11,15 +10,14 @@ import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type {
   ParcelPhotoExceptionView,
   ParcelPhotoProgressView,
-  RetrievalAuthorizationView,
   StopEvidenceItemView,
   StopEvidencePageView,
 } from '../../../platform/pickup-work/pickup-work-shape';
-import { usePhotoAuthorization } from '../../../platform/pickup-work/use-pickup-work-queries';
 import { problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { actorText } from '../pickup/pickup-presentation';
+import { EvidencePhotoDialog } from '../evidence/EvidencePhotoDialog';
 import { EVIDENCE_STATE_MAP, countText } from '../pickup-work/pickup-work-presentation';
 import './stop-photos.css';
 
@@ -117,80 +115,6 @@ function PhotoTile({ tile, onOpen }: { readonly tile: Tile; readonly onOpen: () 
   );
 }
 
-function PhotoImage({
-  authorization,
-  label,
-  taken,
-}: {
-  readonly authorization: RetrievalAuthorizationView;
-  readonly label: string;
-  readonly taken: string;
-}) {
-  const [broken, setBroken] = useState(false);
-  if (broken) {
-    return (
-      <Alert variant="danger">
-        <p>
-          The photo could not be shown: its link may have run out, or the photo store did not
-          answer. Close it and open it again.
-        </p>
-      </Alert>
-    );
-  }
-  return (
-    // The picture is read only while this dialog is open, at full size, from the address this one authorization gave. The `<img>` sends no header and no referrer, and the address is held by nothing
-    // but this element: it is not logged, stored or shown as text.
-    <img
-      className="stop-photo__image"
-      src={authorization.url}
-      alt={`${label}, taken ${taken}`}
-      referrerPolicy="no-referrer"
-      decoding="async"
-      onError={() => {
-        setBroken(true);
-      }}
-    />
-  );
-}
-
-/**
- * One photo, opened: it asks for the authorization to read **this photo alone** (`createEvidenceRetrievalAuthorization`, five minutes) when it is drawn, and drops it when it is closed, so that opening
- * the photo again asks again. It is drawn only while the officer has it open.
- */
-function PhotoDialog({ tile, onClose }: { readonly tile: Tile; readonly onClose: () => void }) {
-  const authorization = usePhotoAuthorization(tile.item.id, true);
-  const taken = formatInstant(tile.item.captured_at) ?? '';
-  return (
-    <Dialog
-      open
-      title={tile.label}
-      description={
-        taken === ''
-          ? 'The photo is read only while this window is open.'
-          : `Taken ${taken}. The photo is read only while this window is open.`
-      }
-      onRequestClose={onClose}
-    >
-      <ReadState<RetrievalAuthorizationView>
-        query={authorization}
-        isEmpty={() => false}
-        empty={null}
-        loadingLabel="Opening the photo…"
-        permission="pickup.read"
-        capability="see pickup runs"
-        operation="createEvidenceRetrievalAuthorization"
-      >
-        {(data) => <PhotoImage authorization={data} label={tile.label} taken={taken} />}
-      </ReadState>
-      <p className="stop-photo__close">
-        <Button type="button" variant="secondary" data-initial-focus onClick={onClose}>
-          Close the photo
-        </Button>
-      </p>
-    </Dialog>
-  );
-}
-
 /** The tiles of one kind of evidence, each named by its place among its kind. */
 function tilesOf(
   items: readonly StopEvidenceItemView[],
@@ -279,9 +203,12 @@ function Photos({
         </p>
       ) : null}
       {opened === undefined ? null : (
-        <PhotoDialog
+        <EvidencePhotoDialog
           key={opened.item.id}
-          tile={opened}
+          evidenceId={opened.item.id}
+          label={opened.label}
+          capturedAt={opened.item.captured_at}
+          of="stop"
           onClose={() => {
             setOpened(undefined);
           }}

@@ -84,20 +84,6 @@
   margin: var(--space-4) 0 0;
 }
 
-/* The photo opened, at full size within the dialog and never wider than it or taller than the window. */
-.stop-photo__image {
-  display: block;
-  max-inline-size: 100%;
-  max-block-size: 70vh;
-  margin-inline: auto;
-  border-radius: var(--radius-md);
-  object-fit: contain;
-}
-
-.stop-photo__close {
-  margin: var(--space-4) 0 0;
-}
-
 @media (forced-colors: active) {
   .stop-photo {
     border-color: CanvasText;

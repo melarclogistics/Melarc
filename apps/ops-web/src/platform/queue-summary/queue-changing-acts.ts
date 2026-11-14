@@ -178,6 +178,17 @@ export const QUEUE_NEUTRAL_CALLS: readonly QueueNeutralCall[] = [
     'A read that is a `POST` (the authorization to read one stored photo): the server changes nothing, and it is a query of the screen that opens the photo and not an act.',
     [['POST', '/evidence/{id}/retrieval-authorization', 'createEvidenceRetrievalAuthorization']],
   ),
+  ...neutral(
+    'Receiving at a hub (S1.35): the lock of an intake, its blind count, its condition, its adjudication and the evidence of a finding. `getQueueSummary` states no queue for intakes, so none of them moves a count (the lock is also `background` activity: the page keeping its own lock).',
+    [
+      ['POST', '/hub-intakes/{id}/lock', 'acquireIntakeLock'],
+      ['POST', '/hub-intakes/{id}/count', 'submitBlindCount'],
+      ['POST', '/hub-intakes/{id}/condition', 'recordIntakeCondition'],
+      ['POST', '/hub-intakes/{id}/discrepancy', 'adjudicateDiscrepancy'],
+      ['POST', '/evidence', 'createEvidence'],
+      ['POST', '/evidence/{id}/complete', 'completeEvidenceUpload'],
+    ],
+  ),
   ...neutral('Acts on a rider’s device, which no queue counts.', [
     ['POST', '/ops/riders/{riderId}/device/register', 'registerRiderDevice'],
     ['POST', '/ops/riders/{riderId}/device/reregister', 'reregisterRiderDevice'],

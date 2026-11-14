@@ -1,0 +1,91 @@
+/*
+ * EvidenceUpload (design/COMPONENT_PATTERNS.md, *EvidenceUpload*): a native file input and, under it, one row for each file with its name and size, its state in words beside a badge, the page's words
+ * for a failure, and the two things a person can do with a file: try it again and leave it out. The input is the browser's own (so it is operable from the keyboard as the browser's is) and takes
+ * its look from the tokens through the file selector button.
+ */
+.ui-evidence-upload {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.ui-evidence-upload__input {
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.ui-evidence-upload__input::file-selector-button {
+  margin-right: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-evidence-upload__input:disabled {
+  border-color: var(--color-border-disabled);
+  background: var(--color-surface-disabled);
+  color: var(--color-text-disabled);
+}
+
+.ui-evidence-upload__input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset-width);
+}
+
+.ui-evidence-upload__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-evidence-upload__file {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-default);
+}
+
+.ui-evidence-upload__file p {
+  margin: 0;
+}
+
+.ui-evidence-upload__name {
+  overflow-wrap: anywhere;
+}
+
+.ui-evidence-upload__size,
+.ui-evidence-upload__step {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.ui-evidence-upload__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ui-evidence-upload__error {
+  color: var(--color-status-danger-foreground);
+  overflow-wrap: anywhere;
+}
+
+.ui-evidence-upload__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

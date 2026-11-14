@@ -45,7 +45,8 @@ export const KIT_GROUPS: readonly Group[] = [
   {
     id: 'panels',
     title: 'Panels and records',
-    summary: 'SidePanel, RecordHeader with StageTracker, DescriptionList, Panel and StatTile',
+    summary:
+      'SidePanel, RecordHeader with StageTracker, DescriptionList, Panel, StatTile and LockIndicator',
     page: () => <PanelsGroup />,
   },
   {
@@ -54,7 +55,12 @@ export const KIT_GROUPS: readonly Group[] = [
     summary: 'ActionMenu and Toast',
     page: () => <MenusGroup />,
   },
-  { id: 'forms', title: 'Forms', summary: 'DateField', page: () => <FormsGroup /> },
+  {
+    id: 'forms',
+    title: 'Forms',
+    summary: 'DateField and EvidenceUpload',
+    page: () => <FormsGroup />,
+  },
   { id: 'lists', title: 'Lists', summary: 'ReorderList', page: () => <ListsGroup /> },
   {
     id: 'badges',

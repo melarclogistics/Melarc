@@ -46,6 +46,11 @@ export interface WorkListParams {
   /** Only the items of this hub (task C3; the hub the switcher chose): a filter that narrows and never widens what the grant reaches. Left out for *All hubs*. */
   readonly hubId?: string;
   readonly pageToken?: string;
+  /**
+   * The id of the view the page is on (`WorkView.id`), for a list whose views are more than its `open` filter (the intakes' are the server's `state`): the list's own hook turns it into what it asks. The lists of
+   * the door and the failure ignore it.
+   */
+  readonly view?: string;
   readonly enabled?: boolean;
 }
 

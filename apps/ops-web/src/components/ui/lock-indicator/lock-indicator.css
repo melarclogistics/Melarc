@@ -1,0 +1,56 @@
+/*
+ * LockIndicator (design/COMPONENT_PATTERNS.md, *LockIndicator*): who holds an advisory lock, told in words, with the icon and the tone to support them. The tone is the status tokens' (warning for
+ * another holder, info for the person's own, neutral for a free or an unknown lock); the border is decoration, and the state line and the sentence carry the meaning.
+ */
+.ui-lock-indicator {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+}
+
+.ui-lock-indicator--free,
+.ui-lock-indicator--unknown {
+  border-color: var(--color-status-neutral-border);
+  background: var(--color-status-neutral-background);
+  color: var(--color-status-neutral-foreground);
+}
+
+.ui-lock-indicator--yours {
+  border-color: var(--color-status-info-border);
+  background: var(--color-status-info-background);
+  color: var(--color-status-info-foreground);
+}
+
+.ui-lock-indicator--other {
+  border-color: var(--color-status-warning-border);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+}
+
+.ui-lock-indicator__icon {
+  flex: none;
+  margin-top: 0.125rem;
+}
+
+.ui-lock-indicator__body {
+  min-width: 0;
+}
+
+.ui-lock-indicator__state {
+  margin: 0;
+  font-weight: var(--text-label-md-weight);
+}
+
+.ui-lock-indicator__text,
+.ui-lock-indicator__note {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-lock-indicator__action {
+  margin-top: var(--space-2);
+}

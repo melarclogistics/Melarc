@@ -69,6 +69,11 @@ export interface WorkListProps<Item> {
   readonly views: readonly [WorkView, ...WorkView[]];
   readonly noun: { readonly plural: string; readonly one: string; readonly other: string };
   readonly tableLabel: string;
+  /**
+   * Whether the hub the switcher chose narrows the list (default: it does). A list whose operation has no hub filter says `false`: it is then asked for no hub, the hub does not start it again at the first page, and an
+   * empty list is never said to be empty "at" the hub chosen, because that would say what the server did not do (the receiving queue lists the hubs of the grant, and each row names its hub).
+   */
+  readonly hubFilter?: boolean;
   /** A refusal of the list, in the words of the screen: what the account cannot do, or the hub it does not work in. */
   readonly refusal: (problem: Problem) => string;
   readonly useList: (params: WorkListParams) => UseQueryResult<WorkListPageView<Item>>;
@@ -98,6 +103,7 @@ export function WorkList<Item>({
   noun,
   tableLabel,
   refusal,
+  hubFilter = true,
   useList,
   rowId,
   table,
@@ -109,12 +115,15 @@ export function WorkList<Item>({
   const [first] = views;
   const current = views.find((view) => view.id === params.get('view')) ?? first;
   // The hub the switcher chose (task C3) is a filter of the list like the view: another hub or another view starts again at the first page.
-  const hubId = useActiveHub();
-  const { hub, showAllHubs } = useHubScope();
+  const chosenHub = useActiveHub();
+  const hubId = hubFilter ? chosenHub : undefined;
+  const { hub: chosen, showAllHubs } = useHubScope();
+  const hub = hubFilter ? chosen : undefined;
   const signature = `${name}|${current.id}|${hubId ?? ''}`;
   const paging = useQueuePaging(signature);
   const list = useList({
     ...(current.open === undefined ? {} : { open: current.open }),
+    view: current.id,
     ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,

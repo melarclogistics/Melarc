@@ -304,6 +304,24 @@ export default defineConfig(
     },
   },
   {
+    // **The one exception to the ban on `fetch`** (S1.35, the evidence upload): the bytes of a file of evidence go to the object store, to the address the
+    // platform issued for that one object, because the platform's API does not carry a file. It is for this one module and for the bare name `fetch`
+    // alone (`window.fetch`, `globalThis.fetch` and `self.fetch` stay refused in it, `XMLHttpRequest`, `WebSocket`, `EventSource`, web storage and every
+    // other rule above still apply to it, and every other file of the application is refused as before: `scripts/eslint-rules.test.ts` holds both). The
+    // module sends a `PUT` with no credentials to the address of the instruction and keeps nothing; the production policy and the bucket's CORS rule decide
+    // whether a store of another origin may be reached at all (`object-store-upload.ts`).
+    files: ['apps/ops-web/src/platform/evidence/object-store-upload.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...restrictedGlobals([
+          ...TRANSPORT_GLOBALS.filter((name) => name !== 'fetch'),
+          ...STORAGE_GLOBALS,
+        ]),
+      ],
+    },
+  },
+  {
     // The one place that may import Motion: the components of the design system, which give a page a panel, a list or a figure that moves in the
     // portal's own times and easings. Everything else above still applies to them.
     files: ['apps/ops-web/src/components/ui/**/*.{ts,tsx}'],

@@ -25,6 +25,8 @@ import {
   LaptopMinimalCheck,
   ListChecks,
   LogOut,
+  Lock,
+  LockOpen,
   Menu,
   MessageSquareText,
   Monitor,
@@ -41,6 +43,7 @@ import {
   User,
   UserPlus,
   Users,
+  Warehouse,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -76,6 +79,8 @@ export const ICONS = {
   handshakes: Handshake,
   'short-counts': Scale,
   'collection-disputes': Flag,
+  // Receiving at a hub (S1.35): the awaiting-receive queue's entry.
+  receiving: Warehouse,
   messages: MessageSquareText,
   staff: Users,
   'add-staff': UserPlus,
@@ -108,6 +113,9 @@ export const ICONS = {
   previous: ChevronLeft,
   next: ChevronRight,
   calendar: Calendar,
+  // The receiver's lock of an intake, held or free (S1.35).
+  lock: Lock,
+  'lock-open': LockOpen,
   // The kit (redesign step R5): the overflow menu of a record's acts. (The "+" of adding a filter is `plus`, the shell's.)
   'more-actions': Ellipsis,
 } as const satisfies Record<string, LucideIcon>;
