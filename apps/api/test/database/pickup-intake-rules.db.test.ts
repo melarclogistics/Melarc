@@ -15,7 +15,7 @@ import {
   type StopRow,
   type StopState,
 } from './support/manifests.js';
-import { insertPickupRequest, pickupRequestRow } from './support/pickups.js';
+import { insertPickupRequest, pickupRequestRow, setHubSetting } from './support/pickups.js';
 import { insertRider, riderRow } from './support/riders.js';
 import { HUB_A, HUB_B, startStaffRoutes, type StaffRoutes } from './support/staff-routes.js';
 import { insertVendor, vendorRow } from './support/vendors.js';
@@ -316,17 +316,26 @@ describe('the declaration is withheld structurally', () => {
     expect(codeOf(result)).toBe('42501');
   });
 
-  // Break caught: a grant of UPDATE or DELETE on an intake to the application's login before a task that needs it exists.
-  it('lets the application’s login neither change nor remove an intake', async () => {
+  // Break caught: a grant of UPDATE beyond the two columns of the lock (S1.32), or of DELETE, on an intake to the application's login before a task that needs it exists.
+  it('lets the application’s login change the two columns of the lock and nothing else, and remove nothing', async () => {
     const done = await handedOver();
     for (const text of [
       `update pickup_intake set state = 'COUNTED'`,
-      `update pickup_intake set active_receiver_id = gen_random_uuid()`,
       `delete from pickup_intake`,
     ]) {
       expect(codeOf(await attempt(staff('hub.read'), text)), text).toBe('42501');
     }
-    expect(await intakeRow(done.intakes[0] ?? '')).toMatchObject({ state: 'AWAITING_COUNT' });
+    // The two columns of the lock are granted to the login (S1.32) and written under the key of the count alone: under any other key no policy admits a row, so nothing is changed.
+    expect(
+      await attempt(
+        staff('hub.read'),
+        `update pickup_intake set active_receiver_id = gen_random_uuid() returning id`,
+      ),
+    ).toEqual({ rows: [] });
+    expect(await intakeRow(done.intakes[0] ?? '')).toMatchObject({
+      state: 'AWAITING_COUNT',
+      active_receiver_id: null,
+    });
   });
 });
 
@@ -355,13 +364,8 @@ describe('who reads an intake', () => {
       expect.arrayContaining([...here.intakes, ...there.intakes]),
     );
     expect(idsOf(await attempt(staff('hub.read', []), read))).toEqual([]);
-    // Another key reads none of them, whatever the hubs.
-    for (const key of [
-      'pickup.read',
-      'hub.intake.count',
-      'fleet.custody.read',
-      'pickup.run.execute',
-    ]) {
+    // Another key reads none of them, whatever the hubs. (`hub.intake.count` reads the intakes of its hubs since S1.32, below: the receiver takes the lock and is shown the intake.)
+    for (const key of ['pickup.read', 'fleet.custody.read', 'pickup.run.execute']) {
       expect(idsOf(await attempt(staff(key), read)), key).toEqual([]);
     }
     // A vendor of the request reads none.
@@ -820,6 +824,9 @@ describe('an intake keeps what was declared and when, and its states move one wa
     const id = done.intakes[0] ?? '';
     await routes.admin.query(`update pickup_intake set state = state where id = $1`, [id]);
     expect(await intakeRow(id)).toMatchObject({ version: 1 });
+    await routes.admin.query(`update pickup_intake set condition = 'OTHER' where id = $1`, [id]);
+    expect(await intakeRow(id)).toMatchObject({ version: 2 });
+    // The advisory lock is not a change of the intake that moves its ETag (S1.32, migration 0093).
     await routes.admin.query(
       `update pickup_intake set active_receiver_id = gen_random_uuid(), lock_acquired_at = now() where id = $1`,
       [id],
@@ -1089,5 +1096,329 @@ describe('the ledger takes the events of the handover with the facts of the act'
       ),
       'a run that has no intake of the rider',
     ).toBe('42501');
+  });
+});
+
+/*
+ * S1.32 (`acquireIntakeLock`, `getHubIntake`, `listHubIntakes`; `AC-SLICE-001-37`, `-43`, `-77`; state-machines.md section 7, the row "acquire receive lock"; hub-intake.md section 5.1
+ * steps 2 and 3): what the database holds, for every writer and reader, of the advisory lock and of the declaration once the count is committed.
+ *
+ * - **The lock is advisory and moves nothing but itself.** The key of the count writes the two columns of the lock in its own name, on an intake that is waiting for its count, and
+ *   no others; the moment is the database's; another receiver takes a held lock over only after the hub's idle time (`intake_lock_idle_ttl_minutes`, a hub setting) and never where
+ *   the hub has none; and **no move of the lock moves the version**, which is the intake's `ETag`: a lock that moved it would refuse a count for a reason that is no fact of the intake.
+ * - **The declaration is read after the count and not before**, by one function that answers it only for an intake past `AWAITING_COUNT`, to staff under a reading key, in the hubs the
+ *   table shows them.
+ */
+const LOCK_TTL = 'intake_lock_idle_ttl_minutes';
+const COUNT = 'hub.intake.count';
+
+/**
+ * The lock of an intake as another receiver left it some minutes ago. The moment of a lock is the database's, so an old one is arranged as an operator's repair would be, with the
+ * triggers off (the guard would give the moment of now).
+ */
+async function lockedMinutesAgo(
+  intakeId: string,
+  receiverId: string,
+  minutes: number,
+): Promise<void> {
+  await routes.admin.query('begin');
+  try {
+    await routes.admin.query('set local session_replication_role = replica');
+    await routes.admin.query(
+      `update pickup_intake set active_receiver_id = $2, lock_acquired_at = now() - make_interval(mins => $3) where id = $1`,
+      [intakeId, receiverId, minutes],
+    );
+    await routes.admin.query('commit');
+  } catch (error) {
+    await routes.admin.query('rollback');
+    throw error;
+  }
+}
+
+/** The act on the lock as the application writes it: the two columns, in the receiver's own name. The moment it gives is a lie that the database must not keep. */
+const lockSql = (id: string, receiver: string): string =>
+  `update pickup_intake set active_receiver_id = '${receiver}', lock_acquired_at = now() - interval '3 hours' where id = '${id}' returning id, active_receiver_id, lock_acquired_at, version`;
+
+/** An intake that has been counted, as the count of S1.33 leaves it (arranged as the administrator, through the state machine of the guard). */
+async function counted(id: string): Promise<void> {
+  await routes.admin.query(
+    `update pickup_intake set state = 'COUNTED', physical_count = 3, counted_at = now(), counted_by = gen_random_uuid(), count_variance = 'MATCH', count_difference = 0 where id = $1`,
+    [id],
+  );
+}
+
+const lockOf = async (id: string) =>
+  (await intakeRow(id)) as {
+    active_receiver_id: string | null;
+    lock_acquired_at: Date | null;
+    version: number;
+    state: string;
+  };
+const secondsSince = (moment: Date | null): number =>
+  moment === null ? Number.NaN : Math.abs(Date.now() - moment.getTime()) / 1000;
+
+describe('the receive lock (S1.32): what the database holds for every writer', () => {
+  beforeAll(async () => {
+    // Hub A has the development value of the Product Owner's decision D-13: fifteen minutes. Hub B has none, on purpose (below).
+    await setHubSetting(routes.admin, HUB_A, LOCK_TTL, 15, 'minutes');
+  });
+
+  // Break caught: a lock that is not written in the receiver's own name, that keeps the moment the writer gives (a lock that is born old, so that any receiver may take it at once), or
+  // that moves the version, which is the ETag of the intake and which the count compares (AC-SLICE-001-43: the lock is not a guard).
+  it('gives the lock to the staff member in their own name, at the database’s moment, and does not move the version', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A);
+    const id = done.intakes[0] ?? '';
+    const receiver = staff(COUNT, [HUB_A]);
+    const taken = await attempt(receiver, lockSql(id, receiver.principalId));
+    expect('rows' in taken ? taken.rows : []).toHaveLength(1);
+    const row = await lockOf(id);
+    expect(row).toMatchObject({
+      active_receiver_id: receiver.principalId,
+      state: 'AWAITING_COUNT',
+      version: 1,
+    });
+    expect(secondsSince(row.lock_acquired_at)).toBeLessThan(120);
+  });
+
+  // Break caught: a policy that lets a staff member write the lock in another's name, on another hub's intake or under another key, and a guard that lets it be taken on an intake that has
+  // been counted (the guard holds the administrator as well, which no policy stops).
+  it('refuses a lock in another member’s name, on another hub’s intake, under another key, and on an intake that is no longer waiting for its count', async () => {
+    const here = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A);
+    const there = await handedOver(['COLLECTED'], HUB_B);
+    const receiver = staff(COUNT, [HUB_A]);
+    const [open, over] = here.intakes;
+    // In another's name: the check of the policy.
+    expect(codeOf(await attempt(receiver, lockSql(open ?? '', randomUUID())))).toBe('42501');
+    // Another hub's intake, and the other keys: the statement finds no row it may write.
+    const writes: [string, SecurityContext, string][] = [
+      ['another hub’s intake', receiver, there.intakes[0] ?? ''],
+      ['hub.read', staff('hub.read', [HUB_A]), open ?? ''],
+      ['pickup.read', staff('pickup.read', [HUB_A]), open ?? ''],
+    ];
+    for (const [name, context, target] of writes) {
+      const result = await attempt(context, lockSql(target, context.principalId));
+      expect('rows' in result ? result.rows : result, name).toEqual([]);
+    }
+    expect((await lockOf(there.intakes[0] ?? '')).active_receiver_id).toBeNull();
+    expect((await lockOf(open ?? '')).active_receiver_id).toBeNull();
+    // An intake that has been counted waits for nothing: a lock is not taken on it, by the staff member or by the administrator.
+    await counted(over ?? '');
+    expect(codeOf(await attempt(receiver, lockSql(over ?? '', receiver.principalId)))).toBe(
+      '23514',
+    );
+    const administrator = await adminRefusal([
+      `update pickup_intake set active_receiver_id = gen_random_uuid(), lock_acquired_at = now() where id = '${over ?? ''}'`,
+    ]);
+    expect(administrator?.code).toBe('23514');
+    expect((await lockOf(over ?? '')).active_receiver_id).toBeNull();
+  });
+
+  // Break caught: a takeover before the hub's idle time (the lock is then no lock), one that never comes (the lock is then a wall), a holder that cannot refresh its own, and a refresh that
+  // keeps the old moment (the lock would grow idle while its holder works).
+  it('lets another receiver take a held lock over only after the hub’s idle time, and the holder refresh its own whenever it likes', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A);
+    const [recent, idle] = done.intakes;
+    const holder = staff(COUNT, [HUB_A]);
+    const other = staff(COUNT, [HUB_A]);
+    // Held five minutes against a fifteen-minute time: the other receiver may not take it; the holder refreshes it, and the moment is again the database's.
+    await lockedMinutesAgo(recent ?? '', holder.principalId, 5);
+    expect(codeOf(await attempt(other, lockSql(recent ?? '', other.principalId)))).toBe('23514');
+    expect((await lockOf(recent ?? '')).active_receiver_id).toBe(holder.principalId);
+    const refreshed = await attempt(holder, lockSql(recent ?? '', holder.principalId));
+    expect('rows' in refreshed).toBe(true);
+    expect(secondsSince((await lockOf(recent ?? '')).lock_acquired_at)).toBeLessThan(120);
+    // Held twenty minutes: the other receiver takes it over, in its own name, at the database's moment.
+    await lockedMinutesAgo(idle ?? '', holder.principalId, 20);
+    const taken = await attempt(other, lockSql(idle ?? '', other.principalId));
+    expect('rows' in taken).toBe(true);
+    const row = await lockOf(idle ?? '');
+    expect(row.active_receiver_id).toBe(other.principalId);
+    expect(secondsSince(row.lock_acquired_at)).toBeLessThan(120);
+  });
+
+  // Break caught: a takeover permitted where the hub has no idle time or one that is no whole number of minutes of a day (a default invented, or a lock that anyone may take at once),
+  // and a missing setting that also stops a free lock being taken or the holder refreshing its own (the lock must degrade takeover, not correctness).
+  it('permits no takeover where the hub has no idle time or one that is not a whole number of minutes in a day, and still gives a free lock and refreshes the holder’s own', async () => {
+    // Hub B has never been given the setting.
+    const none = await handedOver(['COLLECTED'], HUB_B);
+    const holderB = staff(COUNT, [HUB_B]);
+    const otherB = staff(COUNT, [HUB_B]);
+    const idB = none.intakes[0] ?? '';
+    expect('rows' in (await attempt(holderB, lockSql(idB, holderB.principalId)))).toBe(true);
+    await lockedMinutesAgo(idB, holderB.principalId, 600);
+    expect(codeOf(await attempt(otherB, lockSql(idB, otherB.principalId))), 'no setting').toBe(
+      '23514',
+    );
+    expect('rows' in (await attempt(holderB, lockSql(idB, holderB.principalId)))).toBe(true);
+
+    // Hub A, given values that are no minutes of a day. A week idle is idle for any reading, so only the setting can refuse the takeover.
+    const here = await handedOver(['COLLECTED'], HUB_A);
+    const idA = here.intakes[0] ?? '';
+    const holderA = staff(COUNT, [HUB_A]);
+    const otherA = staff(COUNT, [HUB_A]);
+    for (const value of ['fifteen', 0, -5, 1441, 1.5, null, true]) {
+      await setHubSetting(routes.admin, HUB_A, LOCK_TTL, value, 'minutes');
+      await lockedMinutesAgo(idA, holderA.principalId, 7 * 24 * 60);
+      expect(
+        codeOf(await attempt(otherA, lockSql(idA, otherA.principalId))),
+        JSON.stringify(value),
+      ).toBe('23514');
+    }
+    // The values at the two ends of the range are valid.
+    for (const value of [1, 1440]) {
+      await setHubSetting(routes.admin, HUB_A, LOCK_TTL, value, 'minutes');
+      await lockedMinutesAgo(idA, holderA.principalId, 7 * 24 * 60);
+      expect(
+        'rows' in (await attempt(otherA, lockSql(idA, otherA.principalId))),
+        String(value),
+      ).toBe(true);
+    }
+    await setHubSetting(routes.admin, HUB_A, LOCK_TTL, 15, 'minutes');
+  });
+
+  // Break caught: a grant wider than the lock (the key could write a count, a state or a condition, or clear a lock) and a delete. Each statement also takes the lock in the receiver's own name, so
+  // that the check of the lock's policy (which would refuse a statement that leaves the lock unheld) passes and the grant of the columns is the one layer that is asked.
+  it('gives the key of the count the two columns of the lock and no others, and no delete', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A);
+    const id = done.intakes[0] ?? '';
+    const receiver = staff(COUNT, [HUB_A]);
+    for (const assignment of [
+      `state = 'COUNTED'`,
+      `physical_count = 3`,
+      `condition = 'DAMAGED'`,
+      `counted_by = '${receiver.principalId}'`,
+      `rider_declared_count = 0`,
+      `handed_over_by = '${receiver.principalId}'`,
+      `version = 9`,
+    ]) {
+      expect(
+        codeOf(
+          await attempt(
+            receiver,
+            `update pickup_intake set active_receiver_id = '${receiver.principalId}', lock_acquired_at = now(), ${assignment} where id = '${id}'`,
+          ),
+        ),
+        assignment,
+      ).toBe('42501');
+    }
+    expect(codeOf(await attempt(receiver, `delete from pickup_intake where id = '${id}'`))).toBe(
+      '42501',
+    );
+    expect(await intakeRow(id)).toMatchObject({
+      state: 'AWAITING_COUNT',
+      physical_count: null,
+      condition: 'OK',
+      rider_declared_count: 3,
+      version: 1,
+    });
+  });
+
+  // Break caught: a version trigger that counts the lock as a change, so that the ETag one receiver read moves under it each time another receiver (or it itself) refreshes the lock, and a
+  // count carrying that ETag is refused for a reason that is no fact of the intake: the lock would then be a guard. A change of anything else still moves it.
+  it('leaves the version where it was through every move of the lock, and moves it for a change of anything else', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A);
+    const id = done.intakes[0] ?? '';
+    const first = staff(COUNT, [HUB_A]);
+    const second = staff(COUNT, [HUB_A]);
+    await attempt(first, lockSql(id, first.principalId));
+    await attempt(first, lockSql(id, first.principalId));
+    await lockedMinutesAgo(id, first.principalId, 30);
+    await attempt(second, lockSql(id, second.principalId));
+    expect(await lockOf(id)).toMatchObject({ active_receiver_id: second.principalId, version: 1 });
+    await counted(id);
+    expect((await lockOf(id)).version).toBe(2);
+  });
+
+  // Break caught: a guard that keeps the moment a writer gives, one that lets a moment stand without its receiver (or a receiver without its moment), and one that refuses to clear the
+  // lock (the count of S1.33 or an operator may release it).
+  it('keeps the moment the database’s for every writer, and clears the lock with its receiver and not without', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A);
+    const id = done.intakes[0] ?? '';
+    expect(
+      await adminRefusal([
+        `update pickup_intake set active_receiver_id = gen_random_uuid(), lock_acquired_at = now() - interval '3 hours' where id = '${id}'`,
+      ]),
+    ).toBeUndefined();
+    expect(secondsSince((await lockOf(id)).lock_acquired_at)).toBeLessThan(120);
+    // A receiver cannot be cleared and leave its moment (the check of the table keeps the two together); a moment cleared alone while a receiver is held is given back as the database's.
+    expect(
+      (
+        await adminRefusal([
+          `update pickup_intake set active_receiver_id = null where id = '${id}'`,
+        ])
+      )?.code,
+    ).toBe('23514');
+    expect(
+      await adminRefusal([`update pickup_intake set lock_acquired_at = null where id = '${id}'`]),
+    ).toBeUndefined();
+    expect(secondsSince((await lockOf(id)).lock_acquired_at)).toBeLessThan(120);
+    expect(
+      await adminRefusal([
+        `update pickup_intake set active_receiver_id = null, lock_acquired_at = null where id = '${id}'`,
+      ]),
+    ).toBeUndefined();
+    expect(await lockOf(id)).toMatchObject({
+      active_receiver_id: null,
+      lock_acquired_at: null,
+      version: 1,
+    });
+  });
+
+  // Break caught: a policy that gives the key of the count no read (the receiver could not be shown the intake it took) or the whole table (another hub's intakes), or a rider's context under
+  // the key the same.
+  it('shows the key of the count the intakes of its own hubs and no other hub’s', async () => {
+    const here = await handedOver(['COLLECTED'], HUB_A);
+    const there = await handedOver(['COLLECTED'], HUB_B);
+    const read = `select id from pickup_intake`;
+    const seen = idsOf(await attempt(staff(COUNT, [HUB_A]), read));
+    expect(seen).toEqual(expect.arrayContaining(here.intakes));
+    expect(seen.some((id) => there.intakes.includes(id))).toBe(false);
+    expect(idsOf(await attempt(staff(COUNT, []), read))).toEqual([]);
+    expect(idsOf(await attempt(rider(here.holderId, COUNT), read))).toEqual([]);
+    expect(idsOf(await attempt(vendorContext(organisation), read))).toEqual([]);
+  });
+});
+
+describe('the declaration after the count (S1.32; OB-S1-92)', () => {
+  const declared = (ids: readonly string[]): string =>
+    `select intake_id, rider_declared_count from melarc.hub_intake_declarations(array[${ids
+      .map((id) => `'${id}'`)
+      .join(', ')}]::uuid[]) order by intake_id`;
+
+  // Break caught: a function that answers for an intake that is waiting for its count (the blind count read away), or answers nothing for one that has been counted (the page that
+  // shows the comparison could not be built), or answers a number other than the rider's.
+  it('answers the declaration of an intake that has been counted, and nothing for one that is waiting for its count', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A);
+    const [waiting, over] = done.intakes;
+    await counted(over ?? '');
+    for (const key of ['hub.read', COUNT]) {
+      const answer = await attempt(staff(key, [HUB_A]), declared([waiting ?? '', over ?? '']));
+      expect(answer, key).toEqual({ rows: [{ intake_id: over, rider_declared_count: 3 }] });
+    }
+    expect(await attempt(staff('hub.read', [HUB_A]), declared([]))).toEqual({ rows: [] });
+  });
+
+  // Break caught: a definer function that serves the declaration to a context the table would not show the intake to (another hub's staff), or to a context that is not staff under a
+  // reading key (a rider, even of its own handover, a vendor, a staff member of another key): it would be a route round the grants.
+  it('answers no one the table would not show the intake to, and refuses every context that is not staff under a reading key', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A);
+    const id = done.intakes[0] ?? '';
+    await counted(id);
+    expect(await attempt(staff('hub.read', [HUB_B]), declared([id]))).toEqual({ rows: [] });
+    expect(await attempt(staff('hub.read', []), declared([id]))).toEqual({ rows: [] });
+    expect(await attempt(staff('hub.read'), declared([id]))).toEqual({
+      rows: [{ intake_id: id, rider_declared_count: 3 }],
+    });
+    const refused: [string, SecurityContext][] = [
+      ['a staff member of another key', staff('pickup.read', [HUB_A])],
+      ['the rider of the handover', rider(done.holderId, HANDOVER)],
+      ['a rider of another key', rider(done.holderId, 'pickup.run.execute')],
+      ['a rider under a reading key', rider(done.holderId, 'hub.read')],
+      ['a rider under the key of the count', rider(done.holderId, COUNT)],
+      ['a vendor', vendorContext(organisation)],
+    ];
+    for (const [name, context] of refused) {
+      expect(codeOf(await attempt(context, declared([id]))), name).toBe('42501');
+    }
   });
 });
