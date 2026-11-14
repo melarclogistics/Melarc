@@ -10,6 +10,7 @@ import { OPERATION_RUNNER } from '../platform/authorization/authorization-provid
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { RUN_ACCESS, type RunAccess } from '../platform/domain-ports/run-access.port.js';
 import { RUN_CUSTODY, type RunCustody } from '../platform/domain-ports/run-custody.port.js';
+import { HubBlindCounts } from './blind-count.service.js';
 import { HubHandovers } from './hub-handover.service.js';
 import { HubIntakes } from './hub-intakes.service.js';
 
@@ -18,6 +19,9 @@ export const HUB_HANDOVERS = Symbol('HUB_HANDOVERS');
 
 /** The injection token of the service of the receiving side's reads and lock (S1.32), which its controller asks for. */
 export const HUB_INTAKES = Symbol('HUB_INTAKES');
+
+/** The injection token of the service of the blind count (S1.33), which its controller asks for. */
+export const HUB_BLIND_COUNTS = Symbol('HUB_BLIND_COUNTS');
 
 const optional = (token: symbol) => ({ token, optional: true });
 
@@ -62,5 +66,17 @@ export const hubProviders: readonly FactoryProvider[] = [
     ): HubIntakes | undefined =>
       runner === undefined || audit === undefined ? undefined : new HubIntakes({ runner, audit }),
     inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_BLIND_COUNTS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+    ): HubBlindCounts | undefined =>
+      runner === undefined || audit === undefined || idempotency === undefined
+        ? undefined
+        : new HubBlindCounts({ runner, audit, idempotency }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER), optional(IDEMPOTENCY_STORE)],
   },
 ];

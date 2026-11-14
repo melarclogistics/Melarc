@@ -1,7 +1,7 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.104.0 with Run C, SLICE-001 Stage 6, 14 November 2026)
+# Version: see `info.version` below (5.105.0 with Run C, SLICE-001 Stage 6)
 # Date:    14 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
@@ -18,6 +18,7 @@
 #   5.102.0 A2    Run A2 (SLICE-001, Stage 5, the Product Owner's decisions of 12 November 2026): `authoriseParcelPhotoException` (Ops lets a stop's count through without parcel photos: `pickup.handshake.override`, once for a stop, before the count, with a required note); `parcel_photo_ids` on `recordCollection` and `CollectionRecord` (exactly `collected_count` stored photos of this rider and this stop, or none for a stop let through; `VALIDATION_FAILED` with the rules `parcel_photo_count` and `duplicate`, `EVIDENCE_NOT_STORED` for a photo that cannot be counted; `evidence_ids` is now the photo a short count's reason asks for); the purpose `PARCEL_PHOTO` of `EvidenceCreate` (declared under `pickup.collection.confirm`, a failure's proof under `pickup.failure.report`); `Cache-Control: no-store` on the answer of `createEvidence` (the upload instruction is a bearer capability); the text of `completeEvidenceUpload` and `recordCollection` as built
 #   5.103.0 B    Run B (SLICE-001, Stage 5, the Ops half: the Product Owner's review of Run A2 and S1.30): the text of `recordCollection` says that the database holds the photo a short count's reason asks for, for every writer, at the end of the transaction, and that the answer and its replay state the `parcel_photo_ids` the count attached (in the order the rider named them; absent for a stop let through without photos); **S1.30 adds `listPickupStopEvidence`** (`GET /pickup-stops/{id}/evidence`, `pickup.read`: the evidence of a stop with the progress of its parcel photos as the server counts it and the exception that let its count through without them; no object key and no address) **and the `escalation` of an item of `listPickupFailures`** (who escalated the failure's request, a person or the backstop, with the backstop's threshold and wait)
 #   5.104.0 C    Run C (SLICE-001, Stage 6, S1.32): the reads and the lock of the receiving side, as built: `listHubIntakes`, `getHubIntake` and `acquireIntakeLock` declare `VALIDATION_FAILED` (and `NOT_FOUND` on the two addressed by an id, each with its response), say who is served (staff of the Ops Portal, by the hubs of the grant), that the `ETag` of an intake is the digest of its facts and does not move with the advisory lock, that a hub with no usable `intake_lock_idle_ttl_minutes` offers no takeover, that the lock request is `background` activity, and that a counted intake is `HubIntakePostCount` (no shape changes)
+#   5.105.0 C    Run C (SLICE-001, Stage 6, S1.33): `submitBlindCount` says what it does as built (staff of the Ops Portal, by the hubs of the grant; the count is committed once, so a second count, a stale ETag and a missing one are STATE_CONFLICT whoever holds the lock; the database makes the comparison and the intake goes to READY_FOR_ITEMIZATION or RECONCILIATION_REQUIRED, a zero declaration always to the latter) and declares HUB_SCOPE_VIOLATION and NOT_FOUND (with its 404); `HubIntakePostCount` gains the optional `parcel_photo_ids` (the photos of the parcels counted at the door, readable only from the response to the committed count on, D-A10)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -28,7 +29,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.104.0
+  version: 5.105.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -2318,8 +2319,11 @@ paths:
       x-permission: hub.intake.count
       x-error-codes:
         [
+          BLIND_COUNT_VIOLATED,
           CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
           IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
           SESSION_INVALID,
@@ -2342,6 +2346,23 @@ paths:
         This closes that gap rather than correcting the claim, since the reasoning was already
         right: a receiving officer on the same flaky hub connection `itemizeOrder` describes
         needs the same replay safety one call earlier.
+
+        **As built (S1.33, 5.105.0).** For staff of the Ops Portal alone, by the hubs of the
+        session's grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that
+        does not exist). `If-Match` is the `ETag` of `getHubIntake`, which does not move with the
+        advisory receive lock. **A count is committed once**: a second count of the intake, a stale
+        `ETag` and a missing one are `STATE_CONFLICT` (two receivers who both count get one success
+        and one `STATE_CONFLICT`, whoever holds the lock: AC-SLICE-001-43), and the same key with
+        another count is `IDEMPOTENCY_KEY_CONFLICT`; a body that carries anything but the count, the
+        rider's declaration included, is `VALIDATION_FAILED` and nothing is committed. The database
+        makes the comparison: `count_difference` is the physical count minus the declaration and
+        `count_variance` says which side of it the count is on, and the intake goes to
+        `READY_FOR_ITEMIZATION` (a count that matches a declaration above zero) or to
+        `RECONCILIATION_REQUIRED` (a variance, **or a zero declaration whatever the variance**).
+        The response is `HubIntakePostCount`: the declaration, the physical count and the
+        comparison, and **`parcel_photo_ids`, the photos of the parcels counted at the door, which
+        are readable on the intake only from this response on** (D-A10); a stop Ops let through
+        without photos has none.
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -2366,6 +2387,7 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422':
           description: |
@@ -15204,6 +15226,17 @@ components:
                 the three OS&D dimensions never collapse.
             dispute_state: { type: [string, 'null'] }
             parity_exception_id: { type: [string, 'null'], format: uuid }
+            parcel_photo_ids:
+              type: array
+              items: { type: string, format: uuid }
+              description: |
+                **Added at 5.105.0 (S1.33; D-A10, OB-S1-81).** The photos of the parcels the rider
+                counted at the door, as evidence identifiers in the order they were attached; each
+                is fetched, one at a time, with `createEvidenceRetrievalAuthorization`. **They follow
+                the declaration's rule: in no read, response or list of the receiving side before
+                the physical count commits, nor their number, and readable on the intake only from
+                the response to the committed count on.** Absent for a stop that Ops let through
+                without photos (`authoriseParcelPhotoException`).
 
     OrderItemize:
       type: object

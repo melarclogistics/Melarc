@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { hubIntakePreCountOf, hubIntakeViewOf, type HubIntakeRow } from './hub-intake-view.js';
+import {
+  hubIntakePreCountOf,
+  hubIntakeViewOf,
+  type AfterCount,
+  type HubIntakeRow,
+} from './hub-intake-view.js';
 
 const ROW: HubIntakeRow = {
   id: '5eed0900-0000-4000-8000-000000000001',
@@ -20,6 +25,9 @@ const ROW: HubIntakeRow = {
   condition: 'OK',
   version: 1,
 };
+
+/** What the database answers for an intake that has been counted: the declaration, and no photo. */
+const AFTER: AfterCount = { declared: 5, photoIds: [] };
 
 const COUNTED: HubIntakeRow = {
   ...ROW,
@@ -55,7 +63,7 @@ describe('the representation of an intake before its count (AC-SLICE-001-37)', (
 
   // Break caught: a declaration handed to the builder for an intake that has not been counted (a caller that looked it up anyway) reaching the answer.
   it('ignores a declaration it is given for an intake that has not been counted', () => {
-    const view = hubIntakeViewOf(ROW, 5);
+    const view = hubIntakeViewOf(ROW, AFTER);
     expect(JSON.stringify(view)).not.toMatch(/declared/);
     expect(view.count_phase).toBe('PRE_COUNT');
   });
@@ -80,7 +88,7 @@ describe('the representation of an intake before its count (AC-SLICE-001-37)', (
 describe('the representation of an intake once its count is committed', () => {
   // Break caught: a counted intake still answered as the pre-count shape (the comparison could never be shown), the declaration left out, or a number other than the one the database answered.
   it('is HubIntakePostCount: the declaration beside the count, the comparison and the condition', () => {
-    const view = hubIntakeViewOf(COUNTED, 5);
+    const view = hubIntakeViewOf(COUNTED, AFTER);
     expect(view).toMatchObject({
       count_phase: 'POST_COUNT',
       state: 'COUNTED',
@@ -96,8 +104,17 @@ describe('the representation of an intake once its count is committed', () => {
   // Break caught: a counted intake answered without the declaration or without its comparison as if that were a view (a silent pre-count shape, or a post-count one with holes): it is a fault.
   it('is a fault, and no answer, when the declaration or the comparison is missing', () => {
     expect(() => hubIntakeViewOf(COUNTED, undefined)).toThrow(/declaration/);
-    expect(() => hubIntakeViewOf({ ...COUNTED, count_difference: null }, 5)).toThrow();
-    expect(() => hubIntakeViewOf({ ...COUNTED, count_variance: null }, 5)).toThrow();
-    expect(() => hubIntakeViewOf({ ...COUNTED, count_variance: 'MORE' }, 5)).toThrow();
+    expect(() => hubIntakeViewOf({ ...COUNTED, count_difference: null }, AFTER)).toThrow();
+    expect(() => hubIntakeViewOf({ ...COUNTED, count_variance: null }, AFTER)).toThrow();
+    expect(() => hubIntakeViewOf({ ...COUNTED, count_variance: 'MORE' }, AFTER)).toThrow();
+  });
+
+  // Break caught: the photos of the parcels counted at the door left out of a counted intake that has them (the receiver could not compare them), or an empty list given for a stop that was let
+  // through without photos (a member that says none where the contract says nothing), or the list reordered (the order they were attached in is the order the receiver is shown).
+  it('carries the photos of the parcels, in their order, when there are any, and no member when there are none', () => {
+    const photos = ['5eed0b00-0000-4000-8000-000000000002', '5eed0b00-0000-4000-8000-000000000001'];
+    const withPhotos = hubIntakeViewOf(COUNTED, { declared: 5, photoIds: photos });
+    expect(withPhotos).toMatchObject({ parcel_photo_ids: photos });
+    expect(Object.keys(hubIntakeViewOf(COUNTED, AFTER))).not.toContain('parcel_photo_ids');
   });
 });

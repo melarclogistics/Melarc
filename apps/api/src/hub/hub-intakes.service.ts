@@ -1,7 +1,6 @@
-import { sql, type SQL } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
-import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
@@ -10,6 +9,8 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { decodePageToken, encodePageToken } from '../platform/http/page-token.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import { primaryHubOfStaff } from '../platform/lookup/primary-hub.js';
+import { afterCountsOf } from './hub-after-count.js';
+import { noteHubCrossing } from './hub-crossing.js';
 import { hubIntakeEtagOf } from './hub-intake-etag.js';
 import { INTAKE_STATES } from './hub-intake-schemas.js';
 import {
@@ -145,10 +146,10 @@ export class HubIntakes {
             relatedIds: { operation_id: 'listHubIntakes' },
           });
         }
-        const declared = await this.#declarations(tx, page);
+        const after = await afterCountsOf(tx, page);
         const last = page.at(-1);
         return {
-          items: page.map((row) => hubIntakeViewOf(row, declared.get(row.id))),
+          items: page.map((row) => hubIntakeViewOf(row, after.get(row.id))),
           next_page_token:
             read.length > size && last !== undefined
               ? encodePageToken({ createdAt: last.position_text, id: last.id })
@@ -175,9 +176,9 @@ export class HubIntakes {
         );
         const row = found.rows[0] as unknown as HubIntakeRow | undefined;
         if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
-        await this.#noteCrossing(handle, authorized, row);
-        const declared = await this.#declarations(tx, [row]);
-        const intake = hubIntakeViewOf(row, declared.get(row.id));
+        await noteHubCrossing(this.#options.audit, handle, authorized, row);
+        const after = await afterCountsOf(tx, [row]);
+        const intake = hubIntakeViewOf(row, after.get(row.id));
         return { intake, etag: hubIntakeEtagOf(intake, row.version) };
       },
       ONE_SNAPSHOT,
@@ -206,7 +207,7 @@ export class HubIntakes {
            for update of i`);
       let row = found.rows[0] as unknown as LockableRow | undefined;
       if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
-      await this.#noteCrossing(handle, authorized, row);
+      await noteHubCrossing(this.#options.audit, handle, authorized, row);
       if (row.state === 'AWAITING_COUNT' && row.lockable) {
         const taken = await tx.execute(sql`
           update pickup_intake
@@ -217,49 +218,8 @@ export class HubIntakes {
         if (updated === undefined) throw new Error('The lock of an intake could not be taken');
         row = { ...updated, lockable: true };
       }
-      const declared = await this.#declarations(tx, [row]);
-      return hubIntakeViewOf(row, declared.get(row.id));
-    });
-  }
-
-  /**
-   * The declaration of each intake of the rows that has been counted, from the one function that answers it (`melarc.hub_intake_declarations`): an intake that has not been counted has none
-   * and is never asked for, and a page of intakes that have not been counted makes no such call at all.
-   */
-  async #declarations(
-    tx: ReturnType<typeof transactionOf>,
-    rows: readonly HubIntakeRow[],
-  ): Promise<ReadonlyMap<string, number>> {
-    const counted = rows.filter((row) => row.physical_count !== null).map((row) => row.id);
-    if (counted.length === 0) return new Map();
-    const ids: SQL = sql.join(
-      counted.map((intake) => sql`${intake}::uuid`),
-      sql`, `,
-    );
-    const answered = await tx.execute(
-      sql`select intake_id, rider_declared_count from melarc.hub_intake_declarations(array[${ids}]::uuid[])`,
-    );
-    return new Map(
-      (answered.rows as unknown as { intake_id: string; rider_declared_count: number }[]).map(
-        (each) => [each.intake_id, each.rider_declared_count],
-      ),
-    );
-  }
-
-  /** An authorised staff read or act on an intake of another hub than the actor's own is audited, without contents (audit.md sections 5.4 and 6). */
-  async #noteCrossing(
-    handle: TransactionHandle,
-    authorized: AuthorizedRequest,
-    row: Pick<HubIntakeRow, 'id' | 'responsible_hub_id'>,
-  ): Promise<void> {
-    const baseline = await primaryHubOfStaff(handle, authorized.session.principalId);
-    if (row.responsible_hub_id === baseline) return;
-    await this.#options.audit.write(handle, {
-      code: 'auth.hub_boundary.crossed',
-      enhanced: true,
-      outcome: 'SUCCEEDED',
-      object: { type: 'PickupIntake', id: row.id },
-      responsibleHubId: row.responsible_hub_id,
+      const after = await afterCountsOf(tx, [row]);
+      return hubIntakeViewOf(row, after.get(row.id));
     });
   }
 }

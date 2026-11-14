@@ -61,9 +61,10 @@ export interface HubIntakePreCountView {
 }
 
 /**
- * The contract's `HubIntakePostCount`: the intake once its physical count is committed, which is the first moment the declaration may appear beside the count (hub-intake.md section 5.1
- * step 5). Not here, because the task that decides them has not been built: `condition_findings`, `dispute_state` and `parity_exception_id` (S1.34 and the itemization tasks); they are
- * optional in the contract and are left out, never given a value that no fact supports.
+ * The contract's `HubIntakePostCount`: the intake once its physical count is committed, which is the first moment the declaration (and the photos of the parcels counted at the door, D-A10)
+ * may appear beside the count (hub-intake.md section 5.1 step 5). `parcel_photo_ids` is there when the stop's count had photos and absent when Ops let the stop through without them. Not
+ * here, because the task that decides them has not been built: `condition_findings`, `dispute_state` and `parity_exception_id` (S1.34 and the itemization tasks); they are optional in the
+ * contract and are left out, never given a value that no fact supports.
  */
 export interface HubIntakePostCountView extends Omit<HubIntakePreCountView, 'count_phase'> {
   readonly count_phase: 'POST_COUNT';
@@ -72,6 +73,14 @@ export interface HubIntakePostCountView extends Omit<HubIntakePreCountView, 'cou
   readonly count_variance: 'MATCH' | 'SHORT' | 'OVER';
   readonly count_difference: number;
   readonly condition: string;
+  readonly parcel_photo_ids?: readonly string[];
+}
+
+/** What the database answers for an intake that has been counted, beyond the columns the login can read (`melarc.hub_intake_after_count`, `melarc.commit_blind_count`). */
+export interface AfterCount {
+  readonly declared: number;
+  /** The stop's stored parcel photos, in the order they were attached; none when Ops let the stop through without them. */
+  readonly photoIds: readonly string[];
 }
 
 export type HubIntakeView = HubIntakePreCountView | HubIntakePostCountView;
@@ -97,15 +106,15 @@ export function hubIntakePreCountOf(row: HubIntakePreCountRow): HubIntakePreCoun
 
 /**
  * The representation of an intake as it is read (S1.32): **`HubIntakePreCount` until a physical count has been committed, and then `HubIntakePostCount`** (`AC-SLICE-001-37`). The phase is
- * decided by the fact the table holds (a count, which exists exactly when the intake has left `AWAITING_COUNT`), and never by a request or a header. `declared` is what the database's
+ * decided by the fact the table holds (a count, which exists exactly when the intake has left `AWAITING_COUNT`), and never by a request or a header. `after` is what the database's
  * function answered for an intake that has been counted: an intake that has not been counted is given none and has no way to carry one, and a counted intake that was given none, or whose
  * comparison is missing, is a fault and not an answer.
  */
-export function hubIntakeViewOf(row: HubIntakeRow, declared: number | undefined): HubIntakeView {
+export function hubIntakeViewOf(row: HubIntakeRow, after: AfterCount | undefined): HubIntakeView {
   const base = hubIntakePreCountOf(row);
   if (row.physical_count === null) return base;
   if (
-    declared === undefined ||
+    after === undefined ||
     row.count_difference === null ||
     (row.count_variance !== 'MATCH' &&
       row.count_variance !== 'SHORT' &&
@@ -118,10 +127,11 @@ export function hubIntakeViewOf(row: HubIntakeRow, declared: number | undefined)
   return {
     ...base,
     count_phase: 'POST_COUNT',
-    rider_declared_count: declared,
+    rider_declared_count: after.declared,
     physical_count: row.physical_count,
     count_variance: row.count_variance,
     count_difference: row.count_difference,
     condition: row.condition,
+    ...(after.photoIds.length === 0 ? {} : { parcel_photo_ids: [...after.photoIds] }),
   };
 }

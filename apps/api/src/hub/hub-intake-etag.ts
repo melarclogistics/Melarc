@@ -49,6 +49,7 @@ function representationOf(view: HubIntakeView): readonly unknown[] {
     count_variance: view.count_variance,
     count_difference: view.count_difference,
     condition: view.condition,
+    parcel_photo_ids: view.parcel_photo_ids ?? null,
   };
   return [...Object.values(before), ...Object.values(after)];
 }

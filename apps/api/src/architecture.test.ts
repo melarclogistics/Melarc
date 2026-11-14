@@ -1618,33 +1618,37 @@ describe('pickup and fleet meet only through ports', () => {
     );
   });
 
-  // Break caught: a read of the receiving side that names the declaration, or what the rider's form was pre-filled with, in a statement of its own (S1.32). The blind count is held by the grants
-  // and by the one function of the database that answers an intake that has been counted: a statement that read the column itself is refused by the database today, and would be a leak the day a
-  // grant were widened. The columns a read selects are the two lists of `hub-intake-view.ts`, and the one call of the function is the only line of the service that names the declaration.
-  it('has no read of the receiving side name the declaration but the one call of the function that answers it', () => {
+  // Break caught: a read of the receiving side that names the declaration, or what the rider's form was pre-filled with, in a statement of its own (S1.32, S1.33). The blind count is held by
+  // the grants and by the two functions of the database that answer for an intake that has been counted and commit its count: a statement that read the column itself is refused by the
+  // database today, and would be a leak the day a grant were widened. The columns a read selects are the two lists of `hub-intake-view.ts`, and a line of the services that names the
+  // declaration is the call of one of the two functions (or the type of what it answers).
+  it('has no read of the receiving side name the declaration but the calls of the functions that answer it', () => {
     const NAMES_IT = /\b(?:rider_declared_count|prefilled_count)\b/;
+    const ALLOWED =
+      /hub_intake_after_count|commit_blind_count|rider_declared_count: number|\.rider_declared_count/;
     const codeIn = (path: string): string =>
       codeOf(hubFiles().find((source) => source.path === path)?.text ?? '');
     const view = codeIn('hub/hub-intake-view.ts');
-    const service = codeIn('hub/hub-intakes.service.ts');
     expect(view.length, 'the view is read').toBeGreaterThan(0);
-    expect(service.length, 'the service is read').toBeGreaterThan(0);
     // The column lists: every template of `sql.raw(...)` in the view.
     const lists = [...view.matchAll(/sql\.raw\(\s*`([^`]*)`/g)].map((match) => match[1] ?? '');
     expect(lists.length).toBeGreaterThanOrEqual(2);
     for (const list of lists) expect(NAMES_IT.test(list), list).toBe(false);
-    // The service: `prefilled_count` never, and `rider_declared_count` only on the call of the function and in the type of what it answers.
-    expect(/\bprefilled_count\b/.test(service)).toBe(false);
-    const naming = service.split('\n').filter((line) => NAMES_IT.test(line));
-    expect(naming.length).toBeGreaterThan(0);
-    for (const line of naming) {
-      expect(
-        /hub_intake_declarations|rider_declared_count: number|each\.rider_declared_count/.test(
-          line,
-        ),
-        line,
-      ).toBe(true);
+    // The files that read intakes: `prefilled_count` never, and `rider_declared_count` only on the call of a function that answers it, in the type of what it answers and in its use.
+    for (const path of [
+      'hub/hub-after-count.ts',
+      'hub/hub-intakes.service.ts',
+      'hub/blind-count.service.ts',
+    ]) {
+      const code = codeIn(path);
+      expect(code.length, `${path} is read`).toBeGreaterThan(0);
+      expect(/\bprefilled_count\b/.test(code), path).toBe(false);
+      for (const line of code.split('\n').filter((each) => NAMES_IT.test(each))) {
+        expect(ALLOWED.test(line), `${path}: ${line}`).toBe(true);
+      }
     }
+    expect(codeIn('hub/hub-after-count.ts')).toMatch(/hub_intake_after_count/);
+    expect(codeIn('hub/blind-count.service.ts')).toMatch(/commit_blind_count/);
     // The detector sees what it is meant to see.
     expect(NAMES_IT.test('select id, rider_declared_count from pickup_intake')).toBe(true);
     expect(NAMES_IT.test('select id, declaration_captured_at from pickup_intake')).toBe(false);

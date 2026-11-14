@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.104.0
- *   SHA-256 81c9da92a9b4c6dcbd7e6430263e46cc6018a82d76eeeb89e3fc75e0b3e2e0a6 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.105.0
+ *   SHA-256 df58c6bd8aebded3c35f666435ac8124c5c7b83216d89fdb42f7ef6923160908 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1354,6 +1354,23 @@ export interface paths {
          *     This closes that gap rather than correcting the claim, since the reasoning was already
          *     right: a receiving officer on the same flaky hub connection `itemizeOrder` describes
          *     needs the same replay safety one call earlier.
+         *
+         *     **As built (S1.33, 5.105.0).** For staff of the Ops Portal alone, by the hubs of the
+         *     session's grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that
+         *     does not exist). `If-Match` is the `ETag` of `getHubIntake`, which does not move with the
+         *     advisory receive lock. **A count is committed once**: a second count of the intake, a stale
+         *     `ETag` and a missing one are `STATE_CONFLICT` (two receivers who both count get one success
+         *     and one `STATE_CONFLICT`, whoever holds the lock: AC-SLICE-001-43), and the same key with
+         *     another count is `IDEMPOTENCY_KEY_CONFLICT`; a body that carries anything but the count, the
+         *     rider's declaration included, is `VALIDATION_FAILED` and nothing is committed. The database
+         *     makes the comparison: `count_difference` is the physical count minus the declaration and
+         *     `count_variance` says which side of it the count is on, and the intake goes to
+         *     `READY_FOR_ITEMIZATION` (a count that matches a declaration above zero) or to
+         *     `RECONCILIATION_REQUIRED` (a variance, **or a zero declaration whatever the variance**).
+         *     The response is `HubIntakePostCount`: the declaration, the physical count and the
+         *     comparison, and **`parcel_photo_ids`, the photos of the parcels counted at the door, which
+         *     are readable on the intake only from this response on** (D-A10); a stop Ops let through
+         *     without photos has none.
          */
         post: operations["submitBlindCount"];
         delete?: never;
@@ -9775,6 +9792,16 @@ export interface components {
             dispute_state?: string | null;
             /** Format: uuid */
             parity_exception_id?: string | null;
+            /**
+             * @description **Added at 5.105.0 (S1.33; D-A10, OB-S1-81).** The photos of the parcels the rider
+             *     counted at the door, as evidence identifiers in the order they were attached; each
+             *     is fetched, one at a time, with `createEvidenceRetrievalAuthorization`. **They follow
+             *     the declaration's rule: in no read, response or list of the receiving side before
+             *     the physical count commits, nor their number, and readable on the intake only from
+             *     the response to the committed count on.** Absent for a stop that Ops let through
+             *     without photos (`authoriseParcelPhotoException`).
+             */
+            parcel_photo_ids?: string[];
         } & {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -15061,6 +15088,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             /** @description `BLIND_COUNT_VIOLATED` if the declared count was served or accepted before commit. */
             422: {

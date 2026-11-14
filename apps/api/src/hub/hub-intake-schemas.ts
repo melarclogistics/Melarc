@@ -75,9 +75,23 @@ export const HUB_INTAKE_POST_COUNT_SCHEMA = described({
         },
         dispute_state: { type: ['string', 'null'] },
         parity_exception_id: { type: ['string', 'null'], format: 'uuid' },
+        parcel_photo_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
       },
     },
   ],
+});
+
+/**
+ * The body of `submitBlindCount` as the application describes it (the contract's request): **the physical count alone**, and a body that carries anything else, the rider's declaration
+ * included, is not valid (`additionalProperties: false`, `AC-SLICE-001-38`): the declaration is never accepted as input, as it is never served before the count.
+ */
+export const BLIND_COUNT_BODY = described({
+  type: 'object',
+  required: ['physical_count'],
+  additionalProperties: false,
+  properties: {
+    physical_count: { type: 'integer', minimum: 0 },
+  },
 });
 
 /** An intake as `getHubIntake` and `acquireIntakeLock` answer it: the shape the intake's phase calls for, told apart by `count_phase`. */

@@ -199,6 +199,8 @@ describe('the generated description of the real application', () => {
       ['/hub-intakes', ['get'], ['listHubIntakes']],
       ['/hub-intakes/{id}', ['get'], ['getHubIntake']],
       ['/hub-intakes/{id}/lock', ['post'], ['acquireIntakeLock']],
+      // S1.33: the receiver's blind count.
+      ['/hub-intakes/{id}/count', ['post'], ['submitBlindCount']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.

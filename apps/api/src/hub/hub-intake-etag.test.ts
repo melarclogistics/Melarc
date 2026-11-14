@@ -23,7 +23,10 @@ const ROW: HubIntakeRow = {
 };
 
 const view = (over: Partial<HubIntakeRow> = {}, declared?: number): HubIntakeView =>
-  hubIntakeViewOf({ ...ROW, ...over }, declared);
+  hubIntakeViewOf(
+    { ...ROW, ...over },
+    declared === undefined ? undefined : { declared, photoIds: [] },
+  );
 
 describe('the ETag of an intake', () => {
   // Break caught: a token that is not the form a client can send back strictly (43 base64url characters between quotes).
@@ -102,6 +105,23 @@ describe('the ETag of an intake', () => {
     expect(hubIntakeEtagOf(view({ ...counted, condition: 'DAMAGED' }, 3), 2)).not.toBe(base);
     // Whatever declaration is offered for an intake that has not been counted, the digest is the same.
     expect(hubIntakeEtagOf(view({}, 9), 1)).toBe(hubIntakeEtagOf(view({}, undefined), 1));
+  });
+
+  // Break caught: the photos of the parcels counted at the door left out of the digest of a counted intake, so that a change to them is not seen by a client holding the old token.
+  it('moves with the photos of a counted intake, and with their order', () => {
+    const counted = {
+      state: 'COUNTED',
+      physical_count: 3,
+      count_variance: 'MATCH',
+      count_difference: 0,
+    } as const;
+    const photos = ['5eed0b00-0000-4000-8000-000000000001', '5eed0b00-0000-4000-8000-000000000002'];
+    const etagWith = (photoIds: readonly string[]): string =>
+      hubIntakeEtagOf(hubIntakeViewOf({ ...ROW, ...counted }, { declared: 3, photoIds }), 2);
+    const none = etagWith([]);
+    expect(etagWith(photos)).not.toBe(none);
+    expect(etagWith([...photos].reverse())).not.toBe(etagWith(photos));
+    expect(etagWith(photos.slice(0, 1))).not.toBe(etagWith(photos));
   });
 
   // Break caught: a header read leniently (a weak validator, a list, a bare token, another intake's token, a missing one).

@@ -553,6 +553,7 @@ describe('the existence rule is asked about records that are real (the control o
       setManifestStopOrder: 'pickupManifest',
       skipPickupStop: 'pickupStop',
       startRun: 'pickupManifest',
+      submitBlindCount: 'pickupIntake',
       submitHubHandover: 'pickupManifest',
       verifyHandshake: 'pickupStop',
       waiveCancellationCharge: 'pickupRequest',
