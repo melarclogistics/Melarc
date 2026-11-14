@@ -11,9 +11,13 @@ import type { OperationRunner } from '../platform/authorization/operation-runner
 import { RUN_ACCESS, type RunAccess } from '../platform/domain-ports/run-access.port.js';
 import { RUN_CUSTODY, type RunCustody } from '../platform/domain-ports/run-custody.port.js';
 import { HubHandovers } from './hub-handover.service.js';
+import { HubIntakes } from './hub-intakes.service.js';
 
 /** The injection token of the service of the hub handover (S1.31), which its controller asks for. */
 export const HUB_HANDOVERS = Symbol('HUB_HANDOVERS');
+
+/** The injection token of the service of the receiving side's reads and lock (S1.32), which its controller asks for. */
+export const HUB_INTAKES = Symbol('HUB_INTAKES');
 
 const optional = (token: symbol) => ({ token, optional: true });
 
@@ -49,5 +53,14 @@ export const hubProviders: readonly FactoryProvider[] = [
       optional(RUN_ACCESS),
       RUN_CUSTODY,
     ],
+  },
+  {
+    provide: HUB_INTAKES,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+    ): HubIntakes | undefined =>
+      runner === undefined || audit === undefined ? undefined : new HubIntakes({ runner, audit }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
   },
 ];

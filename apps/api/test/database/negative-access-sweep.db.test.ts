@@ -189,6 +189,36 @@ beforeAll(async () => {
     [manifestD.id, HUB_A, riderB.id, riderD.id],
   );
 
+  // A run that was handed over to the hub and the intake it opened (S1.32; `getHubIntake`, `acquireIntakeLock`): "another party's" intake, which the officer of that hub may read and neither
+  // a Vendor nor a Rider may. The intake is made as the handover makes it: for a request collected on a completed run, in the name of the rider that holds the run.
+  const manifestE = await insertManifest(
+    routes.admin,
+    manifestRow(HUB_A, { state: 'COMPLETED', assignedRiderId: riderB.id }),
+  );
+  const requestE = await insertPickupRequest(
+    routes.admin,
+    pickupRequestRow(vendorC.organizationId, HUB_A, { state: 'CONFIRMED' }),
+  );
+  await insertStop(
+    routes.admin,
+    stopRow(manifestE, requestE.id, 1, {
+      state: 'COLLECTED',
+      pickupSummary: {
+        reference: requestE.code,
+        sender_display_name: 'Fixture Sender',
+        declared_package_count: 3,
+        resolved_pickup_location: { address: 'Fixture shop' },
+        location_note: null,
+        contact_phone: null,
+      },
+    }),
+  );
+  const intakeE = await routes.admin.query<{ id: string }>(
+    `insert into pickup_intake (id, code, responsible_hub_id, pickup_request_id, pickup_manifest_id, handed_over_by, declaration_captured_at, rider_declared_count, prefilled_count)
+     values (gen_random_uuid(), 'ACC-IN-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 6)), $1, $2, $3, $4, now(), 3, 3) returning id`,
+    [HUB_A, requestE.id, manifestE.id, riderB.id],
+  );
+
   // A piece of evidence another rider captured for that stop (S1.11): "another party's" record, which the officer of that hub may be given a way to read and neither a Vendor nor an
   // unrelated Rider may reach.
   const evidenceB = await routes.admin.query<{ id: string }>(
@@ -260,6 +290,7 @@ beforeAll(async () => {
     pickupManifest: manifestB.id,
     pickupStop: stopB.id,
     runCustodyHandover: handoverD.rows[0]?.id ?? '',
+    pickupIntake: intakeE.rows[0]?.id ?? '',
     vendorOrganization: vendorC.organizationId,
     evidence: evidenceB.rows[0]?.id ?? '',
   };
@@ -280,6 +311,7 @@ function kindOf(operation: Operation): string {
   if (operation.path.startsWith('/pickup-manifests/')) return 'pickupManifest';
   if (operation.path.startsWith('/pickup-stops/')) return 'pickupStop';
   if (operation.path.startsWith('/run-custody-handovers/')) return 'runCustodyHandover';
+  if (operation.path.startsWith('/hub-intakes/')) return 'pickupIntake';
   if (operation.path.startsWith('/vendor-organizations/')) return 'vendorOrganization';
   if (operation.path.startsWith('/evidence/')) return 'evidence';
   return 'staff';
@@ -447,6 +479,7 @@ const TABLE_OF: Readonly<Record<string, string>> = {
   pickupManifest: 'pickup_manifest',
   pickupStop: 'pickup_stop',
   runCustodyHandover: 'run_custody_handover',
+  pickupIntake: 'pickup_intake',
   vendorOrganization: 'vendor_organization',
   evidence: 'evidence',
 };
@@ -470,6 +503,7 @@ describe('the existence rule is asked about records that are real (the control o
     ).toEqual({
       approveOnePackageException: 'pickupRequest',
       acceptRunCustodyHandover: 'pickupManifest',
+      acquireIntakeLock: 'pickupIntake',
       approveStaffIdentity: 'staff',
       arriveAtPickupStop: 'pickupStop',
       assignRider: 'pickupManifest',
@@ -485,6 +519,7 @@ describe('the existence rule is asked about records that are real (the control o
       escalatePickupRequest: 'pickupRequest',
       extendPickupAttempts: 'pickupRequest',
       failRunCustodyHandover: 'pickupManifest',
+      getHubIntake: 'pickupIntake',
       getPickupManifest: 'pickupManifest',
       getPickupRequest: 'pickupRequest',
       getPickupStop: 'pickupStop',
@@ -540,6 +575,7 @@ describe('the existence rule is asked about records that are real (the control o
           'pickupRequest',
           'pickupManifest',
           'pickupStop',
+          'pickupIntake',
           'runCustodyHandover',
           'vendorOrganization',
         ].includes(kindOf(operation))

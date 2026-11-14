@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.103.0
- *   SHA-256 09c512dcd8b74e42ae3feceb1dd91ee10fe1314012631c429176db62752f38eb (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.104.0
+ *   SHA-256 81c9da92a9b4c6dcbd7e6430263e46cc6018a82d76eeeb89e3fc75e0b3e2e0a6 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1221,6 +1221,15 @@ export interface paths {
          *
          *     **Added at MSC-DEC-416.** The queue had a route in ops-portal.md and a step in
          *     hub-intake.md, and no operation behind either.
+         *
+         *     **As built (S1.32, 5.104.0).** For staff of the Ops Portal alone, by the hubs of the
+         *     session's grant (a vendor and a rider read no intake: `PERMISSION_DENIED`). The queue is
+         *     oldest first (the moment the handover completed the run, then the id), so a page does not
+         *     move under a reader who is paging. A `state` that names no state, a `page_size` out of
+         *     range and a `page_token` that is not one are `VALIDATION_FAILED`. An authorised read of an
+         *     intake outside the actor's own hub is audited without contents, as every staff read is.
+         *     An item that has been counted is `HubIntakePostCount`, whose declaration the database
+         *     answers for it alone; no item carries a parcel photo or their number.
          */
         get: operations["listHubIntakes"];
         put?: never;
@@ -1253,6 +1262,16 @@ export interface paths {
          *
          *     After commitment, `HubIntakePostCount` carries the declared count, the physical count
          *     and the comparison.
+         *
+         *     **As built (S1.32, 5.104.0).** For staff of the Ops Portal alone, by the hubs of the
+         *     session's grant: a staff member who asks for an existing intake outside their hubs is
+         *     `HUB_SCOPE_VIOLATION` and one who asks for an intake that does not exist is `NOT_FOUND`;
+         *     a vendor and a rider read no intake (`PERMISSION_DENIED`). **The `ETag` is the digest of
+         *     the facts of the intake the read returned and of its version, and it does not move with
+         *     the advisory receive lock**: who holds the lock and since when are not facts a count rests
+         *     on, so a receiver who read the intake keeps its `ETag` through every refresh and every
+         *     takeover of the lock (`submitBlindCount` takes it as `If-Match`). No answer carries a
+         *     parcel photo or their number.
          */
         get: operations["getHubIntake"];
         put?: never;
@@ -1289,6 +1308,17 @@ export interface paths {
          *
          *     **Added at MSC-DEC-416.** The row is signed and had no operation behind it - the same
          *     class as skipPickupStop at MSC-DEC-412.
+         *
+         *     **As built (S1.32, 5.104.0).** For staff of the Ops Portal alone, by the hubs of the
+         *     session's grant. The idle time is the hub's `intake_lock_idle_ttl_minutes`, judged by the
+         *     database on its own clock, and **a hub that has no usable value (missing, or not a whole
+         *     number of minutes within a day) offers no takeover at all**: a free lock is still taken
+         *     and the holder still refreshes its own, and nothing is invented in its place. The moment
+         *     of the lock is the database's. **The lock is not part of the intake's `ETag`**, and no
+         *     refresh or takeover moves it. An intake that is no longer waiting for its count (it has
+         *     been counted) is returned as it is, as `HubIntakePostCount`, and no lock is taken on it.
+         *     The request is `background` activity: it is the page keeping its own lock, so it never
+         *     extends a session's idle lifetime (the person's own acts do).
          */
         post: operations["acquireIntakeLock"];
         delete?: never;
@@ -14900,6 +14930,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
@@ -14927,8 +14958,10 @@ export interface operations {
                     "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -14953,8 +14986,10 @@ export interface operations {
                     "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };

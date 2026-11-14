@@ -1,8 +1,8 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.103.0 with Run B, the Ops half of SLICE-001 Stage 5, 13 November 2026)
-# Date:    13 November 2026 (a working revision: see the implementation plan, section 1.1)
+# Version: see `info.version` below (5.104.0 with Run C, SLICE-001 Stage 6, 14 November 2026)
+# Date:    14 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
 #   5.92.0  C2    lookupRecords (global lookup)
@@ -17,6 +17,7 @@
 #   5.101.0 A     Run A (SLICE-001, Stage 5): `createEvidence`, `completeEvidenceUpload` and `createEvidenceRetrievalAuthorization` (the evidence store: `x-permission: owner` on three self routes, the first owner a pickup stop; the first two on the Rider host); `listCollectionDisputes`, `listHandshakesForOps`, `listCollectionShortfalls` and `listPickupFailures` (the Ops reads of the collection and the failure, each item of the last with its `photo_count`); `evidence_ids` of `reportPickupFailure` (a stored photo, at most ten, each once) with its refusals `EVIDENCE_NOT_STORED` and `VALIDATION_FAILED` for a reason that is not of the category named (rule `category`); the four message kinds of a failure and of a short count; `escalatePickupRequest` escalates only a request whose stop failed (`STATE_CONFLICT`, rule `no_failed_stop`), and its trigger `BACKSTOP` is the scheduled lane of the delivery worker
 #   5.102.0 A2    Run A2 (SLICE-001, Stage 5, the Product Owner's decisions of 12 November 2026): `authoriseParcelPhotoException` (Ops lets a stop's count through without parcel photos: `pickup.handshake.override`, once for a stop, before the count, with a required note); `parcel_photo_ids` on `recordCollection` and `CollectionRecord` (exactly `collected_count` stored photos of this rider and this stop, or none for a stop let through; `VALIDATION_FAILED` with the rules `parcel_photo_count` and `duplicate`, `EVIDENCE_NOT_STORED` for a photo that cannot be counted; `evidence_ids` is now the photo a short count's reason asks for); the purpose `PARCEL_PHOTO` of `EvidenceCreate` (declared under `pickup.collection.confirm`, a failure's proof under `pickup.failure.report`); `Cache-Control: no-store` on the answer of `createEvidence` (the upload instruction is a bearer capability); the text of `completeEvidenceUpload` and `recordCollection` as built
 #   5.103.0 B    Run B (SLICE-001, Stage 5, the Ops half: the Product Owner's review of Run A2 and S1.30): the text of `recordCollection` says that the database holds the photo a short count's reason asks for, for every writer, at the end of the transaction, and that the answer and its replay state the `parcel_photo_ids` the count attached (in the order the rider named them; absent for a stop let through without photos); **S1.30 adds `listPickupStopEvidence`** (`GET /pickup-stops/{id}/evidence`, `pickup.read`: the evidence of a stop with the progress of its parcel photos as the server counts it and the exception that let its count through without them; no object key and no address) **and the `escalation` of an item of `listPickupFailures`** (who escalated the failure's request, a person or the backstop, with the backstop's threshold and wait)
+#   5.104.0 C    Run C (SLICE-001, Stage 6, S1.32): the reads and the lock of the receiving side, as built: `listHubIntakes`, `getHubIntake` and `acquireIntakeLock` declare `VALIDATION_FAILED` (and `NOT_FOUND` on the two addressed by an id, each with its response), say who is served (staff of the Ops Portal, by the hubs of the grant), that the `ETag` of an intake is the digest of its facts and does not move with the advisory lock, that a hub with no usable `intake_lock_idle_ttl_minutes` offers no takeover, that the lock request is `background` activity, and that a counted intake is `HubIntakePostCount` (no shape changes)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -27,7 +28,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.103.0
+  version: 5.104.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -2127,7 +2128,7 @@ paths:
         - browserSession: []
         - riderSession: []
       x-permission: hub.read
-      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID]
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
       tags: [hub-intakes]
       summary: List intakes at the acting hub - the awaiting-receive queue
       description: |
@@ -2141,6 +2142,15 @@ paths:
 
         **Added at MSC-DEC-416.** The queue had a route in ops-portal.md and a step in
         hub-intake.md, and no operation behind either.
+
+        **As built (S1.32, 5.104.0).** For staff of the Ops Portal alone, by the hubs of the
+        session's grant (a vendor and a rider read no intake: `PERMISSION_DENIED`). The queue is
+        oldest first (the moment the handover completed the run, then the id), so a page does not
+        move under a reader who is paging. A `state` that names no state, a `page_size` out of
+        range and a `page_token` that is not one are `VALIDATION_FAILED`. An authorised read of an
+        intake outside the actor's own hub is audited without contents, as every staff read is.
+        An item that has been counted is `HubIntakePostCount`, whose declaration the database
+        answers for it alone; no item carries a parcel photo or their number.
       parameters:
         - name: state
           in: query
@@ -2177,6 +2187,7 @@ paths:
                       discriminator:
                         propertyName: count_phase
                   next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -2191,7 +2202,15 @@ paths:
         - browserSession: []
         - riderSession: []
       x-permission: hub.read
-      x-error-codes: [HUB_SCOPE_VIOLATION, PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID]
+      x-error-codes:
+        [
+          HUB_SCOPE_VIOLATION,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          VALIDATION_FAILED,
+        ]
       tags: [hub-intakes]
       summary: Read an intake
       description: |
@@ -2205,6 +2224,16 @@ paths:
 
         After commitment, `HubIntakePostCount` carries the declared count, the physical count
         and the comparison.
+
+        **As built (S1.32, 5.104.0).** For staff of the Ops Portal alone, by the hubs of the
+        session's grant: a staff member who asks for an existing intake outside their hubs is
+        `HUB_SCOPE_VIOLATION` and one who asks for an intake that does not exist is `NOT_FOUND`;
+        a vendor and a rider read no intake (`PERMISSION_DENIED`). **The `ETag` is the digest of
+        the facts of the intake the read returned and of its version, and it does not move with
+        the advisory receive lock**: who holds the lock and since when are not facts a count rests
+        on, so a receiver who read the intake keeps its `ETag` through every refresh and every
+        takeover of the lock (`submitBlindCount` takes it as `If-Match`). No answer carries a
+        parcel photo or their number.
       responses:
         '200':
           description: OK
@@ -2218,8 +2247,10 @@ paths:
                   - $ref: '#/components/schemas/HubIntakePostCount'
                 discriminator:
                   propertyName: count_phase
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /hub-intakes/{id}/lock:
@@ -2231,9 +2262,11 @@ paths:
         [
           CSRF_VALIDATION_FAILED,
           HUB_SCOPE_VIOLATION,
+          NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
           SESSION_INVALID,
+          VALIDATION_FAILED,
         ]
       tags: [hub-intakes]
       summary: Take the advisory receive lock on an intake, or see who holds it
@@ -2250,6 +2283,17 @@ paths:
 
         **Added at MSC-DEC-416.** The row is signed and had no operation behind it - the same
         class as skipPickupStop at MSC-DEC-412.
+
+        **As built (S1.32, 5.104.0).** For staff of the Ops Portal alone, by the hubs of the
+        session's grant. The idle time is the hub's `intake_lock_idle_ttl_minutes`, judged by the
+        database on its own clock, and **a hub that has no usable value (missing, or not a whole
+        number of minutes within a day) offers no takeover at all**: a free lock is still taken
+        and the holder still refreshes its own, and nothing is invented in its place. The moment
+        of the lock is the database's. **The lock is not part of the intake's `ETag`**, and no
+        refresh or takeover moves it. An intake that is no longer waiting for its count (it has
+        been counted) is returned as it is, as `HubIntakePostCount`, and no lock is taken on it.
+        The request is `background` activity: it is the page keeping its own lock, so it never
+        extends a session's idle lifetime (the person's own acts do).
       responses:
         '200':
           description: The intake, showing the current receiver
@@ -2261,8 +2305,10 @@ paths:
                   - $ref: '#/components/schemas/HubIntakePostCount'
                 discriminator:
                   propertyName: count_phase
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /hub-intakes/{id}/count:

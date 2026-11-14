@@ -1,13 +1,5 @@
 import { described } from '../platform/openapi/described-schema.js';
-
-const INTAKE_STATES = [
-  'AWAITING_COUNT',
-  'COUNTED',
-  'RECONCILIATION_REQUIRED',
-  'READY_FOR_ITEMIZATION',
-  'ITEMIZING',
-  'CLOSED',
-] as const;
+import { HUB_INTAKE_PRE_COUNT_SCHEMA } from './hub-intake-schemas.js';
 
 /** One row of the handover: the contract's `HubHandoverRow`. A zero is legal and never quiet: the intake opens and goes to reconciliation after the blind count. */
 export const HUB_HANDOVER_ROW_SCHEMA = described({
@@ -50,48 +42,6 @@ export const HUB_HANDOVER_SUBMIT_BODY = described({
     },
     note: { type: 'string' },
   },
-});
-
-/** The contract's `HubIntakeBase`. */
-const HUB_INTAKE_BASE_SCHEMA = described({
-  type: 'object',
-  required: [
-    'id',
-    'code',
-    'state',
-    'hub_id',
-    'pickup_request_id',
-    'pickup_manifest_id',
-    'handed_over_by',
-    'handed_over_at',
-    'declaration_captured_at',
-    'count_phase',
-  ],
-  properties: {
-    id: { type: 'string', format: 'uuid' },
-    code: { type: 'string' },
-    hub_id: { type: 'string', format: 'uuid' },
-    pickup_request_id: { type: 'string', format: 'uuid' },
-    pickup_manifest_id: { type: 'string', format: 'uuid' },
-    handed_over_by: { type: 'string', format: 'uuid' },
-    handed_over_at: { type: 'string', format: 'date-time' },
-    declaration_captured_at: { type: 'string', format: 'date-time' },
-    active_receiver_id: { type: ['string', 'null'], format: 'uuid' },
-    lock_acquired_at: { type: ['string', 'null'], format: 'date-time' },
-    state: { type: 'string', enum: [...INTAKE_STATES] },
-    count_phase: { type: 'string', enum: ['PRE_COUNT', 'POST_COUNT'] },
-  },
-});
-
-/**
- * The contract's `HubIntakePreCount`. **Deliberately has no `rider_declared_count` property** - the absence is the blind-count guarantee (§35.5.2, §43.2); the database holds the same
- * absence in the grants of its table.
- */
-export const HUB_INTAKE_PRE_COUNT_SCHEMA = described({
-  allOf: [
-    HUB_INTAKE_BASE_SCHEMA,
-    { type: 'object', properties: { count_phase: { const: 'PRE_COUNT' } } },
-  ],
 });
 
 /** The answer of `submitHubHandover`: the intakes it opened, in the order of the rows. */

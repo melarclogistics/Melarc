@@ -1,0 +1,156 @@
+import { randomUUID } from 'node:crypto';
+
+import { expect } from 'vitest';
+
+import { excusePhotos, parcelPhotosOf } from './evidence-photo.js';
+import type { ManifestDays } from './manifest-days.js';
+import { arrangeRun, type ArrangedRun } from './runs.js';
+import { API, HUB_A } from './staff-routes.js';
+import type { ArrangedVendor, VendorRoutes } from './vendor-routes.js';
+
+/**
+ * Runs that have been **handed over to the hub through the real route** (`submitHubHandover`, S1.31), for the tests of what the receiving side does with the intakes it opens (S1.32
+ * onward): a run in progress of the hub with a collected stop for each count given, handed over by its rider with the numbers it declares, so that one intake for each stop is open at
+ * `AWAITING_COUNT`, exactly as the rider's act leaves them. Nothing here writes an intake: the arrangement is the run (as the administrator, as `arrangeRun` is) and the act is the route.
+ */
+export interface HandedOverIntake {
+  readonly id: string;
+  readonly code: string;
+  readonly state: string;
+  readonly hub_id: string;
+  readonly pickup_request_id: string;
+  readonly pickup_manifest_id: string;
+  readonly handed_over_by: string;
+  readonly handed_over_at: string;
+  readonly declaration_captured_at: string;
+  readonly active_receiver_id: string | null;
+  readonly lock_acquired_at: string | null;
+  readonly count_phase: string;
+}
+
+export interface HandedOver {
+  readonly run: ArrangedRun;
+  /** The intakes the handover opened, in the order of its rows (the order of the run's stops). */
+  readonly intakes: readonly HandedOverIntake[];
+  /** What the rider declared for each, in the same order: the number a receiver must not be shown. */
+  readonly declared: readonly number[];
+  /** The ids of the parcel photos of each stop, where the run was made with `photos`: what a receiver must not be shown before the count. */
+  readonly photoIds: readonly string[];
+}
+
+export interface HandOverOptions {
+  /** What each collected stop was counted at by the rider (one stop each). Default three stops counted at 3. */
+  readonly collected?: readonly number[];
+  /** What the rider declares for each row, where it is not the number counted. */
+  readonly declared?: readonly (number | undefined)[];
+  readonly hubId?: string;
+  /**
+   * Whether the rider's count of each stop has the photo of every parcel it counted, as the real operations make them (D-A10), for a test about what the receiving side must not show
+   * of them. Otherwise Ops lets each stop through without photos, which the count of a test about something else need not make.
+   */
+  readonly photos?: boolean;
+}
+
+/** The run's collected stops are arranged as the rider's count leaves them (a collection record, the stop closed), and the rider hands the run over. */
+export async function handOver(
+  routes: VendorRoutes,
+  vendor: ArrangedVendor,
+  days: ManifestDays,
+  options: HandOverOptions = {},
+): Promise<HandedOver> {
+  const collected = options.collected ?? [3, 3, 3];
+  const hubId = options.hubId ?? HUB_A;
+  const run = await arrangeRun(routes.kit, routes.admin, {
+    vendorOrganizationId: vendor.row.organizationId,
+    serviceDate: days.today,
+    state: 'IN_PROGRESS',
+    stops: collected.length,
+    stopStates: collected.map(() => 'ARRIVED' as const),
+    hubId,
+  });
+  const photoIds: string[] = [];
+  for (const [at, stop] of run.stops.entries()) {
+    const counted = collected[at] ?? 3;
+    // Each parcel's photo is a stored record the rider made through the real operations; the count that attaches them and the links are one transaction, as the database holds the number of
+    // photos of a count at the end of its transaction. Without photos, Ops lets the stop through without them.
+    const photos =
+      options.photos === true ? await parcelPhotosOf(routes, run.rider, stop.id, counted) : [];
+    if (options.photos !== true) await excusePhotos(routes, stop.id);
+    photoIds.push(...photos);
+    const recordId = randomUUID();
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot, handshake_type, recorded_by)
+         values ($1, $2, $3, 3, $4, $5, $6::jsonb, 'VENDOR_ENTERED_RIDER_DISPLAYED', $7)`,
+        [
+          recordId,
+          stop.id,
+          hubId,
+          counted,
+          counted < 3 ? 'SHORT' : 'MATCH',
+          counted < 3
+            ? JSON.stringify({
+                reason_code: 'SOME_PARCELS_NOT_READY',
+                label: 'Some parcels not ready',
+                attribution: 'CUSTOMER',
+              })
+            : null,
+          run.rider.id,
+        ],
+      );
+      for (const photo of photos) {
+        await routes.admin.query(
+          `insert into collection_parcel_photo (evidence_id, collection_record_id) values ($1, $2)`,
+          [photo, recordId],
+        );
+      }
+      await routes.admin.query('commit');
+    } catch (error) {
+      await routes.admin.query('rollback').catch(() => undefined);
+      throw error;
+    }
+    await routes.admin.query(
+      `update pickup_stop set state = 'COLLECTED', resolved_at = now() where id = $1`,
+      [stop.id],
+    );
+  }
+  const declared = run.stops.map((_, at) => options.declared?.[at] ?? collected[at] ?? 0);
+  const manifest = `${API}/pickup-manifests/${run.manifest.id}`;
+  const read = await run.rider.client.get(manifest);
+  expect(read.status).toBe(200);
+  const response = await run.rider.client.post(
+    `${manifest}/hub-handover`,
+    {
+      rows: run.stops.map((stop, at) => ({
+        pickup_request_id: stop.requestId,
+        declared_count: declared[at],
+      })),
+      captured_at: new Date(Date.now() - 60_000).toISOString(),
+    },
+    { headers: { 'If-Match': read.header('etag') ?? '', 'Idempotency-Key': randomUUID() } },
+  );
+  expect(response.status).toBe(201);
+  return { run, intakes: response.json() as HandedOverIntake[], declared, photoIds };
+}
+
+/**
+ * An intake as the count of S1.33 leaves it, arranged as the administrator through the state machine of the guard (the count is the next task's operation; what a read does with a counted
+ * intake is this task's). The comparison is the one the numbers say.
+ */
+export async function arrangeCounted(
+  routes: VendorRoutes,
+  intakeId: string,
+  physicalCount: number,
+  declared: number,
+): Promise<void> {
+  // `declared` is the number the rider declared, which the comparison is made against (the database holds it; the arrangement is told it only to say the variance).
+  const difference = physicalCount - declared;
+  await routes.admin.query(
+    `update pickup_intake
+        set state = 'COUNTED', physical_count = $2::integer, counted_at = now(), counted_by = gen_random_uuid(),
+            count_variance = case when $3::integer = 0 then 'MATCH' when $3::integer < 0 then 'SHORT' else 'OVER' end, count_difference = $3::integer
+      where id = $1`,
+    [intakeId, physicalCount, difference],
+  );
+}
