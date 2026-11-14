@@ -178,6 +178,28 @@ export class HubBlindCounts {
         },
       });
 
+      if (counted.state === 'RECONCILIATION_REQUIRED') {
+        // A variance, or a zero declaration whatever the variance, opens the OS&D case (state-machines.md section 7): Senior Ops resolves it with a reason (S1.34).
+        await audit.write(handle, {
+          code: 'hub.osd.opened',
+          enhanced: false,
+          outcome: 'SUCCEEDED',
+          object: { type: 'PickupIntake', id },
+          responsibleHubId: counted.responsible_hub_id,
+          previousState: 'COUNTED',
+          resultingState: counted.state,
+          relatedIds: {
+            pickup_manifest_id: counted.pickup_manifest_id,
+            pickup_request_id: counted.pickup_request_id,
+          },
+          detail: {
+            dimension: view.count_variance === 'MATCH' ? 'ZERO_DECLARATION' : 'VARIANCE',
+            count_variance: view.count_variance,
+            count_difference: view.count_difference,
+          },
+        });
+      }
+
       const answer: CountedIntake = { intake: view, etag: hubIntakeEtagOf(view, counted.version) };
       await idempotency.complete(handle, scope, {
         status: 200,

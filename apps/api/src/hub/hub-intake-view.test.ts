@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   hubIntakePreCountOf,
   hubIntakeViewOf,
+  intakeFindingOf,
   type AfterCount,
   type HubIntakeRow,
 } from './hub-intake-view.js';
@@ -116,5 +117,46 @@ describe('the representation of an intake once its count is committed', () => {
     const withPhotos = hubIntakeViewOf(COUNTED, { declared: 5, photoIds: photos });
     expect(withPhotos).toMatchObject({ parcel_photo_ids: photos });
     expect(Object.keys(hubIntakeViewOf(COUNTED, AFTER))).not.toContain('parcel_photo_ids');
+  });
+
+  // Break caught: the findings made after the count left out of a counted intake that has them (the receiver and Senior Ops could not see what was found), a member that says none where the contract says
+  // nothing, the findings reordered (the order they were made in is the order they are read in), or a finding that carries more than the contract's members.
+  it('carries the findings, in the order they were made, when there are any, and no member when there are none', () => {
+    const findings = [
+      {
+        id: '5eed0c00-0000-4000-8000-000000000001',
+        kind: 'CONDITION',
+        condition: 'DAMAGED',
+        outcome: null,
+        note: 'Crushed',
+        evidence_ids: ['5eed0b00-0000-4000-8000-000000000001'],
+        recorded_by: '5eed0d00-0000-4000-8000-000000000001',
+        recorded_at: '2026-11-14T11:00:00.000Z',
+      },
+      {
+        id: '5eed0c00-0000-4000-8000-000000000002',
+        kind: 'ADJUDICATION',
+        condition: null,
+        outcome: 'ACCEPTED',
+        note: 'Accepted',
+        evidence_ids: [],
+        recorded_by: '5eed0d00-0000-4000-8000-000000000002',
+        recorded_at: '2026-11-14T11:30:00.000Z',
+      },
+    ];
+    const view = hubIntakeViewOf(COUNTED, { declared: 5, photoIds: [], findings });
+    expect(view).toMatchObject({ condition_findings: findings });
+    expect(Object.keys(hubIntakeViewOf(COUNTED, AFTER))).not.toContain('condition_findings');
+    expect(Object.keys(hubIntakeViewOf(COUNTED, { ...AFTER, findings: [] }))).not.toContain(
+      'condition_findings',
+    );
+    // A finding as the database holds it becomes the contract's member, and no more of the row.
+    expect(
+      intakeFindingOf({
+        ...findings[0],
+        pickup_intake_id: COUNTED.id,
+        recorded_at: new Date('2026-11-14T11:00:00.000Z'),
+      } as never),
+    ).toEqual(findings[0]);
   });
 });

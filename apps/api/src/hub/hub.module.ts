@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { BlindCountController } from './blind-count.controller.js';
 import { HubHandoverController } from './hub-handover.controller.js';
 import { HubIntakesController } from './hub-intakes.controller.js';
+import { IntakeFindingsController } from './intake-findings.controller.js';
 import { hubProviders } from './hub-providers.js';
 
 /**
@@ -13,7 +14,12 @@ import { hubProviders } from './hub-providers.js';
  * it. The only thing of `pickup` it names is the schema of the run's and the request's tables, for the foreign keys of its own table (the data layer's convention).
  */
 @Module({
-  controllers: [HubHandoverController, HubIntakesController, BlindCountController],
+  controllers: [
+    HubHandoverController,
+    HubIntakesController,
+    BlindCountController,
+    IntakeFindingsController,
+  ],
   providers: [...hubProviders],
 })
 export class HubModule {}

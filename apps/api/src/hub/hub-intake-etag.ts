@@ -50,6 +50,8 @@ function representationOf(view: HubIntakeView): readonly unknown[] {
     count_difference: view.count_difference,
     condition: view.condition,
     parcel_photo_ids: view.parcel_photo_ids ?? null,
+    // An adjudication that escalates changes nothing of the row but adds a finding: the findings are part of what the read returned.
+    condition_findings: view.condition_findings?.map((finding) => finding.id) ?? null,
   };
   return [...Object.values(before), ...Object.values(after)];
 }

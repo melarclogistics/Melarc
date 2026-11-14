@@ -201,6 +201,9 @@ describe('the generated description of the real application', () => {
       ['/hub-intakes/{id}/lock', ['post'], ['acquireIntakeLock']],
       // S1.33: the receiver's blind count.
       ['/hub-intakes/{id}/count', ['post'], ['submitBlindCount']],
+      // S1.34: what is found at an intake after its count, and Senior Ops's adjudication.
+      ['/hub-intakes/{id}/condition', ['post'], ['recordIntakeCondition']],
+      ['/hub-intakes/{id}/discrepancy', ['post'], ['adjudicateDiscrepancy']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.

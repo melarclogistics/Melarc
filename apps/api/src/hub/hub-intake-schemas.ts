@@ -109,3 +109,28 @@ export const HUB_INTAKE_PAGE_SCHEMA = described({
     next_page_token: { type: ['string', 'null'] },
   },
 });
+
+/** The body of `recordIntakeCondition` (the contract's `IntakeConditionRecord`): the receiver's recording of a condition, independent of the count. DAMAGED and TAMPERED carry stored evidence. */
+export const INTAKE_CONDITION_BODY = described({
+  type: 'object',
+  required: ['condition'],
+  additionalProperties: false,
+  properties: {
+    condition: { type: 'string', enum: ['OK', 'DAMAGED', 'TAMPERED', 'OTHER'] },
+    note: { type: 'string' },
+    evidence_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+  },
+});
+
+/** The body of `adjudicateDiscrepancy` (the contract's `DiscrepancyAdjudication`): an outcome and a reason in words, and optionally a condition with its evidence. */
+export const DISCREPANCY_ADJUDICATION_BODY = described({
+  type: 'object',
+  required: ['outcome', 'note'],
+  additionalProperties: false,
+  properties: {
+    outcome: { type: 'string', enum: ['ACCEPTED', 'ESCALATED', 'WRITTEN_OFF', 'VENDOR_NOTIFIED'] },
+    condition: { type: 'string', enum: ['OK', 'DAMAGED', 'TAMPERED', 'OTHER'] },
+    evidence_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+    note: { type: 'string', minLength: 1 },
+  },
+});

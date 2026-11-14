@@ -74,13 +74,55 @@ export interface HubIntakePostCountView extends Omit<HubIntakePreCountView, 'cou
   readonly count_difference: number;
   readonly condition: string;
   readonly parcel_photo_ids?: readonly string[];
+  readonly condition_findings?: readonly IntakeFindingView[];
 }
 
-/** What the database answers for an intake that has been counted, beyond the columns the login can read (`melarc.hub_intake_after_count`, `melarc.commit_blind_count`). */
+/** A finding as the database holds it (`pickup_intake_finding`, migration 0096). */
+export interface IntakeFindingRow {
+  readonly id: string;
+  readonly pickup_intake_id: string;
+  readonly kind: string;
+  readonly condition: string | null;
+  readonly outcome: string | null;
+  readonly note: string | null;
+  readonly evidence_ids: readonly string[];
+  readonly recorded_by: string;
+  readonly recorded_at: string | Date;
+}
+
+/**
+ * What was found at an intake after its count (`condition_findings` of the contract's `HubIntakePostCount`): the receiver's recording of a condition and Senior Ops's adjudication, each with the
+ * evidence it cites, in the order they were made. A finding explains a discrepancy; it never changes a count.
+ */
+export interface IntakeFindingView {
+  readonly id: string;
+  readonly kind: string;
+  readonly condition: string | null;
+  readonly outcome: string | null;
+  readonly note: string | null;
+  readonly evidence_ids: readonly string[];
+  readonly recorded_by: string;
+  readonly recorded_at: string;
+}
+
+export const intakeFindingOf = (row: IntakeFindingRow): IntakeFindingView => ({
+  id: row.id,
+  kind: row.kind,
+  condition: row.condition,
+  outcome: row.outcome,
+  note: row.note,
+  evidence_ids: [...row.evidence_ids],
+  recorded_by: row.recorded_by,
+  recorded_at: timestampOf(row.recorded_at).toISOString(),
+});
+
+/** What the database answers for an intake that has been counted, beyond the columns the login can read (`melarc.hub_intake_after_count`, `melarc.commit_blind_count`), and the findings made since. */
 export interface AfterCount {
   readonly declared: number;
   /** The stop's stored parcel photos, in the order they were attached; none when Ops let the stop through without them. */
   readonly photoIds: readonly string[];
+  /** The findings made after the count, in the order they were made: none until one is. */
+  readonly findings?: readonly IntakeFindingView[];
 }
 
 export type HubIntakeView = HubIntakePreCountView | HubIntakePostCountView;
@@ -133,5 +175,8 @@ export function hubIntakeViewOf(row: HubIntakeRow, after: AfterCount | undefined
     count_difference: row.count_difference,
     condition: row.condition,
     ...(after.photoIds.length === 0 ? {} : { parcel_photo_ids: [...after.photoIds] }),
+    ...(after.findings === undefined || after.findings.length === 0
+      ? {}
+      : { condition_findings: [...after.findings] }),
   };
 }

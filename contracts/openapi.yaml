@@ -1,7 +1,7 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.105.0 with Run C, SLICE-001 Stage 6)
+# Version: see `info.version` below (5.106.0 with Run C, SLICE-001 Stage 6)
 # Date:    14 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
@@ -19,6 +19,7 @@
 #   5.103.0 B    Run B (SLICE-001, Stage 5, the Ops half: the Product Owner's review of Run A2 and S1.30): the text of `recordCollection` says that the database holds the photo a short count's reason asks for, for every writer, at the end of the transaction, and that the answer and its replay state the `parcel_photo_ids` the count attached (in the order the rider named them; absent for a stop let through without photos); **S1.30 adds `listPickupStopEvidence`** (`GET /pickup-stops/{id}/evidence`, `pickup.read`: the evidence of a stop with the progress of its parcel photos as the server counts it and the exception that let its count through without them; no object key and no address) **and the `escalation` of an item of `listPickupFailures`** (who escalated the failure's request, a person or the backstop, with the backstop's threshold and wait)
 #   5.104.0 C    Run C (SLICE-001, Stage 6, S1.32): the reads and the lock of the receiving side, as built: `listHubIntakes`, `getHubIntake` and `acquireIntakeLock` declare `VALIDATION_FAILED` (and `NOT_FOUND` on the two addressed by an id, each with its response), say who is served (staff of the Ops Portal, by the hubs of the grant), that the `ETag` of an intake is the digest of its facts and does not move with the advisory lock, that a hub with no usable `intake_lock_idle_ttl_minutes` offers no takeover, that the lock request is `background` activity, and that a counted intake is `HubIntakePostCount` (no shape changes)
 #   5.105.0 C    Run C (SLICE-001, Stage 6, S1.33): `submitBlindCount` says what it does as built (staff of the Ops Portal, by the hubs of the grant; the count is committed once, so a second count, a stale ETag and a missing one are STATE_CONFLICT whoever holds the lock; the database makes the comparison and the intake goes to READY_FOR_ITEMIZATION or RECONCILIATION_REQUIRED, a zero declaration always to the latter) and declares HUB_SCOPE_VIOLATION and NOT_FOUND (with its 404); `HubIntakePostCount` gains the optional `parcel_photo_ids` (the photos of the parcels counted at the door, readable only from the response to the committed count on, D-A10)
+#   5.106.0 C    Run C (SLICE-001, Stage 6, S1.34): `recordIntakeCondition` and `adjudicateDiscrepancy` say what they do as built (staff of the Ops Portal by the hubs of the grant; the condition after the count and before itemization, once, and a condition on a cleared intake sends it back to RECONCILIATION_REQUIRED; the adjudication under a key Ops Staff do not hold, with a mandatory reason, ESCALATED leaving the case open and the other outcomes clearing it; no count ever changes) and declare HUB_SCOPE_VIOLATION and NOT_FOUND (and STATE_CONFLICT and VALIDATION_FAILED on the adjudication, with their responses); `HubIntakePostCount.condition_findings` is described (no shape changes)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -29,7 +30,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.105.0
+  version: 5.106.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -2406,7 +2407,9 @@ paths:
         [
           CSRF_VALIDATION_FAILED,
           EVIDENCE_NOT_STORED,
+          HUB_SCOPE_VIOLATION,
           IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
           REASON_REQUIRED,
@@ -2423,6 +2426,20 @@ paths:
         attached, `EVIDENCE_NOT_STORED` for a record not yet stored) and route the case to Senior Ops,
         who adjudicates with `adjudicateDiscrepancy`; an Ops Staff user who tries that is
         `PERMISSION_DENIED`. Only after the blind count has committed.
+
+        **As built (S1.34, 5.106.0).** For staff of the Ops Portal alone, by the hubs of the session's
+        grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that does not
+        exist). `If-Match` is the `ETag` of `getHubIntake`. Recorded **after the count and before
+        itemization starts, once**: an intake that is waiting for its count, one being itemized or closed,
+        and one whose condition is recorded already are `STATE_CONFLICT` (a stale `ETag` is too). The
+        evidence is each one's own: the records are declared with `createEvidence` for the owner
+        `PICKUP_INTAKE` (purpose `CONDITION`, under this key), each must be `STORED`, about this very
+        intake and cited once (`EVIDENCE_NOT_STORED` otherwise). `OK` is a finding and changes nothing;
+        another condition sets the intake's `condition` and, for an intake that was cleared for
+        itemization (`READY_FOR_ITEMIZATION`, a count that matched), **sends it back to
+        `RECONCILIATION_REQUIRED`**, so that the case routes to Senior Ops. **No count changes**: the
+        declared count, the hub count and the variance survive every finding. The response is the intake
+        as `HubIntakePostCount`, with its `condition_findings`.
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -2442,6 +2459,7 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -4122,11 +4140,15 @@ paths:
         [
           CSRF_VALIDATION_FAILED,
           EVIDENCE_NOT_STORED,
+          HUB_SCOPE_VIOLATION,
           INSUFFICIENT_AUTHORITY,
+          NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
           REASON_REQUIRED,
           SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
         ]
       tags: [hub-intakes]
       summary: Adjudicate an over, short or damaged outcome
@@ -4148,6 +4170,22 @@ paths:
         execute. `evidence_ids` is new: `DAMAGED` and `TAMPERED` without a `STORED` reference are
         rejected with `EVIDENCE_NOT_STORED`, the same guard `contracts/errors-and-enums.md` §5.7
         already describes and this operation had never actually declared.
+
+        **As built (S1.34, 5.106.0).** For staff of the Ops Portal alone, by the hubs of the session's
+        grant, under a key **Ops Staff do not hold**: a user without it is `PERMISSION_DENIED` before
+        the body is read (a zero declaration is resolved by Senior Ops with a reason, and an Ops Staff
+        user is refused: AC-SLICE-001-42, -76). `If-Match` is the `ETag` of `getHubIntake`; the
+        operation takes no `Idempotency-Key`, and an intake that is not in reconciliation (it has been
+        resolved already, is waiting, or is being itemized) is `STATE_CONFLICT`, as is a stale `ETag`.
+        **The reason is mandatory** (blank is `REASON_REQUIRED`). `ACCEPTED`, `WRITTEN_OFF` and
+        `VENDOR_NOTIFIED` resolve the case and clear the intake for itemization
+        (`READY_FOR_ITEMIZATION`); **`ESCALATED` records the act and leaves the case open**, for a
+        later adjudication. A `condition` given sets the intake's condition: `DAMAGED` and
+        `TAMPERED` need `evidence_ids` (`REASON_REQUIRED` when none), each `STORED`, about this
+        intake and cited once (`EVIDENCE_NOT_STORED` otherwise), of the receiver's photos or the
+        adjudicator's own (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`, under this
+        key). **No count changes.** The response is the intake as `HubIntakePostCount`, with its
+        `condition_findings`; `hub.osd.resolved` is written, enhanced, for every adjudication.
       parameters: [{ $ref: '#/components/parameters/IfMatch' }]
       requestBody:
         required: true
@@ -4162,8 +4200,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HubIntakePostCount' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -15223,7 +15263,11 @@ components:
               description: |
                 Detail behind a non-`OK` condition — evidence and adjudication notes, not the
                 classification itself, which is `condition` above. Independent of count_variance —
-                the three OS&D dimensions never collapse.
+                the three OS&D dimensions never collapse. **As built (S1.34, 5.106.0):** one member for
+                each recording of a condition by the receiver and each adjudication by Senior Ops, in
+                the order they were made, each `{ id, kind (CONDITION or ADJUDICATION), condition,
+                outcome, note, evidence_ids, recorded_by, recorded_at }`; absent until one is made.
+                A finding explains a discrepancy and never changes a count.
             dispute_state: { type: [string, 'null'] }
             parity_exception_id: { type: [string, 'null'], format: uuid }
             parcel_photo_ids:

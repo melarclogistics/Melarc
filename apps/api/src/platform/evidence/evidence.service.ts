@@ -383,7 +383,7 @@ export class EvidenceService {
       const found = await this.#options.runner.mutate(decision, correlationId, async (handle) => {
         const result = await transactionOf(handle).execute(sql`
           select ${EVIDENCE_COLUMNS}, clock_timestamp() >= upload_expires_at as window_closed
-            from evidence where id = ${id}::uuid and owner_type = ${act.ownerType}`);
+            from evidence where id = ${id}::uuid and owner_type = ${act.ownerType} and purpose = any(${`{${act.purposes.join(',')}}`}::text[])`);
         return result.rows[0] as unknown as (EvidenceRow & { window_closed: boolean }) | undefined;
       });
       if (found !== undefined) {

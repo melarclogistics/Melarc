@@ -124,6 +124,42 @@ describe('the ETag of an intake', () => {
     expect(etagWith(photos.slice(0, 1))).not.toBe(etagWith(photos));
   });
 
+  // Break caught: the findings left out of the digest of a counted intake, so that an escalation (which adds a finding and changes nothing else of the row, so the version does not move) is not seen by a client
+  // holding the old token.
+  it('moves with the findings of a counted intake, though the version has not moved', () => {
+    const counted = {
+      state: 'RECONCILIATION_REQUIRED',
+      physical_count: 1,
+      count_variance: 'SHORT',
+      count_difference: -2,
+    } as const;
+    const finding = (id: string) => ({
+      id,
+      kind: 'ADJUDICATION',
+      condition: null,
+      outcome: 'ESCALATED',
+      note: 'To the manager',
+      evidence_ids: [],
+      recorded_by: '5eed0d00-0000-4000-8000-000000000001',
+      recorded_at: '2026-11-14T11:30:00.000Z',
+    });
+    const etagWith = (findings: readonly ReturnType<typeof finding>[]): string =>
+      hubIntakeEtagOf(
+        hubIntakeViewOf({ ...ROW, ...counted }, { declared: 3, photoIds: [], findings }),
+        4,
+      );
+    const none = etagWith([]);
+    const one = etagWith([finding('5eed0c00-0000-4000-8000-000000000001')]);
+    expect(one).not.toBe(none);
+    expect(etagWith([finding('5eed0c00-0000-4000-8000-000000000002')])).not.toBe(one);
+    expect(
+      etagWith([
+        finding('5eed0c00-0000-4000-8000-000000000001'),
+        finding('5eed0c00-0000-4000-8000-000000000002'),
+      ]),
+    ).not.toBe(one);
+  });
+
   // Break caught: a header read leniently (a weak validator, a list, a bare token, another intake's token, a missing one).
   it('is read strictly: exactly one strong quoted token, equal to the current one', () => {
     const current = hubIntakeEtagOf(view(), 1);

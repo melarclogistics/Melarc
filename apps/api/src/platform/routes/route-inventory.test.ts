@@ -96,7 +96,9 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/evidence' },
       { method: 'POST', path: '/api/v1/evidence/:id/complete' },
       { method: 'POST', path: '/api/v1/evidence/:id/retrieval-authorization' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/condition' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/count' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/discrepancy' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/lock' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
@@ -661,12 +663,37 @@ describe('the real application', () => {
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
       // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
       // changes nothing (the Product Owner, 6 November 2026), so that a number typed in full is in no URL: the CSRF guard judges it like any POST.
+      // S1.34: what is found at an intake after its count: the receiver's condition, and Senior Ops's adjudication (a key Ops Staff do not hold: the guard refuses them before the body is read).
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/condition',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       // S1.33: the receiver's blind count.
       {
         method: 'POST',
         path: '/api/v1/hub-intakes/:id/count',
         access: 'permission',
         permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/discrepancy',
+        access: 'permission',
+        permission: 'hub.osd.adjudicate',
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'qualifying',

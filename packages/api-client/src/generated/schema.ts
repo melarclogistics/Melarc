@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.105.0
- *   SHA-256 df58c6bd8aebded3c35f666435ac8124c5c7b83216d89fdb42f7ef6923160908 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.106.0
+ *   SHA-256 5f6dbf8009c01ae56048a234792df4d18f4ecde96101ad3dd61fb09fc3d669cb (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1399,6 +1399,20 @@ export interface paths {
          *     attached, `EVIDENCE_NOT_STORED` for a record not yet stored) and route the case to Senior Ops,
          *     who adjudicates with `adjudicateDiscrepancy`; an Ops Staff user who tries that is
          *     `PERMISSION_DENIED`. Only after the blind count has committed.
+         *
+         *     **As built (S1.34, 5.106.0).** For staff of the Ops Portal alone, by the hubs of the session's
+         *     grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that does not
+         *     exist). `If-Match` is the `ETag` of `getHubIntake`. Recorded **after the count and before
+         *     itemization starts, once**: an intake that is waiting for its count, one being itemized or closed,
+         *     and one whose condition is recorded already are `STATE_CONFLICT` (a stale `ETag` is too). The
+         *     evidence is each one's own: the records are declared with `createEvidence` for the owner
+         *     `PICKUP_INTAKE` (purpose `CONDITION`, under this key), each must be `STORED`, about this very
+         *     intake and cited once (`EVIDENCE_NOT_STORED` otherwise). `OK` is a finding and changes nothing;
+         *     another condition sets the intake's `condition` and, for an intake that was cleared for
+         *     itemization (`READY_FOR_ITEMIZATION`, a count that matched), **sends it back to
+         *     `RECONCILIATION_REQUIRED`**, so that the case routes to Senior Ops. **No count changes**: the
+         *     declared count, the hub count and the variance survive every finding. The response is the intake
+         *     as `HubIntakePostCount`, with its `condition_findings`.
          */
         post: operations["recordIntakeCondition"];
         delete?: never;
@@ -2531,6 +2545,22 @@ export interface paths {
          *     execute. `evidence_ids` is new: `DAMAGED` and `TAMPERED` without a `STORED` reference are
          *     rejected with `EVIDENCE_NOT_STORED`, the same guard `contracts/errors-and-enums.md` §5.7
          *     already describes and this operation had never actually declared.
+         *
+         *     **As built (S1.34, 5.106.0).** For staff of the Ops Portal alone, by the hubs of the session's
+         *     grant, under a key **Ops Staff do not hold**: a user without it is `PERMISSION_DENIED` before
+         *     the body is read (a zero declaration is resolved by Senior Ops with a reason, and an Ops Staff
+         *     user is refused: AC-SLICE-001-42, -76). `If-Match` is the `ETag` of `getHubIntake`; the
+         *     operation takes no `Idempotency-Key`, and an intake that is not in reconciliation (it has been
+         *     resolved already, is waiting, or is being itemized) is `STATE_CONFLICT`, as is a stale `ETag`.
+         *     **The reason is mandatory** (blank is `REASON_REQUIRED`). `ACCEPTED`, `WRITTEN_OFF` and
+         *     `VENDOR_NOTIFIED` resolve the case and clear the intake for itemization
+         *     (`READY_FOR_ITEMIZATION`); **`ESCALATED` records the act and leaves the case open**, for a
+         *     later adjudication. A `condition` given sets the intake's condition: `DAMAGED` and
+         *     `TAMPERED` need `evidence_ids` (`REASON_REQUIRED` when none), each `STORED`, about this
+         *     intake and cited once (`EVIDENCE_NOT_STORED` otherwise), of the receiver's photos or the
+         *     adjudicator's own (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`, under this
+         *     key). **No count changes.** The response is the intake as `HubIntakePostCount`, with its
+         *     `condition_findings`; `hub.osd.resolved` is written, enhanced, for every adjudication.
          */
         post: operations["adjudicateDiscrepancy"];
         delete?: never;
@@ -9784,7 +9814,11 @@ export interface components {
             /**
              * @description Detail behind a non-`OK` condition — evidence and adjudication notes, not the
              *     classification itself, which is `condition` above. Independent of count_variance —
-             *     the three OS&D dimensions never collapse.
+             *     the three OS&D dimensions never collapse. **As built (S1.34, 5.106.0):** one member for
+             *     each recording of a condition by the receiver and each adjudication by Senior Ops, in
+             *     the order they were made, each `{ id, kind (CONDITION or ADJUDICATION), condition,
+             *     outcome, note, evidence_ids, recorded_by, recorded_at }`; absent until one is made.
+             *     A finding explains a discrepancy and never changes a count.
              */
             condition_findings?: {
                 [key: string]: unknown;
@@ -15168,6 +15202,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
@@ -16617,8 +16652,10 @@ export interface operations {
                     "application/json": components["schemas"]["HubIntakePostCount"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
