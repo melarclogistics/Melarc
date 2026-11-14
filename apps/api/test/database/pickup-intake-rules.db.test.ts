@@ -236,6 +236,7 @@ async function adminRefusal(
 async function handedOver(
   stopStates: readonly StopState[] = ['COLLECTED', 'COLLECTED'],
   hubId: string = HUB_A,
+  declared: readonly number[] = [],
 ): Promise<Fixture & { intakes: string[] }> {
   const fixture = await run('COMPLETED', stopStates, hubId);
   const collected = fixture.stops.filter(
@@ -246,7 +247,11 @@ async function handedOver(
   try {
     for (const [at, stop] of collected.entries()) {
       await routes.admin.query(
-        insertIntakeSql(fixture, { id: intakes[at], requestId: stop.requestId }),
+        insertIntakeSql(fixture, {
+          id: intakes[at],
+          requestId: stop.requestId,
+          ...(declared[at] === undefined ? {} : { declared: declared[at] }),
+        }),
       );
     }
     await routes.admin.query('commit');
@@ -1381,7 +1386,7 @@ describe('the receive lock (S1.32): what the database holds for every writer', (
 
 describe('the declaration after the count (S1.32; OB-S1-92)', () => {
   const declared = (ids: readonly string[]): string =>
-    `select intake_id, rider_declared_count from melarc.hub_intake_declarations(array[${ids
+    `select intake_id, rider_declared_count from melarc.hub_intake_after_count(array[${ids
       .map((id) => `'${id}'`)
       .join(', ')}]::uuid[]) order by intake_id`;
 
@@ -1420,5 +1425,177 @@ describe('the declaration after the count (S1.32; OB-S1-92)', () => {
     for (const [name, context] of refused) {
       expect(codeOf(await attempt(context, declared([id]))), name).toBe('42501');
     }
+  });
+});
+
+/*
+ * S1.33 (`submitBlindCount`; `AC-SLICE-001-38`, `-43`, `-76`; state-machines.md section 7; hub-intake.md section 5.1 steps 4 and 5): what the database holds, for every writer, of the count.
+ *
+ * - **The comparison is the database's.** The application's login cannot read the declaration, so the count is committed by one function of the database (`melarc.commit_blind_count`), which
+ *   reads the declaration as the owner, makes the difference and the variance, writes the count and takes the intake from `AWAITING_COUNT` to `COUNTED` and then, as the System does, to
+ *   `READY_FOR_ITEMIZATION` (a count that matches a declaration above zero, with no condition finding) or to `RECONCILIATION_REQUIRED` (a variance, a finding, **or a zero declaration
+ *   whatever the variance**). It answers the declaration, which is its first legal appearance, and the photos of the parcels counted at the door.
+ * - **And the guard holds the same for every other writer**: a count's difference and variance are the comparison of its number with the declaration, its moment is the database's, and the
+ *   System's two moves are made only for the counts they are for.
+ */
+const commit = (id: string, physical: number): string =>
+  `select intake_id, rider_declared_count, parcel_photo_ids from melarc.commit_blind_count('${id}', ${String(physical)})`;
+
+const countOf = async (id: string) =>
+  (await intakeRow(id)) as {
+    state: string;
+    physical_count: number | null;
+    count_variance: string | null;
+    count_difference: number | null;
+    counted_by: string | null;
+    counted_at: Date | null;
+    condition: string;
+    version: number;
+  };
+
+describe('the blind count (S1.33): what the database holds for every writer', () => {
+  // Break caught: a count whose comparison is wrong (the difference taken the wrong way, a variance for the wrong side), whose next state ignores a zero declaration or a variance, that
+  // answers without the declaration, or that is written in another name than the receiver's.
+  it.each([
+    ['a count that matches a declaration above zero', 3, 3, 'MATCH', 0, 'READY_FOR_ITEMIZATION'],
+    ['a count below the declaration', 5, 3, 'SHORT', -2, 'RECONCILIATION_REQUIRED'],
+    ['a count above the declaration', 2, 3, 'OVER', 1, 'RECONCILIATION_REQUIRED'],
+    ['a zero that matches a zero declaration', 0, 0, 'MATCH', 0, 'RECONCILIATION_REQUIRED'],
+    ['a count above a zero declaration', 0, 4, 'OVER', 4, 'RECONCILIATION_REQUIRED'],
+  ] as const)(
+    'makes the comparison and the System’s move inside the database: %s',
+    async (_name, declared, physical, variance, difference, state) => {
+      const done = await handedOver(['COLLECTED'], HUB_A, [declared]);
+      const id = done.intakes[0] ?? '';
+      const receiver = staff(COUNT, [HUB_A]);
+      expect(await attempt(receiver, commit(id, physical))).toEqual({
+        rows: [{ intake_id: id, rider_declared_count: declared, parcel_photo_ids: [] }],
+      });
+      const row = await countOf(id);
+      expect(row).toMatchObject({
+        state,
+        physical_count: physical,
+        count_variance: variance,
+        count_difference: difference,
+        counted_by: receiver.principalId,
+        condition: 'OK',
+      });
+      expect(secondsSince(row.counted_at)).toBeLessThan(120);
+    },
+  );
+
+  // Break caught: a count that can be made twice (the second would replace the receiver's number), by a context that is not a receiver (another key, a rider, a vendor, another hub), or for a
+  // number that is no count; and one that leaves part of itself behind when it is refused.
+  it('counts an intake once, for staff under the key of the count in its hubs, and nothing else', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A, [3, 3]);
+    const [first, second] = done.intakes;
+    const receiver = staff(COUNT, [HUB_A]);
+    expect('rows' in (await attempt(receiver, commit(first ?? '', 3)))).toBe(true);
+    // Counted again: the function's own check says so (the guard of the table would refuse the same write, with its own words).
+    const again = await attempt(staff(COUNT, [HUB_A]), commit(first ?? '', 4));
+    expect(codeOf(again)).toBe('23514');
+    expect(messageOf(again)).toMatch(/counted once/);
+    expect((await countOf(first ?? '')).physical_count).toBe(3);
+    // Refused by the function's own first check (who may commit a count): the policies of the table would refuse most of these statements as well, with other words.
+    const notReceivers: [string, SecurityContext][] = [
+      ['a staff member under a reading key', staff('hub.read', [HUB_A])],
+      ['a staff member of another key', staff('pickup.read', [HUB_A])],
+      ['the rider of the handover', rider(done.holderId, HANDOVER)],
+      ['a rider under the key of the count', rider(done.holderId, COUNT)],
+      ['a vendor', vendorContext(organisation)],
+    ];
+    for (const [name, context] of notReceivers) {
+      const refused = await attempt(context, commit(second ?? '', 3));
+      expect(codeOf(refused), name).toBe('42501');
+      expect(messageOf(refused), name).toMatch(/committed by a receiver/);
+    }
+    // A receiver of another hub, or of none, finds no such intake: the table shows it nothing.
+    for (const [name, context] of [
+      ['a staff member of another hub', staff(COUNT, [HUB_B])],
+      ['a staff member with no hub', staff(COUNT, [])],
+    ] as const) {
+      const refused = await attempt(context, commit(second ?? '', 3));
+      expect(codeOf(refused), name).toBe('42501');
+      expect(messageOf(refused), name).toMatch(/no such intake/);
+    }
+    // A number that is no count: the function says so (the check of the table would refuse a negative one with its own code), and a number past the column's range is no call at all.
+    const negative = await attempt(receiver, commit(second ?? '', -1));
+    expect(codeOf(negative)).toBe('22023');
+    expect(codeOf(await attempt(receiver, commit(second ?? '', 2147483648)))).toBeDefined();
+    expect(await countOf(second ?? '')).toMatchObject({
+      state: 'AWAITING_COUNT',
+      physical_count: null,
+      version: 1,
+    });
+  });
+
+  // Break caught: a guard that takes a count with a difference or a variance that is not the comparison (a writer that is not the function: the administrator, a later task's login), that keeps
+  // the moment the writer gives, or that lets the intake reach the count with no comparison at all.
+  it('holds the comparison for every writer: the difference and the variance are those of the declaration, and the moment is the database’s', async () => {
+    const done = await handedOver(
+      ['COLLECTED', 'COLLECTED', 'COLLECTED', 'COLLECTED'],
+      HUB_A,
+      [3, 3, 3, 3],
+    );
+    const [wrongDifference, wrongVariance, rightButOld, noComparison] = done.intakes;
+    const counting = (id: string, difference: string, variance: string, at = 'now()') =>
+      `update pickup_intake set state = 'COUNTED', physical_count = 5, counted_at = ${at}, counted_by = gen_random_uuid(), count_variance = ${variance}, count_difference = ${difference} where id = '${id}'`;
+    expect(
+      (await adminRefusal([counting(wrongDifference ?? '', '0', `'OVER'`)]))?.code,
+      'a difference that is not physical minus declared',
+    ).toBe('23514');
+    expect(
+      (await adminRefusal([counting(wrongVariance ?? '', '2', `'SHORT'`)]))?.code,
+      'a variance for the other side',
+    ).toBe('23514');
+    expect(
+      (await adminRefusal([counting(noComparison ?? '', 'null', 'null')]))?.code,
+      'no comparison',
+    ).toBe('23514');
+    expect(
+      await adminRefusal([
+        counting(rightButOld ?? '', '2', `'OVER'`, `now() - interval '3 hours'`),
+      ]),
+    ).toBeUndefined();
+    expect(secondsSince((await countOf(rightButOld ?? '')).counted_at)).toBeLessThan(120);
+    for (const id of [wrongDifference, wrongVariance, noComparison]) {
+      expect((await countOf(id ?? '')).state).toBe('AWAITING_COUNT');
+    }
+  });
+
+  // Break caught: the System's move made for a count it is not for: an intake with a variance, a zero declaration or a finding sent to itemization, or a clean count sent to reconciliation.
+  it('moves a counted intake as the System does, and by no other rule, for every writer', async () => {
+    const done = await handedOver(
+      ['COLLECTED', 'COLLECTED', 'COLLECTED', 'COLLECTED'],
+      HUB_A,
+      [3, 3, 0, 3],
+    );
+    const [clean, short, zero, finding] = done.intakes;
+    const countedAs = async (id: string, physical: number, variance: string, difference: number) =>
+      routes.admin.query(
+        `update pickup_intake set state = 'COUNTED', physical_count = $2, counted_at = now(), counted_by = gen_random_uuid(), count_variance = $3, count_difference = $4 where id = $1`,
+        [id, physical, variance, difference],
+      );
+    await countedAs(clean ?? '', 3, 'MATCH', 0);
+    await countedAs(short ?? '', 1, 'SHORT', -2);
+    await countedAs(zero ?? '', 0, 'MATCH', 0);
+    await routes.admin.query(`update pickup_intake set condition = 'DAMAGED' where id = $1`, [
+      finding ?? '',
+    ]);
+    await countedAs(finding ?? '', 3, 'MATCH', 0);
+    const move = (id: string, to: string) =>
+      adminRefusal([`update pickup_intake set state = '${to}' where id = '${id}'`]);
+    for (const [name, id] of [
+      ['a variance', short],
+      ['a zero declaration', zero],
+      ['a finding', finding],
+    ] as const) {
+      expect((await move(id ?? '', 'READY_FOR_ITEMIZATION'))?.code, name).toBe('23514');
+      expect(await move(id ?? '', 'RECONCILIATION_REQUIRED'), name).toBeUndefined();
+    }
+    expect((await move(clean ?? '', 'RECONCILIATION_REQUIRED'))?.code, 'a clean count').toBe(
+      '23514',
+    );
+    expect(await move(clean ?? '', 'READY_FOR_ITEMIZATION')).toBeUndefined();
   });
 });

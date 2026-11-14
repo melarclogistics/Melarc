@@ -175,10 +175,13 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // stop's count through without parcel photos, once, before the count, with a note. It answers that key of a staff member alone and takes the stop's lock first; the
     // policy of the table admits the write only to a statement that runs as the owner, which is a statement inside this function, so the login can write no exception itself.
     'melarc.authorise_parcel_photo_exception',
-    // And the one read of the declaration of an intake that has been counted (migration 0093, S1.32; OB-S1-92): the application's login cannot read `rider_declared_count`, so the
-    // read that serves a counted intake (`HubIntakePostCount`) asks this function. It answers only an intake past `AWAITING_COUNT`, only staff under `hub.read` or `hub.intake.count`,
-    // and only the intakes the policies of the table show that context; any other context is refused. It serves the declaration and nothing else of the row.
-    'melarc.hub_intake_declarations',
+    // And the two operations of the receiving side that the application's login cannot do itself, because it cannot read `rider_declared_count` (migrations 0093 and 0094, S1.32 and S1.33;
+    // OB-S1-92): the read of what a counted intake carries beyond the columns it can read (`melarc.hub_intake_after_count`: the declaration and the photos of the parcels counted at the door,
+    // only for an intake past `AWAITING_COUNT`, only for staff under `hub.read` or `hub.intake.count`, only the intakes the policies of the tables show that context; any other context is
+    // refused), and the commit of the physical count (`melarc.commit_blind_count`: staff under `hub.intake.count` alone; it makes the comparison with the declaration and the System's move, as
+    // the owner, in the one change; the policy that admits the write names the owner, so the login can write no count itself).
+    'melarc.hub_intake_after_count',
+    'melarc.commit_blind_count',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification
