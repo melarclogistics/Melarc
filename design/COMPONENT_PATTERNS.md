@@ -1918,7 +1918,7 @@ The facts of a card, where a table is too narrow for its columns and draws a car
 
 #### LockIndicator
 
-> **Status:** IMPLEMENTING (15 November 2026) · **Code:** `apps/ops-web/src/components/ui/lock-indicator/`
+> **Status:** IMPLEMENTING (14 November 2026) · **Code:** `apps/ops-web/src/components/ui/lock-indicator/`
 
 Who holds an **advisory** lock on a record, told in words ([surfaces/ops-portal.md §9](../surfaces/ops-portal.md#9-concurrency-is-a-first-class-interface-concern): the receiver's lock of an intake). The words do the saying and the icon (a closed padlock, an open one for a lock nobody holds) and the tone (info for the person's own, warning for another's, neutral for a free or an unknown one) support them. It decides nothing and knows nothing of the policy: it does not know what the lock is for, how long it lasts or who may take it over, and **a lock that is advisory is never drawn as a gate**.
 
@@ -1928,7 +1928,7 @@ Who holds an **advisory** lock on a record, told in words ([surfaces/ops-portal.
 
 #### EvidenceUpload
 
-> **Status:** IMPLEMENTING (15 November 2026) · **Code:** `apps/ops-web/src/components/ui/evidence-upload/`
+> **Status:** IMPLEMENTING (14 November 2026) · **Code:** `apps/ops-web/src/components/ui/evidence-upload/`
 
 The files a person adds as evidence of an act (the photos of a condition found at receiving), each **sent as soon as it is chosen** and told one by one. It is generic and decides no policy: it knows no operation, no owner, no limit and no address, and is given the function that sends a file and the function that words a failure.
 
