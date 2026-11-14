@@ -45,5 +45,7 @@ export async function putBytes(
     // The error of a failed request can carry the address (a browser's message names it): it is dropped here and never repeated.
     throw new ObjectStoreError('unreachable');
   }
+  // What the store says is not read for its content, but it is read to its end: a body left open is torn down, and reported as a request that failed, when the page moves on. A store answers a `PUT` with little or nothing.
+  await response.arrayBuffer().catch(() => undefined);
   if (!response.ok) throw new ObjectStoreError('refused', response.status);
 }
