@@ -55,7 +55,7 @@ The mechanism is a **blind count**: the receiver enters what is physically prese
 
 1. **The custody holder submits the handover** — one row per pickup request collected on the run (§22.2, `MSC-DEC-416`), each **pre-filled from that request's collected total and correctable before submission**, with a read-only total. It carries the device's capture time, is idempotent, and is Version 1's one offline command. **Each row opens one intake**; a request with nothing collected has no row and no intake. **A zero row is legal** — that request's parcels are not in the handover — and its intake opens all the same.
 2. **Each intake appears in the awaiting-receive queue** (`listHubIntakes`) with its run and the rider who handed it over, its sender-set and intake references, submission timing, whether another user is actively receiving, and required evidence indicators (§22.3) — **and never its declared count**, a zero one included.
-3. **A receiver acquires the advisory soft lock** (`acquireIntakeLock`, §22.8), which shows who is receiving and permits takeover after an idle TTL.
+3. **A receiver acquires the advisory soft lock** (`acquireIntakeLock`, §22.8), which shows who is receiving and permits takeover after an idle TTL. **As built (S1.32):** the idle time is the hub's `intake_lock_idle_ttl_minutes` and a hub with no usable value offers no takeover; the lock never moves the intake's `ETag`, so a count is refused for the facts of the intake and never for a lock; an intake that has been counted is shown as it is (`HubIntakePostCount`) and no lock is taken on it ([state-machines.md §7](../../contracts/state-machines.md#7-pickupintake)).
 4. **The receiver enters the physical count without seeing the declaration** (§22.4 steps 1–2).
 5. **The backend reveals the server-owned rider declaration and calculates variance** (§22.4 steps 3–4).
 6. **Any required discrepancy or condition workflow completes** (§22.4 step 5, §22.5): the receiver records a condition and its supporting evidence with `recordIntakeCondition`, and Senior Ops adjudicates with `adjudicateDiscrepancy` — **including a zero declaration**, which always goes to Senior Ops.
@@ -306,7 +306,7 @@ Then no response carries the photos, their identifiers or their number, as none 
 And the photos become readable on the intake only in the response to the committed physical count.
 ```
 
-**Governs:** D-A10, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel), §22.3 · **Surface:** Melarc Ops · **Test level:** API · **Status:** owed by Stage 6 (`OB-S1-81`); no receiving read exists yet.
+**Governs:** D-A10, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel), §22.3 · **Surface:** Melarc Ops · **Test level:** API · **Status:** the receiving reads (S1.32: the queue, the intake, the lock) are built and carry no photo, no identifier of one and no number of them before the count commits (proved with real stored photos, `hub-intakes.db.test.ts`); the response to the committed count, where they become readable, is S1.33's (`OB-S1-81`).
 
 ---
 

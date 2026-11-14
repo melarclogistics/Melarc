@@ -148,7 +148,7 @@ Legend: **A** Ops Staff · **S** Senior Ops · **P** Platform Admin · **V** Ven
 | Key| Holders| Scope| Notes|
 |---|---|---|---|
 | `hub.handover.submit`| **R only**| owned completed run||
-| `hub.intake.count`| A S P| own hub · P: all hubs| Blind count. Guarded on read *and* write (§35.5.2)|
+| `hub.intake.count`| A S P| own hub · P: all hubs| Blind count. Guarded on read *and* write (§35.5.2). **As built (S1.32):** it takes the advisory receive lock (`acquireIntakeLock`, the two columns of the lock and no other) and reads the intakes of its hubs to show the receiver what it locked, never the declaration|
 | `hub.intake.itemize`| A S P| own hub · P: all hubs||
 | `hub.intake.close`| A S P| own hub · P: all hubs| State precondition: parity met (§35.6.11)|
 | `hub.intake.close_exception`| S P| own hub · P: all hubs| The only route to closing without parity (§35.5.5)|
@@ -292,7 +292,7 @@ One key per domain. **Scope is on the grant, not the key**: `pickup.read` held w
 | Key| Holders| Scope| Notes|
 |---|---|---|---|
 | `pickup.read`| A S P, Rider, Vendor| own hub (P: all hubs) · assigned · own record| Rider reads **assigned** stops only; Vendor reads **own** requests only|
-| `hub.read`| A S P| own hub · P: all hubs| Intakes, handovers, OS&D. **Does not lift the blind-count guard** — see below|
+| `hub.read`| A S P| own hub · P: all hubs| Intakes, handovers, OS&D. **Does not lift the blind-count guard** — see below. **As built (S1.32):** `listHubIntakes` and `getHubIntake`, for staff of the Ops Portal alone: a vendor and a rider read no intake|
 | `pricing.read`| A S P, Finance, Vendor| own hub (P: all hubs) · own record| Vendor reads the fee on **own** orders. Finance/Reconciliation reads at all hubs (section 8)|
 | `dispatch.read`| A S P, Rider| own hub (P: all hubs) · assigned| Also gates the **rider roster** — `listRiders` and `getRider`: identity and readiness only (name, phone, status, hub, whether a PIN and an `ACTIVE` device exist, and in `getRider` the devices the rider has held — identity, status and dates, never a key), on the browser surface only: **a Rider's Bearer session holds this key for its own assigned work and is refused these two reads (`PERMISSION_DENIED`)**, so no handset can read the roster. It is the roster dispatch already needs to assign a manifest, and the read `registerRiderDevice`, `reregisterRiderDevice` and `revokeRiderDevice` find their target with (Gate PD-3R1; **confirmed by the Product Owner at Gate PD-3R2, `MSC-DEC-436` — no `rider.read` key exists**).|
 | `delivery.read`| A S P, Rider, Vendor| own hub (P: all hubs) · assigned · own record||
