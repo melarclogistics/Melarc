@@ -81,6 +81,13 @@ describe('an intake that has not been counted', () => {
     expect(parseIntake({ ...preCountFixture(), ...planted })).toBeUndefined();
   });
 
+  // Break caught: the scan for the blind members that gives up at its depth and lets the answer through (a declaration wrapped deeper than the scan reads is refused, not trusted).
+  it('is refused whole when the declaration is wrapped deeper than the scan reads', () => {
+    let nested: unknown = { rider_declared_count: DECLARED };
+    for (let level = 0; level < 12; level += 1) nested = { wrapper: nested };
+    expect(parseIntake({ ...preCountFixture(), extra: nested })).toBeUndefined();
+  });
+
   // Break caught: a page of the queue that shows the intakes that are waiting and is given one with a declaration among them.
   it('is refused in a list as well, and a list with one such item is refused whole', () => {
     const page = intakePage([

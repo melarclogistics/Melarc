@@ -380,6 +380,20 @@ describe('the acts the record offers', () => {
     expect(screen.queryByText(/A senior officer decides this/)).toBeNull();
   });
 
+  // Break caught: the count offered again on an intake that has been counted (the count is recorded once; the page of an intake in review offers the adjudication in its place, and a cleared one offers nothing to count).
+  it.each([
+    ['cleared, to a receiver', postCountFixture(), RECEIVER],
+    ['in review, to a receiver', shortCountFixture(), RECEIVER],
+    ['cleared, to a senior officer', postCountFixture(), SENIOR],
+  ])(
+    'does not offer the count on an intake that has been counted: %s',
+    async (_name, intake, keys) => {
+      open(intake, keys);
+      await screen.findByRole('heading', { level: 1, name: 'ACC-IN-7KQ2MZ' });
+      expect(screen.queryByRole('link', { name: 'Count the parcels' })).toBeNull();
+    },
+  );
+
   it('offers the adjudication on a count that matches, because damage is independent of the count', async () => {
     open(
       postCountFixture({
