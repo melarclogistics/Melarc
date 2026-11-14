@@ -829,11 +829,15 @@ describe('an intake keeps what was declared and when, and its states move one wa
     const id = done.intakes[0] ?? '';
     await routes.admin.query(`update pickup_intake set state = state where id = $1`, [id]);
     expect(await intakeRow(id)).toMatchObject({ version: 1 });
-    await routes.admin.query(`update pickup_intake set condition = 'OTHER' where id = $1`, [id]);
-    expect(await intakeRow(id)).toMatchObject({ version: 2 });
     // The advisory lock is not a change of the intake that moves its ETag (S1.32, migration 0093).
     await routes.admin.query(
       `update pickup_intake set active_receiver_id = gen_random_uuid(), lock_acquired_at = now() where id = $1`,
+      [id],
+    );
+    expect(await intakeRow(id)).toMatchObject({ version: 1 });
+    // A change of the intake does (the count; a condition is found only after it, S1.34).
+    await routes.admin.query(
+      `update pickup_intake set state = 'COUNTED', physical_count = 3, counted_at = now(), counted_by = gen_random_uuid(), count_variance = 'MATCH', count_difference = 0 where id = $1`,
       [id],
     );
     expect(await intakeRow(id)).toMatchObject({ version: 2 });
@@ -1579,10 +1583,18 @@ describe('the blind count (S1.33): what the database holds for every writer', ()
     await countedAs(clean ?? '', 3, 'MATCH', 0);
     await countedAs(short ?? '', 1, 'SHORT', -2);
     await countedAs(zero ?? '', 0, 'MATCH', 0);
-    await routes.admin.query(`update pickup_intake set condition = 'DAMAGED' where id = $1`, [
-      finding ?? '',
-    ]);
     await countedAs(finding ?? '', 3, 'MATCH', 0);
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query('set local session_replication_role = replica');
+      await routes.admin.query(`update pickup_intake set condition = 'DAMAGED' where id = $1`, [
+        finding ?? '',
+      ]);
+      await routes.admin.query('commit');
+    } catch (error) {
+      await routes.admin.query('rollback');
+      throw error;
+    }
     const move = (id: string, to: string) =>
       adminRefusal([`update pickup_intake set state = '${to}' where id = '${id}'`]);
     for (const [name, id] of [
@@ -1597,5 +1609,533 @@ describe('the blind count (S1.33): what the database holds for every writer', ()
       '23514',
     );
     expect(await move(clean ?? '', 'READY_FOR_ITEMIZATION')).toBeUndefined();
+  });
+});
+
+/*
+ * S1.34 (`recordIntakeCondition`, `adjudicateDiscrepancy`; `AC-SLICE-001-41`, `-42`, `-76`; state-machines.md section 7; hub-intake.md sections 5.1 and 5.2): what the database holds, for every writer, of
+ * the findings made after the count.
+ *
+ * - **Two operations of the database write a finding and move the intake in one change**: the receiver's recording of a condition (`melarc.record_intake_condition`, under `hub.intake.count`) and Senior
+ *   Ops's adjudication (`melarc.adjudicate_discrepancy`, under `hub.osd.adjudicate`: Ops Staff do not hold the key). Neither can change a count.
+ * - **The findings are appended and never changed**, and the guard gives their hub and their moment and holds that the evidence they cite is the intake's own and is stored.
+ * - **The one edge a condition needs**: an intake cleared for itemization goes back to reconciliation, only with a condition that is not OK; a condition is found after the count and before itemization starts.
+ */
+const OSD = 'hub.osd.adjudicate';
+
+/** An intake that has been counted: clean (cleared for itemization) or with a variance (in reconciliation), as the count of S1.33 leaves it, arranged as the administrator through the guard. */
+async function countedAs(id: string, kind: 'READY' | 'RECONCILIATION'): Promise<void> {
+  const physical = kind === 'READY' ? 3 : 1;
+  await routes.admin.query(
+    `update pickup_intake set state = 'COUNTED', physical_count = $2, counted_at = now(), counted_by = gen_random_uuid(), count_variance = $3, count_difference = $4 where id = $1`,
+    [id, physical, kind === 'READY' ? 'MATCH' : 'SHORT', physical - 3],
+  );
+  await routes.admin.query(`update pickup_intake set state = $2 where id = $1`, [
+    id,
+    kind === 'READY' ? 'READY_FOR_ITEMIZATION' : 'RECONCILIATION_REQUIRED',
+  ]);
+}
+
+/** A piece of evidence about an intake, as the evidence operations leave it (arranged as the administrator with the guards off for the statement). */
+async function intakeEvidence(
+  intakeId: string,
+  options: {
+    readonly by: string;
+    readonly purpose?: string;
+    readonly state?: 'STORED' | 'PENDING_UPLOAD';
+  },
+): Promise<string> {
+  const id = randomUUID();
+  const stored = (options.state ?? 'STORED') === 'STORED';
+  await routes.admin.query('begin');
+  try {
+    await routes.admin.query('set local session_replication_role = replica');
+    await routes.admin.query(
+      `insert into evidence (id, owner_type, owner_id, purpose, captured_at, captured_by_actor, captured_by_principal_type, storage_ref, responsible_hub_id, access_rule, retention_policy,
+                             state, content_type, byte_size, checksum_sha256, upload_ttl_seconds, upload_expires_at, uploaded_at, validated_signature, scanner, scanner_signature_version, scanned_at)
+       values ($1, 'PICKUP_INTAKE', $2, $3, now() - interval '1 minute', $4, 'STAFF', 'ev/' || replace(gen_random_uuid()::text, '-', ''), $5, 'SUBJECT_READERS', 'PICKUP_INTAKE_EVIDENCE',
+               $6, 'image/jpeg', 12, repeat('a', 64), 900, now() + interval '15 minutes',
+               case when $7::boolean then now() end, case when $7::boolean then 'JPEG' end, case when $7::boolean then 'test' end, case when $7::boolean then '1' end, case when $7::boolean then now() end)`,
+      [
+        id,
+        intakeId,
+        options.purpose ?? 'CONDITION',
+        options.by,
+        HUB_A,
+        stored ? 'STORED' : 'PENDING_UPLOAD',
+        stored,
+      ],
+    );
+    await routes.admin.query('commit');
+  } catch (error) {
+    await routes.admin.query('rollback');
+    throw error;
+  }
+  return id;
+}
+
+const uuids = (values: readonly string[]): string =>
+  `array[${values.map((value) => `'${value}'`).join(', ')}]::uuid[]`;
+const recordCondition = (
+  intake: string,
+  condition: string,
+  evidence: readonly string[] = [],
+  note: string | null = 'seen at the bench',
+): string =>
+  `select previous_state, resulting_state from melarc.record_intake_condition('${intake}', '${randomUUID()}', '${condition}', ${note === null ? 'null' : `'${note}'`}, ${uuids(evidence)})`;
+const adjudicate = (
+  intake: string,
+  outcome: string,
+  options: { condition?: string; evidence?: readonly string[]; note?: string | null } = {},
+): string =>
+  `select previous_state, resulting_state from melarc.adjudicate_discrepancy('${intake}', '${randomUUID()}', '${outcome}', ${options.condition === undefined ? 'null' : `'${options.condition}'`}, ${options.note === undefined ? `'weighed by Senior Ops'` : options.note === null ? 'null' : `'${options.note}'`}, ${uuids(options.evidence ?? [])})`;
+const findingsOf = async (intakeId: string) =>
+  routes.rows<{
+    kind: string;
+    condition: string | null;
+    outcome: string | null;
+    note: string | null;
+    evidence_ids: string[];
+    recorded_by: string;
+    responsible_hub_id: string;
+    recorded_at: Date;
+  }>(
+    `select kind, condition, outcome, note, evidence_ids, recorded_by, responsible_hub_id, recorded_at from pickup_intake_finding where pickup_intake_id = $1 order by recorded_at, id`,
+    [intakeId],
+  );
+const countFacts = async (id: string) => {
+  const row = await countOf(id);
+  return {
+    physical_count: row.physical_count,
+    count_variance: row.count_variance,
+    count_difference: row.count_difference,
+  };
+};
+
+describe('the receiver’s condition (S1.34): what the database holds for every writer', () => {
+  // Break caught: a condition that does not send a cleared intake back to reconciliation (AC-SLICE-001-41: the case routes to senior review), that changes a count, that is recorded without its
+  // evidence, in another name than the receiver's, or that leaves no finding.
+  it('records a condition on a count that matched, appends the finding, and sends the case to Senior Ops without touching a count', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const id = done.intakes[0] ?? '';
+    await countedAs(id, 'READY');
+    const receiver = staff(COUNT, [HUB_A]);
+    const photo = await intakeEvidence(id, { by: receiver.principalId });
+    const before = await countFacts(id);
+    const answer = await attempt(receiver, recordCondition(id, 'DAMAGED', [photo]));
+    expect(answer).toEqual({
+      rows: [
+        { previous_state: 'READY_FOR_ITEMIZATION', resulting_state: 'RECONCILIATION_REQUIRED' },
+      ],
+    });
+    expect(await countOf(id)).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      condition: 'DAMAGED',
+    });
+    expect(await countFacts(id)).toEqual(before);
+    const [finding, ...rest] = await findingsOf(id);
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      kind: 'CONDITION',
+      condition: 'DAMAGED',
+      outcome: null,
+      note: 'seen at the bench',
+      evidence_ids: [photo],
+      recorded_by: receiver.principalId,
+      responsible_hub_id: HUB_A,
+    });
+    expect(secondsSince(finding?.recorded_at ?? null)).toBeLessThan(120);
+  });
+
+  // Break caught: a recording of OK that moves the case (it would send every clean intake to Senior Ops), or one that leaves no finding, or a condition that is not OK on an intake already in reconciliation
+  // that moves its state (the case is open already).
+  it('records OK as a finding that changes nothing, and a condition on an intake already in reconciliation leaves its state', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A, [3, 3]);
+    const [clean, open] = done.intakes;
+    await countedAs(clean ?? '', 'READY');
+    await countedAs(open ?? '', 'RECONCILIATION');
+    const receiver = staff(COUNT, [HUB_A]);
+    const versionBefore = (await countOf(clean ?? '')).version;
+    expect(await attempt(receiver, recordCondition(clean ?? '', 'OK', [], null))).toEqual({
+      rows: [{ previous_state: 'READY_FOR_ITEMIZATION', resulting_state: 'READY_FOR_ITEMIZATION' }],
+    });
+    expect(await countOf(clean ?? '')).toMatchObject({
+      state: 'READY_FOR_ITEMIZATION',
+      condition: 'OK',
+      version: versionBefore,
+    });
+    expect(await findingsOf(clean ?? '')).toHaveLength(1);
+    expect(await attempt(receiver, recordCondition(open ?? '', 'OTHER'))).toEqual({
+      rows: [
+        { previous_state: 'RECONCILIATION_REQUIRED', resulting_state: 'RECONCILIATION_REQUIRED' },
+      ],
+    });
+    expect(await countOf(open ?? '')).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      condition: 'OTHER',
+    });
+  });
+
+  // Break caught: a condition recorded before the count (the blind count's own evidence), after itemization has started, or twice (a second recording would replace the first).
+  it('refuses a condition before the count, after itemization starts, and a second one', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED', 'COLLECTED'], HUB_A, [3, 3, 3]);
+    const [waiting, itemizing, again] = done.intakes;
+    await countedAs(itemizing ?? '', 'READY');
+    await routes.admin.query(`update pickup_intake set state = 'ITEMIZING' where id = $1`, [
+      itemizing ?? '',
+    ]);
+    await countedAs(again ?? '', 'READY');
+    const receiver = staff(COUNT, [HUB_A]);
+    const photo = await intakeEvidence(again ?? '', { by: receiver.principalId });
+    expect(codeOf(await attempt(receiver, recordCondition(waiting ?? '', 'OK', [], null)))).toBe(
+      '23514',
+    );
+    expect(codeOf(await attempt(receiver, recordCondition(itemizing ?? '', 'OK', [], null)))).toBe(
+      '23514',
+    );
+    expect(
+      'rows' in (await attempt(receiver, recordCondition(again ?? '', 'DAMAGED', [photo]))),
+    ).toBe(true);
+    const second = await attempt(receiver, recordCondition(again ?? '', 'OTHER', []));
+    expect(codeOf(second)).toBe('23514');
+    expect(messageOf(second)).toMatch(/recorded once/);
+  });
+
+  // Break caught: a damaged or tampered condition recorded with no evidence, with evidence that is not stored, that is another intake's, of another purpose, or one that cites nothing that exists.
+  it('refuses damage or tampering whose evidence is missing, not stored, another intake’s, of another purpose, or made up', async () => {
+    const done = await handedOver(
+      ['COLLECTED', 'COLLECTED', 'COLLECTED', 'COLLECTED', 'COLLECTED', 'COLLECTED'],
+      HUB_A,
+      [3, 3, 3, 3, 3, 3],
+    );
+    for (const intake of done.intakes) await countedAs(intake, 'READY');
+    const [none, pending, foreign, wrongPurpose, madeUp, twice] = done.intakes;
+    const receiver = staff(COUNT, [HUB_A]);
+    const twicePhoto = await intakeEvidence(twice ?? '', { by: receiver.principalId });
+    const another = await intakeEvidence(none ?? '', { by: receiver.principalId });
+    const pendingPhoto = await intakeEvidence(pending ?? '', {
+      by: receiver.principalId,
+      state: 'PENDING_UPLOAD',
+    });
+    const adjudicatorsPhoto = await intakeEvidence(wrongPurpose ?? '', {
+      by: receiver.principalId,
+      purpose: 'OSD',
+    });
+    const refusals: [string, string, RegExp][] = [
+      ['no evidence', recordCondition(none ?? '', 'TAMPERED', []), /supporting evidence/],
+      [
+        'evidence that is not stored',
+        recordCondition(pending ?? '', 'DAMAGED', [pendingPhoto]),
+        /stored/,
+      ],
+      ['another intake’s evidence', recordCondition(foreign ?? '', 'DAMAGED', [another]), /stored/],
+      [
+        'evidence of another purpose',
+        recordCondition(wrongPurpose ?? '', 'DAMAGED', [adjudicatorsPhoto]),
+        /stored/,
+      ],
+      [
+        'evidence that does not exist',
+        recordCondition(madeUp ?? '', 'DAMAGED', [randomUUID()]),
+        /stored/,
+      ],
+      [
+        'evidence cited twice',
+        recordCondition(twice ?? '', 'DAMAGED', [twicePhoto, twicePhoto]),
+        /once/,
+      ],
+    ];
+    for (const [name, text, message] of refusals) {
+      const refused = await attempt(receiver, text);
+      expect(codeOf(refused), name).toBe('23514');
+      expect(messageOf(refused), name).toMatch(message);
+    }
+    for (const intake of done.intakes) {
+      expect(await findingsOf(intake), intake).toEqual([]);
+      expect((await countOf(intake)).state).toBe('READY_FOR_ITEMIZATION');
+    }
+  });
+
+  // Break caught: a condition open to a key that is not the count's (a reader, the adjudicator, another domain's), to a rider or a vendor, or on another hub's intake; a way for the login to write a finding.
+  it('is recorded by staff under the key of the count in the hubs of their grant, and by nobody else', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const id = done.intakes[0] ?? '';
+    await countedAs(id, 'READY');
+    const notReceivers: [string, SecurityContext][] = [
+      ['a staff member under a reading key', staff('hub.read', [HUB_A])],
+      ['the adjudicator', staff(OSD, [HUB_A])],
+      ['a staff member of another key', staff('pickup.read', [HUB_A])],
+      ['the rider of the handover', rider(done.holderId, HANDOVER)],
+      ['a rider under the key of the count', rider(done.holderId, COUNT)],
+      ['a vendor', vendorContext(organisation)],
+    ];
+    for (const [name, context] of notReceivers) {
+      const refused = await attempt(context, recordCondition(id, 'OK', [], null));
+      expect(codeOf(refused), name).toBe('42501');
+      expect(messageOf(refused), name).toMatch(/by a receiver/);
+    }
+    for (const context of [staff(COUNT, [HUB_B]), staff(COUNT, [])]) {
+      const refused = await attempt(context, recordCondition(id, 'OK', [], null));
+      expect(codeOf(refused)).toBe('42501');
+      expect(messageOf(refused)).toMatch(/no such intake/);
+    }
+    // The login holds no way to write a finding itself, whoever it is.
+    expect(
+      codeOf(
+        await attempt(
+          staff(COUNT, [HUB_A]),
+          `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by) values (gen_random_uuid(), '${id}', '${HUB_A}', 'CONDITION', 'OK', gen_random_uuid())`,
+        ),
+      ),
+    ).toBe('42501');
+    expect(await findingsOf(id)).toEqual([]);
+  });
+});
+
+describe('the adjudication (S1.34): what the database holds for every writer', () => {
+  // Break caught: an adjudication that rewrites a count (the declared count, the hub count and the variance survive it unchanged), that does not clear the case (ACCEPTED, WRITTEN_OFF, VENDOR_NOTIFIED),
+  // that clears one it should only record (ESCALATED), or that leaves no finding with its reason and its author. AC-SLICE-001-76: a zero declaration is resolved by Senior Ops with a reason.
+  it.each([
+    ['ACCEPTED', 'READY_FOR_ITEMIZATION'],
+    ['WRITTEN_OFF', 'READY_FOR_ITEMIZATION'],
+    ['VENDOR_NOTIFIED', 'READY_FOR_ITEMIZATION'],
+    ['ESCALATED', 'RECONCILIATION_REQUIRED'],
+  ] as const)(
+    'adjudicates with the outcome %s: finding appended, counts unchanged, the case %s',
+    async (outcome, resulting) => {
+      const done = await handedOver(['COLLECTED'], HUB_A, [0]);
+      const id = done.intakes[0] ?? '';
+      // A zero declaration that was counted at zero: it matches, and goes to reconciliation all the same.
+      await routes.admin.query(
+        `update pickup_intake set state = 'COUNTED', physical_count = 0, counted_at = now(), counted_by = gen_random_uuid(), count_variance = 'MATCH', count_difference = 0 where id = $1`,
+        [id],
+      );
+      await routes.admin.query(
+        `update pickup_intake set state = 'RECONCILIATION_REQUIRED' where id = $1`,
+        [id],
+      );
+      const senior = staff(OSD, [HUB_A]);
+      const before = await countFacts(id);
+      expect(await attempt(senior, adjudicate(id, outcome))).toEqual({
+        rows: [{ previous_state: 'RECONCILIATION_REQUIRED', resulting_state: resulting }],
+      });
+      expect((await countOf(id)).state).toBe(resulting);
+      expect(await countFacts(id)).toEqual(before);
+      const [finding, ...rest] = await findingsOf(id);
+      expect(rest).toEqual([]);
+      expect(finding).toMatchObject({
+        kind: 'ADJUDICATION',
+        outcome,
+        condition: null,
+        note: 'weighed by Senior Ops',
+        evidence_ids: [],
+        recorded_by: senior.principalId,
+        responsible_hub_id: HUB_A,
+      });
+    },
+  );
+
+  // Break caught: an adjudication without a reason (blank, or only spaces), on an intake that is not in reconciliation (waiting, cleared, being itemized, closed), or twice for one resolution; a condition it
+  // sets that is damaged or tampered with no stored evidence of the intake (the receiver's photos may be cited, and are).
+  it('needs a reason, an intake in reconciliation, and for damage or tampering stored evidence of the intake, which may be the receiver’s', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED', 'COLLECTED'], HUB_A, [3, 3, 3]);
+    const [open, cleared, waiting] = done.intakes;
+    await countedAs(open ?? '', 'RECONCILIATION');
+    await countedAs(cleared ?? '', 'READY');
+    const senior = staff(OSD, [HUB_A]);
+    const receiverPhoto = await intakeEvidence(open ?? '', { by: randomUUID() });
+    for (const note of [null, '', '   ']) {
+      const refused = await attempt(senior, adjudicate(open ?? '', 'ACCEPTED', { note }));
+      expect(codeOf(refused), String(note)).toBe('23514');
+      expect(messageOf(refused), String(note)).toMatch(/says why/);
+    }
+    for (const [name, id] of [
+      ['cleared for itemization', cleared],
+      ['waiting for its count', waiting],
+    ] as const) {
+      expect(codeOf(await attempt(senior, adjudicate(id ?? '', 'ACCEPTED'))), name).toBe('23514');
+    }
+    const bare = await attempt(
+      senior,
+      adjudicate(open ?? '', 'ACCEPTED', { condition: 'DAMAGED' }),
+    );
+    expect(codeOf(bare)).toBe('23514');
+    expect(messageOf(bare)).toMatch(/supporting evidence/);
+    // The receiver's photo (not the adjudicator's own, but stored and the intake's) supports the condition the adjudication sets.
+    expect(
+      await attempt(
+        senior,
+        adjudicate(open ?? '', 'ACCEPTED', { condition: 'DAMAGED', evidence: [receiverPhoto] }),
+      ),
+    ).toEqual({
+      rows: [
+        { previous_state: 'RECONCILIATION_REQUIRED', resulting_state: 'READY_FOR_ITEMIZATION' },
+      ],
+    });
+    expect(await countOf(open ?? '')).toMatchObject({
+      state: 'READY_FOR_ITEMIZATION',
+      condition: 'DAMAGED',
+    });
+    // Adjudicated once: the case is no longer in reconciliation.
+    expect(codeOf(await attempt(senior, adjudicate(open ?? '', 'ACCEPTED')))).toBe('23514');
+    expect(await findingsOf(cleared ?? '')).toEqual([]);
+    expect(await findingsOf(waiting ?? '')).toEqual([]);
+  });
+
+  // Break caught: the adjudication open to Ops Staff (AC-SLICE-001-42, -76: they do not hold the key), to a reader, to a receiver, a rider or a vendor, or on another hub's intake.
+  it('is made by staff under the key of the adjudication in the hubs of their grant, and by nobody else', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const id = done.intakes[0] ?? '';
+    await countedAs(id, 'RECONCILIATION');
+    const notAdjudicators: [string, SecurityContext][] = [
+      ['a receiver under the key of the count', staff(COUNT, [HUB_A])],
+      ['a staff member under a reading key', staff('hub.read', [HUB_A])],
+      ['the rider of the handover', rider(done.holderId, HANDOVER)],
+      ['a vendor', vendorContext(organisation)],
+    ];
+    for (const [name, context] of notAdjudicators) {
+      const refused = await attempt(context, adjudicate(id, 'ACCEPTED'));
+      expect(codeOf(refused), name).toBe('42501');
+      expect(messageOf(refused), name).toMatch(/by Senior Ops/);
+    }
+    for (const context of [staff(OSD, [HUB_B]), staff(OSD, [])]) {
+      const refused = await attempt(context, adjudicate(id, 'ACCEPTED'));
+      expect(codeOf(refused)).toBe('42501');
+      expect(messageOf(refused)).toMatch(/no such intake/);
+    }
+    expect((await countOf(id)).state).toBe('RECONCILIATION_REQUIRED');
+    expect(await findingsOf(id)).toEqual([]);
+  });
+});
+
+describe('the findings and the edge a condition needs, for every writer (S1.34)', () => {
+  // Break caught: a finding that can be changed or removed (by the administrator, the owner or a later task's login), whose hub or moment is the writer's, or whose kind and facts do not agree.
+  it('keeps a finding as it was, gives it the intake’s hub and the database’s moment, and holds what each kind is', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A, [3, 3]);
+    const [id, waiting] = [done.intakes[0] ?? '', done.intakes[1] ?? ''];
+    await countedAs(id, 'READY');
+    const receiver = staff(COUNT, [HUB_A]);
+    expect('rows' in (await attempt(receiver, recordCondition(id, 'OK', [], null)))).toBe(true);
+    for (const statement of [
+      `update pickup_intake_finding set note = 'rewritten' where pickup_intake_id = '${id}'`,
+      `delete from pickup_intake_finding where pickup_intake_id = '${id}'`,
+    ]) {
+      expect((await adminRefusal([statement]))?.code, statement).toBe('23514');
+    }
+    // Written by the administrator with a hub and a moment of its own choosing: the guard gives the intake's hub and the database's moment.
+    const written = await adminRefusal([
+      `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by, recorded_at) values (gen_random_uuid(), '${id}', '${HUB_B}', 'CONDITION', 'OTHER', gen_random_uuid(), now() - interval '3 hours')`,
+    ]);
+    expect(written).toBeUndefined();
+    // The one the administrator wrote (a condition of OTHER: the receiver's own recording above was OK), not the latest by the moment, which is what the writer gave.
+    const mine = (await findingsOf(id)).find((finding) => finding.condition === 'OTHER');
+    expect(mine?.responsible_hub_id).toBe(HUB_A);
+    expect(secondsSince(mine?.recorded_at ?? null)).toBeLessThan(120);
+    // What each kind is: an adjudication with no outcome or no reason, a condition with an outcome or none, damage with no evidence, a kind that is none.
+    for (const [name, columns, values] of [
+      ['an adjudication with no outcome', 'kind, note', `'ADJUDICATION', 'why'`],
+      ['an adjudication with no reason', 'kind, outcome', `'ADJUDICATION', 'ACCEPTED'`],
+      ['a condition with an outcome', 'kind, condition, outcome', `'CONDITION', 'OK', 'ACCEPTED'`],
+      ['a condition with none', 'kind', `'CONDITION'`],
+      ['damage with no evidence', 'kind, condition', `'CONDITION', 'DAMAGED'`],
+      ['a kind that is none', 'kind, condition', `'REMARK', 'OK'`],
+    ] as const) {
+      const refused = await adminRefusal([
+        `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, recorded_by, ${columns}) values (gen_random_uuid(), '${id}', '${HUB_A}', gen_random_uuid(), ${values})`,
+      ]);
+      expect(refused?.code, name).toBe('23514');
+    }
+    // A finding is made after the count, and about an intake.
+    const before = await adminRefusal([
+      `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by) values (gen_random_uuid(), '${waiting}', '${HUB_A}', 'CONDITION', 'OK', gen_random_uuid())`,
+    ]);
+    expect(before?.code).toBe('23514');
+    expect(before?.message).toMatch(/after the blind count/);
+    const nothing = await adminRefusal([
+      `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by) values (gen_random_uuid(), gen_random_uuid(), '${HUB_A}', 'CONDITION', 'OK', gen_random_uuid())`,
+    ]);
+    expect(nothing?.code).toBe('23514');
+    expect(nothing?.message).toMatch(/about an intake/);
+  });
+
+  // Break caught: a policy that shows findings to a key that does not read them, to another hub, to a rider or a vendor.
+  it('shows the findings of an intake to the staff of its hubs under the three keys that read intakes, and to nobody else', async () => {
+    const here = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const there = await handedOver(['COLLECTED'], HUB_B, [3]);
+    const [mine, theirs] = [here.intakes[0] ?? '', there.intakes[0] ?? ''];
+    for (const intake of [mine, theirs]) await countedAs(intake, 'READY');
+    expect(
+      'rows' in (await attempt(staff(COUNT, [HUB_A]), recordCondition(mine, 'OK', [], null))),
+    ).toBe(true);
+    expect(
+      'rows' in (await attempt(staff(COUNT, [HUB_B]), recordCondition(theirs, 'OK', [], null))),
+    ).toBe(true);
+    const read = `select pickup_intake_id as id from pickup_intake_finding`;
+    for (const key of ['hub.read', COUNT, OSD]) {
+      const seen = idsOf(await attempt(staff(key, [HUB_A]), read));
+      expect(seen, key).toContain(mine);
+      expect(seen, key).not.toContain(theirs);
+    }
+    for (const context of [
+      staff('pickup.read', [HUB_A]),
+      staff('hub.read', []),
+      rider(here.holderId, 'hub.read'),
+      rider(here.holderId, HANDOVER),
+      vendorContext(organisation),
+    ]) {
+      expect(idsOf(await attempt(context, read))).toEqual([]);
+    }
+  });
+
+  // Break caught: an intake cleared for itemization that goes back to reconciliation for nothing (a clean state moved by any writer), a condition changed on an intake that is waiting for its count or being
+  // itemized, or the edge missing (the receiver's condition then has nowhere to send the case).
+  it('moves a cleared intake back to reconciliation only for a condition that is not OK, and changes the condition only after the count and before itemization', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED', 'COLLECTED'], HUB_A, [3, 3, 3]);
+    const [cleared, waiting, itemizing] = [
+      done.intakes[0] ?? '',
+      done.intakes[1] ?? '',
+      done.intakes[2] ?? '',
+    ];
+    await countedAs(cleared, 'READY');
+    await countedAs(itemizing, 'READY');
+    await routes.admin.query(`update pickup_intake set state = 'ITEMIZING' where id = $1`, [
+      itemizing,
+    ]);
+    const refusal = (statement: string) => adminRefusal([statement]);
+    expect(
+      (
+        await refusal(
+          `update pickup_intake set state = 'RECONCILIATION_REQUIRED' where id = '${cleared}'`,
+        )
+      )?.code,
+      'with the condition OK',
+    ).toBe('23514');
+    expect(
+      (await refusal(`update pickup_intake set condition = 'DAMAGED' where id = '${waiting}'`))
+        ?.code,
+      'waiting for its count',
+    ).toBe('23514');
+    expect(
+      (await refusal(`update pickup_intake set condition = 'DAMAGED' where id = '${itemizing}'`))
+        ?.code,
+      'being itemized',
+    ).toBe('23514');
+    expect(
+      await refusal(
+        `update pickup_intake set state = 'RECONCILIATION_REQUIRED', condition = 'TAMPERED' where id = '${cleared}'`,
+      ),
+    ).toBeUndefined();
+    expect(await countOf(cleared)).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      condition: 'TAMPERED',
+    });
+    // An intake that is being itemized does not go back.
+    expect(
+      (
+        await refusal(
+          `update pickup_intake set state = 'RECONCILIATION_REQUIRED', condition = 'TAMPERED' where id = '${itemizing}'`,
+        )
+      )?.code,
+    ).toBe('23514');
   });
 });

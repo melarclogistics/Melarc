@@ -182,6 +182,11 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // the owner, in the one change; the policy that admits the write names the owner, so the login can write no count itself).
     'melarc.hub_intake_after_count',
     'melarc.commit_blind_count',
+    // And the two operations of the findings of an intake (migration 0096, S1.34): the receiver's recording of a condition (`melarc.record_intake_condition`, staff under `hub.intake.count` alone) and Senior
+    // Ops's adjudication of a discrepancy (`melarc.adjudicate_discrepancy`, staff under `hub.osd.adjudicate` alone). Each writes the finding and moves the intake, as the owner, in the one change; the policies of
+    // the finding and of the intake that admit the write name the owner, so the login can write neither.
+    'melarc.record_intake_condition',
+    'melarc.adjudicate_discrepancy',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification
