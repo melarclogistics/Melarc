@@ -420,6 +420,27 @@ describe('the acts the record offers', () => {
     expect(screen.queryByRole('link', { name: /itemi|close/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /itemi|close/i })).toBeNull();
   });
+
+  // Break caught: an act of itemising or closing added to a record that offers no other (one counted, with its condition recorded, to a session that holds every key; one not counted, to a receiver; one
+  // in review, to a session without the key to decide it): the offers of the other tests would hide it.
+  it.each([
+    [
+      'counted, with its condition recorded, to a senior officer',
+      shortCountFixture({ condition: 'DAMAGED', condition_findings: [findingFixture()] }),
+      SENIOR,
+    ],
+    ['not counted, to a receiver', preCountFixture(), ['hub.read']],
+    ['counted and cleared, to a reader', postCountFixture(), ['hub.read']],
+    ['itemising, to a senior officer', postCountFixture({ state: 'ITEMIZING' }), SENIOR],
+    ['closed, to a senior officer', postCountFixture({ state: 'CLOSED' }), SENIOR],
+  ])('offers no itemising or closing on an intake %s', async (_name, intake, keys) => {
+    open(intake, keys);
+
+    await screen.findByRole('heading', { level: 1, name: 'ACC-IN-7KQ2MZ' });
+    expect(screen.queryByRole('link', { name: /itemi|close/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /itemi|close/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /itemi|close/i })).toBeNull();
+  });
 });
 
 describeInterfaceStates('the intake record', {

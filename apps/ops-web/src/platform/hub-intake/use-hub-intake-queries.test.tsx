@@ -260,13 +260,14 @@ describe('the receiver’s lock', () => {
     await tick(10);
     expect(locks()).toHaveLength(1);
 
-    await tick(LOCK_REFRESH_MS - 1000);
+    // The provisional value is a minute (OB-S1-108): well inside the hub's idle time, and never a keep-alive in disguise.
+    expect(LOCK_REFRESH_MS).toBe(60_000);
+    await tick(59_000);
     expect(locks()).toHaveLength(1);
     await tick(1000);
     expect(locks()).toHaveLength(2);
-    await tick(LOCK_REFRESH_MS);
+    await tick(60_000);
     expect(locks()).toHaveLength(3);
-    expect(LOCK_REFRESH_MS).toBeLessThanOrEqual(5 * 60_000);
   });
 
   // Break caught: a lock kept from a tab nobody is looking at, which keeps an intake held for a receiver who has gone to lunch; and one not taken again when the person returns.
