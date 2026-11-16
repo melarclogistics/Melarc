@@ -504,4 +504,22 @@ describe('Dialog: its size', () => {
     expect(bare('default')).not.toHaveClass('ui-dialog--wide');
     expect(bare('wide')).toHaveClass('ui-dialog--wide');
   });
+
+  // Break caught (the pictures of the receiving screens, defect 1): a window that is as tall as its content, so that what is shown whole (a photo) pushes its own controls off a short screen. `fill` is a window as
+  // tall as the screen lets it be, with a column inside it that the content fills, so that the content gives way and the controls stay.
+  it('is as tall as its content unless the page asks for it to fill the screen, and the width and the height are asked for apart', () => {
+    const filled = (props: Partial<DialogProps>) =>
+      render(
+        <Dialog open title="A photo" {...props}>
+          <p>Content</p>
+        </Dialog>,
+      ).container.querySelector('dialog');
+
+    expect(bare()).not.toHaveClass('ui-dialog--fill');
+    expect(bare('wide')).not.toHaveClass('ui-dialog--fill');
+    expect(filled({ fill: false })).not.toHaveClass('ui-dialog--fill');
+    expect(filled({ fill: true })).toHaveClass('ui-dialog--fill');
+    expect(filled({ fill: true })).not.toHaveClass('ui-dialog--wide');
+    expect(filled({ size: 'wide', fill: true })).toHaveClass('ui-dialog--wide', 'ui-dialog--fill');
+  });
 });
