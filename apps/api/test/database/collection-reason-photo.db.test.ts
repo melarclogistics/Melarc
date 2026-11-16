@@ -131,6 +131,40 @@ describe('recordCollection: the photo a short count’s reason asks for', () => 
     );
   });
 
+  // Break caught (Run D, finding F2; fails before it: the answer named the photos of the parcels counted and not the one the reason asked for, so the answer, and the replay of it that the
+  // database keeps, left the rider's phone with no id for the photo of the parcel left behind): the evidence a count attached beside its reason is named in the answer, in the order the rider
+  // named it (not the order of the ids), and the replay of the answer names the same.
+  it('names the photos of the parcel left behind in the answer, as the rider named them, and in the replay of it', async () => {
+    const arranged = await run();
+    const stop = stopAt(arranged);
+    const parcels = await parcelPhotosOf(routes, arranged.rider, stop.id, 2);
+    const one = await photoOf(routes, arranged.rider, stop.id);
+    const another = await photoOf(routes, arranged.rider, stop.id);
+    // Named from the greater id to the lesser, so that an answer that sorted them, or listed them by when they were made, would not read as the order named.
+    const named = [one.id, another.id].toSorted().toReversed();
+    const etag = (await arranged.rider.client.get(STOP(stop.id))).header('etag') ?? '';
+    const key = randomUUID();
+    const send = (): Promise<TestResponse> =>
+      arranged.rider.client.post(
+        COLLECT(stop.id),
+        {
+          collected_count: 2,
+          variance_reason_code: REASON,
+          evidence_ids: named,
+          parcel_photo_ids: parcels,
+        },
+        { headers: { 'If-Match': etag, 'Idempotency-Key': key } },
+      );
+
+    const first = await send();
+    expect(first.status, first.text).toBe(200);
+    expect(first.json()).toMatchObject({ evidence_ids: named, parcel_photo_ids: parcels });
+    const replay = await send();
+    expect(replay.status, replay.text).toBe(200);
+    expect(replay.json()).toEqual(first.json());
+    expect(await recordsOf(stop.id)).toHaveLength(1);
+  });
+
   // Break caught: the photo not asked for once the guard stops refusing the reason (the service's own refusal removed).
   it('refuses the same count with no photo of the parcel left behind, and keeps nothing', async () => {
     const arranged = await run();
