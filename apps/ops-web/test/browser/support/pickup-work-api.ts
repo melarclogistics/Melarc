@@ -97,6 +97,17 @@ export interface World {
   pageSize: number;
   /** The next read of the evidence at this position is refused with a 500 (once). */
   failEvidenceAfter?: string;
+  /** Every read of the stop's evidence is refused with a 503 while this is set: the check of the exception form that fails (and that a person may try again). */
+  evidenceDown?: boolean;
+  /**
+   * A count is recorded for the stop (the stop stays `ARRIVED` until its handshake closes it): the server then refuses to let it through without photos (`STATE_CONFLICT`, rule `collection_recorded`,
+   * which the database's guard of the exception raises after `stop_not_arrived` and before the second exception of a stop).
+   */
+  counted?: boolean;
+  /** The photo store's own origin where it is not the page's: the address of a photo then points elsewhere, which the production policy (`img-src 'self'`) blocks. */
+  storeOrigin?: string;
+  /** The first this many pictures the store is asked for are refused (a link that ran out): the page asks for a new link, once. */
+  refuseImages?: number;
 }
 
 /** A parcel photo that is stored, clean and has the moment it was made. */
@@ -233,6 +244,24 @@ export interface PickupWorkApi {
   /** The addresses the browser asked the photo store for: one for each photo that was opened, and none before. */
   readonly images: string[];
   readonly unexpected: string[];
+  /** How many pictures the store has refused so far (`World.refuseImages`). */
+  refusedImages: number;
+}
+
+/**
+ * A stop the server cannot produce, which a world must never be arranged as (the review of Run B, finding 9). **A stop let through without parcel photos is a stop whose photos could not be made or
+ * sent** (the camera failed): the server's list for it carries the exception and no photo that made it. A world that holds the exception beside parcel photos that are all uploaded reads "40 of 40
+ * uploaded" under "Counted without parcel photos", which no server answers; it is refused, loudly, and `src/test-support/pickup-work-fixture.test.ts` holds the same rule for the unit fixtures.
+ */
+function impossibleStop(w: World): string | undefined {
+  if (w.exception === null) return undefined;
+  const parcel = w.photos.filter((photo) => photo.purpose === 'PARCEL_PHOTO');
+  const stored = parcel.filter((photo) => photo.state === 'STORED').length;
+  const pending = parcel.filter((photo) => photo.state === 'PENDING_UPLOAD').length;
+  const expired = parcel.filter((photo) => photo.state === 'EXPIRED').length;
+  return stored + pending > 0 && pending === 0 && expired === 0
+    ? 'a stop let through without parcel photos whose parcel photos are all uploaded: the server never answers that (arrange a stop whose camera failed)'
+    : undefined;
 }
 
 function parsed(text: string | null): unknown {
@@ -481,9 +510,15 @@ function answer(route: Route, state: PickupWorkApi, call: Call): Promise<void> {
     );
   }
   if (method === 'GET' && path === `/api/v1/pickup-stops/${IDS.stop}/evidence`) {
+    if (w.evidenceDown === true) return route.fulfill(error(503, 'SERVICE_UNAVAILABLE'));
     if (w.failEvidenceAfter !== undefined && query.get('page_token') === w.failEvidenceAfter) {
       w.failEvidenceAfter = undefined;
       return route.fulfill(error(500, 'INTERNAL_ERROR'));
+    }
+    const impossible = impossibleStop(w);
+    if (impossible !== undefined) {
+      state.unexpected.push(impossible);
+      return route.abort('failed');
     }
     return route.fulfill(ok(evidenceWire(w, query)));
   }
@@ -500,7 +535,7 @@ function answer(route: Route, state: PickupWorkApi, call: Call): Promise<void> {
       headers: JSON_HEADERS,
       json: {
         method: 'GET',
-        url: `/test-evidence-store/${photo}?token=issued-${String(issued)}`,
+        url: `${w.storeOrigin ?? ''}/test-evidence-store/${photo}?token=issued-${String(issued)}`,
         expires_at: '2026-11-04T10:36:00Z',
       },
     });
@@ -510,8 +545,20 @@ function answer(route: Route, state: PickupWorkApi, call: Call): Promise<void> {
     if (!written(body.note)) return route.fulfill(error(422, 'REASON_REQUIRED'));
     if (w.stopState !== 'ARRIVED')
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stop_not_arrived' }));
+    // The server judges the state of the stop, then whether a count is recorded, and only at the insert whether the stop has an exception already (the guard of the table, then its unique key).
+    if (w.counted === true)
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'collection_recorded' }));
     if (w.exception !== null)
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'exception_exists' }));
+    // What the server answers once the exception is made is a list with the exception on it and no photo that made it: a world that still holds every photo uploaded is not a stop the camera failed at.
+    const impossible = impossibleStop({
+      ...w,
+      exception: exceptionFixture({ pickup_stop_id: IDS.stop }),
+    });
+    if (impossible !== undefined) {
+      state.unexpected.push(impossible);
+      return route.abort('failed');
+    }
     w.exception = exceptionFixture({
       pickup_stop_id: IDS.stop,
       authorised_by: IDS.me,
@@ -532,12 +579,28 @@ export async function stubPickupWorkApi(
   target: Page | BrowserContext,
   initial: World = world(),
 ): Promise<PickupWorkApi> {
-  const state: PickupWorkApi = { world: initial, calls: [], images: [], unexpected: [] };
+  const state: PickupWorkApi = {
+    world: initial,
+    calls: [],
+    images: [],
+    unexpected: [],
+    refusedImages: 0,
+  };
   // The clock of the world: the wait and the dates are the world's, whatever day the machine thinks it is.
   await freezeClock(target);
   // The photo store of the world is the page's own origin: the production build's policy is `img-src 'self'`.
   await target.route('**/test-evidence-store/**', async (route) => {
     state.images.push(new URL(route.request().url()).pathname);
+    // A link that ran out: the store refuses the first pictures it is asked for (`World.refuseImages`), and answers the picture asked for with the new link.
+    if (state.refusedImages < (state.world.refuseImages ?? 0)) {
+      state.refusedImages += 1;
+      await route.fulfill({
+        status: 403,
+        headers: { 'cache-control': 'no-store' },
+        body: 'expired',
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' },

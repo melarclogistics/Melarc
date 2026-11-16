@@ -53,6 +53,23 @@ async function open(
   return { api, watch };
 }
 
+/**
+ * The page's policy for the one test that needs it: pictures from its own origin only, whatever the build or the server says (the production build holds `img-src 'self'` already; the development
+ * server holds no policy). It is a `<meta http-equiv="Content-Security-Policy">` element added when the document has loaded, which a browser applies to everything the page loads after it, so the
+ * browser itself blocks a picture of another origin and reports it. (The document is not intercepted to add a header: a document the test fulfils itself is a document of an unknown address space to
+ * Chromium, which then refuses the development server's own websocket.)
+ */
+async function onlyPicturesFromTheOwnOrigin(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const policy = document.createElement('meta');
+      policy.httpEquiv = 'Content-Security-Policy';
+      policy.content = "img-src 'self'";
+      document.head.append(policy);
+    });
+  });
+}
+
 const acts = (api: PickupWorkApi) => api.calls.filter((call) => call.method === 'POST');
 const reads = (api: PickupWorkApi, suffix: string) =>
   api.calls.filter((call) => call.method === 'GET' && call.path.endsWith(suffix));
@@ -424,12 +441,15 @@ test.describe('the photos of a stop', () => {
 
     await page.getByRole('button', { name: 'Try to load more photos again' }).click();
     await expect(tiles(page)).toHaveCount(130);
+    // The page that failed is asked for again by the position the server gave, and once it is in the pages already shown are read again, in order, so that the progress and the tiles are of one
+    // moment (the review of Run B, finding 5): the first page, then the second by the position that read gives.
+    await expect.poll(() => reads(api, '/evidence').length).toBe(5);
     const list = reads(api, '/evidence');
     expect(
       list.map((call) =>
         new URL(`http://x${call.path}${call.search}`).searchParams.get('page_token'),
       ),
-    ).toEqual([null, '100', '100']);
+    ).toEqual([null, '100', '100', null, '100']);
     expect(authorizations(api)).toHaveLength(0);
     expect(api.unexpected).toEqual([]);
     // The one refusal the test makes on purpose.
@@ -465,15 +485,155 @@ test.describe('the photos of a stop', () => {
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
+
+  // Break caught (the review of Run B, finding 5): the progress as old as the moment the page opened, so a stop whose photos were arriving never said so, and a page put down and shown again drew
+  // what it showed when it was put down.
+  test('reads the list again when Refresh is pressed and when the page is shown again, and tells when it last checked', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, STOP, { photos: [stored(1), waiting(2)] });
+    await expect(photos(page)).toContainText(
+      '1 of 2 parcel photos uploaded. 1 photo is still waiting to upload.',
+    );
+    await expect(photos(page).getByText(/^Updated /)).toBeVisible();
+    expect(reads(api, '/evidence')).toHaveLength(1);
+
+    // The rider's photo arrives while the officer looks at the page: Refresh reads the list again.
+    api.world.photos = [stored(1), stored(2)];
+    await photos(page).getByRole('button', { name: 'Refresh' }).click();
+    await expect(photos(page)).toContainText('2 of 2 parcel photos uploaded.');
+    await expect(photos(page).getByText('Waiting to upload', { exact: true })).toHaveCount(0);
+    expect(reads(api, '/evidence')).toHaveLength(2);
+
+    // Another one arrives while the page is put down: shown again, the page reads the list once more, by itself.
+    api.world.photos = [stored(1), stored(2), waiting(3)];
+    await page.evaluate(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(photos(page)).toContainText(
+      '2 of 3 parcel photos uploaded. 1 photo is still waiting to upload.',
+    );
+    expect(reads(api, '/evidence')).toHaveLength(3);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (the review of Run B, finding 4): a picture whose link ran out was shown as broken and never asked for again, so the officer had to close the photo and open it again.
+  test('a picture the store refuses because its link ran out is asked for again with a new link, once, and drawn', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, STOP, { refuseImages: 1 });
+    await expect(tiles(page)).toHaveCount(40);
+
+    await page.getByRole('button', { name: 'Open Parcel photo 3', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Parcel photo 3' });
+    const image = dialog.getByRole('img', { name: /^Parcel photo 3, taken / });
+    await expect(image).toBeVisible();
+    await expect
+      .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth))
+      .toBeGreaterThan(0);
+
+    // The first link was refused by the store; the page asked for a second one, and only one.
+    expect(authorizations(api)).toHaveLength(2);
+    expect(api.images).toHaveLength(2);
+    expect(api.refusedImages).toBe(1);
+    await expect(dialog).not.toContainText('could not be shown');
+    expect(api.unexpected).toEqual([]);
+    // The one refusal the test makes on purpose.
+    expect(
+      watch.problems.filter(
+        (problem) => !problem.includes('HTTP 403') && !problem.includes('status of 403'),
+      ),
+    ).toEqual([]);
+  });
+
+  // Break caught (the review of Run B, finding 4): a picture the browser's own policy blocked was told as a link that may have run out or a store that did not answer. The policy is the page's own,
+  // pictures from its own origin only, and the photo's address is another origin: the browser blocks it, says so, and no request goes out.
+  test('a photo the browser’s policy blocks is told as blocked, and no new link is asked for', async ({
+    page,
+  }) => {
+    const watch = watchPage(page);
+    const api = await stubPickupWorkApi(page, world({ storeOrigin: 'http://localhost:4999' }));
+    await onlyPicturesFromTheOwnOrigin(page);
+    await page.goto(STOP);
+    await expect(tiles(page)).toHaveCount(40);
+
+    await page.getByRole('button', { name: 'Open Parcel photo 3', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Parcel photo 3' });
+
+    await expect(dialog).toContainText('The browser blocked this photo');
+    await expect(dialog).not.toContainText(/run out|ran out|did not answer|new link/);
+    await expect(dialog.getByRole('img')).toHaveCount(0);
+    expect(authorizations(api)).toHaveLength(1);
+    expect(api.images).toEqual([]);
+    expect(api.unexpected).toEqual([]);
+    // What the browser itself says of the block is the one thing this page reports on purpose: the console's refusal that names the policy, and the failed request of the photo's address, the only
+    // request this test makes to that origin. Anything else is a problem.
+    expect(
+      watch.problems.filter(
+        (problem) =>
+          !/content[- ]security[- ]policy/i.test(problem) &&
+          !problem.startsWith('request failed: http://localhost:4999/'),
+      ),
+    ).toEqual([]);
+  });
 });
 
 test.describe('letting a count through without photos', () => {
+  // Break caught (the review of Run B, finding 6): the act offered for a stop whose every photo is uploaded, which the rider counts with (the count may be recorded already, and the server refuses a
+  // stop that has one).
+  test('is not offered once every parcel photo the rider made is uploaded', async ({ page }) => {
+    const { api, watch } = await open(page, STOP);
+    await expect(photos(page)).toContainText('40 of 40 parcel photos uploaded.');
+
+    await expect(
+      page.getByRole('link', { name: 'Let the count through without photos' }),
+    ).toHaveCount(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a stop that already has a count told as a generic failure, so the officer retries what cannot work. The server refuses it with the rule `collection_recorded`.
+  test('tells a stop that has a count in plain words, in the confirmation', async ({ page }) => {
+    const { api } = await open(page, STOP, { photos: [], counted: true });
+    await page.getByRole('link', { name: 'Let the count through without photos' }).click();
+    await page.getByRole('textbox', { name: /Note/ }).fill('The camera failed');
+    await page.getByRole('button', { name: 'Let the count through' }).click();
+    const dialog = page.getByRole('alertdialog', { name: /through without photos\?/ });
+    await dialog.getByRole('button', { name: 'Let the count through' }).click();
+
+    await expect(dialog).toContainText('already recorded the count at this stop');
+    expect(await drawn(page)).not.toContain(DIAGNOSTIC);
+    expect(acts(api)).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+  });
+
+  // Break caught (the review of Run B, finding 6): the form drawn while its check was loading or after it failed, so an officer could write a note for a stop that had been let through already.
+  test('shows no form while the check of the stop fails, and the form once a check worked', async ({
+    page,
+  }) => {
+    const { api } = await open(page, FORM, { photos: [], evidenceDown: true });
+
+    await expect(page.getByRole('alert')).toContainText(
+      'Whether this stop was let through already could not be checked',
+    );
+    await expect(page.getByRole('textbox', { name: /Note/ })).toHaveCount(0);
+    expect(await drawn(page)).not.toContain(DIAGNOSTIC);
+
+    api.world.evidenceDown = false;
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await expect(page.getByRole('textbox', { name: /Note/ })).toBeVisible();
+  });
+
   // Break caught: an exception sent without a note, with a version (the operation declares none), without a fresh key, or one that is not on the stop afterwards, or an act still offered once it is made.
   test('takes a note, confirms, sends it under a fresh key and no version, and the stop then says who, when and why', async ({
     page,
   }) => {
-    const { api, watch } = await open(page, STOP);
-    await expect(tiles(page)).toHaveCount(40);
+    // The camera failed: no photo of this stop is stored, which is the stop the exception is for (the review of Run B, finding 9). The server answers its list with no photo and the progress at zero,
+    // and after the exception with the same list and the exception on it. A stop whose photos are all uploaded is never let through, and the stand-in refuses to be arranged as one.
+    const { api, watch } = await open(page, STOP, { photos: [] });
+    await expect(photos(page)).toContainText('No parcel photo is stored or waiting to upload.');
+    await expect(tiles(page)).toHaveCount(0);
     await page.getByRole('link', { name: 'Let the count through without photos' }).click();
     await expect(
       page.getByRole('heading', { level: 1, name: 'Let a count through without photos' }),
@@ -499,6 +659,7 @@ test.describe('letting a count through without photos', () => {
       'You let this stop’s count through without parcel photos',
     );
     await expect(photos(page)).toContainText('Why: The camera failed');
+    await expect(photos(page)).toContainText('No parcel photo is stored or waiting to upload.');
     await expect(
       page.getByRole('link', { name: 'Let the count through without photos' }),
     ).toHaveCount(0);
