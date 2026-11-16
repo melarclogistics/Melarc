@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 
 import { noteRefusal } from '../platform/audit/audit-record.js';
-import { randomUUIDv7 } from '../platform/auth/crypto/uuid-v7.js';
+import { orderedUUIDv7 } from '../platform/auth/crypto/uuid-v7.js';
 import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { Clock } from '../platform/auth/ports/clock.port.js';
 import type { IdempotencyStore } from '../platform/auth/ports/idempotency-store.port.js';
@@ -266,6 +266,8 @@ export class HubHandovers {
       );
 
       const opened: HubIntakePreCountRow[] = [];
+      // The intakes are opened in the order of the rows, and their identifiers sort in that order: a run's page lists its vendors "in the order the handover opened them" by the moment and the identifier.
+      const nextIntakeId = orderedUUIDv7(clock);
       for (const row of body.rows) {
         const requestId = row.pickup_request_id.toLowerCase();
         let made: HubIntakePreCountRow | undefined;
@@ -273,7 +275,7 @@ export class HubHandovers {
           const inserted = await tx.execute(sql`
             insert into pickup_intake (id, code, responsible_hub_id, pickup_request_id, pickup_manifest_id, handed_over_by, declaration_captured_at,
                                        rider_declared_count, prefilled_count)
-            values (${randomUUIDv7(clock)}::uuid, ${operationalCode(hubCode, 'IN')}, ${run.responsibleHubId}::uuid, ${requestId}::uuid, ${run.id}::uuid,
+            values (${nextIntakeId()}::uuid, ${operationalCode(hubCode, 'IN')}, ${run.responsibleHubId}::uuid, ${requestId}::uuid, ${run.id}::uuid,
                     ${riderId}::uuid, ${capturedAt}::timestamptz, ${row.declared_count}, ${prefilled.get(requestId) ?? 0})
             on conflict (code) do nothing
             returning ${HUB_INTAKE_PRE_COUNT_COLUMNS}`);

@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { handOver, type HandedOver } from './support/handed-over.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
+import { insertManifest, manifestRow } from './support/manifests.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { API, HUB_A, HUB_B, codeOf, type Actor } from './support/staff-routes.js';
@@ -447,6 +450,44 @@ describe('getQueueSummary: the two queues of the receiving side', () => {
     const queues = await summaryOf(reader);
     expect(entryOf(queues, 'HUB_RECEIVING_RUNS_WAITING')).toBeUndefined();
     expect(entryOf(queues, 'HUB_MISSING_PARCELS_SEARCHING')).toBeUndefined();
+  });
+});
+
+describe('the manifest of a run, as the keys that read intakes see it (migration 0107)', () => {
+  // Break caught: a policy that shows the keys of the receiving side every manifest of the hub (a run in progress, a draft: the pickup domain's), or one that shows another hub's, or a session that holds no hub: the three
+  // keys that read intakes see the manifests of the hubs of the grant that the hub has been handed (a manifest that has an intake) and no other.
+  it('is shown to the three keys that read intakes for the runs the hub has been handed, in the hubs of the grant alone', async () => {
+    const draft = await insertManifest(routes.admin, manifestRow(HUB_A));
+    const context = (key: string, hubs: readonly string[]): SecurityContext => ({
+      principalType: 'STAFF',
+      principalId: randomUUID(),
+      sessionId: randomUUID(),
+      surface: 'OPS_PORTAL',
+      authorizationKey: key,
+      hubScopeMode: 'SET',
+      authorizedHubIds: [...hubs],
+      correlationId: 'manifest-policy',
+    });
+    const seenBy = async (key: string, hubs: readonly string[]): Promise<string[]> =>
+      (
+        await routes.built.service.transactionWithContext(context(key, hubs), async (tx) =>
+          (await tx.execute(sql`select id from pickup_manifest`)).rows as unknown as { id: string }[],
+        )
+      )
+        .map((row) => row.id)
+        .toSorted();
+    const handedA = [idOfRun(photoRunA), idOfRun(blindRunA)].toSorted();
+
+    for (const key of ['hub.read', 'hub.intake.count', 'hub.osd.adjudicate']) {
+      expect(await seenBy(key, [HUB_A]), key).toEqual(handedA);
+    }
+    expect(await seenBy('hub.read', [HUB_B])).toEqual([idOfRun(photoRunB)]);
+    expect(await seenBy('hub.read', [HUB_A, HUB_B])).toEqual(
+      [...handedA, idOfRun(photoRunB)].toSorted(),
+    );
+    expect(await seenBy('hub.read', [])).toEqual([]);
+    // The draft run of the first hub, which no hub has been handed, is in none of them.
+    expect(await seenBy('hub.read', [HUB_A, HUB_B])).not.toContain(draft.id);
   });
 });
 

@@ -347,7 +347,15 @@ describe('adjudicateDiscrepancy: searching, writing off and "Vendor told"', () =
     expect(told.status).toBe(200);
     expect(told.json()).toMatchObject({ state: 'READY_FOR_ITEMIZATION' });
     expect((told.json() as Intake).condition_findings?.map((finding) => finding.outcome)).toEqual(['WRITTEN_OFF', 'VENDOR_NOTIFIED']);
-    expect((await eventRow('hub.osd.resolved', id)) !== undefined).toBe(true);
+    // The last decision of the case is "Vendor told": it is recorded, enhanced like the others, and resolves nothing (the write-off did).
+    const decisions = await routes.rows<{ enhanced: boolean; detail: Record<string, unknown> }>(
+      `select enhanced, detail from audit_event where event_code = 'hub.osd.resolved' and object_id = $1 order by recorded_at, id`,
+      [id],
+    );
+    expect(decisions.map((decision) => [decision.detail['outcome'], decision.detail['resolved'], decision.enhanced])).toEqual([
+      ['WRITTEN_OFF', true, true],
+      ['VENDOR_NOTIFIED', false, true],
+    ]);
     expect(await messagesSent()).toBe(messages);
     expect(await missingList(receiver, 'vendor_to_tell', id)).toEqual([]);
     expect(outcome(await adjudicate(senior, id, { outcome: 'VENDOR_NOTIFIED', note: 'Told again' }))).toEqual([409, 'STATE_CONFLICT', 'vendor_already_told']);

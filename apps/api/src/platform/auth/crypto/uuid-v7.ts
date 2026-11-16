@@ -43,3 +43,16 @@ export function uuidV7From(milliseconds: number, random: Uint8Array): string {
 export function randomUUIDv7(clock: Pick<Clock, 'now'>): string {
   return uuidV7From(clock.now().getTime(), randomBytes(16));
 }
+
+/**
+ * A generator of identifiers that sort in the order they are made, for the records one transaction opens together (the intakes a hub handover opens: the contract's `getReceivingRun` lists a run's vendors "in the order the
+ * handover opened them", and the queue pages by the moment and the identifier). Each is time-ordered to the injected clock as `randomUUIDv7` is; two made in the same millisecond are told apart by stepping the later one a
+ * millisecond on, so that the order of the identifiers is the order of the calls. The generator keeps the last millisecond it gave and nothing else, and is made for one transaction's work, not shared.
+ */
+export function orderedUUIDv7(clock: Pick<Clock, 'now'>): () => string {
+  let last = -1;
+  return (): string => {
+    last = Math.max(clock.now().getTime(), last + 1);
+    return uuidV7From(last, randomBytes(16));
+  };
+}
