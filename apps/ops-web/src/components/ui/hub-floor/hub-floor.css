@@ -34,7 +34,7 @@
 
 /* The lookup of a queue (its field and its button) and the Filter button. */
 .ui-hub-floor .ui-filter-bar__search .ui-filter-bar__search-field,
-.ui-hub-floor .ui-filter-bar__search .ui-button,
+.ui-hub-floor .ui-filter-bar__search button,
 .ui-hub-floor .ui-filter-bar .ui-filter-bar__add {
   min-height: var(--control-height-lg);
 }
