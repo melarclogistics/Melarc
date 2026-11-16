@@ -46,6 +46,8 @@ export default defineConfig({
     './src/pickup/parcel-photo-exception.schema.ts',
     // SLICE-001 (S1.31): what the hub handover opens for each collected request of a run, to be counted blind at the hub.
     './src/hub/pickup-intake.schema.ts',
+    // SLICE-001 (Run D, S1.35b): one parcel as the hub checks it: a row for each door photo of a photo intake, and one for each extra found at the hub.
+    './src/hub/intake-parcel.schema.ts',
     // SLICE-001 (S1.34): what was found at an intake after its count: the receiver's conditions and Senior Ops's adjudications.
     './src/hub/pickup-intake-finding.schema.ts',
   ],
