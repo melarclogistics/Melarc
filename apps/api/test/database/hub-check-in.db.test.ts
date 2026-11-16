@@ -205,6 +205,13 @@ const eventRow = async (code: string, id: string) =>
     )
   )[0];
 
+/** What `getQueueSummary` counts in a queue for the actor. */
+const queueCount = async (actor: Actor, queue: string): Promise<number> => {
+  const response = await actor.client.get(`${API}/ops/queue-summary`);
+  expect(response.status).toBe(200);
+  return (response.json() as { queues: { queue: string; count: number }[] }).queues.find((each) => each.queue === queue)?.count ?? -1;
+};
+
 const versionOf = async (id: string): Promise<number> =>
   (await routes.rows<{ version: number }>(`select version from pickup_intake where id = $1`, [id]))[0]?.version ?? -1;
 
@@ -464,10 +471,14 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
   // Break caught: the summary of a finished run that cannot be read from the reads (what is left to act on after "finish": arrived, missing with its pictures, extras, damaged): the run's page and the queue say
   // the same as the finished vendors, and a run with no vendor waiting leaves the queue of the waiting (AC-SLICE-001-97).
   it('leaves the run’s page and the queue saying what was counted: arrived, missing and what is left to decide', async () => {
+    const waitingBefore = await queueCount(receiver, 'HUB_RECEIVING_RUNS_WAITING');
     const { id } = await arrange(2);
+    expect(await queueCount(receiver, 'HUB_RECEIVING_RUNS_WAITING')).toBe(waitingBefore + 1);
     const [first] = (await read(receiver, id)).intake.parcels;
     expect((await tap(receiver, first?.id ?? '', true)).status).toBe(200);
     expect((await finish(receiver, id, { all_arrived: false })).status).toBe(200);
+    // The run is out of the queue of the waiting, however much a senior officer has still to decide (its decision is a view of the list, with no count of its own).
+    expect(await queueCount(receiver, 'HUB_RECEIVING_RUNS_WAITING')).toBe(waitingBefore);
 
     const manifest = (await routes.rows<{ pickup_manifest_id: string }>(`select pickup_manifest_id from pickup_intake where id = $1`, [id]))[0]
       ?.pickup_manifest_id;
