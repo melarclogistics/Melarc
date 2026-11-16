@@ -480,9 +480,12 @@ describe('the notification capability role', () => {
       return { role: role.rows, tables: tables.rows, columns: columns.rows, members: members.rows };
     });
     expect(facts.role).toEqual([
-      // The four functions the lane executes: the two readers of a stop's standing that a policy names (0067, 0070), the operation that tells a handshake
-      // its code was accepted (0070) and the one that gives it the number a fallback code is texted to (0073). All other functions: none.
-      { rolcanlogin: false, owned: 0, schema_grants: 0, function_grants: 4, memberships_held: 0 },
+      // The five functions the lane executes: the two readers of a stop's standing that a policy names (0067, 0070), the operation that tells a handshake its code was accepted (0070), the one that gives it
+      // the number a fallback code is texted to (0073) and the one boolean that a policy of the manifest names (0107, Run D, S1.35b): `melarc.run_has_intake`, whether a run has an intake. All other functions:
+      // none. The last is granted for one reason only: a policy's functions need EXECUTE for every role that reads the table, whether or not the policy's branch is the one that runs (0067), and the lane reads
+      // the run its envelope names (0062). It is safe to give: it answers one boolean and no row, writes nothing, runs with the caller's own rights and a fixed search_path (the lane holds no privilege on
+      // the intakes it asks about, and never asks: its principal is not staff, so the branch of the policy that calls it is never taken). The `has_table_privilege` check of `hub-receiving-reads` holds that.
+      { rolcanlogin: false, owned: 0, schema_grants: 0, function_grants: 5, memberships_held: 0 },
     ]);
     // The envelope and the notification are read whole (neither holds a destination, a text or a code); no table holds DELETE or TRUNCATE.
     expect(facts.tables).toEqual([
