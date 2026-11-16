@@ -26,6 +26,11 @@
   line-height: var(--text-body-md-line-height);
 }
 
+/* The wide window (size="wide", Run D, S1.35c-0): for what is shown whole, a photo; never wider than the screen. Everything else of the dialog is the same. */
+.ui-dialog--wide {
+  width: min(56rem, calc(100vw - 2 * var(--space-4)));
+}
+
 /*
  * Inside a modal dialog the overlays the kit draws (the date field's calendar, an action menu, a popover such as the filter bar's, a tooltip) are drawn into the dialog: the page
  * behind it is inert and its top layer is above the body, so one drawn there would be unseen and out of reach (task R5.2, M8; before it, only the calendar was). The dialog scrolls,

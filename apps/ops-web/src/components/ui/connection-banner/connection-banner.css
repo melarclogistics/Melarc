@@ -1,1 +1,25 @@
-/* The connection banner (ConnectionBanner): its look is the presentation commit that follows. */
+/*
+ * The connection banner (design/COMPONENT_PATTERNS.md, ConnectionBanner): a line of the page in the warning status tokens (which have their dark form), the icon beside the words. It is never a layer over the page
+ * (no fixed, absolute or sticky position and no z-index), so that it cannot cover what a person is typing into. The region around it has no style: it is empty, and so has no height, until it has something to say.
+ */
+.ui-connection-banner__message {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-status-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+  font-size: var(--text-body-md-size);
+  font-weight: var(--text-label-md-weight);
+  line-height: var(--text-body-md-line-height);
+}
+
+/* Forced colours: the system drops the fill, so the banner is told from the page by its border. */
+@media (forced-colors: active) {
+  .ui-connection-banner__message {
+    border-color: CanvasText;
+  }
+}
