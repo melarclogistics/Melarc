@@ -28,6 +28,18 @@ describe('the receiving screens’ stylesheet', () => {
     expect(plain).not.toMatch(/inset-block-end:/);
   });
 
+  // Break caught (the second review, defect 3 again): the photos and the bars without a block of their own, so that the bar is kept within the whole card and is drawn over the card's name; or that block
+  // without the card's gap, so that the bar stands against the photos.
+  it('gives the photos and the bars a block of their own, with the card’s gap', () => {
+    const work = ruleOf(SHEET, '.receiving-vendor__work');
+
+    expect(work).toBeDefined();
+    expect(work).toMatch(/display:\s*grid\s*;/);
+    expect(work).toMatch(/gap:\s*var\(--space-3\)\s*;/);
+    // It is not itself kept anywhere: the bar in it is.
+    expect(work).not.toMatch(/position:\s*(?:sticky|fixed)\s*;/);
+  });
+
   // Break caught: a bar that scrolls away with the photos, so that "All 12 here" is a scroll back from the thumb; or one that is fixed over the page and hides the last photos.
   it('keeps the action bar of the vendor in work at the foot of the visible screen without covering what is above it', () => {
     expect(bar).toBeDefined();

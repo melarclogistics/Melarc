@@ -53,6 +53,16 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * The photos of a vendor and its bars: one block of the card, with the gap the card keeps between its parts. It is the containing block of the bar that is kept at the foot of the screen: the bar is moved up
+ * as far as the top of this block and no further, so that it is never drawn over the card's name or the lines under it (the second review of the pictures).
+ */
+.receiving-vendor__work {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
 /* Who opened the check-in and the tally of how far it has got: said quietly, because they are not what the officer does next. */
 .receiving-lock,
 .receiving-tally {
