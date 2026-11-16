@@ -17,6 +17,7 @@ import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-co
 import { useRefreshWhenVisible } from '../../../platform/query/use-refresh-when-visible';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatClock } from '../../../platform/time/format-time';
+import { useKeyboardInset } from '../../../platform/viewport/use-keyboard-inset';
 import { UUID } from '../staff/WithProfile';
 import { RECEIVING_QUEUE_PATH } from './receiving-presentation';
 import { RunSummary } from './RunSummary';
@@ -88,6 +89,8 @@ function Run({
   const acts = useRunActs(page.run.id, query.refetch);
   const [notices, setNotices] = useState<Readonly<Record<string, string>>>({});
   useFocusFallenToHeading();
+  // The action bar is lifted above the on-screen keyboard (a note typed in a dialog, a tablet at 768 px), so that the officer is never made to close the keyboard to reach a button.
+  useKeyboardInset();
   // The page is read again when it is shown again (the tablet was picked up): what it shows is as old as the moment it was put down. It is an automatic read, so it asks the hold first.
   useRefreshWhenVisible('receiving-run', () => {
     void query.refetch();
