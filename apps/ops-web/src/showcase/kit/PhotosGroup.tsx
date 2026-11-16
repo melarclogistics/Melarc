@@ -105,7 +105,7 @@ function PhotoGridSpecimens() {
       note="The photos of a vendor, a parcel or a finding as tiles of one shape, three to a row on a phone and as many as fit on a desk. Each tile is a button of at least 56 px, the whole grid is one stop of the Tab key with the arrow keys moving between the tiles, and a tile says its state in an icon and words, never in colour alone. The grid decides nothing: the page draws each picture and says what a press means. The boxes below stand for photos (nothing is read from a store here)."
     >
       <div className="showcase-kit-grid">
-        <Specimen label="Normal, ticked, missing, set apart, with a badge">
+        <Specimen label="Normal, ticked, missing, set apart, with a badge" edge>
           <PhotoGrid
             label="Sample photos of one stop"
             items={GRID_ITEMS}
@@ -116,9 +116,9 @@ function PhotoGridSpecimens() {
               setPressed(item.label);
             }}
           />
-          <p>Last pressed: {pressed}</p>
+          <p className="showcase-kit-specimen__note">Last pressed: {pressed}</p>
         </Specimen>
-        <Specimen label="Tiles that are ticked as found">
+        <Specimen label="Tiles that are ticked as found" edge>
           <PhotoGrid
             label="Sample photos to tick"
             items={tickable}
@@ -135,7 +135,7 @@ function PhotoGridSpecimens() {
               });
             }}
           />
-          <p>{String(found.size)} of 5 ticked as found.</p>
+          <p className="showcase-kit-specimen__note">{String(found.size)} of 5 ticked as found.</p>
         </Specimen>
         <Specimen label="A picture that cannot be shown" width="14rem">
           <PhotoGrid

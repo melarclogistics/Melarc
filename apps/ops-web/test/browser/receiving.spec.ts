@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
 import {
@@ -17,6 +17,7 @@ import {
 } from './support/receiving-api';
 import { parcelRow, type RunRow, type VendorRow } from './support/receiving-runs-api';
 import { watchPage, wcagViolations } from './support/page';
+import { parcelRow } from './support/receiving-runs-api';
 import { menuEntry } from './support/shell';
 import { expectNoTableScrollsSideways } from './support/tables';
 import { expectWholeInTheWindow } from './support/whole';
@@ -1871,5 +1872,186 @@ test.describe('enlarged text and forced colours', () => {
     expect(line).toEqual({ style: 'solid', width: 1 });
     await page.getByRole('link', { name: 'Decide' }).scrollIntoViewIfNeeded();
     await expectWholeInTheWindow(page, page.getByRole('link', { name: 'Decide' }));
+  });
+});
+
+/**
+ * What a photo tile says of its parcel (the second look at the pictures, 16 November 2026, new defects 1 and 2), measured on the run's page at the three widths of the review: **a tile's state is an icon and one
+ * line of words, and no word is broken in the middle**. The grid's columns are 6rem at least, and the tile is a square of that, so the words have what is left of 96px after the border, the strip's own padding and
+ * the icon: "Damaged" was broken in two ("Damage" and "d") and "Checked in" took two lines in every checked tile, which left the photo a strip of 40px above its words. The grid is the receiving page's own, and its
+ * room is the page's: the kit's showcase is framed twice and has less, so it cannot show what a phone is given here.
+ */
+test.describe('the photo tiles of the run’s page: the state is an icon and one line of words', () => {
+  /** The parcels of a finished vendor say every state a tile can say: checked in, missing, damaged (checked in and flagged) and taken back (an extra the officer took back). */
+  function everyState(): World['runs'] {
+    const runs = world().runs;
+    const vendor = runs[1]?.vendors[0];
+    if (vendor === undefined) throw new Error('the world holds no vendor');
+    const arrived = {
+      state: 'ARRIVED',
+      arrivedBy: 'Synthetic Officer',
+      arrivedAt: '2026-11-03T08:20:00Z',
+    } as const;
+    vendor.parcels = [
+      parcelRow(3, 1, arrived),
+      parcelRow(3, 2, { state: 'MISSING', missingAt: '2026-11-03T08:20:00Z' }),
+      parcelRow(3, 3, {
+        ...arrived,
+        condition: {
+          condition: 'DAMAGED',
+          note: null,
+          evidence_ids: [],
+          recorded_by_name: 'Synthetic Officer',
+          recorded_at: '2026-11-03T08:21:00Z',
+        },
+      }),
+      parcelRow(3, 4, { origin: 'HUB_EXTRA', state: 'VOID' }),
+      parcelRow(3, 5, arrived),
+      parcelRow(3, 6, arrived),
+    ];
+    vendor.received = 4;
+    return runs;
+  }
+
+  interface Strip {
+    readonly name: string;
+    readonly words: string;
+    readonly icon: boolean;
+    /** How many lines the words are drawn on. */
+    readonly lines: number;
+    /** The words that are broken over two lines. */
+    readonly split: readonly string[];
+    /** The height of the strip, and the width and height of the tile it is in. */
+    readonly height: number;
+    readonly tileWidth: number;
+    readonly tileHeight: number;
+    /** How much wider the strip's content is than the strip: words that are cut off. */
+    readonly across: number;
+  }
+
+  /** The strip of every tile in sight inside a box that has one: its words, how they lie, and the box it makes. Read from the page as it stands. */
+  function stripsOf(scope: Locator): Promise<Strip[]> {
+    return scope.evaluate((root) => {
+      const found: Strip[] = [];
+      const linesOf = (range: Range): number =>
+        new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+      for (const tile of root.querySelectorAll<HTMLElement>('button.ui-photo-tile')) {
+        const mark = tile.querySelector<HTMLElement>('.ui-photo-tile__mark');
+        const text = [...(mark?.childNodes ?? [])].find((node) => node.nodeType === Node.TEXT_NODE);
+        if (mark === null || text === undefined || tile.getClientRects().length === 0) continue;
+        const words = text.textContent ?? '';
+        const whole = document.createRange();
+        whole.selectNodeContents(text);
+        const split: string[] = [];
+        for (const word of words.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(text, word.index);
+          range.setEnd(text, word.index + word[0].length);
+          if (linesOf(range) > 1) split.push(word[0]);
+        }
+        const tileBox = tile.getBoundingClientRect();
+        found.push({
+          name: tile.getAttribute('aria-label') ?? '',
+          words,
+          icon: mark.querySelector('svg') !== null,
+          lines: linesOf(whole),
+          split,
+          height: mark.getBoundingClientRect().height,
+          tileWidth: tileBox.width,
+          tileHeight: tileBox.height,
+          across: mark.scrollWidth - mark.clientWidth,
+        });
+      }
+      return found;
+    });
+  }
+
+  // Break caught (new defects 1 and 2): a state whose words wrap in a tile of 96px ("Checked in" on two lines in every checked tile, which leaves the photo a strip), a word broken in the middle ("Damage" and "d": the frame lets any
+  // text break anywhere), a state drawn in words alone (a state is never colour alone), or words cut off at the tile's edge.
+  for (const size of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+  ]) {
+    test(`says Checked in, Damaged, Missing and Taken back in an icon and one line, breaking no word, in tiles of the grid’s own room, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, runPath(RUNS.decision), { runs: everyState() });
+      const yaw = page.getByRole('region', { name: 'Yaw Textiles' });
+      await expect(yaw.getByRole('button', { name: 'Parcel 3, Damaged' })).toBeVisible();
+      await expect(yaw.getByRole('button', { name: 'Parcel 4, Taken back' })).toBeVisible();
+
+      const strips = await stripsOf(page.locator('body'));
+      expect(strips.map((strip) => strip.words)).toEqual(
+        expect.arrayContaining(['Checked in', 'Damaged', 'Missing', 'Taken back']),
+      );
+      for (const strip of strips) {
+        const said = `${strip.name}: "${strip.words}" is on ${String(strip.lines)} line(s) in a tile of ${String(Math.round(strip.tileWidth))}px, in a strip ${String(Math.round(strip.height))}px high, with ${String(strip.split.length)} word(s) broken (${strip.split.join(', ')}) and ${String(Math.round(strip.across))}px cut off`;
+        expect(strip.lines, said).toBe(1);
+        expect(strip.split, said).toEqual([]);
+        expect(strip.across, said).toBeLessThanOrEqual(0);
+        // One line of the label size, in a strip of its own: the photo keeps most of the tile.
+        expect(strip.height, said).toBeLessThanOrEqual(28);
+        // A tile that is checked in, missing or damaged says it in an icon beside the words; only a tile that is set apart (taken back) says it in words and a grey picture.
+        if (strip.words !== 'Taken back') expect(strip.icon, said).toBe(true);
+      }
+    });
+
+    // Break caught: a grid whose columns are not what the stylesheet says (a column is 6rem at least and the gap is 12px): the tiles of the first row are as many as the room holds, and a phone has room for three.
+    test(`lays the parcels’ tiles in as many columns as the room holds, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, runPath(RUNS.decision), { runs: everyState() });
+      const list = page
+        .getByRole('region', { name: 'Yaw Textiles' })
+        .getByRole('list', { name: 'Photos of Yaw Textiles’s parcels' });
+      await expect(list.getByRole('button')).toHaveCount(6);
+      const room = (await list.boundingBox())?.width ?? 0;
+      const tiles = await Promise.all(
+        (await list.getByRole('button').all()).map(async (tile) => await tile.boundingBox()),
+      );
+      const top = tiles[0]?.y ?? 0;
+      const firstRow = tiles.filter((tile) => Math.abs((tile?.y ?? 0) - top) < 2).length;
+      const held = Math.floor((room + 12) / (96 + 12));
+      const said = `the list is ${String(Math.round(room))}px wide: ${String(held)} columns of 96px and a gap of 12px, ${String(firstRow)} tiles in the first row`;
+
+      expect(firstRow, said).toBe(Math.min(6, held));
+      // The page leaves a phone the room of three tiles (3 x 96 and two gaps of 12 = 312px): if the page's own frame took more, it is the page that is narrower, and the test says so.
+      if (size.width === 390) expect(room, said).toBeGreaterThanOrEqual(3 * 96 + 2 * 12);
+      expect(await overflowOf(page)).toBeLessThanOrEqual(0);
+    });
+  }
+
+  // Break caught: a strip that holds its words in the tiles that the three widths happen to make (100, 94 and 95px: wider than the least) and not in the least tile there can be, 96px, where a label size or a padding that does not
+  // leave the icon, its gap and "Checked in" their 84.3px of the 92px inside the border takes two lines. The viewport is narrowed to the room of exactly three tiles of 96px and two gaps of 12px.
+  test('keeps the words of a state on one line in the narrowest tile the grid makes, 96px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, runPath(RUNS.decision), { runs: everyState() });
+    const list = page
+      .getByRole('region', { name: 'Yaw Textiles' })
+      .getByRole('list', { name: 'Photos of Yaw Textiles’s parcels' });
+    await expect(list.getByRole('button')).toHaveCount(6);
+    const wanted = 3 * 96 + 2 * 12;
+    const room = (await list.boundingBox())?.width ?? 0;
+    await page.setViewportSize({ width: Math.round(390 - (room - wanted)), height: 844 });
+    await expect.poll(async () => Math.round((await list.boundingBox())?.width ?? 0)).toBe(wanted);
+
+    // The tiles of the vendor's own grid, whose room is the one narrowed (the summary above it lays its list of missing parcels out in a room of its own).
+    const strips = await stripsOf(list);
+    expect(strips.map((strip) => strip.words)).toEqual(
+      expect.arrayContaining(['Checked in', 'Damaged', 'Missing', 'Taken back']),
+    );
+    for (const strip of strips) {
+      const said = `${strip.name}: "${strip.words}" is on ${String(strip.lines)} line(s) in a tile of ${String(strip.tileWidth)}px, in a strip ${String(Math.round(strip.height))}px high, with ${String(strip.split.length)} word(s) broken (${strip.split.join(', ')}) and ${String(Math.round(strip.across))}px cut off`;
+      expect(strip.tileWidth, said).toBeCloseTo(96, 0);
+      expect(strip.lines, said).toBe(1);
+      expect(strip.split, said).toEqual([]);
+      expect(strip.across, said).toBeLessThanOrEqual(0);
+      expect(strip.height, said).toBeLessThanOrEqual(28);
+    }
   });
 });
