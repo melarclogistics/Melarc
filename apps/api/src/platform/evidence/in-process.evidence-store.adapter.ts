@@ -8,7 +8,13 @@ import type {
   StoredObjectFacts,
   UploadCapabilityRequest,
 } from '../auth/ports/evidence-store.port.js';
-import { checksumHexOf, expiryOf, objectPathOf, uploadHeadersOf } from './object-capability.js';
+import {
+  checksumHexOf,
+  expiryOf,
+  objectPathOf,
+  RETRIEVAL_QUERY,
+  uploadHeadersOf,
+} from './object-capability.js';
 import {
   canonicalRequestOf,
   presignRequest,
@@ -111,6 +117,7 @@ export class InProcessEvidenceStore implements EvidenceStore {
       method: 'GET',
       host: STAND_IN_HOST,
       path: objectPathOf(BUCKET, request.key),
+      query: RETRIEVAL_QUERY,
       expiresSeconds: request.ttlSeconds,
     });
     return {
