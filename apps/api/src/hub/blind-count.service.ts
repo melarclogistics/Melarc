@@ -4,6 +4,7 @@ import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { IdempotencyStore } from '../platform/auth/ports/idempotency-store.port.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
+import { guardRuleIn } from '../platform/database/database-failures.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
@@ -145,10 +146,23 @@ export class HubBlindCounts {
       }
 
       // The count, by the one function that can read the declaration; it answers the declaration and the photos, for the first time.
-      const committed = await tx.execute(
-        sql`select intake_id, rider_declared_count, parcel_photo_ids from melarc.commit_blind_count(${id}::uuid, ${physical}::integer)`,
-      );
-      const after = committed.rows[0] as unknown as AfterCountRow | undefined;
+      let committed: { readonly rows: readonly unknown[] };
+      try {
+        committed = await tx.execute(
+          sql`select intake_id, rider_declared_count, parcel_photo_ids from melarc.commit_blind_count(${id}::uuid, ${physical}::integer)`,
+        );
+      } catch (error) {
+        // An intake whose stop has door photos is checked in against them and never counted blind (Run D, D-D1 and D-D3; migration 0104): the database refuses it with the rule the contract names.
+        if (guardRuleIn(error) === 'photo_check_in') {
+          throw ApiException.of(
+            ErrorCode.StateConflict,
+            'The intake is checked in against its door photos: it is never counted blind',
+            { rule: 'photo_check_in' },
+          );
+        }
+        throw error;
+      }
+      const after = committed.rows[0] as AfterCountRow | undefined;
       if (after === undefined) throw new Error('The count of a locked intake was not committed');
       const reread = await tx.execute(
         sql`select ${HUB_INTAKE_READ_COLUMNS} from pickup_intake where id = ${id}::uuid`,
