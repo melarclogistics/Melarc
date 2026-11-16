@@ -194,7 +194,20 @@ export interface CarryoverReasonRow {
  * says the contents are seeded up to the next such sentence.
  */
 export function parseCarryoverReasons(markdown: string): CarryoverReasonRow[] {
-  const start = markdown.indexOf('**The `PICKUP_CARRYOVER` contents are seeded**');
+  return parseLabelledReasons(markdown, 'PICKUP_CARRYOVER');
+}
+
+/**
+ * The rows of the `PICKUP_OVER_COUNT` table of domain-model.md section 3.9 (D-D5, the Product Owner's drafts of 15 and 16 November 2026): code, attribution, whether a note is required and
+ * the label, in the form of the carry-over table, because the labels are the drafted words and not the codes in sentence case.
+ */
+export function parseOverCountReasons(markdown: string): CarryoverReasonRow[] {
+  return parseLabelledReasons(markdown, 'PICKUP_OVER_COUNT');
+}
+
+/** A table of reasons that gives each code its label, read from the sentence that says the domain's contents are seeded up to the next such sentence. */
+function parseLabelledReasons(markdown: string, domain: string): CarryoverReasonRow[] {
+  const start = markdown.indexOf(`**The \`${domain}\` contents are seeded**`);
   if (start < 0) return [];
   const rest = markdown.slice(start + 1);
   const next = rest.search(/\*\*The `[A-Z_]+` contents are seeded\*\*/);

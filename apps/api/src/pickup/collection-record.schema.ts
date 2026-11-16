@@ -17,7 +17,7 @@ import { hub } from '../platform/database/schema/reference-data.js';
 import { riderIdentity } from '../staff/rider-identity.schema.js';
 import { pickupStop } from './pickup-stop.schema.js';
 
-export const COLLECTION_VARIANCES = ['MATCH', 'SHORT'] as const;
+export const COLLECTION_VARIANCES = ['MATCH', 'SHORT', 'OVER'] as const;
 export const HANDSHAKE_TYPES = [
   'VENDOR_ENTERED_RIDER_DISPLAYED',
   'SENDER_SMS_RIDER_ENTERED',
@@ -36,9 +36,10 @@ const quoted = (values: readonly string[]): string =>
  *   (`ZERO_COLLECTION_IS_FAILURE`), so `collected_count` is at least one.
  * - **The actual count, never the declared one.** `declared_count` is what the request said (a copy, so that the variance can be read without
  *   the request), `collected_count` is what the rider counted, and **neither seeds the hub's `rider_declared_count`** (`MSC-DEC-194` part 3).
- * - **`variance` is recorded on every collection**: `MATCH` when the counts are equal and `SHORT` when fewer were collected, which needs the
- *   catalogue reason (`variance_reason_snapshot`, the code and its label as they were, the domain-model's section 3.7) and sets
- *   `office_notified_at` in the same transaction. More than was declared is not a variance either section names, and is refused (OB-S1-50).
+ * - **`variance` is recorded on every collection**: `MATCH` when the counts are equal, `SHORT` when fewer were collected and `OVER` when MORE were (D-D5, 16 November 2026:
+ *   the rider may count more parcels than were booked; before, a count above the booking was refused, OB-S1-50). A count that is not equal needs its catalogue reason
+ *   (`variance_reason_snapshot`, the code and its label as they were, the domain-model's section 3.7: `PICKUP_SHORT_COUNT` for a short one, `PICKUP_OVER_COUNT` for an over one)
+ *   and sets `office_notified_at` in the same transaction.
  * - **The handshake is not run here** (S1.27): `handshake_type` says which direction it will take, fixed by the kind of sender (a registered
  *   vendor enters the code the rider shows; an individual sender is texted it and the rider enters it), and the channel, the override and the
  *   confirmation are null until the handshake sets them. The stop stays `ARRIVED` until it closes.
@@ -112,16 +113,17 @@ export const collectionRecord = pgTable(
       'collection_record_counts',
       sql`${table.collectedCount} >= 1 AND ${table.declaredCount} >= 1`,
     ),
-    // The variance is the comparison of the counts and nothing else: equal is MATCH, fewer is SHORT, and more is not recorded.
+    // The variance is the comparison of the counts and nothing else: equal is MATCH, fewer is SHORT and more is OVER (D-D5).
     check(
       'collection_record_variance_follows_counts',
       sql`(${table.variance} = 'MATCH' AND ${table.collectedCount} = ${table.declaredCount})
-          OR (${table.variance} = 'SHORT' AND ${table.collectedCount} < ${table.declaredCount})`,
+          OR (${table.variance} = 'SHORT' AND ${table.collectedCount} < ${table.declaredCount})
+          OR (${table.variance} = 'OVER' AND ${table.collectedCount} > ${table.declaredCount})`,
     ),
-    // A shortfall has its reason and has raised the office flag; a clean count has neither.
+    // A count that is not equal to the booking has its reason and has raised the office flag; a clean count has neither.
     check(
       'collection_record_shortfall_facts',
-      sql`(${table.variance} = 'SHORT' AND ${table.varianceReasonSnapshot} IS NOT NULL AND ${table.officeNotifiedAt} IS NOT NULL)
+      sql`(${table.variance} IN ('SHORT', 'OVER') AND ${table.varianceReasonSnapshot} IS NOT NULL AND ${table.officeNotifiedAt} IS NOT NULL)
           OR (${table.variance} = 'MATCH' AND ${table.varianceReasonSnapshot} IS NULL AND ${table.officeNotifiedAt} IS NULL)`,
     ),
     check(

@@ -137,6 +137,16 @@ const carryover = (
 const shortCount = (code: string, requirements: Requirements = {}): WorkflowReasonSeed =>
   workflowReason('PICKUP_SHORT_COUNT', code, 'CUSTOMER', requirements);
 
+/**
+ * An over-count reason (D-D5: the reason of a count above the booking): the customer's side of the count, as a short count's is, with the drafted words as the label (the Product Owner's
+ * drafts of 15 and 16 November 2026; the code of "Booked number was wrong" carries the prefix `OVER_` because the short count's `BOOKED_COUNT_WRONG` holds the other name and a code is
+ * the table's primary key). It asks for a note where the table says; no photo, contact attempt, approval, review or escalation.
+ */
+const overCount = (code: string, label: string, requiresNote: boolean): WorkflowReasonSeed => ({
+  ...workflowReason('PICKUP_OVER_COUNT', code, 'CUSTOMER', requiresNote ? { note: true } : {}),
+  label,
+});
+
 export const WORKFLOW_REASONS: readonly WorkflowReasonSeed[] = [
   stopSkip('RUN_CUT_SHORT', 'MELARC', false),
   stopSkip('VENDOR_REQUESTED_SKIP', 'CUSTOMER', false),
@@ -181,6 +191,10 @@ export const WORKFLOW_REASONS: readonly WorkflowReasonSeed[] = [
   carryover('CARRYOVER_OTHER_CUSTOMER_REASON', 'CUSTOMER', 'Other customer reason', true),
   carryover('CARRYOVER_OTHER_MELARC_REASON', 'MELARC', 'Other Melarc reason', true),
   carryover('CARRYOVER_OTHER_EXTERNAL_REASON', 'EXTERNAL', 'Other external reason', true),
+
+  overCount('VENDOR_ADDED_PARCELS', 'Vendor added parcels after booking', false),
+  overCount('OVER_BOOKED_NUMBER_WRONG', 'Booked number was wrong', false),
+  overCount('OVER_OTHER', 'Other', true),
 ];
 
 /** A workflow reason as the reference seed's database function takes it: the columns of `reason_code` by name. */

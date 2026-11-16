@@ -171,6 +171,9 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // inside these functions, so the login can write neither envelope itself.
     'melarc.failure_envelope',
     'melarc.shortfall_envelope',
+    // And the envelope of a count ABOVE the booking (migration 0099, D-D5): the mirror of the short count's, for a stop whose record the calling rider has just made OVER, under the same key,
+    // naming the number of parcels over the booking; the outbox's policy for it admits only a statement that runs as the owner, which is a statement inside this function.
+    'melarc.over_count_envelope',
     // And the one operation of Ops's exception for the day the camera fails (migration 0088, D-A10): an officer of the stop's hub holding `pickup.handshake.override` lets a
     // stop's count through without parcel photos, once, before the count, with a note. It answers that key of a staff member alone and takes the stop's lock first; the
     // policy of the table admits the write only to a statement that runs as the owner, which is a statement inside this function, so the login can write no exception itself.

@@ -694,6 +694,20 @@
       "when": 1794744264561,
       "tag": "0098_hub_lock_ttl_upgrade",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1794791801382,
+      "tag": "0099_over_count_at_the_door",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1794792703881,
+      "tag": "0100_over_count_reasons",
+      "breakpoints": true
     }
   ]
 }

@@ -712,6 +712,8 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       // S1.28 and OB-S1-51: the outbox envelopes of the rider's failure and short count.
       'melarc.failure_envelope',
       'melarc.shortfall_envelope',
+      // D-D5 (migration 0099): the outbox envelope of a count above the booking.
+      'melarc.over_count_envelope',
       // D-A10 (migration 0088): Ops's exception for the day the camera fails, once for a stop and before its count.
       'melarc.authorise_parcel_photo_exception',
       // S1.32 and S1.33 (migrations 0093 and 0094): what a counted intake carries beyond the columns the login can read (the declaration, the photos), and the commit of the count.

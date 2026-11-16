@@ -163,7 +163,7 @@ A reason therefore drives validation. Selecting *damaged in transit* may make a 
 | Field| Type| Null| Notes|
 |---|---|---|---|
 | `code`| text| no| Stable; never reused after deactivation|
-| `domain`| enum| no| Which workflow offers it. **`DELIVERY_FAILURE` · `RECIPIENT_CONTACT` · `PICKUP_STOP_SKIP` · `HANDOFF_FAILURE` · `PICKUP_CANCELLATION` · `PICKUP_FAILURE` · `PICKUP_SHORT_COUNT` · `PICKUP_CARRYOVER`** — the third added at `MSC-DEC-412`, closing `OQ-141`, the fourth at `MSC-DEC-417`, for an outbound stop that fails at the counter, and the last on 2 November 2026 (`SLICE-001`, the S1.20 closeout), for the reason a manifest gives for each overdue request it carries over. **Six identity domains follow, one per operation family** (below)|
+| `domain`| enum| no| Which workflow offers it. **`DELIVERY_FAILURE` · `RECIPIENT_CONTACT` · `PICKUP_STOP_SKIP` · `HANDOFF_FAILURE` · `PICKUP_CANCELLATION` · `PICKUP_FAILURE` · `PICKUP_SHORT_COUNT` · `PICKUP_CARRYOVER` · `PICKUP_OVER_COUNT`** — the third added at `MSC-DEC-412`, closing `OQ-141`, the fourth at `MSC-DEC-417`, for an outbound stop that fails at the counter, the last but one on 2 November 2026 (`SLICE-001`, the S1.20 closeout), for the reason a manifest gives for each overdue request it carries over, and the last on 16 November 2026 (`SLICE-001`, D-D5), for the reason of a count above the booking. **Six identity domains follow, one per operation family** (below)|
 | `valid_checkpoints`| enum set| **yes**| **The recipient-contact checkpoints this reason may be selected at** — any of `PRE_DISPATCH` · `NEXT_STOP` · `DOORSTEP`. **Mandatory and non-empty where `domain = RECIPIENT_CONTACT`; null for every other domain**, which has no checkpoints. Added at `MSC-DEC-407`, closing `OQ-138`'s engineering half: §6.12's `RecipientContactAttempt` invariant already said *"the catalogue carries the mapping"* and [errors-and-enums.md](errors-and-enums.md) §6 that *"a reason declares the checkpoints it is valid for"* — **and this table carried no such field**, so `REASON_NOT_VALID_FOR_CHECKPOINT` had nothing to read|
 | `label`| text| no| Snapshotted onto records at selection (§3.7)|
 | `requires_note`| bool| no||
@@ -223,6 +223,14 @@ Any workflow that hardcodes "this reason needs a photo" contradicts §35.9.2. Th
 | `PARCEL_DAMAGED_OR_UNSAFE`| `CUSTOMER`| no| **yes**|
 | `BOOKED_COUNT_WRONG`| `CUSTOMER`| no| no|
 | `VENDOR_DISPUTES_COUNT`| `CUSTOMER`| **yes**| no|
+
+**The `PICKUP_OVER_COUNT` contents are seeded**, three codes (the Product Owner's drafts of 15 and 16 November 2026, D-D5): the variance reason of a collection that counts MORE parcels than were booked (the office is flagged, and told in the system, when one is recorded). A new database gets them from the seed and a database seeded earlier from migration `0099`. **A code is the table's primary key and belongs to one domain**, so the approved words "Booked number was wrong" carry the prefix `OVER_` (the short count's `BOOKED_COUNT_WRONG` holds the other name), and `OVER_OTHER` is the catch-all that asks for a note. The label is the drafted words:
+
+| `code`| `attribution`| `requires_note`| `label`|
+|---|---|---|---|
+| `VENDOR_ADDED_PARCELS`| `CUSTOMER`| no| Vendor added parcels after booking|
+| `OVER_BOOKED_NUMBER_WRONG`| `CUSTOMER`| no| Booked number was wrong|
+| `OVER_OTHER`| `CUSTOMER`| **yes**| Other|
 
 **The `PICKUP_CARRYOVER` contents are seeded**, eight codes (decided on 2 November 2026: the reviewer's recommendation, applied on the Product Owner's instruction), in the attribution model of the cancellation catalogue. A new database gets them from the seed and a database seeded earlier from migration `0061`. **A code is the table's primary key and belongs to one domain**, so five of the approved names, which `PICKUP_CANCELLATION` already holds (`ROAD_OR_WEATHER_DISRUPTION`, `NO_RIDER_AVAILABLE`, `OTHER_CUSTOMER_REASON`, `OTHER_MELARC_REASON` and `OTHER_EXTERNAL_REASON`), carry the prefix `CARRYOVER_` here. **These names are approved as written** (the Product Owner, 2 November 2026; OB-S1-36): the prefix keeps a code from colliding with a code of the cancellation catalogue, and the primary key of `reason_code` is not redesigned for it. The label is the approved words, and `ROAD_OR_WEATHER_DISRUPTION` asks for a note here where it does not under cancellation:
 

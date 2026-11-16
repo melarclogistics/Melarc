@@ -74,7 +74,8 @@ export const SETTING_VALUE_TYPES = [
  * were admitted for SLICE-001 on 29 October 2026 (D-05): their codes are the Product Owner's and none is seeded yet, so an operation
  * that takes a reason of one of them refuses every code until they are (`REASON_NOT_ACTIVE`). `PICKUP_CARRYOVER` was admitted on
  * 2 November 2026 (the S1.20 closeout) for the reason a manifest gives for each overdue request it carries over; its codes are the
- * Product Owner's and none is seeded, so a manifest holding an overdue request cannot be made until they are.
+ * Product Owner's and none is seeded, so a manifest holding an overdue request cannot be made until they are. `PICKUP_OVER_COUNT` was admitted on
+ * 16 November 2026 (D-D5) for the reason of a count above the booking, the mirror of `PICKUP_SHORT_COUNT`; its three drafted codes are seeded.
  */
 export const WORKFLOW_REASON_DOMAINS = [
   'DELIVERY_FAILURE',
@@ -85,6 +86,7 @@ export const WORKFLOW_REASON_DOMAINS = [
   'PICKUP_FAILURE',
   'PICKUP_SHORT_COUNT',
   'PICKUP_CARRYOVER',
+  'PICKUP_OVER_COUNT',
 ] as const;
 export const IDENTITY_REASON_DOMAINS = [
   'SESSION_REVOCATION',

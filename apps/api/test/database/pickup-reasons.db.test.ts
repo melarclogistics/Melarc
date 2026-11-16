@@ -32,12 +32,13 @@ import {
  *   and no others, after either path.
  */
 // 0044 widens the closed set of domains and adds the four of the stop skip; 0054 adds the 25 codes of the three pickup catalogues the Product
-// Owner approved on 29 October 2026; 0061 adds the eight carry-over codes decided on 2 November 2026 (the domain itself was admitted by 0059).
-// A database seeded earlier gets them in order.
+// Owner approved on 29 October 2026; 0061 adds the eight carry-over codes decided on 2 November 2026 (the domain itself was admitted by 0059); 0100 adds the three over-count codes
+// drafted on 15 and 16 November 2026 (D-D5; the domain itself was admitted by 0099). A database seeded earlier gets them in order.
 const MIGRATIONS = [
   '0044_pickup_reason_domains.sql',
   '0054_pickup_reason_codes.sql',
   '0061_pickup_carryover_reasons.sql',
+  '0100_over_count_reasons.sql',
 ];
 const CATALOGUE_DOMAINS = ['PICKUP_CANCELLATION', 'PICKUP_FAILURE', 'PICKUP_SHORT_COUNT'];
 /**
@@ -202,7 +203,7 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
     expect(before.some((row) => row.domain === 'PICKUP_STOP_SKIP')).toBe(false);
   });
 
-  describe('once migrations 0044, 0054 and 0061 are applied', () => {
+  describe('once migrations 0044, 0054, 0061 and 0100 are applied', () => {
     beforeAll(async () => {
       await applyReasonMigrations(earlier);
     });
@@ -286,6 +287,38 @@ describe('a database seeded before SLICE-001 (the owner’s)', () => {
       expect(rows.find((row) => row.code === 'CARRYOVER_ROAD_OR_WEATHER_DISRUPTION')).toMatchObject(
         { domain: 'PICKUP_CARRYOVER', requires_note: true },
       );
+    });
+
+    // Break caught (D-D5): an over-count code, attribution, note requirement or label the migration wrote differently from the Product Owner's drafts of 15 and 16 November 2026, a
+    // flag that would make a reason do more than say why (a photo, a contact attempt, an approval), or a code taken from another domain: the three are the drafts, each in its own domain.
+    it('holds the three over-count codes drafted on 16 November 2026, with their words, and no flag beyond a note', async () => {
+      const rows = await reasons(earlier.observer);
+      expect(
+        rows
+          .filter((row) => row.domain === 'PICKUP_OVER_COUNT')
+          .map((row) => [row.code, row.label, row.attribution, row.requires_note, row.active]),
+      ).toEqual([
+        ['OVER_BOOKED_NUMBER_WRONG', 'Booked number was wrong', 'CUSTOMER', false, true],
+        ['OVER_OTHER', 'Other', 'CUSTOMER', true, true],
+        ['VENDOR_ADDED_PARCELS', 'Vendor added parcels after booking', 'CUSTOMER', false, true],
+      ]);
+      for (const row of rows.filter((each) => each.domain === 'PICKUP_OVER_COUNT')) {
+        expect(row, String(row.code)).toMatchObject({
+          requires_photo: false,
+          requires_contact_attempt: false,
+          requires_approval: false,
+          requires_ops_review: false,
+          requires_escalation: false,
+          consumes_delivery_attempt: false,
+          valid_checkpoints: null,
+          permitted_operations: null,
+          failure_category: null,
+        });
+      }
+      // The short count's name for a wrong booked count is still the short count's.
+      expect(rows.find((row) => row.code === 'BOOKED_COUNT_WRONG')).toMatchObject({
+        domain: 'PICKUP_SHORT_COUNT',
+      });
     });
 
     // Break caught: a migration that cannot run twice, or that inserts the same code again.
