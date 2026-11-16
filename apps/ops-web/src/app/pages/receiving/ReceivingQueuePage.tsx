@@ -6,6 +6,7 @@ import {
   RowTitle,
   type DataColumn,
 } from '../../../components/ui/data-table/DataTable';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import {
   RUN_VIEWS,
@@ -161,34 +162,36 @@ export function ReceivingQueuePage() {
   ];
 
   return (
-    <WorkList<RunSummaryView>
-      name="receiving-runs"
-      operation="listReceivingRuns"
-      title={WORDS.queue.title}
-      description={WORDS.queue.description}
-      viewsLabel={WORDS.queue.viewsLabel}
-      views={VIEWS}
-      noun={{ plural: 'runs', one: 'run', other: 'runs' }}
-      tableLabel={WORDS.queue.tableLabel}
-      refusal={refusalWords}
-      lookup={{
-        label: WORDS.queue.lookupLabel,
-        minLength: LOOKUP_MIN,
-        maxLength: LOOKUP_MAX,
-      }}
-      useList={useReceivingQueue}
-      rowId={(run) => run.run_id}
-      table={{
-        columns,
-        density: 'two-line',
-        opens: 'record',
-        card: (run) => <RunCard run={run} />,
-        cardTitle: (run) => (
-          <Link to={runPath(run.run_id)}>
-            <OperationalCode>{run.run_code}</OperationalCode>
-          </Link>
-        ),
-      }}
-    />
+    <HubFloor>
+      <WorkList<RunSummaryView>
+        name="receiving-runs"
+        operation="listReceivingRuns"
+        title={WORDS.queue.title}
+        description={WORDS.queue.description}
+        viewsLabel={WORDS.queue.viewsLabel}
+        views={VIEWS}
+        noun={{ plural: 'runs', one: 'run', other: 'runs' }}
+        tableLabel={WORDS.queue.tableLabel}
+        refusal={refusalWords}
+        lookup={{
+          label: WORDS.queue.lookupLabel,
+          minLength: LOOKUP_MIN,
+          maxLength: LOOKUP_MAX,
+        }}
+        useList={useReceivingQueue}
+        rowId={(run) => run.run_id}
+        table={{
+          columns,
+          density: 'touch',
+          opens: 'record',
+          card: (run) => <RunCard run={run} />,
+          cardTitle: (run) => (
+            <Link to={runPath(run.run_id)}>
+              <OperationalCode>{run.run_code}</OperationalCode>
+            </Link>
+          ),
+        }}
+      />
+    </HubFloor>
   );
 }

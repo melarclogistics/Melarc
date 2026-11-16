@@ -589,6 +589,8 @@ export const RECEIVING_WORDS = {
     checkedIn: (count: number): string => `${String(count)} checked in`,
     missing: (count: number): string => `${String(count)} missing`,
     extra: (count: number): string => `${String(count)} extra`,
+    /** A parcel that is not on the list is checked in: it is said inside the count of the ones checked in ("4 checked in (1 not on the list, 1 damaged)"), not beside it as one parcel more. */
+    notOnTheList: (count: number): string => `${String(count)} not on the list`,
     damaged: (count: number): string => `${String(count)} damaged`,
   },
 
@@ -687,7 +689,6 @@ export const RECEIVING_WORDS = {
 
   /** The viewer of a vendor's photos, one at a time. */
   viewer: {
-    note: 'A photo is read only while this window is open.',
     act: 'Open this parcel',
     lookAt: 'Look at the photos',
   },
@@ -721,8 +722,9 @@ export const RECEIVING_WORDS = {
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the parcel.',
     onePhoto: 'One photo of the parcel is enough. Remove the others.',
-    noteLabel: 'Note (optional)',
-    noteHelp: 'What is it, and who is it from? Leave out phone numbers and email addresses.',
+    noteLabel: 'Note',
+    noteHelp:
+      'Optional. What is it, and who is it from? Leave out phone numbers and email addresses.',
     confirm: 'Add this parcel',
   },
 
@@ -734,9 +736,9 @@ export const RECEIVING_WORDS = {
     photoLabel: 'Photo of the damage',
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the damage.',
-    noteLabel: 'What is damaged? (optional)',
+    noteLabel: 'What is damaged?',
     noteHelp:
-      'A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
+      'Optional. A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
     confirm: 'Record the damage',
   },
 
@@ -754,6 +756,8 @@ export const RECEIVING_WORDS = {
   /** A vendor's record (`/intakes/{id}`): what came of the vendor, what needs someone, what was found. */
   record: {
     documentTitle: (code: string): string => `Vendor ${code}`,
+    /** A vendor said by its code, where its name is not known (a vendor counted without photos carries none of its own, and its run is not read yet). */
+    byCode: (code: string): string => `Vendor ${code}`,
     loadingTitle: 'Vendor',
     notFoundTitle: 'Vendor not found',
     receiving: 'Receiving',
@@ -778,7 +782,7 @@ export const RECEIVING_WORDS = {
       differs: { SHORT: 'Fewer than expected', OVER: 'More than expected' },
     },
     needsSomeone: {
-      title: 'Parcels that need someone',
+      title: 'Missing, extra or damaged parcels',
       none: 'Nothing is missing, extra or damaged.',
       missing: 'Missing',
       extra: 'Extra',
@@ -844,8 +848,8 @@ export const RECEIVING_WORDS = {
   blindCount: {
     title: 'Count the parcels',
     documentTitle: 'Count the parcels',
-    description: (code: string): string =>
-      `Vendor ${code}. Count what was handed over, then enter the number.`,
+    description: (who: string): string =>
+      `${who}. Count what was handed over, then enter the number.`,
     fieldLabel: 'Parcels counted',
     fieldHelp: 'A whole number, 0 or more. Count what is in front of you, not what you expect.',
     invalid: 'Enter the number of parcels you counted, as a whole number from 0.',
@@ -871,20 +875,19 @@ export const RECEIVING_WORDS = {
     photoLabel: 'Photo of the damage',
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the damage.',
-    noteLabel: 'What is damaged? (optional)',
+    noteLabel: 'What is damaged?',
     noteHelp:
-      'A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
+      'Optional. A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
     confirm: 'Record the damage',
   },
 
   /** The senior's decision (`/intakes/{id}/discrepancy`): the facts first, then what to decide. */
   decision: {
-    documentTitle: 'Decide about a vendor',
+    documentTitle: (who: string): string => `Decide about ${who}`,
     title: 'Decide',
-    description: (code: string): string =>
-      `Vendor ${code}. Say what happens next about what is missing, extra or damaged.`,
+    description: (who: string): string =>
+      `${who}. Say what happens next about what is missing, extra or damaged.`,
     facts: 'What happened to this vendor',
-    section: 'Your decision',
     outcomeLegend: 'What do you decide?',
     outcomes: {
       ESCALATED: {
@@ -906,8 +909,8 @@ export const RECEIVING_WORDS = {
     },
     reasonLabel: 'Why you decided this',
     reasonHelp: 'A few words. Leave out phone numbers and email addresses.',
-    photosLabel: 'Photos for this decision (optional)',
-    photosHelp: 'Take a photo with the camera. Each is sent as soon as you take it.',
+    photosLabel: 'Photos for this decision',
+    photosHelp: 'Optional. Take a photo with the camera. Each is sent as soon as you take it.',
     chooseOutcome: 'Choose what you decide.',
     writeReason: 'Write why you decided this.',
     review: 'Review',

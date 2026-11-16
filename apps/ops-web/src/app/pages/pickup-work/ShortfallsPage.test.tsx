@@ -17,7 +17,7 @@ import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api'
 
 /**
  * `/collection-shortfalls` (`listCollectionShortfalls`; S1.30). The counts the office was flagged on, oldest first: what was declared and counted, the reason the rider gave and its note (staff's own),
- * when the flag was raised and the pickup. A row opens the stop. **Nothing marks a shortfall as read or worked yet, so the page offers no such act and says so.** No price, total or fee is drawn.
+ * when the flag was raised and the pickup. A row opens the stop. **Nothing marks a shortfall as read or worked yet, so the page offers no such act.** No price, total or fee is drawn.
  */
 const LIST = 'GET /collection-shortfalls';
 const DIAGNOSTIC = /Diagnostic text that must never reach a screen\./;
@@ -140,17 +140,16 @@ describe('the short counts: what the list shows', () => {
     );
   });
 
-  // Break caught: an act drawn that the API cannot do (nothing marks a shortfall as read or worked yet), or the page saying nothing of it.
-  it('says nothing marks a short count as read or worked, and offers no such act', async () => {
+  // Break caught: an act drawn that the API cannot do (nothing marks a shortfall as read or worked yet), or a sentence in the voice of the people who built the page about what the list does not do (the
+  // pictures' review, defect 4: "This list supplements the rider’s phone call and replaces nothing. Nothing marks a count difference as read or worked yet, so there is no act here.").
+  it('offers no act of marking a count as read or worked, and says nothing of what the list does not do', async () => {
     open();
     await table();
 
-    expect(
-      screen.getByText(
-        /Nothing marks a count difference as read or worked yet, so there is no act here\./,
-      ),
-    ).toBeVisible();
     expect(screen.queryByRole('button', { name: /mark|worked|resolve|read/i })).toBeNull();
+    expect(document.body.textContent).not.toMatch(
+      /supplements|replaces nothing|Nothing marks|no act here/,
+    );
   });
 
   // Break caught: a price, a total or a fee drawn on a count (section 7: no price, total or fee).

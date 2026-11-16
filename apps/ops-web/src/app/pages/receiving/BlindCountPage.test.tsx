@@ -12,8 +12,13 @@ import {
   postCountFixture,
   preCountFixture,
 } from '../../../test-support/hub-intake-fixture';
+import { MANIFEST_ID } from '../../../test-support/manifest-fixture';
 import {
+  BLIND_VENDOR,
+  HUB_NAME,
+  RUN_CODE,
   RUN_ID,
+  blindVendorFixture,
   checkInFixture,
   parcelFixture,
   photoLinkHandlers,
@@ -43,6 +48,20 @@ const ONE_LINE =
   'Count this vendor’s parcels on the table first. The rider’s number is shown only after you have typed yours.';
 const FIELD_ERROR = 'Enter the number of parcels you counted, as a whole number from 0.';
 
+/** The run the vendor counted without photos belongs to: it names the vendor. */
+const blindRun = runFixture(
+  [blindVendorFixture({ intake_id: INTAKE_ID, intake_code: INTAKE_CODE })],
+  {
+    run: {
+      id: MANIFEST_ID,
+      code: RUN_CODE,
+      hub_id: INTAKE_HUB_ID,
+      hub_name: HUB_NAME,
+      service_date: '2026-11-14',
+    },
+  },
+);
+
 let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
@@ -54,6 +73,8 @@ function open(handlers: Record<string, Handler> = {}, keys: readonly string[] = 
     staffApi(sessionWith(keys, { authorized_hubs: [ACCRA] }), {
       [READ]: () => json(200, preCountFixture(), V1),
       [LOCK]: () => json(200, preCountFixture()),
+      // The vendor's name is the run's: a vendor counted without photos carries none of its own.
+      [`GET /receiving-runs/${MANIFEST_ID}`]: () => json(200, blindRun),
       ...handlers,
     }),
   );
@@ -124,6 +145,42 @@ describe('the blind page', () => {
     expect(await field()).toHaveValue('');
     expect(document.body.innerHTML).not.toContain(String(PLANTED_DECLARATION));
     expect(document.body.innerHTML).not.toMatch(/placeholder="d/);
+  });
+});
+
+describe('the vendor is named, and the page has one heading', () => {
+  // Break caught: a vendor named by its code alone ("Vendor ACC-IN-7KQ2MZ") on the page that asks an officer to count its parcels.
+  it('names the vendor by its name, read from its run, in the description and the breadcrumb', async () => {
+    open();
+
+    expect(
+      await screen.findByText(
+        `${BLIND_VENDOR}. Count what was handed over, then enter the number.`,
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: BLIND_VENDOR })).toHaveAttribute(
+      'href',
+      `/intakes/${INTAKE_ID}`,
+    );
+    expect(document.title).not.toContain(INTAKE_CODE);
+  });
+
+  it('says the vendor by its code while the run cannot be read, and still lets the officer count', async () => {
+    open({ [`GET /receiving-runs/${MANIFEST_ID}`]: () => refusal(500, 'INTERNAL_ERROR') });
+
+    expect(
+      await screen.findByText(
+        `Vendor ${INTAKE_CODE}. Count what was handed over, then enter the number.`,
+      ),
+    ).toBeVisible();
+    expect(await field()).toBeEnabled();
+  });
+
+  // Break caught: the heading said twice ("Count the parcels" as the page and again as the section under it).
+  it('has one heading, and says "Count the parcels" once', async () => {
+    open();
+    await field();
+    expect(screen.getAllByRole('heading', { name: 'Count the parcels' })).toHaveLength(1);
   });
 });
 

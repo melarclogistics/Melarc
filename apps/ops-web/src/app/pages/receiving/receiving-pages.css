@@ -1,8 +1,8 @@
 /*
  * The receiving screens of a run (S1.35c; design/DESIGN_SYSTEM.md sections 11 and 12, the hub floor): the queue's lines, the run's page, a vendor's section, its action bar and the parcel that is open.
  * Presentation only: what a page shows and offers is its own and the API's. Every size, space and colour is a token; the one number written here is the zero of a safe area. **The floor is a tablet in a hand, in
- * a hurry, at a table with a rider waiting**: every control is the 56px of `--control-height-lg` (the screen asks for it, the components draw it), the action bar of a vendor stays at the foot of the visible
- * screen so that the thumb finds it without scrolling back, is lifted above the on-screen keyboard (`--keyboard-inset`, written by `useKeyboardInset` from the visual viewport) and stays clear of the home
+ * a hurry, at a table with a rider waiting**: every control is the 56px of `--control-height-lg` (the screen asks for it, the components draw it), the action bar of the vendor in work stays at the foot of the
+ * visible screen so that the thumb finds it without scrolling back, is lifted above the on-screen keyboard (`--keyboard-inset`, written by `useKeyboardInset` from the visual viewport) and stays clear of the home
  * indicator (`env(safe-area-inset-bottom)`), and a line of text is never narrower than the page lets it be.
  */
 
@@ -73,21 +73,13 @@
 }
 
 /*
- * The action bar of a vendor: its buttons are the floor's 56px (the page asks for it), side by side while they fit and one under the other when they do not, with the gap of a thumb between them. It is sticky
- * to the foot of the visible screen, above the on-screen keyboard and clear of the home indicator, so that "All 12 here" is under the thumb whether the officer has scrolled through the photos or not.
+ * The action bar of a vendor: its buttons are the floor's 56px (the page asks for it), side by side while they fit and one under the other when they do not, with the gap of a thumb between them. It stands
+ * at the foot of its card, where the officer meets it after the photos.
  */
 .receiving-actions {
-  position: sticky;
-  inset-block-end: var(--keyboard-inset, 0px);
-  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
-  margin-inline: calc(var(--space-4) * -1);
-  padding: var(--space-3) var(--space-4);
-  padding-block-end: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
-  border-block-start: 1px solid var(--color-border-subtle);
-  background: var(--color-surface-default);
 }
 
 .receiving-actions > * {
@@ -95,10 +87,39 @@
   justify-content: center;
 }
 
-/* The summary of a finished run: what to do next first, then what each vendor came to, then the photos of what is missing. */
+/*
+ * **The bar of the vendor in work only** (the first vendor that waits, and any vendor the officer is checking in; the page says which) is kept at the foot of the visible screen, above the on-screen keyboard and
+ * clear of the home indicator, so that "All 12 here" is under the thumb whether the officer has scrolled through the photos or not. A bar kept there for every vendor was drawn over the top of its own card,
+ * over the vendor's name, wherever the card began at the foot of the screen (the review of the pictures, defect 3).
+ */
+.receiving-actions--sticky {
+  position: sticky;
+  inset-block-end: var(--keyboard-inset, 0px);
+  z-index: 1;
+  margin-inline: calc(var(--space-4) * -1);
+  padding: var(--space-3) var(--space-4);
+  padding-block-end: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  border-block-start: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-default);
+}
+
+/*
+ * The summary of a finished run: what to do next first, then what each vendor came to, then the photos of what is missing. **Its heading is not smaller than the sentence under it**: the panel's own title
+ * is a label (a page does not style the panel's markup), so the sentence that leads is at the label's size too, and its weight, a step under the title's, carries the order. **The gaps are the same everywhere**:
+ * one gap between the blocks, and one between what a vendor came to and its photos.
+ */
+.receiving-summary__body {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.receiving-summary__body p {
+  margin: 0;
+}
+
 .receiving-summary__lead {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-body-lg-size);
+  font-size: var(--text-label-md-size);
+  line-height: var(--text-label-md-line-height);
   font-weight: var(--text-label-md-weight);
 }
 
@@ -110,8 +131,9 @@
   list-style: none;
 }
 
-.receiving-summary__vendors p {
-  margin: 0 0 var(--space-2);
+.receiving-summary__vendors > li {
+  display: grid;
+  gap: var(--space-2);
 }
 
 /* One parcel, opened: its picture, where it stands, its condition and what was said when it failed. */
@@ -132,6 +154,30 @@
   margin-block-start: var(--space-3);
 }
 
+/*
+ * The fields of the decision and of the count, which have no section heading of their own (the page has one heading): a column, with the gap the task form's sections keep between fields. The count of the
+ * parcels is a few digits, so its field is as wide as a few digits need.
+ */
+.receiving-decision__fields,
+.receiving-count {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The facts of the decision, one panel under another with a gap between them, and a gap before the decision they are the ground of. */
+.receiving-decision__facts {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  margin-block-end: var(--space-6);
+}
+
+/* The field is as wide as a few digits need (its label and its help keep the width of the page); the floor's own scope draws it 56px high. */
+.receiving-count__control {
+  max-inline-size: calc(var(--space-20) * 2);
+}
+
 /* The record of a vendor (S1.35c): the parcels that need someone, group by group, each group the photos of its parcels. */
 .receiving-record__group {
   display: grid;
@@ -139,9 +185,11 @@
   margin-block-end: var(--space-4);
 }
 
+/* A group's title is not larger than the title of the panel it is in (the panel's own is a label): the same size, a weight lighter. */
 .receiving-record__group-title {
   margin: var(--space-3) 0 var(--space-2);
-  font-size: var(--text-body-lg-size);
+  font-size: var(--text-label-md-size);
+  line-height: var(--text-label-md-line-height);
   font-weight: var(--text-label-md-weight);
 }
 
@@ -200,11 +248,12 @@
   color: var(--color-text-secondary);
 }
 
-/* The photo of a missing parcel in its row of the list: a small square, cropped to its box and never stretched, so that two rows are the same height. */
+/* The photo of a missing parcel in its row of the list: a small square, cropped to its box and never stretched, so that two rows are the same height, with air above and below so that it does not touch the lines of its row. */
 .receiving-missing__picture {
   display: block;
   inline-size: var(--space-16);
   block-size: var(--space-16);
+  margin-block: var(--space-2);
   overflow: hidden;
   border-radius: var(--radius-md);
   background: var(--color-surface-subtle);

@@ -10,6 +10,7 @@ import {
   type DataColumn,
 } from '../../../components/ui/data-table/DataTable';
 import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { useApiClient } from '../../../platform/api/api-client';
 import { recordParcelArrival } from '../../../platform/hub-receiving/receiving-commands';
@@ -63,12 +64,12 @@ function MissingFor({ item }: { readonly item: MissingParcelView }) {
   );
 }
 
+/** A parcel as a card, where the vendor is the card's title and is said there once, not again as a row under it. */
 function MissingCard({ item }: { readonly item: MissingParcelView }) {
   return (
     <CardFacts
       lead={<MissingPicture item={item} size="tile" />}
       facts={[
-        { label: WORDS.missingList.columns.vendor, value: item.vendor_name },
         { label: WORDS.missingList.columns.run, value: item.run_code },
         {
           label: WORDS.missingList.columns.missingFor,
@@ -206,29 +207,31 @@ export function MissingParcelsPage() {
   ];
 
   return (
-    <WorkList<MissingParcelView>
-      name="missing-parcels"
-      operation="listMissingParcels"
-      title={WORDS.missingList.title}
-      description={WORDS.missingList.description}
-      viewsLabel={WORDS.missingList.viewsLabel}
-      views={VIEWS}
-      noun={{ plural: 'missing parcels', one: 'missing parcel', other: 'missing parcels' }}
-      tableLabel={WORDS.missingList.tableLabel}
-      refusal={refusalWords}
-      useList={useMissingQueue}
-      rowId={(item) => item.parcel_id}
-      table={{
-        columns,
-        density: 'two-line',
-        openLabel: (item) => WORDS.missingList.open(item.vendor_name),
-        card: (item) => <MissingCard item={item} />,
-        cardTitle: (item) => item.vendor_name,
-      }}
-      panel={(item, tools) => ({
-        code: item.intake_code,
-        body: <MissingPanel key={item.parcel_id} item={item} mayCount={mayCount} tools={tools} />,
-      })}
-    />
+    <HubFloor>
+      <WorkList<MissingParcelView>
+        name="missing-parcels"
+        operation="listMissingParcels"
+        title={WORDS.missingList.title}
+        description={WORDS.missingList.description}
+        viewsLabel={WORDS.missingList.viewsLabel}
+        views={VIEWS}
+        noun={{ plural: 'missing parcels', one: 'missing parcel', other: 'missing parcels' }}
+        tableLabel={WORDS.missingList.tableLabel}
+        refusal={refusalWords}
+        useList={useMissingQueue}
+        rowId={(item) => item.parcel_id}
+        table={{
+          columns,
+          density: 'touch',
+          openLabel: (item) => WORDS.missingList.open(item.vendor_name),
+          card: (item) => <MissingCard item={item} />,
+          cardTitle: (item) => item.vendor_name,
+        }}
+        panel={(item, tools) => ({
+          code: item.intake_code,
+          body: <MissingPanel key={item.parcel_id} item={item} mayCount={mayCount} tools={tools} />,
+        })}
+      />
+    </HubFloor>
   );
 }

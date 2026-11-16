@@ -10,7 +10,8 @@ import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { RadioGroup } from '../../../components/ui/radio/RadioGroup';
 import { Textarea } from '../../../components/ui/textarea/Textarea';
-import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
+import { Panel } from '../../../components/ui/panel/Panel';
+import { TaskForm, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import {
   decideCase,
@@ -22,6 +23,7 @@ import { RECEIVING_WORDS as WORDS, SENIOR_DECIDES } from '../../../platform/prob
 import { ActDialog } from '../manifests/ManifestActDialogs';
 import {
   blindFindings,
+  checkInComparison,
   checkInFindings,
   comparisonText,
   RECEIVING_QUEUE_PATH,
@@ -61,7 +63,11 @@ interface Errors {
   readonly photos?: string;
 }
 
-/** What the API stated of the vendor, beside the decision: the decision is made against it and changes none of it. */
+/**
+ * What the API stated of the vendor, **before the decision, at every width**: the comparison and the counts, the parcels that are missing, extra or damaged as their photos, and what was found with each damage's
+ * note. The task form's own summary slot follows the fields on a narrow page and stands beside them on a wide one, so it cannot put facts first: these are panels of the page, above the form. The decision is made
+ * against them and changes none of it.
+ */
 function Facts({
   record,
   principalId,
@@ -71,45 +77,52 @@ function Facts({
 }) {
   if (record.kind === 'check-in') {
     const view = record.view;
-    const comparison = comparisonText(view.count_variance, view.count_difference);
+    const comparison = checkInComparison(view, view.count_difference);
     return (
-      <>
-        <DescriptionList
-          items={[
-            { label: WORDS.record.came.photographed, value: String(view.parcels_expected ?? 0) },
-            { label: WORDS.record.came.checkedIn, value: String(view.arrived_count ?? 0) },
-            { label: WORDS.record.came.missing, value: String(view.missing_count) },
-            { label: WORDS.record.came.extra, value: String(view.extra_count) },
-            { label: WORDS.record.came.damaged, value: String(view.damaged_count) },
-            ...(comparison === undefined
-              ? []
-              : [{ label: WORDS.record.came.comparison, value: comparison }]),
-          ]}
-        />
-        <h3 className="receiving-record__group-title">{WORDS.record.needsSomeone.title}</h3>
-        <ParcelsThatNeedSomeone vendorName={view.vendor_name} parcels={view.parcels} />
-        <h3 className="receiving-record__group-title">{WORDS.record.found.title}</h3>
-        <FindingsList findings={checkInFindings(view)} />
-      </>
+      <div className="receiving-decision__facts">
+        <Panel title={WORDS.decision.facts} headingLevel={2} region>
+          <DescriptionList
+            items={[
+              { label: WORDS.record.came.photographed, value: String(view.parcels_expected ?? 0) },
+              { label: WORDS.record.came.checkedIn, value: String(view.arrived_count ?? 0) },
+              { label: WORDS.record.came.missing, value: String(view.missing_count) },
+              { label: WORDS.record.came.extra, value: String(view.extra_count) },
+              { label: WORDS.record.came.damaged, value: String(view.damaged_count) },
+              ...(comparison === undefined
+                ? []
+                : [{ label: WORDS.record.came.comparison, value: comparison }]),
+            ]}
+          />
+        </Panel>
+        <Panel title={WORDS.record.needsSomeone.title} headingLevel={2} region>
+          <ParcelsThatNeedSomeone vendorName={view.vendor_name} parcels={view.parcels} />
+        </Panel>
+        <Panel title={WORDS.record.found.title} headingLevel={2} region>
+          <FindingsList findings={checkInFindings(view)} />
+        </Panel>
+      </div>
     );
   }
   const intake = record.intake;
   if (intake.count_phase === 'PRE_COUNT') return null;
   return (
-    <>
-      <DescriptionList
-        items={[
-          { label: WORDS.record.came.riderSaid, value: String(intake.rider_declared_count) },
-          { label: WORDS.record.came.counted, value: String(intake.physical_count) },
-          {
-            label: WORDS.record.came.comparisonBlind,
-            value: comparisonText(intake.count_variance, intake.count_difference) ?? '',
-          },
-        ]}
-      />
-      <h3 className="receiving-record__group-title">{WORDS.record.found.title}</h3>
-      <FindingsList findings={blindFindings(intake.condition_findings, principalId)} />
-    </>
+    <div className="receiving-decision__facts">
+      <Panel title={WORDS.decision.facts} headingLevel={2} region>
+        <DescriptionList
+          items={[
+            { label: WORDS.record.came.riderSaid, value: String(intake.rider_declared_count) },
+            { label: WORDS.record.came.counted, value: String(intake.physical_count) },
+            {
+              label: WORDS.record.came.comparisonBlind,
+              value: comparisonText(intake.count_variance, intake.count_difference) ?? '',
+            },
+          ]}
+        />
+      </Panel>
+      <Panel title={WORDS.record.found.title} headingLevel={2} region>
+        <FindingsList findings={blindFindings(intake.condition_findings, principalId)} />
+      </Panel>
+    </div>
   );
 }
 
@@ -160,13 +173,10 @@ function Form({
 
   return (
     <>
+      <Facts record={record} principalId={me?.session.principal_id} />
       <TaskForm
         formRef={form}
         onSubmit={review}
-        summary={{
-          title: WORDS.decision.facts,
-          children: <Facts record={record} principalId={me?.session.principal_id} />,
-        }}
         actions={
           <>
             <Button type="submit" size="lg">
@@ -185,11 +195,12 @@ function Form({
           </>
         }
       >
-        <TaskFormSection title={WORDS.decision.section}>
+        <div className="receiving-decision__fields">
           <TaskFormWide>
             <RadioGroup
               legend={WORDS.decision.outcomeLegend}
               name="outcome"
+              size="lg"
               required
               value={outcome}
               options={offered.map((value) => ({
@@ -240,7 +251,7 @@ function Form({
             />
             <UploadGateNotice gate={gate} />
           </TaskFormWide>
-        </TaskFormSection>
+        </div>
       </TaskForm>
 
       <ActDialog<CaseDecision, Decided>
@@ -336,7 +347,7 @@ function SeniorDecides({ id }: { readonly id: string }) {
   useFocusFallenToHeading();
   return (
     <>
-      <title>{`${WORDS.decision.documentTitle} · Melarc Ops Portal`}</title>
+      <title>{`${WORDS.decision.title} · Melarc Ops Portal`}</title>
       <PageHeader
         title={WORDS.decision.title}
         breadcrumb={[{ label: WORDS.record.receiving, to: RECEIVING_QUEUE_PATH }]}
@@ -370,14 +381,23 @@ export function DecisionPage() {
   return (
     <WithRecord
       id={id}
-      heading={(record) => ({
+      named
+      heading={(record, vendor) => ({
         title: WORDS.decision.title,
-        documentTitle: WORDS.decision.documentTitle,
+        // The vendor is said by its name, and by its code only until the name is known.
+        documentTitle:
+          record === undefined
+            ? WORDS.decision.title
+            : WORDS.decision.documentTitle(vendor ?? WORDS.record.byCode(codeOfRecord(record))),
         ...(record === undefined
           ? {}
-          : { description: WORDS.decision.description(codeOfRecord(record)) }),
+          : {
+              description: WORDS.decision.description(
+                vendor ?? WORDS.record.byCode(codeOfRecord(record)),
+              ),
+            }),
       })}
-      breadcrumb={(record) => actBreadcrumb(record, id)}
+      breadcrumb={(record, vendor) => actBreadcrumb(record, id, vendor)}
     >
       {(record, query) => <Body record={record} reload={query.refetch} />}
     </WithRecord>

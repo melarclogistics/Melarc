@@ -308,8 +308,48 @@ test.describe('the handshakes that need Ops', () => {
 });
 
 test.describe('the short counts and the collection disputes', () => {
+  for (const size of [
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+  ] as const) {
+    // Break caught (the pictures' review, defects 6 and 7): the views, the Filter button or the code of a request at the working height (44, 36 and 17 to 22 px) on a list the receiving floor reads, or a row of
+    // views that scrolls under the page's edge.
+    test(`the views, the Filter button and the code of a request are 56 px, and every view is in sight, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, SHORTFALLS);
+      const main = page.getByRole('main');
+      const code = main.getByRole('link', { name: 'ACC-PR-7KQ2MZ' }).first();
+      await expect(code).toBeVisible();
+
+      const heightOf = (locator: typeof code): Promise<number> =>
+        locator.first().evaluate((node) => (node as HTMLElement).offsetHeight);
+      for (const tab of await main.getByRole('tab').all()) {
+        expect(await heightOf(tab)).toBeGreaterThanOrEqual(56);
+      }
+      expect(await heightOf(main.locator('.ui-filter-bar__add'))).toBeGreaterThanOrEqual(56);
+      // The code of a row opens its page from the height of the row, less the 1px separator inside it.
+      expect(await heightOf(code)).toBeGreaterThanOrEqual(55);
+      const inSight = await page.evaluate(() => {
+        const strip = document.querySelector<HTMLElement>('.ui-view-tabs__scroll');
+        if (strip === null) return false;
+        const edge = strip.getBoundingClientRect().right;
+        return (
+          strip.scrollWidth <= strip.clientWidth &&
+          [...strip.querySelectorAll<HTMLElement>('[role="tab"]')].every(
+            (tab) => tab.getBoundingClientRect().right <= edge + 1,
+          )
+        );
+      });
+      expect(inSight).toBe(true);
+    });
+  }
+
   // Break caught: an act drawn that the API does not have, or a price, a total or a fee on a count.
-  test('show what was counted, offer no act, and say so', async ({ page }) => {
+  test('show what was counted and offer no act, with no sentence about the list', async ({
+    page,
+  }) => {
     const { api, watch } = await open(page, SHORTFALLS);
 
     const row = table(page, 'Count differences')
@@ -319,7 +359,7 @@ test.describe('the short counts and the collection disputes', () => {
     await expect(row).toContainText('Short by 2');
     await expect(
       page.getByText(/Nothing marks a count difference as read or worked yet/),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page
         .getByRole('main')

@@ -43,7 +43,6 @@ export function ParcelViewer({ parcels, startId, onClose, onAct }: ParcelViewerP
       index={Math.min(index, items.length - 1)}
       onIndexChange={setIndex}
       onClose={onClose}
-      note={WORDS.viewer.note}
       renderPicture={(item, { current }) => {
         const parcel = byKey.get(item.key);
         if (parcel === undefined) return null;

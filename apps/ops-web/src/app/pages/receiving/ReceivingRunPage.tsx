@@ -5,6 +5,7 @@ import { useLocation, useParams } from 'react-router';
 import { PageHeading } from '../../../components/PageHeading';
 import { ConnectionBanner } from '../../../components/ui/connection-banner/ConnectionBanner';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
@@ -99,7 +100,8 @@ function Run({
     void query.refetch();
   });
 
-  const waiting = page.vendors.some((vendor) => vendor.state === 'AWAITING_COUNT');
+  const firstWaiting = page.vendors.find((vendor) => vendor.state === 'AWAITING_COUNT');
+  const waiting = firstWaiting !== undefined;
   // Whether a vendor has waited on this page: the summary that appears after that is one the officer has just earned, and is read first. (State kept from what the page is given, set while it is drawn.)
   const [sawWaiting, setSawWaiting] = useState(waiting);
   if (waiting && !sawWaiting) setSawWaiting(true);
@@ -113,7 +115,7 @@ function Run({
     problemOf(query.error, { operation: 'getReceivingRun' }).kind === 'unavailable';
 
   return (
-    <>
+    <HubFloor>
       <title>{`${WORDS.run.documentTitle(page.run.code)} · Melarc Ops Portal`}</title>
       <PageHeader
         title={page.run.code}
@@ -146,6 +148,7 @@ function Run({
           mayCount={mayCount}
           acts={acts}
           next={nextWaiting(page.vendors, vendor)}
+          firstToCheck={vendor.intake_id === firstWaiting?.intake_id}
           notice={notices[vendor.intake_id]}
           onNotice={(text) => {
             setNotices((all) => ({ ...all, [vendor.intake_id]: text }));
@@ -154,7 +157,7 @@ function Run({
           readAgain={query.refetch}
         />
       ))}
-    </>
+    </HubFloor>
   );
 }
 

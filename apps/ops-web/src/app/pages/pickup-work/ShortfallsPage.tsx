@@ -6,6 +6,7 @@ import {
   RowTitle,
   type DataColumn,
 } from '../../../components/ui/data-table/DataTable';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { ShortfallView } from '../../../platform/pickup-work/pickup-work-shape';
@@ -85,7 +86,7 @@ function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly 
  * Count differences (surfaces/ops-portal.md section 7, `/collection-shortfalls`; S1.30; D-D5: *Short counts* until Run D, and now the over counts too): the counts the office was flagged on, short and over, from `listCollectionShortfalls`, **oldest first**: what was declared and
  * counted, the reason the rider gave and its note (staff's own), when the flag was raised and the pickup. Views: *In progress* (the rider is still out with the parcels the office was told are
  * missing), *Ended runs* and *All*. A row opens the stop. It supplements the rider's phone call and replaces nothing; **nothing marks a shortfall as read or worked yet, so the page offers no such
- * act and says so.** No price, total or fee is drawn.
+ * act.** It says nothing of what it does not do: a sentence about the list is not a word of the floor. No price, total or fee is drawn.
  */
 export function ShortfallsPage() {
   const me = useSignedInSession();
@@ -144,35 +145,36 @@ export function ShortfallsPage() {
   ];
 
   return (
-    <WorkList<ShortfallView>
-      name="shortfalls"
-      operation="listCollectionShortfalls"
-      title="Count differences"
-      description="Counts where a rider collected fewer or more parcels than were booked at your hubs, oldest first."
-      viewsLabel="Views of the count differences"
-      views={VIEWS}
-      noun={{
-        plural: 'count differences',
-        one: 'count difference',
-        other: 'count differences',
-      }}
-      tableLabel="Count differences"
-      refusal={refusalWords}
-      choice={KINDS}
-      useList={useCollectionShortfalls}
-      rowId={(item) => item.id}
-      note="This list supplements the rider’s phone call and replaces nothing. Nothing marks a count difference as read or worked yet, so there is no act here."
-      table={{
-        columns,
-        density: 'two-line',
-        opens: 'record',
-        card: (item) => <ShortfallCard item={item} hubs={hubs} />,
-        cardTitle: (item) => (
-          <Link to={stopOf(item)}>
-            <OperationalCode>{item.request_code}</OperationalCode>
-          </Link>
-        ),
-      }}
-    />
+    <HubFloor>
+      <WorkList<ShortfallView>
+        name="shortfalls"
+        operation="listCollectionShortfalls"
+        title="Count differences"
+        description="Counts where a rider collected fewer or more parcels than were booked at your hubs, oldest first."
+        viewsLabel="Views of the count differences"
+        views={VIEWS}
+        noun={{
+          plural: 'count differences',
+          one: 'count difference',
+          other: 'count differences',
+        }}
+        tableLabel="Count differences"
+        refusal={refusalWords}
+        choice={KINDS}
+        useList={useCollectionShortfalls}
+        rowId={(item) => item.id}
+        table={{
+          columns,
+          density: 'touch',
+          opens: 'record',
+          card: (item) => <ShortfallCard item={item} hubs={hubs} />,
+          cardTitle: (item) => (
+            <Link to={stopOf(item)}>
+              <OperationalCode>{item.request_code}</OperationalCode>
+            </Link>
+          ),
+        }}
+      />
+    </HubFloor>
   );
 }

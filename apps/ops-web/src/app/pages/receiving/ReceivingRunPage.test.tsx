@@ -253,6 +253,58 @@ describe('the run’s page: what it shows', () => {
   });
 });
 
+describe('the action bar of a vendor', () => {
+  const STICKY = 'receiving-actions--sticky';
+  /** The bar of acts that holds the named button, in the section of a vendor. */
+  const barOf = (scope: HTMLElement, name: string): HTMLElement => {
+    const bar = within(scope)
+      .getByRole('button', { name })
+      .closest<HTMLElement>('.receiving-actions');
+    if (bar === null) throw new Error(`no bar holds ${name}`);
+    return bar;
+  };
+
+  // Break caught (the pictures' review, defect 3): every vendor's bar was kept at the foot of the screen, so the bar of a vendor whose card began at the foot of the first screen was drawn over the top of its
+  // own card, over its name. The bar that stays at the foot of the screen is the one of the vendor the officer works in: the first that waits.
+  it('keeps at the foot of the screen the bar of the first vendor that waits, and of no other that waits', async () => {
+    open({ run: runFixture([photoVendorFixture(3), sheaVendor(2)]) });
+    expect(barOf(await kente(), 'All 3 here')).toHaveClass(STICKY);
+    expect(barOf(await section(SHEA), 'All 2 here')).not.toHaveClass(STICKY);
+  });
+
+  // Break caught: a vendor the officer begins to check in whose bar stays at the end of its card, out of the thumb's reach while the officer taps parcels at the top of its photos.
+  it('keeps at the foot of the screen the bar of a vendor the officer begins to check in', async () => {
+    const { user } = open({ run: runFixture([photoVendorFixture(3), sheaVendor(2)]) });
+    await user.click(
+      within(await section(SHEA)).getByRole('button', { name: 'The count is different' }),
+    );
+
+    expect(barOf(await section(SHEA), 'Finish this vendor')).toHaveClass(STICKY);
+  });
+
+  // Break caught: the bar of a vendor that is checked in kept at the foot of the screen, over its own photos, while nothing is being counted there.
+  it('does not keep at the foot of the screen the bar of a vendor that is checked in', async () => {
+    const parcels = [arrivedParcel(1), arrivedParcel(2), parcelFixture(3)];
+    open({
+      run: runFixture([
+        photoVendorFixture(3, { state: 'RECONCILIATION_REQUIRED' }, parcels),
+        sheaVendor(2),
+      ]),
+    });
+    expect(barOf(await kente(), 'Add a parcel not on the list')).not.toHaveClass(STICKY);
+    expect(barOf(await section(SHEA), 'All 2 here')).toHaveClass(STICKY);
+  });
+
+  // Break caught: two bars of one vendor both kept at the foot of the screen, the one lying over the other so that "Look at the photos" cannot be reached.
+  it('keeps one bar of a vendor at the foot of the screen, never "Look at the photos" with it', async () => {
+    const { user } = open({ run: runFixture([photoVendorFixture(3)]) });
+    await user.click(within(await kente()).getByRole('button', { name: 'The count is different' }));
+
+    expect(barOf(await kente(), 'Look at the photos')).not.toHaveClass(STICKY);
+    expect(barOf(await kente(), 'Finish this vendor')).toHaveClass(STICKY);
+  });
+});
+
 describe('the lock’s line', () => {
   // Break caught: the lock told in the words of the builders, with its time as a date, or as the officer's when it is someone else's.
   it('says who opened the check-in and when, in one plain line', async () => {
@@ -620,6 +672,39 @@ describe('the run when every vendor is finished', () => {
     expect(summary.getByText('A senior officer will decide about Kente Crafts.')).toBeVisible();
   });
 
+  // Break caught (the pictures' review, defect 8): "4 checked in, 1 missing, 1 extra, 1 damaged" read as seven parcels for a vendor of five, because the parcel that is not on the list and the damaged one are
+  // among the four that are checked in. They are told inside the count of the ones checked in, in the summary and in the vendor's own section.
+  it('says a parcel not on the list and a damaged parcel as ones that are checked in, so that the line does not read as more parcels than came', async () => {
+    const damaged = arrivedParcel(2, {
+      condition: {
+        condition: 'DAMAGED',
+        note: 'A torn corner',
+        evidence_ids: [],
+        recorded_by_name: 'Ama Owusu',
+        recorded_at: '2026-11-16T09:31:00Z',
+      },
+    });
+    open({
+      run: runFixture([
+        photoVendorFixture(4, { state: 'RECONCILIATION_REQUIRED' }, [
+          arrivedParcel(1),
+          damaged,
+          arrivedParcel(3),
+          parcelFixture(4, { state: 'MISSING', missing_marked_at: '2026-11-16T09:20:00Z' }),
+          extraParcel(5),
+        ]),
+      ]),
+    });
+    const summary = within(await screen.findByRole('region', { name: 'Before the rider leaves' }));
+
+    expect(
+      summary.getByText('Kente Crafts: 4 checked in (1 not on the list, 1 damaged), 1 missing'),
+    ).toBeVisible();
+    expect(
+      within(await kente()).getByText('4 checked in (1 not on the list, 1 damaged), 1 missing'),
+    ).toBeVisible();
+  });
+
   // Break caught: the summary shown while a vendor still waits, which would tell the officer the run is done.
   it('is not shown while a vendor still waits to be checked in', async () => {
     open({
@@ -807,6 +892,16 @@ describe('the photos of a vendor, one at a time (the kit’s viewer)', () => {
     expect(await screen.findByRole('dialog', { name: 'Parcel 1' })).toBeVisible();
     expect(screen.getByText('1 of 3')).toBeVisible();
     for (const parcel of parcels) expect(requestsTo(arrivalOf(parcel.id))).toHaveLength(0);
+  });
+
+  // Break caught (the pictures' review, defect 4): "A photo is read only while this window is open." under every photo, a sentence of the people who built the viewer about how a photo is fetched, which says
+  // nothing the officer can use.
+  it('says nothing of how a photo is read', async () => {
+    const { user } = open({ run: finished });
+    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Checked in' }));
+    await screen.findByRole('dialog', { name: 'Parcel 2' });
+
+    expect(body()).not.toMatch(/read only|while this window is open/i);
   });
 
   // Break caught: the viewer as the only way to a parcel's acts (a missing parcel could not be found), or acts in it that decide for the page.
@@ -1004,6 +1099,65 @@ describe('a photo taken at the hub: a parcel that is not on the list, and damage
     expect(screen.queryByRole('button', { name: 'All 3 here' })).toBeNull();
     // The run was not read again for it: the answer is taken in.
     expect(requestsTo(READ)).toHaveLength(1);
+  });
+
+  /** What the platform answers to the parcel that is not on the list: the extra, the vendor's token and its counts, with the lock taken before it. */
+  const addedAnswer = (): Record<string, Handler> => ({
+    ...store(EXTRA_PHOTO, 'OSD'),
+    ...photoLinkHandlers([extra]),
+    [lockOf(KENTE_INTAKE_ID)]: () => json(200, checkInFixture(parcels)),
+    [extraRoute]: () =>
+      json(200, {
+        parcel: extra,
+        intake_etag: '"kente-1"',
+        counts: { ...countsOf(withExtra), received_count: null, count_variance: null },
+      }),
+  });
+  /** The officer adds the parcel that is not on the list to the first vendor, with its photo and no note (the note is optional). */
+  const addTheExtra = async (user: ReturnType<typeof open>['user']): Promise<void> => {
+    await user.click(
+      await within(await kente()).findByRole('button', { name: 'Add a parcel not on the list' }),
+    );
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'Add a parcel that is not on the list',
+    });
+    await user.upload(cameraOf(dialog), photo());
+    await within(dialog).findByText('Stored');
+    await user.click(within(dialog).getByRole('button', { name: 'Add this parcel' }));
+  };
+
+  // Break caught (the pictures' review, defect 9): after a parcel that is not on the list the notice sent the officer on to the next vendor ("Next: Shea Naturals", "Go to Shea Naturals") while this vendor was
+  // still being checked in. The way on is told of a vendor that is finished, and of none that still waits.
+  it('does not send the officer on to the next vendor after an extra while this vendor is still being checked in', async () => {
+    const { user } = open({
+      run: runFixture([photoVendorFixture(3, {}, parcels), sheaVendor(2)]),
+      handlers: addedAnswer(),
+    });
+    await addTheExtra(user);
+
+    expect(
+      await screen.findByText('The parcel was added. A senior officer will decide about it.'),
+    ).toBeVisible();
+    expect(screen.queryByText(/^Next: /)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Go to / })).toBeNull();
+  });
+
+  // Break caught: the way on taken away from every notice. A vendor that is checked in and whose case is open is finished with its check-in, and the officer is sent on from it.
+  it('still tells the way on, after an extra, of a vendor that is checked in and has its case open', async () => {
+    const { user } = open({
+      run: runFixture([
+        photoVendorFixture(3, { state: 'RECONCILIATION_REQUIRED' }, parcels),
+        sheaVendor(2),
+      ]),
+      handlers: addedAnswer(),
+    });
+    await addTheExtra(user);
+
+    expect(
+      await screen.findByText('The parcel was added. A senior officer will decide about it.'),
+    ).toBeVisible();
+    expect(await screen.findByText('Next: Shea Naturals')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Go to Shea Naturals' })).toBeVisible();
   });
 
   // Break caught: a form that sends while its photo is on its way: a photo that is not yet stored would be refused, and the officer would not know why.

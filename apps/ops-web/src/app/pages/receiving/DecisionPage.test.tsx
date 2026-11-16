@@ -150,11 +150,11 @@ describe('the form: the facts first, then the decision', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Decide' })).toBeVisible();
     expect(
       await screen.findByText(
-        `Vendor ${KENTE_INTAKE_CODE}. Say what happens next about what is missing, extra or damaged.`,
+        `${KENTE}. Say what happens next about what is missing, extra or damaged.`,
       ),
     ).toBeVisible();
     const facts = within(
-      await screen.findByRole('complementary', { name: 'What happened to this vendor' }),
+      await screen.findByRole('region', { name: 'What happened to this vendor' }),
     );
     expect(facts.getByText('Missing', { selector: 'dt' }).nextElementSibling).toHaveTextContent(
       '1',
@@ -162,8 +162,13 @@ describe('the form: the facts first, then the decision', () => {
     expect(facts.getByText('Compared with the photos').nextElementSibling).toHaveTextContent(
       '1 parcel fewer',
     );
-    expect(facts.getByRole('list', { name: `Missing parcels of ${KENTE}` })).toBeVisible();
-    expect(facts.getByText('Parcel 2: Damaged')).toBeVisible();
+    const parcels = within(
+      screen.getByRole('region', { name: 'Missing, extra or damaged parcels' }),
+    );
+    expect(parcels.getByRole('list', { name: `Missing parcels of ${KENTE}` })).toBeVisible();
+    expect(
+      within(screen.getByRole('region', { name: 'What was found' })).getByText('Parcel 2: Damaged'),
+    ).toBeVisible();
 
     const outcomes = within(screen.getByRole('group', { name: /What do you decide?/ }))
       .getAllByRole('radio')
@@ -175,6 +180,58 @@ describe('the form: the facts first, then the decision', () => {
     for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeChecked();
     expect(screen.queryByRole('radio', { name: /Vendor told/ })).toBeNull();
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
+  });
+
+  // Break caught (the Product Owner's requirement, facts first, at every width): the facts in a rail that follows the fields on a tablet, so that a senior officer is asked to decide before they have read what happened.
+  it('puts every fact before the decision in the page: the comparison, the parcels as pictures and each damage with its note come before the outcomes and the button', async () => {
+    open();
+    const group = await screen.findByRole('group', { name: /What do you decide\?/ });
+    for (const name of [
+      'What happened to this vendor',
+      'Missing, extra or damaged parcels',
+      'What was found',
+    ]) {
+      const fact = screen.getByRole('region', { name });
+      expect(
+        fact.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING,
+        name,
+      ).toBeTruthy();
+    }
+    const review = screen.getByRole('button', { name: 'Review' });
+    expect(group.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // Break caught (the pictures' review, defect 7): the three outcome rows drawn at the working height (46px, the circle 20px) on a page of the hub floor, where the whole row is the target at 56px.
+  it('draws the outcomes as rows of the hub floor, in the floor’s scope', async () => {
+    open();
+    const group = await screen.findByRole('group', { name: /What do you decide\?/ });
+
+    expect(group).toHaveClass('ui-radio-group--lg');
+    expect(document.querySelector('.ui-hub-floor')).not.toBeNull();
+  });
+
+  // Break caught: the heading of the page said twice ("Decide", and "Your decision" under it).
+  it('has one heading for the page, and no second one that says the same', async () => {
+    open();
+    await screen.findByRole('group', { name: /What do you decide\?/ });
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Your decision' })).toBeNull();
+  });
+
+  // Break caught: a vendor named by its code alone (the record carries its name).
+  it('names the vendor by its name, in the description, the breadcrumb and the title, and never by the code alone', async () => {
+    open();
+    expect(
+      await screen.findByText(
+        `${KENTE}. Say what happens next about what is missing, extra or damaged.`,
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: KENTE })).toHaveAttribute(
+      'href',
+      `/intakes/${KENTE_INTAKE_ID}`,
+    );
+    expect(document.title).toBe(`Decide about ${KENTE} · Melarc Ops Portal`);
+    expect(document.body.textContent).not.toContain(KENTE_INTAKE_CODE);
   });
 
   // Break caught: an outcome or a reason defaulted, so that a decision is made by pressing Review.
@@ -195,9 +252,57 @@ describe('the form: the facts first, then the decision', () => {
     expect(requestsTo(DECIDE)).toHaveLength(0);
   });
 
-  it('has the photos of a decision optional, and the camera among its fields', async () => {
+  // Break caught (the pictures' review, defect 12): "(optional)" typed into the label, as bold as the label while the kit's "(required)" is muted. The photos are optional, which the help says as the product's
+  // other forms do ("Optional. …").
+  it('has the photos of a decision optional, said in their help and not in their label, and the camera among its fields', async () => {
     open();
-    expect(await screen.findByText('Photos for this decision (optional)')).toBeVisible();
+    expect(await screen.findByText('Photos for this decision')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Optional. Take a photo with the camera. Each is sent as soon as you take it.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/\(optional\)/)).toBeNull();
+  });
+});
+
+describe('the comparison is as true as the parcels', () => {
+  const sameTotals = (parcels: ReturnType<typeof arrivedParcel>[]) =>
+    checkInFixture(parcels, {
+      state: 'RECONCILIATION_REQUIRED',
+      count_variance: 'MATCH',
+      count_difference: 0,
+    });
+
+  // Break caught: "The same" said of a vendor with a parcel missing and one that is extra: the totals match and the parcels do not.
+  it('does not say a vendor with a parcel missing and one extra is the same, and says what differs', async () => {
+    open(
+      sameTotals([
+        arrivedParcel(1),
+        arrivedParcel(2),
+        parcelFixture(3, { state: 'MISSING', missing_marked_at: '2026-11-14T09:30:00Z' }),
+        extraParcel(4),
+      ]),
+    );
+    const facts = within(
+      await screen.findByRole('region', { name: 'What happened to this vendor' }),
+    );
+
+    expect(facts.getByText('Compared with the photos').nextElementSibling).toHaveTextContent(
+      '1 missing, 1 extra',
+    );
+    expect(facts.queryByText('The same')).toBeNull();
+  });
+
+  it('says the same when every parcel is here and none is extra', async () => {
+    open(sameTotals([arrivedParcel(1), arrivedParcel(2), arrivedParcel(3)]));
+    const facts = within(
+      await screen.findByRole('region', { name: 'What happened to this vendor' }),
+    );
+
+    expect(facts.getByText('Compared with the photos').nextElementSibling).toHaveTextContent(
+      'The same',
+    );
   });
 });
 
