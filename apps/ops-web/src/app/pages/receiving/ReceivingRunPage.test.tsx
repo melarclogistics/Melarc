@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { act } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
@@ -8,6 +9,7 @@ import { describeInterfaceStates } from '../../../test-support/interface-states'
 import {
   BLIND_INTAKE_ID,
   BLIND_VENDOR,
+  EVIDENCE_LIMITS,
   KENTE,
   KENTE_INTAKE_ID,
   PARCEL_KIND,
@@ -365,7 +367,8 @@ describe('"All N here"', () => {
     expect(sent?.headers.get('If-Match')).toBe('"kente-1"');
     expect(sent?.headers.get('Idempotency-Key')).toMatch(/\S+/);
     expect(await sent?.clone().json()).toEqual({ all_arrived: true, confirmed_count: 3 });
-    expect(requestsTo(lockOf(KENTE_INTAKE_ID)).length).toBeGreaterThanOrEqual(0);
+    // Confirming is the first act on the vendor: the lock is taken then, once.
+    expect(requestsTo(lockOf(KENTE_INTAKE_ID))).toHaveLength(1);
     expect(within(await kente()).getByText('Checked in and cleared')).toBeVisible();
     expect(within(await kente()).queryByRole('button', { name: /All 3 here/ })).toBeNull();
   });
@@ -381,6 +384,37 @@ describe('"All N here"', () => {
 });
 
 describe('"The count is different": a tap on each parcel that is here', () => {
+  // Break caught: a lock taken by a tap only, so that an officer whose first act on a vendor is to finish it (nothing here: every parcel is missing) is shown to others as not checking it in.
+  it('takes the lock when the first act on the vendor is finishing it', async () => {
+    const { user } = open({
+      handlers: {
+        [lockOf(KENTE_INTAKE_ID)]: () => json(200, checkInFixture([parcelFixture(1)])),
+        [finishOf(KENTE_INTAKE_ID)]: () =>
+          json(
+            200,
+            checkInFixture(
+              [1, 2, 3].map((n) =>
+                parcelFixture(n, { state: 'MISSING', missing_marked_at: '2026-11-16T09:20:00Z' }),
+              ),
+              { state: 'RECONCILIATION_REQUIRED', received_count: 0, count_variance: 'SHORT' },
+            ),
+            { ETag: '"kente-2"' },
+          ),
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'The count is different' }));
+    await user.click(screen.getByRole('button', { name: 'Finish this vendor' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Finish Kente Crafts?' });
+    expect(
+      within(dialog).getByText('3 parcels you did not tap will be marked missing.'),
+    ).toBeVisible();
+    expect(requestsTo(lockOf(KENTE_INTAKE_ID))).toHaveLength(0);
+    await user.click(within(dialog).getByRole('button', { name: 'Finish this vendor' }));
+
+    expect(await screen.findByText('Kente Crafts is checked in.')).toBeVisible();
+    expect(requestsTo(lockOf(KENTE_INTAKE_ID))).toHaveLength(1);
+  });
+
   const taps = (n: number) => arrivalOf(parcelFixture(n).id);
 
   // Break caught: tiles that do nothing until the officer chooses, or that check a parcel in when the officer only looks.
@@ -730,6 +764,290 @@ describe('an officer who can look at the run and cannot check parcels in', () =>
       }),
     ).toBeNull();
     expect(screen.queryByRole('button', { name: 'Add a parcel not on the list' })).toBeNull();
+  });
+});
+
+describe('a photo taken at the hub: a parcel that is not on the list, and damage', () => {
+  const EXTRA_PHOTO = uuid(0xe1, 1);
+  const DAMAGE_PHOTO = uuid(0xe2, 1);
+  const STORE = 'https://store.example/object-store/hub-photo';
+  const photo = () =>
+    new File([new Uint8Array([1, 2, 3, 4])], 'parcel.jpg', {
+      type: 'image/jpeg',
+      lastModified: Date.parse('2026-11-16T09:30:00Z'),
+    });
+
+  beforeEach(() => {
+    // jsdom has no crypto.subtle; every browser the portal runs in has it.
+    vi.stubGlobal('crypto', webcrypto);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** The three steps of storing one photo, and the limits the platform gives the chooser. */
+  const store = (id: string, purpose: string): Record<string, Handler> => ({
+    'GET /evidence-limits': () => json(200, EVIDENCE_LIMITS),
+    'POST /evidence': () =>
+      json(
+        200,
+        {
+          evidence: {
+            id,
+            owner_type: 'PICKUP_INTAKE',
+            owner_id: KENTE_INTAKE_ID,
+            purpose,
+            captured_at: '2026-11-16T09:30:00Z',
+            captured_by_actor: KENTE_INTAKE_ID,
+            state: 'PENDING_UPLOAD',
+            access_rule: 'x',
+            retention_policy: 'y',
+          },
+          upload: {
+            method: 'PUT',
+            url: STORE + '?sig=bearer-capability',
+            headers: { 'Content-Type': 'image/jpeg' },
+            expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+          },
+        },
+        { ETag: '"e1"' },
+      ),
+    'PUT /object-store/hub-photo': () => new Response(null, { status: 200 }),
+    ['POST /evidence/' + id + '/complete']: () => json(200, { id, state: 'STORED' }),
+  });
+
+  const extraRoute = 'POST /hub-intakes/' + KENTE_INTAKE_ID + '/extra-parcels';
+  const conditionRoute = 'POST /hub-intakes/' + KENTE_INTAKE_ID + '/condition';
+  const parcels = [arrivedParcel(1), arrivedParcel(2), parcelFixture(3)];
+  const extra = extraParcel(4, { photo_evidence_id: EXTRA_PHOTO });
+  const withExtra = [...parcels, extra];
+
+  // Break caught: a parcel added without a photo (the API would refuse it), with a photo that is still on its way, or sent with a version, which an extra never takes.
+  it('adds a parcel that is not on the list with a photo taken at the hub, stored first and then cited once, and takes the answer into the page', async () => {
+    const { user } = open({
+      run: runFixture([photoVendorFixture(3, {}, parcels)]),
+      handlers: {
+        ...store(EXTRA_PHOTO, 'OSD'),
+        // The new parcel's tile draws its photo, which is asked for like every other.
+        ...photoLinkHandlers([extra]),
+        [lockOf(KENTE_INTAKE_ID)]: () => json(200, checkInFixture(parcels)),
+        [extraRoute]: () =>
+          json(200, {
+            parcel: extra,
+            intake_etag: '"kente-1"',
+            counts: { ...countsOf(withExtra), received_count: null, count_variance: null },
+          }),
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Add a parcel not on the list' }));
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'Add a parcel that is not on the list',
+    });
+    expect(
+      within(dialog).getByText(
+        /It is counted as an extra, and a senior officer will decide about it./,
+      ),
+    ).toBeVisible();
+
+    // No photo: nothing is sent, and the photo field says what is wanted.
+    await user.click(within(dialog).getByRole('button', { name: 'Add this parcel' }));
+    expect(await within(dialog).findByText('Take a photo of the parcel.')).toBeVisible();
+    expect(requestsTo(extraRoute)).toHaveLength(0);
+
+    await user.upload(within(dialog).getByLabelText(/Photo of the parcel/), photo());
+    await within(dialog).findByText('Stored');
+    await user.type(within(dialog).getByLabelText(/Note/), 'A box of soap, from the vendor');
+    await user.click(within(dialog).getByRole('button', { name: 'Add this parcel' }));
+
+    expect(
+      await screen.findByText('The parcel was added. A senior officer will decide about it.'),
+    ).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Extra parcel 4, Checked in' })).toBeVisible();
+    const [declared] = requestsTo('POST /evidence');
+    expect(await declared?.clone().json()).toMatchObject({
+      owner_type: 'PICKUP_INTAKE',
+      owner_id: KENTE_INTAKE_ID,
+      purpose: 'OSD',
+    });
+    const [sent] = requestsTo(extraRoute);
+    expect(sent?.headers.get('Idempotency-Key')).toMatch(/\S+/);
+    expect(sent?.headers.get('If-Match')).toBeNull();
+    expect(await sent?.clone().json()).toEqual({
+      photo_evidence_id: EXTRA_PHOTO,
+      note: 'A box of soap, from the vendor',
+    });
+    expect(requestsTo(lockOf(KENTE_INTAKE_ID))).toHaveLength(1);
+    // With an extra among the parcels the pile is not "all here": the vendor is finished as tapped.
+    expect(screen.queryByRole('button', { name: 'All 3 here' })).toBeNull();
+    // The run was not read again for it: the answer is taken in.
+    expect(requestsTo(READ)).toHaveLength(1);
+  });
+
+  // Break caught: a form that sends while its photo is on its way: a photo that is not yet stored would be refused, and the officer would not know why.
+  it('does not send while the photo is on its way, and says so', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { user } = open({
+      run: runFixture([photoVendorFixture(3, {}, parcels)]),
+      handlers: {
+        ...store(EXTRA_PHOTO, 'OSD'),
+        'PUT /object-store/hub-photo': async () => {
+          await held;
+          return new Response(null, { status: 200 });
+        },
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Add a parcel not on the list' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.upload(within(dialog).getByLabelText(/Photo of the parcel/), photo());
+    await user.click(within(dialog).getByRole('button', { name: 'Add this parcel' }));
+
+    expect(
+      await within(dialog).findByText(
+        'The photo is still being sent. Wait for it, then add the parcel.',
+      ),
+    ).toBeVisible();
+    expect(requestsTo(extraRoute)).toHaveLength(0);
+    release();
+    await within(dialog).findByText('Stored');
+  });
+
+  it('is offered while the vendor is open and while its case is open, and not once it is cleared', async () => {
+    const view = open({
+      run: runFixture([photoVendorFixture(3, { state: 'RECONCILIATION_REQUIRED' }, parcels)]),
+    });
+    expect(
+      await screen.findByRole('button', { name: 'Add a parcel not on the list' }),
+    ).toBeVisible();
+    view.unmount();
+    api.restore();
+
+    open({ run: runFixture([photoVendorFixture(3, { state: 'READY_FOR_ITEMIZATION' }, parcels)]) });
+    await kente();
+    expect(screen.queryByRole('button', { name: 'Add a parcel not on the list' })).toBeNull();
+  });
+
+  // Break caught: damage recorded for the whole vendor (no parcel), with no photo, or on a version other than the one the officer read.
+  it('records damage on a parcel with a photo taken at the hub and a note, on the vendor’s version, and reads the run again', async () => {
+    const damaged = arrivedParcel(1, {
+      condition: {
+        condition: 'DAMAGED',
+        note: 'A torn corner',
+        evidence_ids: [DAMAGE_PHOTO],
+        recorded_by_name: 'Ama Owusu',
+        recorded_at: '2026-11-16T09:31:00Z',
+      },
+    });
+    let read = 0;
+    const before = runFixture([
+      photoVendorFixture(3, { state: 'READY_FOR_ITEMIZATION' }, [
+        arrivedParcel(1),
+        arrivedParcel(2),
+        arrivedParcel(3),
+      ]),
+    ]);
+    const after = runFixture([
+      photoVendorFixture(
+        3,
+        { state: 'RECONCILIATION_REQUIRED', intake_etag: '"kente-2"', damaged_count: 1 },
+        [damaged, arrivedParcel(2), arrivedParcel(3)],
+      ),
+    ]);
+    const { user } = open({
+      run: before,
+      read: () => {
+        read += 1;
+        return json(200, read === 1 ? before : after);
+      },
+      handlers: {
+        ...store(DAMAGE_PHOTO, 'CONDITION'),
+        [lockOf(KENTE_INTAKE_ID)]: () => json(200, checkInFixture(parcels)),
+        [conditionRoute]: () =>
+          json(
+            200,
+            checkInFixture([damaged, arrivedParcel(2), arrivedParcel(3)], {
+              state: 'RECONCILIATION_REQUIRED',
+            }),
+            { ETag: '"kente-2"' },
+          ),
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Parcel 1, Checked in' }));
+    await user.click(
+      within(await screen.findByRole('dialog', { name: 'Parcel 1' })).getByRole('button', {
+        name: 'Damaged',
+      }),
+    );
+    const dialog = await screen.findByRole('alertdialog', { name: 'Record damage on Parcel 1?' });
+
+    await user.click(within(dialog).getByRole('button', { name: 'Record the damage' }));
+    expect(await within(dialog).findByText('Take a photo of the damage.')).toBeVisible();
+    expect(requestsTo(conditionRoute)).toHaveLength(0);
+
+    await user.upload(within(dialog).getByLabelText(/Photo of the damage/), photo());
+    await within(dialog).findByText('Stored');
+    await user.type(within(dialog).getByLabelText(/What is damaged/), 'A torn corner');
+    await user.click(within(dialog).getByRole('button', { name: 'Record the damage' }));
+
+    expect(await screen.findByText('The damage to Parcel 1 is recorded.')).toBeVisible();
+    const [declared] = requestsTo('POST /evidence');
+    expect(await declared?.clone().json()).toMatchObject({
+      purpose: 'CONDITION',
+      owner_id: KENTE_INTAKE_ID,
+    });
+    const [sent] = requestsTo(conditionRoute);
+    expect(sent?.headers.get('If-Match')).toBe('"kente-1"');
+    expect(sent?.headers.get('Idempotency-Key')).toMatch(/\S+/);
+    expect(await sent?.clone().json()).toEqual({
+      condition: 'DAMAGED',
+      parcel_id: parcelFixture(1).id,
+      note: 'A torn corner',
+      evidence_ids: [DAMAGE_PHOTO],
+    });
+    expect(requestsTo(lockOf(KENTE_INTAKE_ID))).toHaveLength(1);
+    // The vendor changed (its token, its state): the run is read again, and the tile says damaged.
+    expect(await screen.findByRole('button', { name: 'Parcel 1, Damaged' })).toBeVisible();
+    expect(requestsTo(READ).length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Break caught: damage offered a second time for a parcel that has a condition recorded (it is recorded once), or for a parcel that is not checked in.
+  it('is offered for a parcel that is checked in and has no condition, and for no other', async () => {
+    const recorded = arrivedParcel(2, {
+      condition: {
+        condition: 'DAMAGED',
+        note: null,
+        evidence_ids: [DAMAGE_PHOTO],
+        recorded_by_name: 'Ama Owusu',
+        recorded_at: '2026-11-16T09:31:00Z',
+      },
+    });
+    const { user } = open({
+      run: runFixture([
+        photoVendorFixture(3, { state: 'RECONCILIATION_REQUIRED' }, [
+          arrivedParcel(1),
+          recorded,
+          parcelFixture(3),
+        ]),
+      ]),
+    });
+    await user.click(await screen.findByRole('button', { name: 'Parcel 1, Checked in' }));
+    expect(
+      within(await screen.findByRole('dialog', { name: 'Parcel 1' })).getByRole('button', {
+        name: 'Damaged',
+      }),
+    ).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Damaged' }));
+    const second = await screen.findByRole('dialog', { name: 'Parcel 2' });
+    expect(within(second).queryByRole('button', { name: 'Damaged' })).toBeNull();
+    expect(within(second).getByText(/Damaged\. Recorded by Ama Owusu at 09:31\./)).toBeVisible();
+    await user.click(within(second).getByRole('button', { name: 'Close' }));
+    await user.click(await screen.findByRole('button', { name: 'Parcel 3' }));
+    const third = await screen.findByRole('dialog', { name: 'Parcel 3' });
+    expect(within(third).queryByRole('button', { name: 'Damaged' })).toBeNull();
+    expect(within(third).getByText('Not checked in yet.')).toBeVisible();
   });
 });
 

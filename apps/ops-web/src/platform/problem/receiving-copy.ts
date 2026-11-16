@@ -546,8 +546,10 @@ export const RECEIVING_WORDS = {
     photoLabel: 'Photo of the parcel',
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the parcel.',
+    onePhoto: 'One photo of the parcel is enough. Remove the others.',
+    photoBusy: 'The photo is still being sent. Wait for it, then add the parcel.',
     noteLabel: 'Note (optional)',
-    noteHelp: 'What is it, and who is it from?',
+    noteHelp: 'What is it, and who is it from? Leave out phone numbers and email addresses.',
     confirm: 'Add this parcel',
   },
 
@@ -559,8 +561,10 @@ export const RECEIVING_WORDS = {
     photoLabel: 'Photo of the damage',
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the damage.',
+    photoBusy: 'The photo is still being sent. Wait for it, then record the damage.',
     noteLabel: 'What is damaged? (optional)',
-    noteHelp: 'A few words, for example a torn corner or a wet box.',
+    noteHelp:
+      'A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
     confirm: 'Record the damage',
   },
 

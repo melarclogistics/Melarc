@@ -4,7 +4,10 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useApiClient } from '../../../platform/api/api-client';
 import { applyParcelAnswer } from '../../../platform/hub-receiving/apply-parcel-answer';
 import { recordParcelArrival } from '../../../platform/hub-receiving/receiving-commands';
-import type { RunPageView } from '../../../platform/hub-receiving/receiving-shape';
+import type {
+  ParcelAnswerView,
+  RunPageView,
+} from '../../../platform/hub-receiving/receiving-shape';
 import {
   useReceivingLocks,
   type LockStatus,
@@ -28,6 +31,11 @@ export interface RunActs {
    * saw it also reads the run again.
    */
   readonly tap: (intakeId: string, parcelId: string, arrived: boolean) => Promise<TapResult>;
+  /**
+   * Takes into the page the answer of an act that is not a tap and answers as one (an extra parcel added: the parcel, the vendor's token and its counts), in the line of the taps and through the same door, so
+   * that it is never written over by a tap and never writes over one.
+   */
+  readonly takeAnswer: (intakeId: string, answer: ParcelAnswerView) => Promise<void>;
   /** Takes the vendor's lock on the officer's first act on it, for the acts that are not a tap (the finish, an extra, damage). It never fails: the lock is advisory. */
   readonly ensureLock: (intakeId: string) => Promise<void>;
   /** What the lock of a vendor says, or nothing for a vendor the officer has not acted on in this page. */
@@ -94,5 +102,22 @@ export function useRunActs(manifestId: string, readAgain: () => unknown): RunAct
     [client, queryClient, manifestId, ensure],
   );
 
-  return { tap, ensureLock: ensure, lockStatus: locks.status, requestFailed };
+  const takeAnswer = useCallback(
+    (intakeId: string, answer: ParcelAnswerView): Promise<void> => {
+      const job = chain.current.then(async () => {
+        const page = queryClient.getQueryData<RunPageView>(runKey(manifestId));
+        if (page === undefined) return;
+        await writeAnswer(
+          queryClient,
+          runKey(manifestId),
+          applyParcelAnswer(page, intakeId, answer),
+        );
+      });
+      chain.current = job;
+      return job;
+    },
+    [queryClient, manifestId],
+  );
+
+  return { tap, takeAnswer, ensureLock: ensure, lockStatus: locks.status, requestFailed };
 }

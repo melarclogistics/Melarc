@@ -14,7 +14,12 @@ import { ParcelDialog } from './ParcelDialog';
 import { ParcelGrid } from './ParcelGrid';
 import { countsText, photographedText, VENDOR_STATE_MAP } from './receiving-presentation';
 import type { RunActs } from './use-run-acts';
-import { AllHereDialog, FinishVendorDialog } from './VendorDialogs';
+import {
+  AllHereDialog,
+  DamageDialog,
+  ExtraParcelDialog,
+  FinishVendorDialog,
+} from './VendorDialogs';
 import './receiving-pages.css';
 
 /** The heading of a vendor's section: its element is what the page moves focus to when it sends the officer to the next vendor. */
@@ -151,8 +156,9 @@ function PhotoVendor({
   readAgain,
 }: Pick<VendorSectionProps, 'vendor' | 'mayCount' | 'acts' | 'onNotice' | 'readAgain'>) {
   const [chosen, setChosen] = useState(false);
-  const [dialog, setDialog] = useState<'all' | 'finish' | undefined>(undefined);
+  const [dialog, setDialog] = useState<'all' | 'finish' | 'extra' | undefined>(undefined);
   const [openId, setOpenId] = useState<string | undefined>(undefined);
+  const [damagedId, setDamagedId] = useState<string | undefined>(undefined);
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
   /** The parcels whose tap is on its way: a second press on one is ignored (a disabled tile would lose the focus). */
   const sending = useRef(new Set<string>());
@@ -164,6 +170,10 @@ function PhotoVendor({
     waiting && mayCount && (chosen || vendor.parcels.some((parcel) => parcel.state !== 'EXPECTED'));
   const opened =
     openId === undefined ? undefined : vendor.parcels.find((parcel) => parcel.id === openId);
+  const damaged =
+    damagedId === undefined ? undefined : vendor.parcels.find((parcel) => parcel.id === damagedId);
+  // A parcel that is not on the list can be added while the vendor is open and while its case is open (not once it is decided, and not once the orders are being listed).
+  const mayAddExtra = mayCount && (waiting || vendor.state === 'RECONCILIATION_REQUIRED');
   const gridLabel = WORDS.vendor.gridLabel(vendor.vendor_name);
 
   async function press(parcel: ParcelView): Promise<void> {
@@ -221,9 +231,9 @@ function PhotoVendor({
           void press(parcel);
         }}
       />
-      {mayCount && waiting ? (
+      {mayAddExtra ? (
         <div className="receiving-actions">
-          {tapping ? (
+          {waiting && tapping ? (
             <Button
               type="button"
               size="lg"
@@ -234,7 +244,7 @@ function PhotoVendor({
               {WORDS.vendor.finish}
             </Button>
           ) : null}
-          {!hasExtras && expected > 0 ? (
+          {waiting && !hasExtras && expected > 0 ? (
             <Button
               type="button"
               size="lg"
@@ -246,7 +256,7 @@ function PhotoVendor({
               {WORDS.vendor.allHere(expected)}
             </Button>
           ) : null}
-          {tapping ? null : (
+          {waiting && !tapping ? (
             <Button
               type="button"
               size="lg"
@@ -257,12 +267,23 @@ function PhotoVendor({
             >
               {WORDS.vendor.countDifferent}
             </Button>
-          )}
+          ) : null}
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            onClick={() => {
+              setDialog('extra');
+            }}
+          >
+            {WORDS.vendor.addExtra}
+          </Button>
         </div>
       ) : null}
 
       {dialog === 'all' ? (
         <AllHereDialog
+          ensureLock={acts.ensureLock}
           vendor={vendor}
           onCancel={() => {
             setDialog(undefined);
@@ -277,6 +298,7 @@ function PhotoVendor({
       ) : null}
       {dialog === 'finish' ? (
         <FinishVendorDialog
+          ensureLock={acts.ensureLock}
           vendor={vendor}
           onCancel={() => {
             setDialog(undefined);
@@ -289,6 +311,41 @@ function PhotoVendor({
           onReload={readAgain}
         />
       ) : null}
+      {dialog === 'extra' ? (
+        <ExtraParcelDialog
+          ensureLock={acts.ensureLock}
+          vendor={vendor}
+          onCancel={() => {
+            setDialog(undefined);
+          }}
+          onDone={(answer) => {
+            setDialog(undefined);
+            void acts.takeAnswer(vendor.intake_id, answer);
+            onNotice(WORDS.vendor.done.extraAdded);
+          }}
+          onReload={readAgain}
+        />
+      ) : null}
+      {damaged === undefined ? null : (
+        <DamageDialog
+          ensureLock={acts.ensureLock}
+          vendor={vendor}
+          parcel={damaged}
+          onCancel={() => {
+            setDamagedId(undefined);
+          }}
+          onDone={() => {
+            setDamagedId(undefined);
+            onNotice(
+              WORDS.vendor.done.damageRecorded(
+                WORDS.parcel.label(damaged.ordinal, damaged.origin === 'HUB_EXTRA'),
+              ),
+            );
+            void readAgain();
+          }}
+          onReload={readAgain}
+        />
+      )}
       {opened === undefined ? null : (
         <ParcelDialog
           parcel={opened}
@@ -297,6 +354,10 @@ function PhotoVendor({
           acts={acts}
           onClose={() => {
             setOpenId(undefined);
+          }}
+          onDamaged={(parcel) => {
+            setOpenId(undefined);
+            setDamagedId(parcel.id);
           }}
           onDone={(text) => {
             setOpenId(undefined);
