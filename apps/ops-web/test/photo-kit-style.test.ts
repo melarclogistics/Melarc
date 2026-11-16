@@ -19,6 +19,22 @@ describe('the stylesheet of the wide dialog', () => {
       /width:\s*min\(56rem,\s*calc\(100vw - 2 \* var\(--space-4\)\)\)\s*;/,
     );
   });
+
+  // Break caught (the pictures of the receiving screens, defect 1): a window as tall as its content, which a photo shown whole makes as tall as the screen and more, so that its controls are reached by scrolling.
+  // A window that fills is as tall as the screen lets it be (the same margin as every dialog's, and never taller than 56rem), and what is in it is a column that fills it, which may shrink to nothing.
+  it('fills the height of the screen when it is asked to, and its content is a column that gives way', () => {
+    const sheet = css('dialog/dialog.css');
+    const window = ruleOf(sheet, '.ui-dialog--fill[open]');
+    const panel = ruleOf(sheet, '.ui-dialog--fill .ui-dialog__panel');
+
+    expect(window).toMatch(/display:\s*flex\s*;/);
+    expect(window).toMatch(/flex-direction:\s*column\s*;/);
+    expect(window).toMatch(/height:\s*min\(calc\(100dvh - 2 \* var\(--space-4\)\),\s*56rem\)\s*;/);
+    expect(panel).toMatch(/display:\s*flex\s*;/);
+    expect(panel).toMatch(/flex-direction:\s*column\s*;/);
+    expect(panel).toMatch(/flex:\s*1 1 auto\s*;/);
+    expect(panel).toMatch(/min-height:\s*0\s*;/);
+  });
 });
 
 describe('the stylesheet of the photo viewer', () => {
@@ -61,13 +77,74 @@ describe('the stylesheet of the photo viewer', () => {
     );
   });
 
-  // Break caught: three floor buttons that run off a phone's width instead of wrapping.
-  it('lets its buttons wrap on a narrow screen, with room between them', () => {
-    const actions = ruleOf(sheet, '.ui-photo-viewer__actions');
+  // Break caught (the pictures of the receiving screens, defect 1): a viewer as tall as its content, so that at 1280 x 800 the controls began below the screen and the viewer went back to the top after every Next.
+  // The viewer is a column in a window of a height of its own: the photo's stage is the part that gives way (a basis of nothing, and it may shrink to nothing), and the controls are the part that does not.
+  it('is a column whose stage takes the room that the controls leave, and gives way to them', () => {
+    const root = ruleOf(sheet, '.ui-photo-viewer');
+    const stage = ruleOf(sheet, '.ui-photo-viewer__stage');
+    const controls = ruleOf(sheet, '.ui-photo-viewer__controls');
 
-    expect(actions).toMatch(/display:\s*flex\s*;/);
-    expect(actions).toMatch(/flex-wrap:\s*wrap\s*;/);
-    expect(actions).toMatch(/gap:\s*var\(--space-3\)\s*;/);
+    expect(root).toMatch(/display:\s*flex\s*;/);
+    expect(root).toMatch(/flex-direction:\s*column\s*;/);
+    expect(root).toMatch(/flex:\s*1 1 auto\s*;/);
+    expect(root).toMatch(/min-height:\s*0\s*;/);
+    expect(stage).toMatch(/flex:\s*1 1 0\s*;/);
+    expect(stage).toMatch(/min-height:\s*0\s*;/);
+    expect(stage).toMatch(/position:\s*relative\s*;/);
+    expect(controls).toMatch(/flex:\s*none\s*;/);
+  });
+
+  // Break caught: a photo that is laid out by what it is (its own height, the page's 70vh) and not by the room it is given: the photo's box fills the stage, and what the page draws in it is a column whose first child,
+  // the picture, takes the room that is left and whose others, a button of the page's, keep their size. The picture is told how much room it has (`--ui-photo-room`), which is the whole of its box here.
+  it('gives the picture of a photo the room that is left, and the page’s button under it its own size', () => {
+    const photo = ruleOf(sheet, '.ui-photo-viewer__photo');
+    const first = ruleOf(sheet, '.ui-photo-viewer__photo > :first-child');
+    const others = ruleOf(sheet, '.ui-photo-viewer__photo > :not(:first-child)');
+
+    expect(photo).toMatch(/position:\s*absolute\s*;/);
+    expect(photo).toMatch(/inset:\s*0\s*;/);
+    expect(photo).toMatch(/display:\s*flex\s*;/);
+    expect(photo).toMatch(/flex-direction:\s*column\s*;/);
+    expect(photo).toMatch(/--ui-photo-room:\s*100%\s*;/);
+    expect(first).toMatch(/flex:\s*1 1 0\s*;/);
+    expect(first).toMatch(/min-height:\s*0\s*;/);
+    expect(first).toMatch(/display:\s*flex\s*;/);
+    expect(first).toMatch(/flex-direction:\s*column\s*;/);
+    expect(first).toMatch(/align-items:\s*center\s*;/);
+    expect(first).toMatch(/justify-content:\s*center\s*;/);
+    expect(first).toMatch(/width:\s*100%\s*;/);
+    expect(others).toMatch(/flex:\s*none\s*;/);
+  });
+
+  // Break caught (defect 11): Previous alone on a row at 390 px, with the place under it and Next and Close sharing the next: Previous, the place and Next are one row that does not break, and Close is a control of its
+  // own that wraps to its own row where the row of the other three leaves it no room, and sits at the end of the same row where there is room.
+  it('puts previous, the place and next in one row, and wraps close apart from it', () => {
+    const controls = ruleOf(sheet, '.ui-photo-viewer__controls');
+    const nav = ruleOf(sheet, '.ui-photo-viewer__nav');
+    const position = ruleOf(sheet, '.ui-photo-viewer__position');
+
+    expect(controls).toMatch(/display:\s*flex\s*;/);
+    expect(controls).toMatch(/flex-wrap:\s*wrap\s*;/);
+    expect(controls).toMatch(/align-items:\s*center\s*;/);
+    expect(controls).toMatch(/gap:\s*var\(--space-3\)\s*;/);
+    expect(nav).toMatch(/display:\s*flex\s*;/);
+    expect(nav).not.toMatch(/flex-wrap/);
+    expect(nav).toMatch(/flex:\s*1 1 18rem\s*;/);
+    expect(nav).toMatch(/align-items:\s*center\s*;/);
+    expect(nav).toMatch(/gap:\s*var\(--space-3\)\s*;/);
+    expect(position).toMatch(/flex:\s*1 1 auto\s*;/);
+  });
+
+  // Break caught: two buttons that say "Previous photo" and "Next photo" in full beside the place, which do not fit in the 326 px of a 390 px phone (nor the 296 px of a 360 px one); they keep the floor's target
+  // (56 px high, and at least as wide), a padding that leaves the room, and where even that is too much (a phone of 320 px) they show their icon and are named in full by their label.
+  it('keeps the floor’s target on the two buttons that move, with less padding, and only their icons on the narrowest phone', () => {
+    const buttons = ruleOf(sheet, '.ui-photo-viewer__nav .ui-button');
+    const narrow = after(sheet, '@media (max-width: 22.5rem)');
+
+    expect(buttons).toMatch(/min-width:\s*var\(--control-height-lg\)\s*;/);
+    expect(buttons).toMatch(/padding-inline:\s*var\(--space-4\)\s*;/);
+    expect(narrow).toBeDefined();
+    expect(ruleOf(narrow ?? '', '.ui-photo-viewer__label')).toMatch(/display:\s*none\s*;/);
   });
 
   // Break caught: the place ("3 of 12") drawn at the edge or in a colour the tokens do not own.

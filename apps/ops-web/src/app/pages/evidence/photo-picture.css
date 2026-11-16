@@ -1,6 +1,7 @@
 /*
  * The picture of a stored photo (PhotoPicture). In a tile the retrieved original fills the tile's box and is cropped to it, never stretched (no small copy is made yet: provisional, said so in the pattern); in the
- * viewer the photo is drawn whole within its window, never wider than the box or taller than the screen. Layout only: every colour, size and space comes from tokens.css.
+ * viewer the photo is drawn whole within its window, never wider than the box or taller than the room it is given: the viewer says how much that is (`--ui-photo-room`, the whole of the box the photo is drawn in, as the
+ * window gives way to the controls), and a picture that is drawn anywhere else has the screen's 70vh. Layout only: every colour, size and space comes from tokens.css.
  */
 .photo-picture {
   display: block;
@@ -14,7 +15,7 @@
 
 .photo-picture--full {
   max-inline-size: 100%;
-  max-block-size: 70vh;
+  max-block-size: var(--ui-photo-room, 70vh);
   margin-inline: auto;
   border-radius: var(--radius-md);
   object-fit: contain;

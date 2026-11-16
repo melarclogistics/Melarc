@@ -171,13 +171,15 @@ describe('the stylesheet of the picture of a stored photo', () => {
     expect(tile).toMatch(/object-fit:\s*cover\s*;/);
   });
 
-  // Break caught: a photo in the viewer cropped to its window (a part of the evidence cut off), or one taller than the screen.
-  it('draws the photo of the viewer whole, within its window and the height of the screen', () => {
+  // Break caught: a photo in the viewer cropped to its window (a part of the evidence cut off), one taller than the room it is given (the viewer's controls pushed off the screen: the pictures of the receiving
+  // screens, defect 1: its own 70vh was a height of its own and not the room that was left), or one that has no height at all where there is no viewer round it. The viewer tells it the room it has
+  // (`--ui-photo-room`: the whole of its box, as a percentage), and outside a viewer the room is 70vh, as it was.
+  it('draws the photo of the viewer whole, within the room the viewer gives it, and 70vh high where there is none', () => {
     const full = ruleOf(PICTURE, '.photo-picture--full');
 
     expect(full).toMatch(/object-fit:\s*contain\s*;/);
     expect(full).toMatch(/max-inline-size:\s*100%\s*;/);
-    expect(full).toMatch(/max-block-size:\s*70vh\s*;/);
+    expect(full).toMatch(/max-block-size:\s*var\(--ui-photo-room,\s*70vh\)\s*;/);
   });
 
   // Break caught: a placeholder or a line of words that sits at a corner of the tile, or in a colour the tokens do not own.
