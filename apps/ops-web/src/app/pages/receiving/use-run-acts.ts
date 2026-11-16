@@ -11,6 +11,7 @@ import {
 } from '../../../platform/hub-receiving/use-receiving-locks';
 import { runKey } from '../../../platform/hub-receiving/use-receiving-queries';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
+import { writeAnswer } from '../../../platform/query/write-answer';
 import { StaleSessionError } from '../../../platform/session/session-boundary';
 
 /** What a tap came to: nothing to say when it was taken, or the refusal in the table's words. */
@@ -21,9 +22,10 @@ export interface TapResult {
 export interface RunActs {
   /**
    * A tap on a parcel's photo (`recordParcelArrival`): **the first act on a vendor takes its lock**, the tap is sent, and the API's answer is put into the page that was read (the parcel, the vendor's token and
-   * its counts, as the API gave them) so that twelve taps are twelve requests and not twenty-four. **The taps of one vendor go one at a time, in the order they were made**: the answer of a tap carries the
-   * vendor's counts at that moment, and two taps in flight could be answered in the other order and leave the page with the older counts. A refusal is answered in words; one that says the vendor is no longer as
-   * the officer saw it also reads the run again.
+   * its counts, as the API gave them) so that twelve taps are twelve requests and not twenty-four. **The taps of the page go one at a time, in the order they were made**: the answer of a tap carries the
+   * vendor's counts at that moment, two taps in flight could be answered in the other order and leave the page with the older counts, and each answer is merged into the page as the last one left it, so that
+   * a tap on another vendor is never written over. The answer is written through `writeAnswer`, the one door of the portal. A refusal is answered in words; one that says the vendor is no longer as the officer
+   * saw it also reads the run again.
    */
   readonly tap: (intakeId: string, parcelId: string, arrived: boolean) => Promise<TapResult>;
   /** Takes the vendor's lock on the officer's first act on it, for the acts that are not a tap (the finish, an extra, damage). It never fails: the lock is advisory. */
@@ -49,34 +51,35 @@ export function useRunActs(manifestId: string, readAgain: () => unknown): RunAct
   useLayoutEffect(() => {
     latest.current = readAgain;
   });
-  /** The taps of each vendor, one after the other. */
-  const chains = useRef(new Map<string, Promise<unknown>>());
+  /** The taps of the page, one after the other. */
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
   const { ensure } = locks;
 
   const tap = useCallback(
     (intakeId: string, parcelId: string, arrived: boolean): Promise<TapResult> => {
-      const vendor = intakeId.toLowerCase();
-      const job = (chains.current.get(vendor) ?? Promise.resolve()).then(
-        async (): Promise<TapResult> => {
-          await ensure(intakeId);
-          try {
-            const answer = await recordParcelArrival(client, parcelId, arrived);
-            // A read that began before this tap is answered with the vendor as it was: it is dropped, and the answer of the tap is what the page keeps.
-            await queryClient.cancelQueries({ queryKey: runKey(manifestId) });
-            queryClient.setQueryData<RunPageView>(runKey(manifestId), (page) =>
-              page === undefined ? page : applyParcelAnswer(page, intakeId, answer),
+      const job = chain.current.then(async (): Promise<TapResult> => {
+        await ensure(intakeId);
+        try {
+          const answer = await recordParcelArrival(client, parcelId, arrived);
+          // The answer is merged into the page as it is now and written at once, so that a read that began before this tap (answered with the vendor as it was) is dropped and cannot write over it.
+          const page = queryClient.getQueryData<RunPageView>(runKey(manifestId));
+          if (page !== undefined) {
+            await writeAnswer(
+              queryClient,
+              runKey(manifestId),
+              applyParcelAnswer(page, intakeId, answer),
             );
-            return {};
-          } catch (error) {
-            // The answer is for a session that has gone: nothing is said to the person who replaced the one it was for.
-            if (error instanceof StaleSessionError) return {};
-            const problem = problemOf(error, { operation: 'recordParcelArrival' });
-            if (problem.kind === 'conflict') void latest.current();
-            return { problem };
           }
-        },
-      );
-      chains.current.set(vendor, job);
+          return {};
+        } catch (error) {
+          // The answer is for a session that has gone: nothing is said to the person who replaced the one it was for.
+          if (error instanceof StaleSessionError) return {};
+          const problem = problemOf(error, { operation: 'recordParcelArrival' });
+          if (problem.kind === 'conflict') void latest.current();
+          return { problem };
+        }
+      });
+      chain.current = job;
       return job;
     },
     [client, queryClient, manifestId, ensure],

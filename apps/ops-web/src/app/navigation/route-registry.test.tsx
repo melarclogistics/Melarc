@@ -183,6 +183,10 @@ describe('the real registry', () => {
     expect(entries.find((entry) => entry.label === 'Receiving')?.queue).toBeUndefined();
 
     const route = (path: string) => SIGNED_IN_ROUTES.find((candidate) => candidate.path === path);
+    // The queue by run and a run's page open for the read alone, and only the queue has a menu entry: a run is reached from it.
+    expect(route('/receiving')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/receiving/:manifestId')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/receiving/:manifestId')?.menu).toBeNull();
     expect(route('/intakes')?.access).toEqual({ permission: 'hub.read' });
     expect(route('/intakes/:id')?.access).toEqual({ permission: 'hub.read' });
     expect(route('/intakes/:id/count')?.access).toEqual({ permission: 'hub.intake.count' });

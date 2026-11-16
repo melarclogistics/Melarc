@@ -229,3 +229,39 @@ export function photoLinkHandlers(
     ]),
   );
 }
+
+/**
+ * A vendor's record as the finish of its check-in answers it (`HubIntakeCheckIn`, the third shape of an intake): finished by default, as "All N here" leaves it, with the parcels given and the counts the database
+ * would derive from them. Overrides name what a test changes (the state of a vendor with a missing parcel, a lock).
+ */
+export function checkInFixture(
+  parcels: readonly Parcel[],
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id: KENTE_INTAKE_ID,
+    code: KENTE_INTAKE_CODE,
+    hub_id: INTAKE_HUB_ID,
+    pickup_request_id: uuid(0x44, 1),
+    pickup_manifest_id: RUN_ID,
+    run_code: RUN_CODE,
+    state: 'READY_FOR_ITEMIZATION',
+    count_phase: 'CHECK_IN',
+    receiving_mode: 'PHOTO_CHECK_IN',
+    vendor_name: KENTE,
+    handed_over_by_name: RIDER_NAME,
+    handed_over_at: '2026-11-14T09:00:00Z',
+    rider_declared_count: parcels.length,
+    received_count: parcels.length,
+    count_variance: 'MATCH',
+    count_difference: 0,
+    counted_at: '2026-11-14T09:30:00Z',
+    counted_by_name: RECEIVER_NAME,
+    lock: null,
+    parcels: [...parcels],
+    ...countsOf(parcels),
+    condition: 'OK',
+    condition_findings: [],
+    ...overrides,
+  };
+}

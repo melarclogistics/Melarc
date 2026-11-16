@@ -121,6 +121,20 @@ function isRouteAccess(property: ts.PropertyAssignment): boolean {
   return ts.isPropertyAssignment(holder) && nameOf(holder.name) === 'access';
 }
 
+/**
+ * Whether `permission` is a property of the `reading` of a `PhotoPicture`: the kit's picture hands it to `ReadState`, which only looks its words up, so that a refusal to read a parcel's photo names what the
+ * officer cannot do and not what a stop's page would say (Run D, S1.35c).
+ */
+function isReadingOfPhotoPicture(property: ts.PropertyAssignment): boolean {
+  const holder = outward(property.parent).parent;
+  const attribute = ts.isJsxExpression(holder) ? holder.parent : holder;
+  return (
+    ts.isJsxAttribute(attribute) &&
+    nameOf(attribute.name) === 'reading' &&
+    elementOf(attribute) === 'PhotoPicture'
+  );
+}
+
 /** Whether the string is a key of the table of words (a property name of `CAPABILITY`, in the table's own file). */
 function isKeyOfTheTable(node: ts.Node, file: string): boolean {
   if (!file.endsWith(WORDS_FILE)) return false;
@@ -155,7 +169,9 @@ function isKeyPosition(node: ts.Node): boolean {
   }
   if (ts.isPropertyAssignment(parent)) {
     return (
-      parent.initializer === at && NAMES.has(nameOf(parent.name) ?? '') && isRouteAccess(parent)
+      parent.initializer === at &&
+      NAMES.has(nameOf(parent.name) ?? '') &&
+      (isRouteAccess(parent) || isReadingOfPhotoPicture(parent))
     );
   }
   return false;
@@ -586,6 +602,17 @@ describe('the source of the portal', () => {
     ).toBe(0);
     expect(wrong(`const r = { permission: 'pickup.read' };`)).toBe(1);
     expect(wrong(`const r = { access: { capability: 'pickup.read' } };`)).toBe(1);
+  });
+
+  // Break caught: the kit's picture made a place where any key may be written (a `reading` of any component, or any property of it), when it is the picture's `permission` alone that is only looked up.
+  it('lets the `reading` of a PhotoPicture carry the key it looks up, and nothing else of it, and no other component’s', () => {
+    const wrong = (code: string) => scan(sourceOf(code), keys).found.length;
+    expect(
+      wrong(`const a = <PhotoPicture reading={{ permission: 'hub.read', context: 'intake' }} />;`),
+    ).toBe(0);
+    expect(wrong(`const a = <Card reading={{ permission: 'hub.read' }} />;`)).toBe(1);
+    expect(wrong(`const a = <PhotoPicture reading={{ context: 'hub.read' }} />;`)).toBe(1);
+    expect(wrong(`const a = <PhotoPicture note={{ permission: 'hub.read' }} />;`)).toBe(1);
   });
 
   // Break caught: a scanner so strict that the guards cannot name the key they ask for, or so loose that it is fooled by a comment.

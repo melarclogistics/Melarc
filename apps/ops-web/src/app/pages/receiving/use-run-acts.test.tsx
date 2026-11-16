@@ -10,12 +10,16 @@ import {
 } from '../../../test-support/fake-api';
 import {
   KENTE_INTAKE_ID,
+  PARCEL_KIND,
+  PHOTO_KIND,
   RUN_ID,
+  SHEA_INTAKE_ID,
   arrivedParcel,
   countsOf,
   parcelFixture,
   photoVendorFixture,
   runFixture,
+  uuid,
 } from '../../../test-support/receiving-fixture';
 import { renderWithProviders } from '../../../test-support/render-providers';
 import type { RunPageView } from '../../../platform/hub-receiving/receiving-shape';
@@ -80,6 +84,68 @@ const actsNow = (): RunActs => {
   if (acts === undefined) throw new Error('not mounted');
   return acts;
 };
+
+describe('the taps of two vendors', () => {
+  const sheaParcels = [1, 2].map((n) =>
+    parcelFixture(n, {
+      id: uuid(PARCEL_KIND, 100 + n),
+      photo_evidence_id: uuid(PHOTO_KIND, 100 + n),
+    }),
+  );
+  const sheaVendor = photoVendorFixture(
+    2,
+    { intake_id: SHEA_INTAKE_ID, intake_etag: '"shea-1"', vendor_name: 'Shea Naturals' },
+    sheaParcels,
+  );
+
+  // Break caught: the taps of each vendor kept in a line of their own, so that two taps made together are in flight together: each merges its answer into a page it read before the other was written, and the
+  // later write is over the earlier. The taps of the page go one at a time, whichever vendor they are for.
+  it('goes one at a time across the page, so that the tap on one vendor is never written over by another', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sheaArrived = [
+      {
+        ...sheaParcels[0],
+        state: 'ARRIVED' as const,
+        arrived_by_name: 'Ama Owusu',
+        arrived_at: '2026-11-16T09:14:00Z',
+      },
+      sheaParcels[1],
+    ];
+    open({
+      [RUN_READ]: () => json(200, runFixture([photoVendorFixture(3), sheaVendor])),
+      [`POST /hub-intakes/${SHEA_INTAKE_ID}/lock`]: () =>
+        json(200, { ...sheaVendor, id: SHEA_INTAKE_ID, count_phase: 'CHECK_IN' }),
+      [arrival(1)]: async () => {
+        await held;
+        return answerFor([arrivedParcel(1), parcelFixture(2), parcelFixture(3)], 0, '"kente-2"');
+      },
+      [`PUT /intake-parcels/${sheaParcels[0]?.id ?? ''}/arrival`]: () =>
+        json(200, {
+          parcel: sheaArrived[0],
+          intake_etag: '"shea-1"',
+          counts: { ...countsOf(sheaArrived as never), received_count: null, count_variance: null },
+        }),
+    });
+    await loaded();
+
+    const first = actsNow().tap(KENTE_INTAKE_ID, parcelFixture(1).id, true);
+    const second = actsNow().tap(SHEA_INTAKE_ID, sheaParcels[0]?.id ?? '', true);
+    await waitFor(() => {
+      expect(requests(arrival(1))).toHaveLength(1);
+    });
+    expect(requests(`PUT /intake-parcels/${sheaParcels[0]?.id ?? ''}/arrival`)).toHaveLength(0);
+
+    release();
+    await Promise.all([first, second]);
+    await waitFor(() => {
+      expect(page?.vendors[0]?.parcels[0]?.state).toBe('ARRIVED');
+      expect(page?.vendors[1]?.parcels[0]?.state).toBe('ARRIVED');
+    });
+  });
+});
 
 describe('a tap on the run’s page', () => {
   // Break caught: the lock taken by every tap, or by none: the first act on a vendor takes it and the second does not ask again.

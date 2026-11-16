@@ -428,11 +428,13 @@ export const RECEIVING_WORDS = {
   /** The run's page (`/receiving/{run}`). */
   run: {
     documentTitle: (code: string): string => `Run ${code}`,
+    loadingTitle: 'Run',
     notFoundTitle: 'Run not found',
     receiving: 'Receiving',
     back: 'Back to receiving',
     loading: 'Loading the run…',
-    handedOver: (rider: string, at: string): string => `${rider} handed this run over at ${at}.`,
+    handedOver: (rider: string, hub: string, at: string): string =>
+      `${rider} handed this run over to ${hub} at ${at}.`,
     lookOnly: (cannot: string): string => `You can look at this run. ${cannot}`,
     next: (vendor: string): string => `Next: ${vendor}`,
     goTo: (vendor: string): string => `Go to ${vendor}`,
@@ -455,6 +457,7 @@ export const RECEIVING_WORDS = {
         ? `${String(arrived)} of ${String(expected)} checked in`
         : `${String(arrived)} checked in, ${String(extras)} of them not on the list`,
     allHere,
+    findHint: 'If a missing parcel turns up, tap its photo and choose “Found it”.',
     countDifferent: 'The count is different',
     finish: 'Finish this vendor',
     addExtra: 'Add a parcel not on the list',
@@ -567,7 +570,7 @@ export const RECEIVING_WORDS = {
     lead: 'Check the rider’s bag before they leave.',
     allIn: 'Everything the rider handed over is checked in.',
     missingLead: 'These parcels are not here. Show the rider their photos.',
-    missingLabel: 'Photos of the missing parcels',
+    missingLabel: (vendor: string): string => `Photos of ${vendor}’s missing parcels`,
     decisionFor: (names: string): string => `A senior officer will decide about ${names}.`,
     vendorLine: (vendor: string, counts: string): string => `${vendor}: ${counts}`,
   },

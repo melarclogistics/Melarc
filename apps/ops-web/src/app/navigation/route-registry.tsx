@@ -7,6 +7,7 @@ import { IntakeCountPage } from '../pages/intakes/IntakeCountPage';
 import { IntakeDiscrepancyPage } from '../pages/intakes/IntakeDiscrepancyPage';
 import { IntakePage } from '../pages/intakes/IntakePage';
 import { ReceivingQueuePage } from '../pages/receiving/ReceivingQueuePage';
+import { ReceivingRunPage } from '../pages/receiving/ReceivingRunPage';
 import { MyWorkPage } from '../pages/my-work/MyWorkPage';
 import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
 import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
@@ -157,6 +158,12 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       description:
         'Check in the parcels a rider handed over at your hub, run by run, and decide what is found.',
     },
+  },
+  {
+    path: '/receiving/:manifestId',
+    element: <ReceivingRunPage />,
+    access: { permission: 'hub.read' },
+    menu: null,
   },
   {
     path: '/intakes',
