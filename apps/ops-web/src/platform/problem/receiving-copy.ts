@@ -754,6 +754,8 @@ export const RECEIVING_WORDS = {
   /** A vendor's record (`/intakes/{id}`): what came of the vendor, what needs someone, what was found. */
   record: {
     documentTitle: (code: string): string => `Vendor ${code}`,
+    /** A vendor said by its code, where its name is not known (a vendor counted without photos carries none of its own, and its run is not read yet). */
+    byCode: (code: string): string => `Vendor ${code}`,
     loadingTitle: 'Vendor',
     notFoundTitle: 'Vendor not found',
     receiving: 'Receiving',
@@ -778,7 +780,7 @@ export const RECEIVING_WORDS = {
       differs: { SHORT: 'Fewer than expected', OVER: 'More than expected' },
     },
     needsSomeone: {
-      title: 'Parcels that need someone',
+      title: 'Missing, extra or damaged parcels',
       none: 'Nothing is missing, extra or damaged.',
       missing: 'Missing',
       extra: 'Extra',
@@ -844,8 +846,8 @@ export const RECEIVING_WORDS = {
   blindCount: {
     title: 'Count the parcels',
     documentTitle: 'Count the parcels',
-    description: (code: string): string =>
-      `Vendor ${code}. Count what was handed over, then enter the number.`,
+    description: (who: string): string =>
+      `${who}. Count what was handed over, then enter the number.`,
     fieldLabel: 'Parcels counted',
     fieldHelp: 'A whole number, 0 or more. Count what is in front of you, not what you expect.',
     invalid: 'Enter the number of parcels you counted, as a whole number from 0.',
@@ -879,12 +881,11 @@ export const RECEIVING_WORDS = {
 
   /** The senior's decision (`/intakes/{id}/discrepancy`): the facts first, then what to decide. */
   decision: {
-    documentTitle: 'Decide about a vendor',
+    documentTitle: (who: string): string => `Decide about ${who}`,
     title: 'Decide',
-    description: (code: string): string =>
-      `Vendor ${code}. Say what happens next about what is missing, extra or damaged.`,
+    description: (who: string): string =>
+      `${who}. Say what happens next about what is missing, extra or damaged.`,
     facts: 'What happened to this vendor',
-    section: 'Your decision',
     outcomeLegend: 'What do you decide?',
     outcomes: {
       ESCALATED: {

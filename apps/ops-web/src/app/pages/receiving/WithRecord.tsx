@@ -11,6 +11,7 @@ import {
   useIntakeRecord,
   type IntakeRecordView,
 } from '../../../platform/hub-receiving/use-intake-record';
+import { useReceivingRun } from '../../../platform/hub-receiving/use-receiving-queries';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -66,11 +67,22 @@ export interface WithRecordProps {
   /** The vendor asked for. An address that is not an id is a vendor that is not there, and nothing is asked of the API. */
   readonly id: string;
   /** What the page is called, from the vendor once it is read: the same element while the vendor is on its way and after, so that focus on it is not lost when it arrives. */
-  readonly heading: (record: IntakeRecordView | undefined) => RecordHeading;
-  /** The pages above this one, once the vendor is read: the queue, then the vendor's own code (a page of an act on the vendor). */
-  readonly breadcrumb?: (record: IntakeRecordView | undefined) => readonly BreadcrumbEntry[];
+  readonly heading: (
+    record: IntakeRecordView | undefined,
+    vendor: string | undefined,
+  ) => RecordHeading;
+  /** The pages above this one, once the vendor is read: the queue, then the vendor itself (a page of an act on the vendor). */
+  readonly breadcrumb?: (
+    record: IntakeRecordView | undefined,
+    vendor: string | undefined,
+  ) => readonly BreadcrumbEntry[];
   /** The page draws its own header once the vendor is read (a record page: the code is the page's heading). */
   readonly ownsHeading?: boolean;
+  /**
+   * The page names the vendor by its **name** (never by its code alone): a vendor checked in against its photos carries it, and a vendor counted without photos does not, so its run is read for it (a page
+   * that does not name the vendor asks for nothing more). Until the name is known, and when it cannot be read, `vendor` is undefined and the page says the code.
+   */
+  readonly named?: boolean;
   /** The body of the page, drawn once the vendor has been read. It gets the read itself and does not ask again. */
   readonly children: (
     record: IntakeRecordView,
@@ -78,8 +90,28 @@ export interface WithRecordProps {
   ) => ReactNode;
 }
 
-function Reading({ id, heading, breadcrumb, ownsHeading = false, children }: WithRecordProps) {
+function Reading({
+  id,
+  heading,
+  breadcrumb,
+  ownsHeading = false,
+  named: namesTheVendor = false,
+  children,
+}: WithRecordProps) {
   const query = useIntakeRecord(id);
+  // A vendor counted without photos carries no name of its own: its run does, and the page that names the vendor reads it (once, and only for such a vendor).
+  const blindRun =
+    namesTheVendor && query.data?.kind === 'blind' ? query.data.intake.pickup_manifest_id : '';
+  const run = useReceivingRun(blindRun, blindRun !== '');
+  const read = query.data;
+  const vendor =
+    read === undefined
+      ? undefined
+      : read.kind === 'check-in'
+        ? read.view.vendor_name
+        : run.data?.vendors.find(
+            (candidate) => candidate.intake_id.toLowerCase() === read.intake.id.toLowerCase(),
+          )?.vendor_name;
 
   if (query.status === 'error') {
     const problem = problemOf(query.error, { operation: 'getHubIntake' });
@@ -103,8 +135,8 @@ function Reading({ id, heading, breadcrumb, ownsHeading = false, children }: Wit
   }
 
   const loaded = ownsHeading && query.status === 'success';
-  const named = heading(query.data);
-  const trail = breadcrumb?.(query.data);
+  const named = heading(query.data, vendor);
+  const trail = breadcrumb?.(query.data, vendor);
   return (
     <>
       <title>{`${named.documentTitle} · Melarc Ops Portal`}</title>
@@ -140,15 +172,16 @@ export function WithRecord(props: WithRecordProps) {
   return <Reading key={props.id} {...props} />;
 }
 
-/** The breadcrumb of a page of an act on a vendor: the queue, then the vendor itself. */
+/** The breadcrumb of a page of an act on a vendor: the queue, then the vendor itself, by its name where it is known and by its code where it is not. */
 export function actBreadcrumb(
   record: IntakeRecordView | undefined,
   id: string,
+  vendor?: string,
 ): readonly BreadcrumbEntry[] {
   return [
     { label: WORDS.record.receiving, to: RECEIVING_QUEUE_PATH },
     {
-      label: record === undefined ? WORDS.record.loadingTitle : codeOfRecord(record),
+      label: vendor ?? (record === undefined ? WORDS.record.loadingTitle : codeOfRecord(record)),
       to: recordPath(id),
     },
   ];

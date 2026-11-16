@@ -7,7 +7,7 @@ import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Input } from '../../../components/ui/input/Input';
-import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
+import { TaskForm, TaskFormWide } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
 import {
   submitBlindCount,
@@ -105,7 +105,7 @@ function CountForm({
           </>
         }
       >
-        <TaskFormSection title={WORDS.blindCount.title}>
+        <div className="receiving-count">
           <TaskFormWide>
             <p className="receiving-note">{WORDS.vendor.blind.explain}</p>
           </TaskFormWide>
@@ -130,7 +130,7 @@ function CountForm({
             </Field>
             <LockLine intake={intake} cannotCheck={locks.status(intake.id) === 'cannot-check'} />
           </TaskFormWide>
-        </TaskFormSection>
+        </div>
       </TaskForm>
 
       <ActDialog<{ readonly count: number }, CountedWithVersion>
@@ -208,14 +208,20 @@ export function BlindCountPage() {
   return (
     <WithRecord
       id={id}
-      heading={(record) => ({
+      named
+      heading={(record, vendor) => ({
         title: WORDS.blindCount.title,
         documentTitle: WORDS.blindCount.documentTitle,
         ...(record === undefined
           ? {}
-          : { description: WORDS.blindCount.description(codeOfRecord(record)) }),
+          : {
+              // The vendor is said by its name (its run's), and by its code only until the name is known.
+              description: WORDS.blindCount.description(
+                vendor ?? WORDS.record.byCode(codeOfRecord(record)),
+              ),
+            }),
       })}
-      breadcrumb={(record) => actBreadcrumb(record, id)}
+      breadcrumb={(record, vendor) => actBreadcrumb(record, id, vendor)}
     >
       {(record, query) => <Counting record={record} reload={query.refetch} />}
     </WithRecord>

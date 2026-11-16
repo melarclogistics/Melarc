@@ -192,6 +192,30 @@ describe('a vendor checked in against its door photos', () => {
     expect(within(viewer).queryByRole('button', { name: 'Open this parcel' })).toBeNull();
   });
 
+  // Break caught: "The same" said of a vendor with a parcel missing and one extra on its record: the totals match and the parcels do not.
+  it('does not say a vendor with a parcel missing and one extra is the same on its record either', async () => {
+    const parcels = [
+      arrivedParcel(1),
+      arrivedParcel(2),
+      parcelFixture(3, { state: 'MISSING', missing_marked_at: '2026-11-14T09:30:00Z' }),
+      extraParcel(4),
+    ];
+    open({
+      body: checkInFixture(parcels, {
+        state: 'RECONCILIATION_REQUIRED',
+        count_variance: 'MATCH',
+        count_difference: 0,
+      }),
+      photos: parcels,
+    });
+    const came = within(await section('What came of this vendor'));
+
+    expect(came.getByText('Compared with the photos').nextElementSibling).toHaveTextContent(
+      '1 missing, 1 extra',
+    );
+    expect(came.queryByText('The same')).toBeNull();
+  });
+
   it('says a vendor still waiting is waiting, and offers its run to an officer who may check it in', async () => {
     const parcels = [parcelFixture(1), parcelFixture(2)];
     open({
@@ -212,7 +236,7 @@ describe('a vendor checked in against its door photos', () => {
       'href',
       `/receiving/${RUN_ID}`,
     );
-    expect(screen.queryByRole('heading', { name: 'Parcels that need someone' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Missing, extra or damaged parcels' })).toBeNull();
     expect(screen.getByRole('link', { name: RUN_CODE })).toBeVisible();
   });
 });

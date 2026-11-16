@@ -101,6 +101,24 @@ export function comparisonText(
   return variance === 'SHORT' ? WORDS.record.came.fewer(by) : WORDS.record.came.more(by);
 }
 
+/**
+ * What a vendor checked in against its photos came to, told against them, **true of the parcels and not only of the totals**: the API's comparison says the totals match (`MATCH`) for a vendor with a parcel
+ * missing and one extra (four photographed, four checked in), and "the same" would be false of it, so a match with a parcel missing or extra says which (*1 missing, 1 extra*), and only a vendor with every
+ * parcel here and none extra is *the same*. A count that is short or over is told as the API stated it (`comparisonText`). The page counts nothing: the numbers are the API's.
+ */
+export function checkInComparison(
+  counts: Pick<CountsView, 'count_variance' | 'missing_count' | 'extra_count'>,
+  difference: number | null,
+): string | undefined {
+  if (counts.count_variance === 'MATCH' && (counts.missing_count > 0 || counts.extra_count > 0)) {
+    return [
+      ...(counts.missing_count > 0 ? [WORDS.counts.missing(counts.missing_count)] : []),
+      ...(counts.extra_count > 0 ? [WORDS.counts.extra(counts.extra_count)] : []),
+    ].join(', ');
+  }
+  return comparisonText(counts.count_variance, difference);
+}
+
 /** The sentence under a vendor's name: what was photographed at the door, or that it is counted without photos. */
 export function photographedText(vendor: VendorView): string {
   if (vendor.receiving_mode === 'BLIND_COUNT') return WORDS.vendor.blindPhotographed;

@@ -24,6 +24,7 @@ import { BlindDamageDialog } from './BlindDamageDialog';
 import { CorrectionDialog, type CorrectionTarget } from './CorrectionDialog';
 import {
   blindFindings,
+  checkInComparison,
   checkInFindings,
   comparisonText,
   countPath,
@@ -61,7 +62,7 @@ function sentenceOf(state: IntakeState, blindWaiting: boolean): string {
 /** What came of a vendor checked in against its door photos: the API's counts, said, with the comparison. */
 function CheckInCame({ view }: { readonly view: CheckInView }) {
   const waiting = view.state === 'AWAITING_COUNT';
-  const comparison = comparisonText(view.count_variance, view.count_difference);
+  const comparison = checkInComparison(view, view.count_difference);
   return (
     <>
       <DescriptionList
