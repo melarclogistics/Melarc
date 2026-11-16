@@ -46,6 +46,7 @@ import {
   UserPlus,
   Users,
   Warehouse,
+  WifiOff,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -123,6 +124,8 @@ export const ICONS = {
   // The photo kit (Run D, S1.35c-0): a photo that is on its way, and one that cannot be shown (the words say which: the icon never does alone).
   photo: Image,
   'photo-unavailable': ImageOff,
+  // The connection banner (Run D, S1.35c-0): the connection is gone and what a person does now is not saved (the words say so: the icon never does alone).
+  offline: WifiOff,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
