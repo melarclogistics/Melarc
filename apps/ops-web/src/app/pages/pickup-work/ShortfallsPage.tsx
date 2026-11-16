@@ -19,7 +19,7 @@ import { hubNameOf } from '../staff/staff-presentation';
 import {
   countDifferenceLabel,
   countDifferenceText,
-  shortCountText,
+  countedOfBookedText,
   stopPathOf,
 } from './pickup-work-presentation';
 import { WorkList, type WorkView } from './WorkList';
@@ -29,24 +29,35 @@ const VIEWS: readonly [WorkView, ...WorkView[]] = [
     id: 'in-progress',
     label: 'In progress',
     open: true,
-    none: 'No rider is out with parcels the office was told are missing. A short count appears here when a rider counts fewer parcels than were declared.',
+    none: 'No rider is out with a count that differs from the booking. A count difference appears here when a rider counts fewer or more parcels than were booked.',
   },
   {
     id: 'ended',
     label: 'Ended runs',
     open: false,
-    none: 'A short count whose run has ended appears here.',
+    none: 'A count difference whose run has ended appears here.',
   },
   {
     id: 'all',
     label: 'All',
     open: undefined,
-    none: 'A short count appears here when a rider counts fewer parcels than were declared at your hubs.',
+    none: 'A count difference appears here when a rider counts fewer or more parcels than were booked at your hubs.',
   },
 ];
 
+/** The kind of difference, a filter of the list in the address (`variance`): the contract's two, and the way to take it off. */
+const KINDS = {
+  param: 'variance',
+  label: 'Kind of difference',
+  allLabel: 'Short and over',
+  options: [
+    { id: 'SHORT', label: 'Short' },
+    { id: 'OVER', label: 'Over' },
+  ],
+} as const;
+
 const refusalWords = (problem: Problem): string =>
-  refusalText(problem.forbidden, 'pickup.handshake.override', { of: 'short counts' });
+  refusalText(problem.forbidden, 'pickup.handshake.override', { of: 'count differences' });
 
 type Hubs = readonly { readonly id: string; readonly display_name: string }[];
 
@@ -59,7 +70,7 @@ function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly 
       head={<StatusBadge status={item.run_state} map={MANIFEST_STATE_MAP} />}
       lead={item.sender_name}
       facts={[
-        { label: 'Counted', value: shortCountText(item.declared_count, item.collected_count) },
+        { label: 'Counted', value: countedOfBookedText(item.declared_count, item.collected_count) },
         { label: countDifferenceLabel(item.variance), value: String(item.difference_count) },
         { label: 'Reason', value: item.reason.label },
         ...(item.note === null ? [] : [{ label: 'Rider’s note', value: item.note }]),
@@ -71,7 +82,7 @@ function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly 
 }
 
 /**
- * Short counts (surfaces/ops-portal.md section 7, `/collection-shortfalls`; S1.30): the counts the office was flagged on, from `listCollectionShortfalls`, **oldest first**: what was declared and
+ * Count differences (surfaces/ops-portal.md section 7, `/collection-shortfalls`; S1.30; D-D5: *Short counts* until Run D, and now the over counts too): the counts the office was flagged on, short and over, from `listCollectionShortfalls`, **oldest first**: what was declared and
  * counted, the reason the rider gave and its note (staff's own), when the flag was raised and the pickup. Views: *In progress* (the rider is still out with the parcels the office was told are
  * missing), *Ended runs* and *All*. A row opens the stop. It supplements the rider's phone call and replaces nothing; **nothing marks a shortfall as read or worked yet, so the page offers no such
  * act and says so.** No price, total or fee is drawn.
@@ -96,7 +107,7 @@ export function ShortfallsPage() {
       kind: 'prose',
       cell: (item) => (
         <CellLines
-          first={shortCountText(item.declared_count, item.collected_count)}
+          first={countedOfBookedText(item.declared_count, item.collected_count)}
           second={countDifferenceText(item.variance, item.difference_count)}
         />
       ),
@@ -136,16 +147,21 @@ export function ShortfallsPage() {
     <WorkList<ShortfallView>
       name="shortfalls"
       operation="listCollectionShortfalls"
-      title="Short counts"
-      description="Counts where a rider collected fewer parcels than were declared at your hubs, oldest first."
-      viewsLabel="Views of the short counts"
+      title="Count differences"
+      description="Counts where a rider collected fewer or more parcels than were booked at your hubs, oldest first."
+      viewsLabel="Views of the count differences"
       views={VIEWS}
-      noun={{ plural: 'short counts', one: 'short count', other: 'short counts' }}
-      tableLabel="Short counts"
+      noun={{
+        plural: 'count differences',
+        one: 'count difference',
+        other: 'count differences',
+      }}
+      tableLabel="Count differences"
       refusal={refusalWords}
+      choice={KINDS}
       useList={useCollectionShortfalls}
       rowId={(item) => item.id}
-      note="This list supplements the rider’s phone call and replaces nothing. Nothing marks a short count as read or worked yet, so there is no act here."
+      note="This list supplements the rider’s phone call and replaces nothing. Nothing marks a count difference as read or worked yet, so there is no act here."
       table={{
         columns,
         density: 'two-line',

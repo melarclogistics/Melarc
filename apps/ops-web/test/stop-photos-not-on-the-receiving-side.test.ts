@@ -4,15 +4,15 @@ import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * **No photo of a stop, and no number of them, is on any page of the receiving side before the count commits** (surfaces/ops-portal.md section 7, `/manifests/{id}/stops/{stopId}`; hub-intake.md section 5.3): the photos tell the
- * receiving officer what the rider counted (the number of parcel photos *is* the rider's count), so one who counts what they receive must not see them before their own count commits: the hub's blind count
- * (MSC-DEC-194). **After** the count commits the photos are readable on the intake (`parcel_photo_ids` of a counted intake, D-A10, S1.33) and the intake's record shows them one at a time: that is the one
- * thing the receiving side may draw, in the one file named below, which a counted intake alone gives the identifiers. This holds the portal's source to it in three ways. **The photos have one home**: the
- * files outside `platform/pickup-work/` that read a stop's evidence, ask for the authorization of a photo or draw the progress of its photos are the stop's pages and the one dialog that opens a photo, so a page
- * that begins to draw them must be added to the list below, on purpose and in review. **The receiving side has none of the stop's**: no file whose name says it is the receiving side (an intake, a receiving, a
- * custody handover: the act of one who counts what is handed to them) names any of them. A file of the receiving side that is added later is held to the same, whatever the list says. **The one door is held in
- * its turn**: the dialog that opens a photo is named by the stop's photos and by one file of the receiving side, the photos of a counted intake, and that file is named by the intake's record page alone: the
- * queue, the count, the condition and the adjudication never open a photo.
+ * **Where a photo is drawn, and what the receiving side may draw** (surfaces/ops-portal.md section 7; D-D1 of Run D, which reversed what this held for a photo vendor). Until Run D no photo of a stop was on any
+ * page of the receiving side before the count: the number of the parcel photos *was* the rider's count, so an officer who counted what they received must not see them (MSC-DEC-194). **The door photos are now the
+ * reference of a photo check-in**: the receiving officer is shown each parcel's photo from the handover on and taps each one that is on the table. What stayed is **the blind count of a vendor whose photos Ops
+ * excused**: its read carries no parcel and no number of the rider's, so there is no photo of it to draw (the run's page draws none for it, which the page's tests and the browser's leak scan hold). This
+ * holds the portal's source to what is left, in four ways. **The stop's photos have one home**: the files outside `platform/pickup-work/` that read a stop's evidence, ask for the authorization of a photo or
+ * draw the progress of its photos are the stop's pages and the one dialog that opens a photo. **The receiving side never reads a stop's evidence**: it draws the photo of a *parcel* (the identifier the parcel
+ * carries), through the one hook that gives a picture's address, and no file whose name says it is the receiving side names any of the stop's machinery. **The picture and the grid have one door each**: the hook that
+ * gives the address of a picture, and the grid of tiles, are named by the files of the receiving run's page that draw them and by nothing else, so that the queue, the blind count and the decision do not begin to
+ * draw a photo without being added to the list below, on purpose and in review. **The dialog that opens a photo** is named by the stop's photos, the photos of a counted intake and nothing else.
  */
 const SRC = join(import.meta.dirname, '../src');
 
@@ -48,6 +48,9 @@ const HOMES = [
   `app${sep}pages${sep}evidence${sep}EvidencePhotoDialog.tsx`,
 ].map((path) => path.replaceAll('\\', '/'));
 
+/** The one platform hook that asks for the address of a picture and is not the stop's: the receiving side's pictures are drawn from it, and it shares the stop's call. */
+const PICTURE_HOOK_FILE = 'platform/evidence/use-photo-link.ts';
+
 /** The dialog that opens one stored photo, and who may name it: the stop's photos, and the photos of a counted intake (the one file of the receiving side that may). */
 const PHOTO_DIALOG = 'EvidencePhotoDialog';
 const DIALOG_USERS = [
@@ -55,11 +58,40 @@ const DIALOG_USERS = [
   'app/pages/evidence/EvidencePhotoDialog.tsx',
   'app/pages/intakes/IntakePhotos.tsx',
 ];
-/** The photos of a counted intake, and who may name them: the file itself and the intake's record page. */
+/** The photos of a counted vendor, and who may name them: the file itself and the parts of the vendor's record page. */
 const INTAKE_PHOTOS = 'IntakePhotos';
 const INTAKE_PHOTOS_USERS = [
   'app/pages/intakes/IntakePhotos.tsx',
-  'app/pages/intakes/IntakePage.tsx',
+  'app/pages/receiving/RecordParts.tsx',
+];
+
+/**
+ * The hook that gives the address of a picture, and the grid of photo tiles: named by their own files and by the files of the receiving run's page that draw a parcel's photo. A page of the receiving side
+ * that is not in the list (the queue, the blind count, a decision) draws no photo.
+ */
+const PICTURE_HOOK = 'usePhotoLink';
+const PICTURE_USERS = [
+  PICTURE_HOOK_FILE,
+  // The kit's one component that draws the picture of a stored photo from its link (the grid and the viewer are generic and draw what a page gives them).
+  'app/pages/evidence/PhotoPicture.tsx',
+];
+/** The kit's component that draws a picture from a stored photo's link: named by itself and by the files of the receiving run's page that draw a parcel's photo (its grid and its open parcel). */
+const PICTURE_COMPONENT = 'PhotoPicture';
+const PICTURE_COMPONENT_USERS = [
+  'app/pages/evidence/PhotoPicture.tsx',
+  'app/pages/receiving/ParcelGrid.tsx',
+  'app/pages/receiving/ParcelDialog.tsx',
+  // The viewer of a vendor's parcels: one photo at a time, among the grid's (D-D1: the door photos are the officer's reference).
+  'app/pages/receiving/ParcelViewer.tsx',
+  // The photo of a missing parcel, in its row of the list of those being searched for and whole in the panel of the row (D-D4).
+  'app/pages/receiving/MissingPicture.tsx',
+];
+const PHOTO_GRID = 'PhotoGrid';
+const GRID_USERS = [
+  'components/ui/photo-grid/PhotoGrid.tsx',
+  // The kit's picture is made for the grid's tile and says so in its words: it names the grid and draws none.
+  'app/pages/evidence/PhotoPicture.tsx',
+  'app/pages/receiving/ParcelGrid.tsx',
 ];
 
 /** Where a failure's number of photos is drawn: the failure queue, and no other page. */
@@ -91,7 +123,7 @@ function sources(directory: string): Source[] {
 const mentions = (text: string, names: readonly string[]): string[] =>
   names.filter((name) => new RegExp(`\\b${name}\\b`).test(text));
 
-/** What is wrong with a set of sources, in words: the files that draw a photo and are not its home, and the files of the receiving side that name one. */
+/** What is wrong with a set of sources, in words: the files that draw a photo and are not its home, and the files of the receiving side that name the stop's. */
 export function offenders(files: readonly Source[]): string[] {
   const found: string[] = [];
   for (const file of files) {
@@ -101,16 +133,20 @@ export function offenders(files: readonly Source[]): string[] {
     ) {
       continue;
     }
-    const photos = mentions(file.text, PHOTOS);
-    if (photos.length > 0 && !HOMES.includes(file.path)) {
-      found.push(
-        `${file.path} names ${photos.join(', ')}: a stop's photos are drawn by the stop's pages alone.`,
-      );
-    }
-    if (RECEIVING.test(file.path)) {
-      const names = mentions(file.text, [...PHOTOS, FAILURE_PHOTO_COUNT]);
-      if (names.length > 0) {
-        found.push(`${file.path} is of the receiving side and names ${names.join(', ')}.`);
+    if (file.path !== PICTURE_HOOK_FILE) {
+      const photos = mentions(file.text, PHOTOS);
+      if (photos.length > 0 && !HOMES.includes(file.path)) {
+        found.push(
+          `${file.path} names ${photos.join(', ')}: a stop's photos are drawn by the stop's pages alone.`,
+        );
+      }
+      if (RECEIVING.test(file.path)) {
+        const names = mentions(file.text, [...PHOTOS, FAILURE_PHOTO_COUNT]);
+        if (names.length > 0) {
+          found.push(
+            `${file.path} is of the receiving side and names ${names.join(', ')}: the receiving side draws the photo of a parcel, never a stop's.`,
+          );
+        }
       }
     }
     if (mentions(file.text, [PHOTO_DIALOG]).length > 0 && !DIALOG_USERS.includes(file.path)) {
@@ -126,6 +162,24 @@ export function offenders(files: readonly Source[]): string[] {
         `${file.path} names ${INTAKE_PHOTOS}: the photos of a counted intake are drawn by the intake's record page alone.`,
       );
     }
+    if (mentions(file.text, [PICTURE_HOOK]).length > 0 && !PICTURE_USERS.includes(file.path)) {
+      found.push(
+        `${file.path} names ${PICTURE_HOOK}: the address of a picture is asked for by the run's parcel picture alone.`,
+      );
+    }
+    if (
+      mentions(file.text, [PICTURE_COMPONENT]).length > 0 &&
+      !PICTURE_COMPONENT_USERS.includes(file.path)
+    ) {
+      found.push(
+        `${file.path} names ${PICTURE_COMPONENT}: a picture is drawn from a stored photo's link by the kit's component and the run's parcel picture alone.`,
+      );
+    }
+    if (mentions(file.text, [PHOTO_GRID]).length > 0 && !GRID_USERS.includes(file.path)) {
+      found.push(
+        `${file.path} names ${PHOTO_GRID}: the grid of photos is drawn by the run's parcel grid alone.`,
+      );
+    }
     if (
       mentions(file.text, [FAILURE_PHOTO_COUNT]).length > 0 &&
       !FAILURE_HOMES.includes(file.path)
@@ -138,7 +192,7 @@ export function offenders(files: readonly Source[]): string[] {
   return found;
 }
 
-describe('the photos of a stop and the receiving side', () => {
+describe('where a photo is drawn, and what the receiving side may draw', () => {
   const real = sources(SRC);
 
   it('reads the portal’s source', () => {
@@ -146,8 +200,8 @@ describe('the photos of a stop and the receiving side', () => {
     expect(real.some((file) => file.path === 'app/pages/manifests/StopPhotos.tsx')).toBe(true);
   });
 
-  // Break caught: a page that begins to draw a stop's photos, or their number, that is not the stop's own page.
-  it('has no page that draws a stop’s photos but the stop’s own', () => {
+  // Break caught: a page that begins to draw a stop's photos, their number, a parcel's picture or the grid, without being added to the list on purpose.
+  it('has no page that draws a photo but the one that is its home', () => {
     expect(offenders(real)).toEqual([]);
   });
 
@@ -163,18 +217,30 @@ describe('the photos of a stop and the receiving side', () => {
     expect(mentions(stop?.text ?? '', ['useStopEvidence', 'StopPhotos'])).toHaveLength(2);
   });
 
+  // Break caught: a guard that stops looking because the files it names were renamed: the doors it holds are there.
+  it('has the doors it holds', () => {
+    for (const door of [...PICTURE_USERS, ...GRID_USERS].filter(
+      (path) => path.startsWith('platform/') || path.startsWith('components/'),
+    )) {
+      expect(
+        real.some((file) => file.path === door),
+        door,
+      ).toBe(true);
+    }
+  });
+
   // Break caught: a guard that finds nothing because its patterns match nothing: each kind of offence, written in a source of the receiving side, is found.
   describe('finds each kind of offence', () => {
     const synthetic = (path: string, text: string): string[] => offenders([{ path, text }]);
 
     it.each([
       [
-        'an intake page that reads the evidence',
+        'an intake page that reads the stop’s evidence',
         'app/pages/hub/IntakeCountPage.tsx',
         'const e = useStopEvidence(id, undefined);',
       ],
       [
-        'a receiving page that draws the progress of the photos',
+        'a receiving page that draws the progress of the stop’s photos',
         'app/pages/hub/ReceivingPage.tsx',
         'return <p>{page.parcel_photos.declared}</p>;',
       ],
@@ -198,20 +264,83 @@ describe('the photos of a stop and the receiving side', () => {
         'app/pages/pickup/ApprovalsPage.tsx',
         'row.photo_count',
       ],
+      [
+        'a page of the receiving run that asks the platform for the stop’s picture instead of the parcel’s',
+        'app/pages/receiving/ParcelGrid.tsx',
+        'createRetrievalAuthorization(client, id)',
+      ],
     ])('finds %s', (_name, path, text) => {
       expect(synthetic(path, text).length).toBeGreaterThan(0);
     });
 
-    // Break caught: the door that opens a photo named by a page of the receiving side that is not the counted intake's own photos, so that a photo is opened before the count.
+    // Break caught: the photo kit's two doors (the hook that asks for the link of a picture and the component that draws it) used by a page that was not added to the list, so that a page of the receiving side
+    // draws a photo by them and nothing fails: the dialog and the stop's tiles are not the only way to a picture any more.
+    it.each([
+      [
+        'an intake page drawing a photo by the kit’s picture',
+        'app/pages/receiving/BlindCountPage.tsx',
+        '<PhotoPicture evidenceId={id} near />',
+      ],
+      [
+        'a custody page asking for the link of a photo',
+        'app/pages/manifests/CustodySection.tsx',
+        'const link = usePhotoLink(id, true);',
+      ],
+      [
+        'a page that is not a home drawing a photo by the kit’s picture',
+        'app/pages/pickup/PickupRequestDetailPage.tsx',
+        'import { PhotoPicture } from "../evidence/PhotoPicture";',
+      ],
+      [
+        'a page that is not a home asking for the link of a photo',
+        'app/pages/pickup/ApprovalsPage.tsx',
+        'usePhotoLink(evidenceId, near)',
+      ],
+      [
+        'another file of the evidence platform asking for the authorization of a photo',
+        'platform/evidence/evidence-view.ts',
+        'await createRetrievalAuthorization(client, evidenceId);',
+      ],
+    ])('finds %s', (_name, path, text) => {
+      expect(synthetic(path, text).length).toBeGreaterThan(0);
+    });
+
+    // Break caught: the queue, the blind count or a decision beginning to draw a photo without the list being changed on purpose.
+    it.each([
+      [
+        'the queue drawing a picture',
+        'app/pages/receiving/ReceivingQueuePage.tsx',
+        'const link = usePhotoLink(id, true);',
+      ],
+      [
+        'the blind count drawing a picture',
+        'app/pages/receiving/BlindCountPage.tsx',
+        'const link = usePhotoLink(id, true);',
+      ],
+      [
+        'the queue drawing the grid',
+        'app/pages/receiving/ReceivingQueuePage.tsx',
+        '<PhotoGrid label="x" items={[]} renderPicture={() => null} />',
+      ],
+      [
+        'a vendor’s section drawing the grid itself',
+        'app/pages/receiving/VendorSection.tsx',
+        'import { PhotoGrid } from "../../../components/ui/photo-grid/PhotoGrid";',
+      ],
+    ])('finds %s', (_name, path, text) => {
+      expect(synthetic(path, text).length).toBeGreaterThan(0);
+    });
+
+    // Break caught: the door that opens a photo named by a page of the receiving side that is not the counted intake's own photos, so that a photo is opened where it should not be.
     it.each([
       [
         'the queue opening a photo',
-        'app/pages/intakes/IntakeQueuePage.tsx',
+        'app/pages/receiving/ReceivingQueuePage.tsx',
         'import { EvidencePhotoDialog } from "../evidence/EvidencePhotoDialog";',
       ],
       [
         'the count page opening a photo',
-        'app/pages/intakes/IntakeCountPage.tsx',
+        'app/pages/receiving/BlindCountPage.tsx',
         '<EvidencePhotoDialog evidenceId={id} />',
       ],
       [
@@ -221,19 +350,53 @@ describe('the photos of a stop and the receiving side', () => {
       ],
       [
         'the count page drawing the photos of a counted intake',
-        'app/pages/intakes/IntakeCountPage.tsx',
+        'app/pages/receiving/BlindCountPage.tsx',
         '<IntakePhotos ids={ids} />',
       ],
       [
         'the adjudication drawing the photos of a counted intake',
-        'app/pages/intakes/IntakeDiscrepancyPage.tsx',
+        'app/pages/receiving/DecisionPage.tsx',
         'import { IntakePhotos } from "./IntakePhotos";',
       ],
     ])('finds %s', (_name, path, text) => {
       expect(synthetic(path, text).length).toBeGreaterThan(0);
     });
 
-    it('finds nothing in the photos of a counted intake, in the record page that draws them or in the dialog', () => {
+    // Break caught: the guard widened until it flags the kit's own two doors: the file that asks for the authorization and the component that draws the picture are the homes of those names.
+    it('finds nothing in the file that asks for a photo’s link or in the component that draws the picture', () => {
+      expect(
+        synthetic(
+          'platform/evidence/use-photo-link.ts',
+          'import { createRetrievalAuthorization } from "../pickup-work/pickup-work-commands";',
+        ),
+      ).toEqual([]);
+      expect(
+        synthetic(
+          'app/pages/evidence/PhotoPicture.tsx',
+          'const view = usePhotoLink(evidenceId, near); export function PhotoPicture() {}',
+        ),
+      ).toEqual([]);
+    });
+
+    it('finds nothing in the doors: the kit’s picture, the run’s grid and open parcel, the hook, the counted intake’s photos, the record page and the dialog', () => {
+      expect(
+        synthetic(
+          'app/pages/receiving/ParcelDialog.tsx',
+          'import { PhotoPicture } from "../evidence/PhotoPicture"; <PhotoPicture evidenceId={id} wanted size="full" />',
+        ),
+      ).toEqual([]);
+      expect(
+        synthetic(
+          'app/pages/receiving/ParcelGrid.tsx',
+          'import { PhotoGrid } from "../../../components/ui/photo-grid/PhotoGrid"; <PhotoGrid />',
+        ),
+      ).toEqual([]);
+      expect(
+        synthetic(
+          'platform/evidence/use-photo-link.ts',
+          'createRetrievalAuthorization(client, evidenceId); export function usePhotoLink() {}',
+        ),
+      ).toEqual([]);
       expect(
         synthetic(
           'app/pages/intakes/IntakePhotos.tsx',
@@ -242,7 +405,7 @@ describe('the photos of a stop and the receiving side', () => {
       ).toEqual([]);
       expect(
         synthetic(
-          'app/pages/intakes/IntakePage.tsx',
+          'app/pages/receiving/RecordParts.tsx',
           '<IntakePhotos ids={intake.parcel_photo_ids} />',
         ),
       ).toEqual([]);
@@ -270,7 +433,7 @@ describe('the photos of a stop and the receiving side', () => {
       expect(
         synthetic(
           'app/pages/hub/IntakePage.tsx',
-          'const NOT_A_PARCEL_PHOTO_X = 1; xuseStopEvidencex;',
+          'const NOT_A_PARCEL_PHOTO_X = 1; xuseStopEvidencex; xusePhotoLinkx; PhotoGridish;',
         ),
       ).toEqual([]);
     });

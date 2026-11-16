@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import type { ButtonVariant } from '../../../components/ui/button/Button';
+import type { ButtonSize, ButtonVariant } from '../../../components/ui/button/Button';
 import { Dialog } from '../../../components/ui/dialog/Dialog';
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
@@ -32,6 +32,8 @@ export interface ActDialogProps<Command extends object, Result> {
   readonly confirmLabel: string;
   readonly confirmVariant?: ButtonVariant;
   readonly cancelLabel?: string;
+  /** `lg` for the hub floor's 56 px on the buttons of the dialog: asked for by the receiving screens. */
+  readonly size?: ButtonSize;
   /** The `operationId`, so that a failure is worded for it. */
   readonly operation: string;
   /** The act takes an `Idempotency-Key`, so a lost answer can be tried again under the same key. */
@@ -66,6 +68,7 @@ function OpenAct<Command extends object, Result>({
   confirmLabel,
   confirmVariant = 'primary',
   cancelLabel = 'Cancel',
+  size = 'md',
   operation,
   retryable,
   build,
@@ -137,6 +140,7 @@ function OpenAct<Command extends object, Result>({
           onCancel={onCancel}
           confirmLabel={confirmLabel}
           confirmVariant={confirmVariant}
+          size={size}
         />
       </form>
     </Dialog>

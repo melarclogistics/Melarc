@@ -1,0 +1,211 @@
+/*
+ * The receiving screens of a run (S1.35c; design/DESIGN_SYSTEM.md sections 11 and 12, the hub floor): the queue's lines, the run's page, a vendor's section, its action bar and the parcel that is open.
+ * Presentation only: what a page shows and offers is its own and the API's. Every size, space and colour is a token; the one number written here is the zero of a safe area. **The floor is a tablet in a hand, in
+ * a hurry, at a table with a rider waiting**: every control is the 56px of `--control-height-lg` (the screen asks for it, the components draw it), the action bar of a vendor stays at the foot of the visible
+ * screen so that the thumb finds it without scrolling back, is lifted above the on-screen keyboard (`--keyboard-inset`, written by `useKeyboardInset` from the visual viewport) and stays clear of the home
+ * indicator (`env(safe-area-inset-bottom)`), and a line of text is never narrower than the page lets it be.
+ */
+
+/* A line of the queue's "To do" cell: one under the other, so that two lines never run together. */
+.receiving-line {
+  display: block;
+}
+
+.receiving-back {
+  margin: var(--space-4) 0 0;
+}
+
+/* The sentence that says an account can look at the run and not act on it: a quiet line, not a warning. */
+.receiving-note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+}
+
+/* A vendor's section: a box of its own, so that two vendors never run together on one screen, with its heading, what it says, the photos and the act. */
+.receiving-vendor {
+  display: grid;
+  gap: var(--space-3);
+  margin-block-start: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-default);
+  /* A vendor the officer is sent to ("Go to Shea Naturals") is brought to the top of the screen with a little room above it. */
+  scroll-margin-block-start: var(--space-4);
+}
+
+.receiving-vendor p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.receiving-vendor__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.receiving-vendor__head h2 {
+  margin: 0;
+  font-size: var(--text-heading-md-size);
+  font-weight: var(--text-heading-md-weight);
+  overflow-wrap: anywhere;
+}
+
+/* Who opened the check-in and the tally of how far it has got: said quietly, because they are not what the officer does next. */
+.receiving-lock,
+.receiving-tally {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+.receiving-tally {
+  font-weight: var(--text-label-md-weight);
+}
+
+/* What was just done, and the way on: it is where the focus goes, so it is a landmark of the section and shows when it has it. */
+.receiving-notice:focus-visible {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-md);
+}
+
+/*
+ * The action bar of a vendor: its buttons are the floor's 56px (the page asks for it), side by side while they fit and one under the other when they do not, with the gap of a thumb between them. It is sticky
+ * to the foot of the visible screen, above the on-screen keyboard and clear of the home indicator, so that "All 12 here" is under the thumb whether the officer has scrolled through the photos or not.
+ */
+.receiving-actions {
+  position: sticky;
+  inset-block-end: var(--keyboard-inset, 0px);
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-inline: calc(var(--space-4) * -1);
+  padding: var(--space-3) var(--space-4);
+  padding-block-end: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  border-block-start: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-default);
+}
+
+.receiving-actions > * {
+  flex: 1 1 14rem;
+  justify-content: center;
+}
+
+/* The summary of a finished run: what to do next first, then what each vendor came to, then the photos of what is missing. */
+.receiving-summary__lead {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-body-lg-size);
+  font-weight: var(--text-label-md-weight);
+}
+
+.receiving-summary__vendors {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.receiving-summary__vendors p {
+  margin: 0 0 var(--space-2);
+}
+
+/* One parcel, opened: its picture, where it stands, its condition and what was said when it failed. */
+.receiving-parcel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.receiving-parcel p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The button that leads from a photo in the viewer to the parcel's own dialog: under the picture, at the floor's size, never narrower than the picture lets it be. */
+.receiving-viewer__act {
+  display: flex;
+  justify-content: center;
+  margin-block-start: var(--space-3);
+}
+
+/* The record of a vendor (S1.35c): the parcels that need someone, group by group, each group the photos of its parcels. */
+.receiving-record__group {
+  display: grid;
+  gap: var(--space-2);
+  margin-block-end: var(--space-4);
+}
+
+.receiving-record__group-title {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-body-lg-size);
+  font-weight: var(--text-label-md-weight);
+}
+
+/* What was found, in the order it was made: one block for each finding, set apart by a quiet line, with its photos and who made it and when. */
+.receiving-findings {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.receiving-finding {
+  display: grid;
+  gap: var(--space-2);
+  padding-block-end: var(--space-3);
+  border-block-end: 1px solid var(--color-border-subtle);
+}
+
+.receiving-finding:last-child {
+  padding-block-end: 0;
+  border-block-end: 0;
+}
+
+.receiving-finding p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.receiving-finding__title {
+  font-weight: var(--text-label-md-weight);
+}
+
+.receiving-finding__by {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The correction of a count: a tick for each parcel that is here, each a row of the floor's size (the checkbox draws it), in a group that has no box of its own. */
+.receiving-correction__parcels {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.receiving-correction__parcels legend {
+  padding: 0;
+  font-weight: var(--text-label-md-weight);
+}
+
+.receiving-correction__parcels p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* The photo of a missing parcel in its row of the list: a small square, cropped to its box and never stretched, so that two rows are the same height. */
+.receiving-missing__picture {
+  display: block;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}

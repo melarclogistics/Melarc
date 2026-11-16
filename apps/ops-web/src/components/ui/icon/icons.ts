@@ -3,7 +3,9 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bike,
+  Binoculars,
   Calendar,
+  Camera,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -21,6 +23,9 @@ import {
   Funnel,
   Gavel,
   Handshake,
+  Image,
+  ImageOff,
+  Images,
   Info,
   LaptopMinimalCheck,
   ListChecks,
@@ -35,6 +40,7 @@ import {
   Package,
   PackagePlus,
   Plus,
+  RotateCcw,
   Scale,
   Search,
   Store,
@@ -44,6 +50,7 @@ import {
   UserPlus,
   Users,
   Warehouse,
+  WifiOff,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -81,6 +88,8 @@ export const ICONS = {
   'collection-disputes': Flag,
   // Receiving at a hub (S1.35): the awaiting-receive queue's entry.
   receiving: Warehouse,
+  // The parcels being searched for (S1.35c, D-D4): the list's entry.
+  'missing-parcels': Binoculars,
   messages: MessageSquareText,
   staff: Users,
   'add-staff': UserPlus,
@@ -118,6 +127,15 @@ export const ICONS = {
   'lock-open': LockOpen,
   // The kit (redesign step R5): the overflow menu of a record's acts. (The "+" of adding a filter is `plus`, the shell's.)
   'more-actions': Ellipsis,
+  // The photo kit (Run D, S1.35c-0): a photo that is on its way, and one that cannot be shown (the words say which: the icon never does alone).
+  photo: Image,
+  'photo-unavailable': ImageOff,
+  // The evidence upload's photo mode (Run D, S1.35c-0): take a photo with the camera, choose one from the gallery, take a photo again (each with words beside it).
+  camera: Camera,
+  gallery: Images,
+  retake: RotateCcw,
+  // The connection banner (Run D, S1.35c-0): the connection is gone and what a person does now is not saved (the words say so: the icon never does alone).
+  offline: WifiOff,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

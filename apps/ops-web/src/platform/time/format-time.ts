@@ -36,6 +36,19 @@ export function todayText(now: Date = new Date()): string {
   return `${parts.get('year') ?? ''}-${parts.get('month') ?? ''}-${parts.get('day') ?? ''}`;
 }
 
+/**
+ * The time of day of an instant in Accra, as `09:12` (24-hour, two digits, no date and no zone label), or nothing when the text is not an instant: for what happened today and is said as a moment ("Ama Owusu opened
+ * this check-in at 09:12"), where the day would be noise.
+ */
+export function formatClock(instant: string): string | undefined {
+  const time = Date.parse(instant);
+  if (Number.isNaN(time)) return undefined;
+  const parts = new Map(ACCRA.formatToParts(time).map((part) => [part.type, part.value]));
+  const hour = parts.get('hour');
+  const minute = parts.get('minute');
+  return hour === undefined || minute === undefined ? undefined : `${hour}:${minute}`;
+}
+
 /** The text for an instant, or nothing when the text is not an instant. */
 export function formatInstant(instant: string): string | undefined {
   const time = Date.parse(instant);

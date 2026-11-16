@@ -25,6 +25,14 @@ export const PHOTO_UNREACHABLE =
 export const PHOTO_BLOCKED =
   'The browser blocked this photo. The portal’s settings do not allow it to show pictures from the photo store, so the photo itself is not at fault. Tell the person who looks after the portal.';
 
+/**
+ * What a **tile** of a grid says when its picture cannot be drawn (`PhotoPicture`, Run D, S1.35c-0): short, plain, and the same for every cause, so that a page of sixty tiles does not tell the same sentence sixty
+ * times. The one distinction a tile keeps is the one above, because a picture the browser's own policy blocked is not a photo that is gone and is told as blocked; the cause of the rest is told in full where
+ * the photo is opened.
+ */
+export const PHOTO_TILE_UNAVAILABLE = 'Photo not available';
+export const PHOTO_TILE_BLOCKED = 'Photo blocked';
+
 /** The four lists share a refusal of a filter or a place that the server would not take, which is a contract that moved and not something the person did. */
 const LISTS = [
   [
@@ -39,7 +47,7 @@ const LISTS = [
   ],
   [
     'listCollectionShortfalls',
-    'The short counts could not be loaded.',
+    'The count differences could not be loaded.',
     cannotText('pickup.handshake.override'),
   ],
   [

@@ -385,8 +385,10 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/app/pages/manifests/',
     'apps/ops-web/src/app/pages/pickup/',
   ],
-  // The receiving screens: the intake pages, the one dialog that opens a photo (the evidence folder, which the stop's page shares), and the work list the queue is drawn on.
+  // The receiving screens: the queue by run and the run's page (the receiving folder), the intake pages of the blind count, the record, the condition and the decision, the photo picture and the one dialog that
+  // opens a photo (the evidence folder, which the stop's page shares), and the work list the queue is drawn on.
   'receiving.spec.ts': [
+    'apps/ops-web/src/app/pages/receiving/',
     'apps/ops-web/src/app/pages/intakes/',
     'apps/ops-web/src/app/pages/evidence/',
     'apps/ops-web/src/app/pages/pickup-work/',

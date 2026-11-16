@@ -1,6 +1,6 @@
 import type { ConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import { Alert } from '../alert/Alert';
-import { Button, type ButtonVariant } from '../button/Button';
+import { Button, type ButtonSize, type ButtonVariant } from '../button/Button';
 import { DialogActions } from '../dialog/Dialog';
 
 /**
@@ -60,6 +60,8 @@ export interface CommandOutcomeActionsProps {
   readonly confirmVariant: ButtonVariant;
   /** The act cannot be confirmed yet (the reasons are still loading). */
   readonly confirmDisabled?: boolean;
+  /** `lg` for the hub floor's 56 px, on every button of the foot: asked for by the screen (the receiving screens), never by the dialog. */
+  readonly size?: ButtonSize;
 }
 
 /**
@@ -78,6 +80,7 @@ export function CommandOutcomeActions({
   confirmLabel,
   confirmVariant,
   confirmDisabled = false,
+  size = 'md',
 }: CommandOutcomeActionsProps) {
   return (
     <DialogActions>
@@ -87,6 +90,7 @@ export function CommandOutcomeActions({
             key="check"
             type="button"
             variant="secondary"
+            size={size}
             data-recovery
             onClick={command.checkRecord}
           >
@@ -96,6 +100,7 @@ export function CommandOutcomeActions({
             <Button
               key="retry"
               type="button"
+              size={size}
               onClick={() => {
                 void command.retry();
               }}
@@ -106,10 +111,16 @@ export function CommandOutcomeActions({
         </>
       ) : command.phase === 'conflict' ? (
         <>
-          <Button key="cancel" type="button" variant="secondary" onClick={onCancel}>
+          <Button key="cancel" type="button" variant="secondary" size={size} onClick={onCancel}>
             {cancelLabel}
           </Button>
-          <Button key="reload" type="button" data-recovery onClick={command.checkRecord}>
+          <Button
+            key="reload"
+            type="button"
+            size={size}
+            data-recovery
+            onClick={command.checkRecord}
+          >
             Reload the record
           </Button>
         </>
@@ -119,6 +130,7 @@ export function CommandOutcomeActions({
             key="cancel"
             type="button"
             variant="secondary"
+            size={size}
             data-initial-focus
             disabled={command.locked}
             onClick={onCancel}
@@ -129,6 +141,7 @@ export function CommandOutcomeActions({
             key="confirm"
             type="submit"
             variant={confirmVariant}
+            size={size}
             disabled={confirmDisabled}
             loading={command.phase === 'sending'}
           >

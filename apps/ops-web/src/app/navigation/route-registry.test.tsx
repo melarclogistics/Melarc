@@ -74,8 +74,8 @@ describe('the real registry', () => {
     expect(menusFor(everyKey)).toEqual({
       groups: [
         ['Today', ['My work', 'Decisions', 'Handshakes']],
-        ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-        ['Hub', ['Receiving']],
+        ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes']],
+        ['Hub', ['Receiving', 'Missing parcels']],
         ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
         ['System', ['Message log']],
       ],
@@ -141,7 +141,7 @@ describe('the real registry', () => {
     ]);
     expect(menusFor(['pickup.handshake.override']).groups).toEqual([
       ['Today', ['My work', 'Handshakes']],
-      ['Pickups', ['Short counts']],
+      ['Pickups', ['Count differences']],
     ]);
     // The resolution by hand is the act of a second key, offered inside the list: it opens no list of its own.
     expect(menusFor(['pickup.handshake.resolve']).groups).toEqual([['Today', ['My work']]]);
@@ -153,7 +153,7 @@ describe('the real registry', () => {
       [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS],
       SIGNED_IN_ROUTES,
     ).groups.flatMap((group) => group.entries);
-    for (const label of ['Handshakes', 'Failed pickups', 'Short counts', 'Disputes']) {
+    for (const label of ['Handshakes', 'Failed pickups', 'Count differences', 'Disputes']) {
       expect(entries.find((entry) => entry.label === label)?.queue, label).toBeUndefined();
     }
     // The stop's page and its form are reached from the run and the lists, and have no entry; each is behind its own key.
@@ -171,7 +171,7 @@ describe('the real registry', () => {
   it('offers the receiving queue to the holders of its read alone, and gives the acts on an intake no entry', () => {
     expect(menusFor(['hub.read']).groups).toEqual([
       ['Today', ['My work']],
-      ['Hub', ['Receiving']],
+      ['Hub', ['Receiving', 'Missing parcels']],
     ]);
     // The count and the adjudication open no queue of their own: a holder of either alone is offered nothing.
     expect(menusFor(['hub.intake.count']).groups).toEqual([['Today', ['My work']]]);
@@ -180,14 +180,35 @@ describe('the real registry', () => {
       [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS],
       SIGNED_IN_ROUTES,
     ).groups.flatMap((group) => group.entries);
-    expect(entries.find((entry) => entry.label === 'Receiving')?.queue).toBeUndefined();
+    // The count beside each entry is the queue summary's own: the runs that wait for the queue by run, the parcels of a case that is open for the list of missing parcels.
+    expect(entries.find((entry) => entry.label === 'Receiving')?.queue).toBe(
+      'HUB_RECEIVING_RUNS_WAITING',
+    );
+    expect(entries.find((entry) => entry.label === 'Missing parcels')?.queue).toBe(
+      'HUB_MISSING_PARCELS_SEARCHING',
+    );
 
     const route = (path: string) => SIGNED_IN_ROUTES.find((candidate) => candidate.path === path);
+    // The queue by run and a run's page open for the read alone, and only the queue has a menu entry: a run is reached from it.
+    expect(route('/receiving')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/receiving/:manifestId')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/receiving/:manifestId')?.menu).toBeNull();
     expect(route('/intakes')?.access).toEqual({ permission: 'hub.read' });
     expect(route('/intakes/:id')?.access).toEqual({ permission: 'hub.read' });
     expect(route('/intakes/:id/count')?.access).toEqual({ permission: 'hub.intake.count' });
-    expect(route('/intakes/:id/condition')?.access).toEqual({ permission: 'hub.intake.count' });
-    expect(route('/intakes/:id/discrepancy')?.access).toEqual({ permission: 'hub.osd.adjudicate' });
+    // The page of a vendor's one condition is gone (damage is recorded where it is seen): its address is a way to the vendor's record, open for the read.
+    expect(route('/intakes/:id/condition')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/intakes/:id/condition')?.menu).toBeNull();
+    // The list of the parcels being searched for opens for the read alone and is the second entry of the Hub group.
+    expect(route('/missing-parcels')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/missing-parcels')?.menu).toMatchObject({
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Missing parcels',
+      order: 1,
+    });
+    // The decision's route admits the read: the page tells an officer without the decision that a senior officer decides (the API checks the key again on the act).
+    expect(route('/intakes/:id/discrepancy')?.access).toEqual({ permission: 'hub.read' });
     for (const path of [
       '/intakes/:id',
       '/intakes/:id/count',
@@ -203,7 +224,7 @@ describe('the real registry', () => {
   });
 
   // Break caught: Decisions gathering the staff approver's count: it stays on Staff, and a merged inbox is a later page that is not built.
-  it('gives each queue to one entry (the exceptions to Decisions, the confirmations to Requests, the runs to Pickup runs, the staff profiles to Staff), and no other entry carries a queue', () => {
+  it('gives each queue to one entry (the exceptions to Decisions, the confirmations to Requests, the runs to Pickup runs, the staff profiles to Staff, the runs that wait to Receiving, the parcels being searched for to Missing parcels), and no other entry carries a queue', () => {
     const queues = Object.fromEntries(
       navigationFor(Object.values(BUNDLE_KEY_SETS).flat(), SIGNED_IN_ROUTES)
         .groups.flatMap((group) => group.entries)
@@ -216,6 +237,8 @@ describe('the real registry', () => {
       Requests: 'PICKUP_AWAITING_CONFIRMATION',
       'Pickup runs': 'PICKUP_RUNS_IN_PROGRESS',
       Staff: 'STAFF_AWAITING_APPROVAL',
+      Receiving: 'HUB_RECEIVING_RUNS_WAITING',
+      'Missing parcels': 'HUB_MISSING_PARCELS_SEARCHING',
     });
   });
 
@@ -245,8 +268,11 @@ describe('the real registry', () => {
       {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
-          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-          ['Hub', ['Receiving']],
+          [
+            'Pickups',
+            ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
+          ],
+          ['Hub', ['Receiving', 'Missing parcels']],
           ['People and access', ['Riders', 'Vendors']],
           ['System', ['Message log']],
         ],
@@ -259,8 +285,11 @@ describe('the real registry', () => {
       {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
-          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-          ['Hub', ['Receiving']],
+          [
+            'Pickups',
+            ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
+          ],
+          ['Hub', ['Receiving', 'Missing parcels']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],
@@ -273,8 +302,11 @@ describe('the real registry', () => {
       {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
-          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-          ['Hub', ['Receiving']],
+          [
+            'Pickups',
+            ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
+          ],
+          ['Hub', ['Receiving', 'Missing parcels']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],

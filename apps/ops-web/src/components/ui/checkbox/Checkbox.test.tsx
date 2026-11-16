@@ -18,6 +18,23 @@ describe('Checkbox', () => {
     expect(box).not.toBeChecked();
   });
 
+  // Break caught: the hub floor's 56 px row asked for and not drawn (the class is the only thing jsdom can see; test/hub-floor-sizes.test.ts holds the stylesheet to the token).
+  it('is a standard row unless the floor row is asked for', () => {
+    render(
+      <>
+        <Checkbox name="a" label="Standard row" />
+        <Checkbox name="b" label="Floor row" size="lg" />
+      </>,
+    );
+
+    expect(
+      screen.getByRole('checkbox', { name: 'Standard row' }).closest('.ui-checkbox'),
+    ).not.toHaveClass('ui-checkbox--lg');
+    expect(screen.getByRole('checkbox', { name: 'Floor row' }).closest('.ui-checkbox')).toHaveClass(
+      'ui-checkbox--lg',
+    );
+  });
+
   // Break caught: a control that cannot be reached or turned on from the keyboard.
   it('is reached with Tab and turned on and off with Space', async () => {
     const user = userEvent.setup();

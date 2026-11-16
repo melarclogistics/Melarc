@@ -174,6 +174,11 @@ export function shortCountText(declared: number, collected: number): string {
   return `${String(collected)} counted of ${String(declared)} declared`;
 }
 
+/** The figures of a count difference, told against the booking (D-D5): what was counted of what was booked. */
+export function countedOfBookedText(booked: number, collected: number): string {
+  return `${String(collected)} counted of ${String(booked)} booked`;
+}
+
 /** By how many a count differs from the booking and on which side, as the server stated it (D-D5): the page works out nothing. The words are provisional until the screen of the count differences is redone. */
 export const countDifferenceLabel = (variance: CountDifference): string =>
   variance === 'SHORT' ? 'Short by' : 'Over by';

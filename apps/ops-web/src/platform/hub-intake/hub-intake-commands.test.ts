@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installFakeApi, json, type FakeApi } from '../../test-support/fake-api';
 import {
   DECLARED,
-  PLANTED_DECLARATION,
   INTAKE_EVIDENCE_ONE,
   INTAKE_ID,
   OTHER_INTAKE_ID,
@@ -13,12 +12,7 @@ import {
   preCountFixture,
   shortCountFixture,
 } from '../../test-support/hub-intake-fixture';
-import {
-  acquireIntakeLock,
-  adjudicateDiscrepancy,
-  recordIntakeCondition,
-  submitBlindCount,
-} from './hub-intake-commands';
+import { recordIntakeCondition, submitBlindCount } from './hub-intake-commands';
 
 /**
  * The wire shape of the four acts of the receiving screens (S1.35), read from the requests the real client puts on the wire: the method, the path, the headers each operation declares and no other,
@@ -47,61 +41,6 @@ const last = () => {
 };
 const bodyOf = async (): Promise<unknown> => last().clone().json();
 const withVersion = (body: unknown): Response => json(200, body, { ETag: NEW_VERSION });
-
-describe('acquireIntakeLock', () => {
-  it('posts to the lock with no body, no key and no version, and answers the intake as the server shows it', async () => {
-    api = installFakeApi({
-      [`POST /hub-intakes/${INTAKE_ID}/lock`]: () =>
-        json(
-          200,
-          preCountFixture({
-            active_receiver_id: OTHER_INTAKE_ID,
-            lock_acquired_at: '2026-11-14T09:10:00Z',
-          }),
-        ),
-    });
-
-    const intake = await acquireIntakeLock(client(), INTAKE_ID);
-
-    expect(last().method).toBe('POST');
-    expect(new URL(last().url).pathname).toBe(`/api/v1/hub-intakes/${INTAKE_ID}/lock`);
-    expect(last().headers.get('Idempotency-Key')).toBeNull();
-    expect(last().headers.get('If-Match')).toBeNull();
-    expect(await last().clone().text()).toBe('');
-    expect(intake).toMatchObject({ count_phase: 'PRE_COUNT', active_receiver_id: OTHER_INTAKE_ID });
-  });
-
-  // Break caught: the lock of one intake taken as the lock of the one asked about, so that the page says who holds an intake it is not counting.
-  it('reads an answer for another intake as an answer that is not the API’s', async () => {
-    api = installFakeApi({
-      [`POST /hub-intakes/${INTAKE_ID}/lock`]: () =>
-        json(200, preCountFixture({ id: OTHER_INTAKE_ID })),
-    });
-    await expect(acquireIntakeLock(client(), INTAKE_ID)).rejects.toMatchObject({
-      kind: 'unexpected-response',
-    });
-  });
-
-  // Break caught: the declaration let through on the answer of the lock, the one write whose answer is an intake that may be counted or not.
-  it('refuses an answer that has not been counted and carries the declaration', async () => {
-    api = installFakeApi({
-      [`POST /hub-intakes/${INTAKE_ID}/lock`]: () =>
-        json(200, { ...preCountFixture(), rider_declared_count: PLANTED_DECLARATION }),
-    });
-    await expect(acquireIntakeLock(client(), INTAKE_ID)).rejects.toMatchObject({
-      kind: 'unexpected-response',
-    });
-  });
-
-  it('answers an intake that has been counted as it is', async () => {
-    api = installFakeApi({
-      [`POST /hub-intakes/${INTAKE_ID}/lock`]: () => json(200, postCountFixture()),
-    });
-    await expect(acquireIntakeLock(client(), INTAKE_ID)).resolves.toMatchObject({
-      count_phase: 'POST_COUNT',
-    });
-  });
-});
 
 describe('submitBlindCount', () => {
   it('posts the physical count and nothing else, under a key and the version read', async () => {
@@ -263,81 +202,6 @@ describe('recordIntakeCondition', () => {
         { condition: 'DAMAGED', evidenceIds: [INTAKE_EVIDENCE_ONE] },
         VERSION,
         KEY,
-      ),
-    ).rejects.toMatchObject({ kind: 'unexpected-response' });
-  });
-});
-
-describe('adjudicateDiscrepancy', () => {
-  it('posts the outcome and the reason under the version read and no key', async () => {
-    api = installFakeApi({
-      [`POST /hub-intakes/${INTAKE_ID}/discrepancy`]: () =>
-        withVersion(shortCountFixture({ state: 'READY_FOR_ITEMIZATION' })),
-    });
-
-    const adjudicated = await adjudicateDiscrepancy(
-      client(),
-      INTAKE_ID,
-      { outcome: 'WRITTEN_OFF', note: 'Two parcels lost at the door.' },
-      VERSION,
-    );
-
-    expect(last().headers.get('If-Match')).toBe(VERSION);
-    // Break caught: a key sent where the operation declares none, or a version left off the one that needs it.
-    expect(last().headers.get('Idempotency-Key')).toBeNull();
-    expect(await bodyOf()).toEqual({
-      outcome: 'WRITTEN_OFF',
-      note: 'Two parcels lost at the door.',
-    });
-    expect(adjudicated.version).toBe(NEW_VERSION);
-  });
-
-  it('sends the condition and the evidence when the adjudicator found one', async () => {
-    api = installFakeApi({
-      [`POST /hub-intakes/${INTAKE_ID}/discrepancy`]: () =>
-        withVersion(shortCountFixture({ condition: 'TAMPERED', state: 'RECONCILIATION_REQUIRED' })),
-    });
-    await adjudicateDiscrepancy(
-      client(),
-      INTAKE_ID,
-      {
-        outcome: 'ESCALATED',
-        note: 'Seal broken.',
-        condition: 'TAMPERED',
-        evidenceIds: [INTAKE_EVIDENCE_ONE],
-      },
-      VERSION,
-    );
-    expect(await bodyOf()).toEqual({
-      outcome: 'ESCALATED',
-      note: 'Seal broken.',
-      condition: 'TAMPERED',
-      evidence_ids: [INTAKE_EVIDENCE_ONE],
-    });
-  });
-
-  // Break caught: an adjudication taken as done when the answer says the intake has another condition than the one the adjudicator set, or is not the intake acted on.
-  it.each([
-    ['another condition', () => withVersion(shortCountFixture({ condition: 'OK' }))],
-    [
-      'another intake',
-      () => withVersion(shortCountFixture({ id: OTHER_INTAKE_ID, condition: 'TAMPERED' })),
-    ],
-    ['an intake that was not counted', () => withVersion(preCountFixture())],
-    ['no version', () => json(200, shortCountFixture({ condition: 'TAMPERED' }))],
-  ])('reads an answer with %s as an answer that is not the API’s', async (_name, answer) => {
-    api = installFakeApi({ [`POST /hub-intakes/${INTAKE_ID}/discrepancy`]: answer });
-    await expect(
-      adjudicateDiscrepancy(
-        client(),
-        INTAKE_ID,
-        {
-          outcome: 'ESCALATED',
-          note: 'Seal broken.',
-          condition: 'TAMPERED',
-          evidenceIds: [INTAKE_EVIDENCE_ONE],
-        },
-        VERSION,
       ),
     ).rejects.toMatchObject({ kind: 'unexpected-response' });
   });

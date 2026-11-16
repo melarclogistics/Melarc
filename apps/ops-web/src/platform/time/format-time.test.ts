@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { BUSINESS_TIME_ZONE, formatInstant, todayText } from './format-time';
+import { BUSINESS_TIME_ZONE, formatClock, formatInstant, todayText } from './format-time';
 
 describe('formatInstant', () => {
   // Break caught: a format with a year, a weekday or a zone label, none of which the design system shows (COMPONENT_PATTERNS section 40).
@@ -40,5 +40,19 @@ describe('todayText', () => {
   // Break caught: a month or a day written without its zero, which is not the shape the page and the API hold.
   it('writes the month and the day with two digits', () => {
     expect(todayText(new Date('2026-02-03T12:00:00Z'))).toBe('2026-02-03');
+  });
+});
+
+describe('formatClock', () => {
+  // Break caught: a date, a zone label or a 12-hour clock on a moment that is said as a time of day.
+  it('shows the 24-hour time in Accra and nothing else', () => {
+    expect(formatClock('2026-11-16T09:12:00Z')).toBe('09:12');
+    expect(formatClock('2026-11-16T10:12:00+01:00')).toBe('09:12');
+    expect(formatClock('2026-11-16T00:05:00Z')).toBe('00:05');
+    expect(formatClock('2026-11-16T23:59:59.999Z')).toBe('23:59');
+  });
+
+  it.each([['not a time'], [''], ['2026-13-40T99:00:00Z']])('says nothing for %j', (text) => {
+    expect(formatClock(text)).toBeUndefined();
   });
 });

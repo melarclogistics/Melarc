@@ -10,6 +10,7 @@ import { useApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
 import { createRetrievalAuthorization } from './pickup-work-commands';
 import {
+  COUNT_DIFFERENCES,
   parseDisputePage,
   parseOpsHandshakePage,
   parsePickupFailurePage,
@@ -51,6 +52,16 @@ export interface WorkListParams {
    * the door and the failure ignore it.
    */
   readonly view?: string;
+  /**
+   * What the person searched for, as the address holds it (a list that has a lookup, `WorkListProps.lookup`): the lookup the list's own hook sends when it is long enough for the server to take. A list that has
+   * no lookup is never given one, and the lists of the door and the failure ignore it.
+   */
+  readonly q?: string;
+  /**
+   * The value of the list's one extra filter (`WorkListProps.choice`), as the address holds it: the count differences' kind (`SHORT` or `OVER`, the contract's `variance`). A list that has none is never
+   * given one; the hook of a list that has one sends it only if it is a value the contract has.
+   */
+  readonly choice?: string;
   readonly enabled?: boolean;
 }
 
@@ -70,6 +81,7 @@ const keyOf = (name: string, params: WorkListParams) =>
     params.open ?? null,
     params.hubId ?? null,
     params.pageToken ?? null,
+    params.choice ?? null,
   ] as const;
 
 /** `listPickupFailures` (`pickup.failure.resolve`): the failure decision queue, oldest failure first. `open` is a failure whose request is still confirmed. */
@@ -112,7 +124,7 @@ export function useHandshakesForOps(
   });
 }
 
-/** `listCollectionShortfalls` (`pickup.handshake.override`): the short counts flagged to the office. `open` is a shortfall whose run is still in progress. */
+/** `listCollectionShortfalls` (`pickup.handshake.override`): the count differences flagged to the office, short and over (D-D5), in the kind the address asks for. `open` is a shortfall whose run is still in progress. */
 export function useCollectionShortfalls(
   params: WorkListParams,
 ): UseQueryResult<WorkListPageView<ShortfallView>> {
@@ -123,7 +135,16 @@ export function useCollectionShortfalls(
     ...NOT_KEPT,
     queryFn: async () => {
       const answer = answerOf(
-        await client.GET('/collection-shortfalls', { params: { query: queryOf(params) } }),
+        await client.GET('/collection-shortfalls', {
+          params: {
+            query: {
+              ...queryOf(params),
+              ...(COUNT_DIFFERENCES.find((kind) => kind === params.choice) === undefined
+                ? {}
+                : { variance: params.choice as (typeof COUNT_DIFFERENCES)[number] }),
+            },
+          },
+        }),
       );
       const page = parseShortfallPage(answer.data);
       if (page === undefined) throw unexpectedResponse(answer.status);

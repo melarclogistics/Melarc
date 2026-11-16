@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
 import { watchPage } from './support/page';
+import { onePixelPng } from './support/png';
 import { enforceStrictPolicy } from './support/strict-policy';
 
 /**
@@ -131,5 +132,51 @@ test.describe('the kit in a production build under the strict content-security p
         document.querySelectorAll('li[style]').length + document.querySelectorAll('style').length,
     );
     expect(styled).toBeGreaterThan(0);
+  });
+
+  // Break caught: the photo mode of the evidence upload showing a photo back from an object URL (`img-src 'self'` refuses a `blob:` picture, so every preview would be a broken one in production), or the
+  // viewer, the banner or the gate needing more of the policy than it gives. The preview is drawn on a canvas, and nothing is reported.
+  test('the photo kit takes a photo, shows it back, opens the viewer and the banner, and raises no violation', async ({
+    page,
+    context,
+  }) => {
+    const { violations, problems } = await open(page, 'photos');
+    const form = page.getByRole('figure', { name: /^A form that waits for its photos/ });
+    await form
+      .locator('input[capture]')
+      .nth(1)
+      .setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: onePixelPng() });
+
+    // The photo is shown back: a canvas with the photo's pixel drawn on it, and no picture from a URL.
+    await expect
+      .poll(() =>
+        form
+          .locator('canvas:visible')
+          .evaluate((canvas) =>
+            (canvas as HTMLCanvasElement)
+              .getContext('2d')
+              ?.getImageData(80, 80, 1, 1)
+              .data.join(','),
+          ),
+      )
+      .toBe('200,48,32,255');
+    await expect(form.locator('img')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Open the sample photos' }).click();
+    const viewer = page.getByRole('dialog', { name: 'Sample photo 1' });
+    await expect(viewer).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(viewer.getByText('2 of 5')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(viewer).toBeHidden();
+
+    await context.setOffline(true);
+    await expect(
+      page.getByText('No connection. What you do now is not saved.').first(),
+    ).toBeVisible();
+    await context.setOffline(false);
+
+    expect(violations).toEqual([]);
+    expect(problems).toEqual([]);
   });
 });

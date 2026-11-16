@@ -9,6 +9,7 @@ import {
 import { createServer as createHttpsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 
+import { contentSecurityPolicy } from '../../apps/ops-web/config/content-security-policy.ts';
 import type { TlsMaterial } from './tls-material.ts';
 
 /**
@@ -30,30 +31,31 @@ import type { TlsMaterial } from './tls-material.ts';
  */
 
 /**
- * The policy of the shell's compatibility baseline (`apps/ops-web/test/browser/support/strict-policy.ts`, `STRICT_POLICY`; a test of
- * this folder holds the two equal): no inline script,
- * no eval, nothing from another origin, no framing; inline style alone is allowed (style-src), by the decision of the Product Owner of
- * 5 November 2026 recorded in architecture/SECURITY_DESIGN.md. The shell is held to work under it, so the front can send it for real.
+ * The policy with no evidence store configured: no inline script, no eval, nothing from another origin, no framing; inline style alone is
+ * allowed (style-src), by the decision of the Product Owner of 5 November 2026 recorded in architecture/SECURITY_DESIGN.md. **It is built
+ * by the one builder** (`apps/ops-web/config/content-security-policy.ts`) that the shell's compatibility baseline
+ * (`apps/ops-web/test/browser/support/strict-policy.ts`, `STRICT_POLICY`) is built by, so the shell is held to work under the policy the
+ * front sends and the two cannot drift. With an evidence store configured the policy is the same with that one origin in `connect-src`
+ * and `img-src` (`edgeHeaders`).
  */
-export const CONTENT_SECURITY_POLICY = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self'",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
+export const CONTENT_SECURITY_POLICY = contentSecurityPolicy();
 
-/** The headers the front sets on every response, replacing any the upstream sent under the same name. */
-export const EDGE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
-  'content-security-policy': CONTENT_SECURITY_POLICY,
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
-  'strict-transport-security': 'max-age=31536000',
-});
+/**
+ * The headers the front sets on every response, replacing any the upstream sent under the same name. `evidenceOrigin` is the https
+ * origin of the evidence store, where the deployment has one (`MELARC_EVIDENCE_STORE_ORIGIN`, DEPLOYMENT_AND_ENVIRONMENTS.md §12.4):
+ * the policy then allows the browser to send photos to it and to draw them from it, in those two directives and no other.
+ */
+export function edgeHeaders(evidenceOrigin?: string): Readonly<Record<string, string>> {
+  return Object.freeze({
+    'content-security-policy': contentSecurityPolicy({ evidenceOrigin }),
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'strict-transport-security': 'max-age=31536000',
+  });
+}
+
+/** The headers of a front with no evidence store, replacing any the upstream sent under the same name. */
+export const EDGE_HEADERS: Readonly<Record<string, string>> = edgeHeaders();
 
 /** Headers that describe a single connection and are not forwarded in either direction (RFC 9110 section 7.6.1). */
 const HOP_BY_HOP = new Set([
@@ -77,6 +79,11 @@ export interface HttpsFrontOptions {
   readonly port?: number;
   /** The TLS server factory. Only the unit tests replace it, to see what it is given without a certificate. */
   readonly tlsServer?: TlsServerFactory;
+  /**
+   * The https origin of the evidence store (`MELARC_EVIDENCE_STORE_ORIGIN`): the policy the front sends names it in `connect-src` and `img-src`. Absent, both stay `'self'`. A value that is not an https origin
+   * stops the front from starting.
+   */
+  readonly evidenceOrigin?: string;
 }
 
 export interface TlsServerOptions {
@@ -113,7 +120,12 @@ function forwardedHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
   return kept;
 }
 
-function proxy(upstream: URL, request: IncomingMessage, response: ServerResponse): void {
+function proxy(
+  upstream: URL,
+  edge: Readonly<Record<string, string>>,
+  request: IncomingMessage,
+  response: ServerResponse,
+): void {
   const outgoing = httpRequest(
     {
       protocol: upstream.protocol,
@@ -127,18 +139,18 @@ function proxy(upstream: URL, request: IncomingMessage, response: ServerResponse
       // The edge's own headers replace whatever the upstream sent under those names, in any case.
       const headers = Object.fromEntries(
         Object.entries(forwardedHeaders(incoming.headers)).filter(
-          ([name]) => !(name.toLowerCase() in EDGE_HEADERS),
+          ([name]) => !(name.toLowerCase() in edge),
         ),
       );
       response.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, {
         ...headers,
-        ...EDGE_HEADERS,
+        ...edge,
       });
       incoming.pipe(response);
     },
   );
   outgoing.on('error', () => {
-    if (!response.headersSent) response.writeHead(502, { ...EDGE_HEADERS });
+    if (!response.headersSent) response.writeHead(502, { ...edge });
     response.end();
   });
   request.pipe(outgoing);
@@ -150,8 +162,10 @@ export async function startHttpsFront(options: HttpsFrontOptions): Promise<Https
   if (upstream.protocol !== 'http:') {
     throw new TypeError('The front forwards to the Ops origin over plain HTTP on this machine.');
   }
+  // Built before anything listens: an evidence origin that is not an origin stops the front here, where it is seen.
+  const edge = edgeHeaders(options.evidenceOrigin);
   const handler = (request: IncomingMessage, response: ServerResponse): void => {
-    proxy(upstream, request, response);
+    proxy(upstream, edge, request, response);
   };
   const server: Listener =
     options.tls === undefined

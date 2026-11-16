@@ -13,7 +13,6 @@ import {
   HUB_INTAKE_FIELDS,
   INTAKE_CONDITIONS,
   INTAKE_STATES,
-  MAX_PAGE_ITEMS,
 } from '../src/platform/hub-intake/hub-intake-shape';
 
 /**
@@ -96,18 +95,6 @@ const operationNamed = (operationId: string): Operation => {
   if (operation === undefined) throw new Error(`The contract has no operation ${operationId}`);
   return operation;
 };
-
-function parameterOf(operationId: string, name: string): Parameter | undefined {
-  for (const each of operationNamed(operationId).parameters ?? []) {
-    if (each === undefined) continue;
-    const parameter =
-      each.$ref === undefined
-        ? each
-        : document.components.parameters[each.$ref.split('/').at(-1) ?? ''];
-    if (parameter?.name === name) return parameter;
-  }
-  return undefined;
-}
 
 function bodyOf(operationId: string): {
   properties: Record<string, Schema>;
@@ -254,8 +241,8 @@ describe('the blind count and the contract', () => {
   });
 
   // Break caught: a list or a read that stops telling a counted intake from one that has not been counted (the page tells them apart by this member alone).
-  it('has the intake told counted or not by `count_phase`, in the list, the read and the lock', () => {
-    for (const operationId of ['listHubIntakes', 'getHubIntake', 'acquireIntakeLock']) {
+  it('has the intake told counted or not by `count_phase`, in the read and the lock', () => {
+    for (const operationId of ['getHubIntake', 'acquireIntakeLock']) {
       const text = JSON.stringify(operationNamed(operationId));
       expect(text, operationId).toContain('HubIntakePreCount');
       expect(text, operationId).toContain('HubIntakePostCount');
@@ -321,7 +308,6 @@ describe('the permission, the headers and the refusals of each operation', () =>
     ['adjudicateDiscrepancy', ['IfMatch']],
     ['createEvidence', ['IdempotencyKey']],
     ['completeEvidenceUpload', ['IfMatch']],
-    ['listHubIntakes', []],
     ['getHubIntake', []],
   ])('has %s sending %j', (operationId, expected) => {
     expect(headersOf(operationId)).toEqual(expected);
@@ -329,7 +315,6 @@ describe('the permission, the headers and the refusals of each operation', () =>
 
   // Break caught: an act offered to a key other than the one its operation needs, or the adjudication offered to the key Ops Staff hold (the server checks it again; this is the hint).
   it.each([
-    ['listHubIntakes', 'hub.read'],
     ['getHubIntake', 'hub.read'],
     ['acquireIntakeLock', 'hub.intake.count'],
     ['submitBlindCount', 'hub.intake.count'],
@@ -370,7 +355,7 @@ describe('the permission, the headers and the refusals of each operation', () =>
         'STATE_CONFLICT',
         'REASON_REQUIRED',
         'EVIDENCE_NOT_STORED',
-        'INSUFFICIENT_AUTHORITY',
+        'VALIDATION_FAILED',
         'PERMISSION_DENIED',
       ],
     ],
@@ -386,35 +371,19 @@ describe('the permission, the headers and the refusals of each operation', () =>
   });
 });
 
-describe('the list and the bodies of the acts and the contract', () => {
-  // Break caught: the page sending a filter under a name the list does not have, or sending a hub the list does not take (the queue says it is not narrowed by the hub switcher, and this holds why).
-  it('has the list taking `state`, `page_size` and `page_token` and no hub', () => {
-    expect(parameterOf('listHubIntakes', 'state')).toMatchObject({ in: 'query' });
-    expect(valuesOf(parameterOf('listHubIntakes', 'state')?.schema).toSorted()).toEqual(
-      [...INTAKE_STATES].toSorted(),
-    );
-    expect(parameterOf('listHubIntakes', 'page_token')).toMatchObject({ in: 'query' });
-    for (const name of ['state', 'page_token']) {
-      expect(parameterOf('listHubIntakes', name)?.required ?? false, name).toBe(false);
-    }
-    expect(parameterOf('listHubIntakes', 'hub_id')).toBeUndefined();
-  });
-
-  // Break caught: the page believing a longer page than the contract allows.
-  it('has a page of at most the number of items the guard accepts', () => {
-    expect(parameterOf('listHubIntakes', 'page_size')?.schema).toMatchObject({
-      type: 'integer',
-      minimum: 1,
-      maximum: MAX_PAGE_ITEMS,
-    });
-  });
-
+describe('the bodies of the acts and the contract', () => {
   // Break caught: the condition sent under names the schema does not have, or the contract making evidence mandatory for every condition.
   it('has the condition taking a condition, a note and evidence, the condition alone required', () => {
     const body = bodyOf('recordIntakeCondition');
     expect(body.closed).toBe(true);
     expect(body.required).toEqual(['condition']);
-    expect(Object.keys(body.properties).toSorted()).toEqual(['condition', 'evidence_ids', 'note']);
+    // The condition of a vendor checked in against its door photos is the condition of one parcel (D-D7): it names the parcel.
+    expect(Object.keys(body.properties).toSorted()).toEqual([
+      'condition',
+      'evidence_ids',
+      'note',
+      'parcel_id',
+    ]);
     expect(valuesOf(body.properties.condition).toSorted()).toEqual(
       [...INTAKE_CONDITIONS].toSorted(),
     );

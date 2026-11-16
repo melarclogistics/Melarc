@@ -1,12 +1,14 @@
 import type { ReactElement } from 'react';
-import type { RouteObject } from 'react-router';
+import { Navigate, type RouteObject } from 'react-router';
 
 import { RequirePermission } from '../../platform/session/RequirePermission';
-import { IntakeConditionPage } from '../pages/intakes/IntakeConditionPage';
-import { IntakeCountPage } from '../pages/intakes/IntakeCountPage';
-import { IntakeDiscrepancyPage } from '../pages/intakes/IntakeDiscrepancyPage';
-import { IntakePage } from '../pages/intakes/IntakePage';
-import { IntakeQueuePage } from '../pages/intakes/IntakeQueuePage';
+import { BlindCountPage } from '../pages/receiving/BlindCountPage';
+import { ConditionRedirect } from '../pages/receiving/ConditionRedirect';
+import { DecisionPage } from '../pages/receiving/DecisionPage';
+import { IntakeRecordPage } from '../pages/receiving/IntakeRecordPage';
+import { MissingParcelsPage } from '../pages/receiving/MissingParcelsPage';
+import { ReceivingQueuePage } from '../pages/receiving/ReceivingQueuePage';
+import { ReceivingRunPage } from '../pages/receiving/ReceivingRunPage';
 import { MyWorkPage } from '../pages/my-work/MyWorkPage';
 import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
 import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
@@ -140,12 +142,13 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
         'Settle the handshakes whose code could not be entered, by an override or by hand.',
     },
   },
-  // Receiving at a hub (S1.35): the queue of intakes, one intake's record, the blind count, the condition and the adjudication. Each is behind the key of the operation that is its point, and never a role: the
-  // queue and the record open for the read, the count and the condition for the key of the count, the adjudication for the key Ops Staff do not hold. The queue is the one entry, in the Hub group, and draws no
-  // count: `getQueueSummary` states none for intakes. Itemising and closing are later work and have no route.
+  // Receiving at a hub (S1.35c; D-D2): the queue BY RUN, and, from the intakes' side, one vendor's record, the blind count, the condition and the decision. Each is behind the key of the operation that is its
+  // point, and never a role: the queue and the records open for the read, the count for the key of the count, the decision for the read (its page tells an officer without the key Ops Staff do not hold that a senior officer decides). The queue is the first entry, in the
+  // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING` (the runs that wait, never vendors). `/intakes` was the queue of S1.35 and is a
+  // redirect now, so that a link made before it goes to the queue by run. Itemising and closing are later work and have no route.
   {
-    path: '/intakes',
-    element: <IntakeQueuePage />,
+    path: '/receiving',
+    element: <ReceivingQueuePage />,
     access: { permission: 'hub.read' },
     menu: {
       place: 'sidebar',
@@ -153,31 +156,64 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       label: 'Receiving',
       icon: 'receiving',
       order: 0,
-      description: 'Count the parcels a rider handed over at your hub, and decide what is found.',
+      queue: 'HUB_RECEIVING_RUNS_WAITING',
+      description:
+        'Check in the parcels a rider handed over at your hub, run by run, and decide what is found.',
     },
   },
   {
+    path: '/receiving/:manifestId',
+    element: <ReceivingRunPage />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  // The parcels that were not on the table when a vendor was checked in, and are being looked for: the list *Missing — being searched for* (D-D4), read with the same key as the queue. Its count is the queue
+  // summary's `HUB_MISSING_PARCELS_SEARCHING` (the parcels of a case that is open, never vendors).
+  {
+    path: '/missing-parcels',
+    element: <MissingParcelsPage />,
+    access: { permission: 'hub.read' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Missing parcels',
+      icon: 'missing-parcels',
+      order: 1,
+      queue: 'HUB_MISSING_PARCELS_SEARCHING',
+      description:
+        'Look for the parcels that were not on the table when a vendor was checked in, and check one in when it turns up.',
+    },
+  },
+  {
+    path: '/intakes',
+    element: <Navigate to="/receiving" replace />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  {
     path: '/intakes/:id',
-    element: <IntakePage />,
+    element: <IntakeRecordPage />,
     access: { permission: 'hub.read' },
     menu: null,
   },
   {
     path: '/intakes/:id/count',
-    element: <IntakeCountPage />,
+    element: <BlindCountPage />,
     access: { permission: 'hub.intake.count' },
     menu: null,
   },
   {
     path: '/intakes/:id/condition',
-    element: <IntakeConditionPage />,
-    access: { permission: 'hub.intake.count' },
+    element: <ConditionRedirect />,
+    access: { permission: 'hub.read' },
     menu: null,
   },
   {
     path: '/intakes/:id/discrepancy',
-    element: <IntakeDiscrepancyPage />,
-    access: { permission: 'hub.osd.adjudicate' },
+    element: <DecisionPage />,
+    // The route admits the read: an officer without the decision is told by the page that a senior officer decides (the generic refusal would send them to an administrator for what an administrator does not
+    // decide), and the API checks the key again on the act.
+    access: { permission: 'hub.read' },
     menu: null,
   },
   // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
@@ -255,10 +291,11 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     menu: {
       place: 'sidebar',
       group: 'pickups',
-      label: 'Short counts',
+      label: 'Count differences',
       icon: 'short-counts',
       order: 3,
-      description: 'See the counts where a rider collected fewer parcels than were declared.',
+      description:
+        'See the counts where a rider collected fewer or more parcels than were booked, and what each came to.',
     },
   },
   {

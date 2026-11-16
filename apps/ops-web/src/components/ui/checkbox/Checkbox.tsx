@@ -10,6 +10,8 @@ export type CheckboxProps = Omit<
   readonly label: string;
   /** What the choice does and does not do, for the person deciding. Linked with `aria-describedby`. */
   readonly help?: string;
+  /** `lg` is the hub floor's row (at least the 56 px touch row, by the token): the whole phrase is the target. */
+  readonly size?: 'md' | 'lg';
 };
 
 /**
@@ -18,7 +20,13 @@ export type CheckboxProps = Omit<
  * off unless the person turns it on (`defaultChecked` is for a choice that was already theirs), and it is read from the form at submit time
  * (`fieldChecked`). It takes no part in a Field, which is for a text control; a checkbox that needs an error says it in an Alert of the form.
  */
-export function Checkbox({ label, help, 'aria-describedby': describedBy, ...rest }: CheckboxProps) {
+export function Checkbox({
+  label,
+  help,
+  size = 'md',
+  'aria-describedby': describedBy,
+  ...rest
+}: CheckboxProps) {
   const id = useId();
   const helpId = `${id}-help`;
   const hasHelp = help !== undefined && help !== '';
@@ -26,7 +34,7 @@ export function Checkbox({ label, help, 'aria-describedby': describedBy, ...rest
     .filter((part) => part !== undefined && part !== '')
     .join(' ');
   return (
-    <div className="ui-checkbox">
+    <div className={size === 'lg' ? 'ui-checkbox ui-checkbox--lg' : 'ui-checkbox'}>
       <input
         {...rest}
         id={id}

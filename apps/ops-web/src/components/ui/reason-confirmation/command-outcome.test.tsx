@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import type { Problem } from '../../../platform/problem/problem-copy';
-import { CommandOutcomeNotice } from './command-outcome';
+import { CommandOutcomeActions, CommandOutcomeNotice } from './command-outcome';
 
 /**
  * What a command that is under way, refused, in conflict or of unknown outcome says (COMPONENT_PATTERNS sections 20.4 and 33.2). The
@@ -125,5 +125,41 @@ describe('CommandOutcomeNotice: a command that is idle, on its way or done', () 
 
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.body.textContent).toBe('');
+  });
+});
+
+describe('CommandOutcomeActions: the size of every button of the foot', () => {
+  const foot = (phase: Outcome['phase'], overrides: Partial<Outcome>, size?: 'lg') =>
+    render(
+      <CommandOutcomeActions
+        command={command({ phase, ...overrides })}
+        cancelLabel="Cancel"
+        onCancel={vi.fn()}
+        confirmLabel="Yes, all 12 are here"
+        confirmVariant="primary"
+        {...(size === undefined ? {} : { size })}
+      />,
+    );
+
+  // Break caught: one button of the foot left at the working size on the hub floor, so that the officer's thumb finds a smaller Cancel beside a 56 px Yes (or a smaller way out of an unknown outcome).
+  it.each([
+    ['idle', {}],
+    ['unknown', { canRetry: true }],
+    ['conflict', {}],
+  ] as const)(
+    'puts every button of the %s foot at the hub floor’s size when it is asked for',
+    (phase, overrides) => {
+      foot(phase, overrides, 'lg');
+      const buttons = screen.getAllByRole('button');
+      expect(buttons.length).toBeGreaterThanOrEqual(2);
+      for (const button of buttons) expect(button).toHaveClass('ui-button--lg');
+    },
+  );
+
+  it('leaves every button at the working size when no size is asked for', () => {
+    foot('idle', {});
+    for (const button of screen.getAllByRole('button')) {
+      expect(button).not.toHaveClass('ui-button--lg');
+    }
   });
 });
