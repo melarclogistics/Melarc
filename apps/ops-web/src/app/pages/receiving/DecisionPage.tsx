@@ -7,6 +7,7 @@ import { useUploadGate, UploadGateNotice } from '../../../components/ui/evidence
 import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Link } from '../../../components/ui/link/Link';
+import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { RadioGroup } from '../../../components/ui/radio/RadioGroup';
 import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { TaskForm, TaskFormSection, TaskFormWide } from '../../../components/ui/templates/TaskForm';
@@ -17,19 +18,27 @@ import {
   type Decided,
 } from '../../../platform/hub-receiving/receiving-decisions';
 import type { IntakeRecordView } from '../../../platform/hub-receiving/use-intake-record';
-import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
+import { RECEIVING_WORDS as WORDS, SENIOR_DECIDES } from '../../../platform/problem/receiving-copy';
 import { ActDialog } from '../manifests/ManifestActDialogs';
 import {
   blindFindings,
   checkInFindings,
   comparisonText,
+  RECEIVING_QUEUE_PATH,
   recordPath,
   vendorTold,
   type DoneState,
 } from './receiving-presentation';
 import { ReceivingPhoto } from './ReceivingPhoto';
 import { FindingsList, ParcelsThatNeedSomeone } from './RecordParts';
-import { actBreadcrumb, codeOfRecord, WithRecord } from './WithRecord';
+import { UUID } from '../staff/WithProfile';
+import {
+  actBreadcrumb,
+  BackToReceiving,
+  codeOfRecord,
+  useFocusFallenToHeading,
+  WithRecord,
+} from './WithRecord';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import './receiving-pages.css';
 
@@ -322,9 +331,31 @@ function Body({
   );
 }
 
+/** What an officer without the decision is shown at the decision's address: a page of its own, in the words of the act, with the way back to the vendor (or to receiving when the address is no vendor's). */
+function SeniorDecides({ id }: { readonly id: string }) {
+  useFocusFallenToHeading();
+  return (
+    <>
+      <title>{`${WORDS.decision.documentTitle} · Melarc Ops Portal`}</title>
+      <PageHeader
+        title={WORDS.decision.title}
+        breadcrumb={[{ label: WORDS.record.receiving, to: RECEIVING_QUEUE_PATH }]}
+      />
+      <p className="receiving-note">{SENIOR_DECIDES}</p>
+      {UUID.test(id) ? (
+        <p className="receiving-back">
+          <Link to={recordPath(id)}>{WORDS.decision.openVendor}</Link>
+        </p>
+      ) : (
+        <BackToReceiving />
+      )}
+    </>
+  );
+}
+
 /**
  * The senior officer's decision (surfaces/ops-portal.md section 7, `/intakes/{id}/discrepancy`; S1.35c; D-D4; the task form of `adjudicateDiscrepancy`, `hub.osd.adjudicate`: **never offered to a session without
- * the key**, the route is behind it and the record offers the act to a holder alone). **The facts come first**: the counts the API stated, the parcels that are missing, extra or damaged as their photos, and what was
+ * the key**: the route admits the read, the page tells an officer without the key that a senior officer decides, and the record offers the act to a holder alone). **The facts come first**: the counts the API stated, the parcels that are missing, extra or damaged as their photos, and what was
  * found, so that the officer decides against what happened and not from a form. The outcomes are chosen, never defaulted, in the order *Still searching* (the case stays open and the missing parcels stay on the list of
  * those being searched for), *Accept what arrived* and *Write off what is missing*; ***Vendor told* is a record that someone told the vendor, offered only after a write-off and once**, and the page says that it sends
  * nothing. The reason is required, and photos for the decision are optional and stored before they are cited. It is confirmed before it is sent, and sent on the version read and under no key (the operation takes
@@ -332,6 +363,10 @@ function Body({
  */
 export function DecisionPage() {
   const { id = '' } = useParams();
+  const me = useSignedInSession();
+  if (me === undefined) return null;
+  // An officer without the decision is told, in the words of the act, that a senior officer decides: nothing of the vendor is read for them, and the API checks the key again on the act.
+  if (!me.holds('hub.osd.adjudicate')) return <SeniorDecides id={id} />;
   return (
     <WithRecord
       id={id}

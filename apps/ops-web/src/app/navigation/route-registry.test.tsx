@@ -207,7 +207,8 @@ describe('the real registry', () => {
       label: 'Missing parcels',
       order: 1,
     });
-    expect(route('/intakes/:id/discrepancy')?.access).toEqual({ permission: 'hub.osd.adjudicate' });
+    // The decision's route admits the read: the page tells an officer without the decision that a senior officer decides (the API checks the key again on the act).
+    expect(route('/intakes/:id/discrepancy')?.access).toEqual({ permission: 'hub.read' });
     for (const path of [
       '/intakes/:id',
       '/intakes/:id/count',

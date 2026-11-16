@@ -351,14 +351,34 @@ describe('a vendor the form is not for', () => {
     expect(screen.queryByRole('group', { name: /What do you decide?/ })).toBeNull();
   });
 
-  // Break caught: the form offered to a session without the key of the decision, or the refusal told as a way to ask an administrator for what a senior officer decides.
-  it('refuses a session without the key of the decision before it asks the API anything', async () => {
+  // Break caught: the form offered to a session without the key of the decision, or the refusal told as a way to ask an administrator for what a senior officer decides: the route admits the read, and the PAGE
+  // says that a senior officer decides, in the words of the act, and gives the way back to the vendor.
+  it('tells a session without the key of the decision that a senior officer decides, and never to ask an administrator, before it asks the API anything', async () => {
     open(undefined, ['hub.read', 'hub.intake.count']);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Decide' })).toBeVisible();
     expect(
-      await screen.findByText(
-        'Your account can’t decide what happens to missing or damaged parcels. Ask an administrator for access.',
-      ),
+      await screen.findByText('A senior officer decides this. Ask one to open this page.'),
     ).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/administrator/i);
+    expect(screen.getByRole('link', { name: 'Open the vendor' })).toHaveAttribute(
+      'href',
+      `/intakes/${KENTE_INTAKE_ID}`,
+    );
+    expect(screen.queryByRole('group', { name: /What do you decide\?/ })).toBeNull();
+    expect(requestsTo(READ)).toHaveLength(0);
+    expect(requestsTo(DECIDE)).toHaveLength(0);
+  });
+
+  it('gives a session that holds the read alone, at an address that is not a vendor’s, the way back to receiving', async () => {
+    api = installFakeApi(staffApi(sessionWith(['hub.read'], { authorized_hubs: [ACCRA] })));
+    renderApp('/intakes/not-an-id/discrepancy');
+    expect(
+      await screen.findByText('A senior officer decides this. Ask one to open this page.'),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Back to receiving' })).toHaveAttribute(
+      'href',
+      '/receiving',
+    );
     expect(requestsTo(READ)).toHaveLength(0);
   });
 });

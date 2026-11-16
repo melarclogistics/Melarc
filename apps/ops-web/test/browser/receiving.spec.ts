@@ -792,10 +792,9 @@ test.describe('the record of a vendor counted without photos', () => {
     await expect(page.getByRole('button', { name: 'Record damage' })).toBeVisible();
     await page.goto(discrepancy(IDS.short));
     await expect(
-      page.getByText(
-        'Your account can’t decide what happens to missing or damaged parcels. Ask an administrator for access.',
-      ),
+      page.getByText('A senior officer decides this. Ask one to open this page.'),
     ).toBeVisible();
+    await expect(page.getByText(/administrator/i)).toHaveCount(0);
     await expect(page.getByRole('radio')).toHaveCount(0);
     expect(opened.api.unexpected).toEqual([]);
   });

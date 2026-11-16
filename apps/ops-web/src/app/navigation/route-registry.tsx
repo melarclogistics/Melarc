@@ -143,7 +143,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     },
   },
   // Receiving at a hub (S1.35c; D-D2): the queue BY RUN, and, from the intakes' side, one vendor's record, the blind count, the condition and the decision. Each is behind the key of the operation that is its
-  // point, and never a role: the queue and the records open for the read, the count and the condition for the key of the count, the decision for the key Ops Staff do not hold. The queue is the first entry, in the
+  // point, and never a role: the queue and the records open for the read, the count for the key of the count, the decision for the read (its page tells an officer without the key Ops Staff do not hold that a senior officer decides). The queue is the first entry, in the
   // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING` (the runs that wait, never vendors). `/intakes` was the queue of S1.35 and is a
   // redirect now, so that a link made before it goes to the queue by run. Itemising and closing are later work and have no route.
   {
@@ -211,7 +211,9 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
   {
     path: '/intakes/:id/discrepancy',
     element: <DecisionPage />,
-    access: { permission: 'hub.osd.adjudicate' },
+    // The route admits the read: an officer without the decision is told by the page that a senior officer decides (the generic refusal would send them to an administrator for what an administrator does not
+    // decide), and the API checks the key again on the act.
+    access: { permission: 'hub.read' },
     menu: null,
   },
   // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
