@@ -426,6 +426,15 @@ describe('the receiving mode and the parcels a handover opens (migration 0103)',
         `update pickup_intake set state = state where id = '${intake.id}'`,
       ]),
     ).toEqual({ code: '23514', constraint: 'intake_parcel_count' });
+    // The number is wrong and nothing else is: the difference and the variance still say what the parcels say, so that only the number of the count can be what the check refuses.
+    expect(
+      await adminCommit([
+        'set local session_replication_role = replica',
+        `update pickup_intake set physical_count = 7 where id = '${intake.id}'`,
+        'set local session_replication_role = origin',
+        `update pickup_intake set state = state where id = '${intake.id}'`,
+      ]),
+    ).toEqual({ code: '23514', constraint: 'intake_parcel_count' });
     // A parcel left to check in in a finished vendor.
     expect(
       await adminCommit([
@@ -799,6 +808,13 @@ describe('the guard of an intake: what the database holds of a count for every w
         'a blind count changed by the receiver',
         staff(COUNT),
         [countUpdate(blindRecon.id, 3, 0, 'MATCH', 'READY_FOR_ITEMIZATION')],
+        '23514',
+      ],
+      // The case left where it was: only the key says that the receiver may not change a blind count (the rule of a found parcel, which leaves the state alone, would let it through).
+      [
+        'a blind count changed by the receiver, the case left open',
+        staff(COUNT),
+        [countUpdate(blindRecon.id, 3, 0, 'MATCH')],
         '23514',
       ],
       [
@@ -2024,6 +2040,8 @@ describe('the names of the receiving side (migration 0106)', () => {
     const real = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
     const photo = await photoIntake(2);
     const blind = await blindIntake();
+    // A run of the same hub whose intake nobody asks about: its rider is in the caller's scope and is not named.
+    const unasked = await blindIntake();
     const officer = staff(COUNT, [HUB_A], real.identity.id);
     rowsOf(await attempt(officer, tap(photo.parcels[0]?.id ?? '', true)));
     rowsOf(await attempt(officer, finish(photo.id, false)));
@@ -2062,6 +2080,7 @@ describe('the names of the receiving side (migration 0106)', () => {
         ]),
       );
       for (const row of riders) expect(JSON.stringify(rows), key).not.toContain(row.phone);
+      expect(JSON.stringify(rows), key).not.toContain(unasked.riderId);
       expect(JSON.stringify(rows), key).not.toContain(staffRow?.work_email ?? 'unreachable');
     }
     // Another hub sees no intake and so names nobody; a context that does not read intakes is refused.
