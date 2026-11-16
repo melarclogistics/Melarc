@@ -10,6 +10,7 @@ import {
   exceptionFixture,
   failureFixture,
   handshakeFixture,
+  letThroughListFixture,
   opsHandshakeFixture,
   shortfallFixture,
 } from '../../test-support/pickup-work-fixture';
@@ -491,13 +492,8 @@ describe('a page of a stop’s evidence', () => {
   });
 
   it('is read with who, when and why of an exception', () => {
-    const page = parseStopEvidencePage(
-      evidenceListFixture({
-        items: [],
-        parcel_photos: { declared: 0, stored: 0, pending: 0, expired: 0 },
-        parcel_photo_exception: exceptionFixture(),
-      }),
-    );
+    // The list of a stop the camera failed at, after the exception: no photo, the progress at zero, the exception on it.
+    const page = parseStopEvidencePage(letThroughListFixture());
 
     expect(page?.parcel_photo_exception).toMatchObject({
       authorised_at: '2026-11-04T09:20:00Z',
@@ -517,7 +513,14 @@ describe('a page of a stop’s evidence', () => {
       { parcel_photos: { declared: 1, stored: 1, pending: 0 } as never },
     ],
     ['no progress', { parcel_photos: undefined as never }],
-    ['an exception that is not one', { parcel_photo_exception: { id: 'x' } as never }],
+    [
+      'an exception that is not one',
+      {
+        items: [],
+        parcel_photos: { declared: 0, stored: 0, pending: 0, expired: 0 },
+        parcel_photo_exception: { id: 'x' } as never,
+      },
+    ],
     ['a photo listed twice', { items: [evidenceItemFixture(), evidenceItemFixture()] }],
     ['an item that is not evidence', { items: [{ id: WORK_EVIDENCE_ID }] as never }],
   ])('is refused with %s', (_name, overrides) => {

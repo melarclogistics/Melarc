@@ -157,15 +157,48 @@ export function exceptionFixture(overrides: Partial<ExceptionBody> = {}): Except
   };
 }
 
-/** A page of a stop's evidence, with the progress of its parcel photos counted for the whole stop. */
+/** The progress of a stop whose camera failed: no parcel photo was made, so none is stored and none waits. */
+export const NO_PARCEL_PHOTOS: EvidenceListBody['parcel_photos'] = {
+  declared: 0,
+  stored: 0,
+  pending: 0,
+  expired: 0,
+};
+
+/** "N of N parcel photos uploaded": some were made, none still waits and none was lost. */
+const everyPhotoIsIn = (progress: EvidenceListBody['parcel_photos']): boolean =>
+  progress.declared > 0 && progress.pending === 0 && progress.expired === 0;
+
+/**
+ * A page of a stop's evidence, with the progress of its parcel photos counted for the whole stop. **It is a list the server can answer** (the review of Run B, finding 9): a stop let through without
+ * parcel photos is a stop whose photos could not be made or sent (Ops makes the exception before the count, when the camera failed: pickup-collection.md section 5.5), so the list of such a stop carries
+ * the exception and no photo that made it. A fixture that holds the exception beside "N of N parcel photos uploaded" is a state no server answers, and a screen test asserting on it asserts on nothing
+ * real: it throws. `letThroughListFixture` is the one fixture made for that stop.
+ */
 export function evidenceListFixture(overrides: Partial<EvidenceListBody> = {}): EvidenceListBody {
-  return {
+  const list: EvidenceListBody = {
     items: [evidenceItemFixture()],
     next_page_token: null,
     parcel_photos: { declared: 1, stored: 1, pending: 0, expired: 0 },
     parcel_photo_exception: null,
     ...overrides,
   };
+  if (list.parcel_photo_exception !== null && everyPhotoIsIn(list.parcel_photos)) {
+    throw new Error(
+      'A stop let through without parcel photos is a stop whose photos could not be made or sent: the server never answers it with every parcel photo uploaded ("N of N"). Arrange a stop with no photo, or with photos waiting or lost (letThroughListFixture).',
+    );
+  }
+  return list;
+}
+
+/** The evidence list of a stop Ops let through without parcel photos because the camera failed: no photo, the progress at zero, and the exception on it. */
+export function letThroughListFixture(overrides: Partial<EvidenceListBody> = {}): EvidenceListBody {
+  return evidenceListFixture({
+    items: [],
+    parcel_photos: NO_PARCEL_PHOTOS,
+    parcel_photo_exception: exceptionFixture(),
+    ...overrides,
+  });
 }
 
 /** The handshake an act answers with. */

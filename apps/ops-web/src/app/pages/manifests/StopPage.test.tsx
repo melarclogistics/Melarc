@@ -25,7 +25,7 @@ import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
 import {
   evidenceItemFixture,
   evidenceListFixture,
-  exceptionFixture,
+  letThroughListFixture,
 } from '../../../test-support/pickup-work-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
@@ -648,18 +648,8 @@ describe('the photos as they arrive', () => {
 
 describe('the exception that let a count through without photos', () => {
   it('says who, when and why, and offers the act no more', async () => {
-    open(
-      () =>
-        json(
-          200,
-          evidenceListFixture({
-            items: [],
-            parcel_photos: progress(0),
-            parcel_photo_exception: exceptionFixture(),
-          }),
-        ),
-      OFFICER,
-    );
+    // What the server answers for a stop the camera failed at, after the exception: no photo, the progress at zero, the exception on the list.
+    open(() => json(200, letThroughListFixture()), OFFICER);
 
     expect(await screen.findByText('Counted without parcel photos')).toBeVisible();
     expect(

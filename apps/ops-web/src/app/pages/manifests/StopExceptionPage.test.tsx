@@ -15,7 +15,11 @@ import {
   summaryFixture,
 } from '../../../test-support/manifest-fixture';
 import { PICKUP_HUB_ID } from '../../../test-support/pickup-fixture';
-import { evidenceListFixture, exceptionFixture } from '../../../test-support/pickup-work-fixture';
+import {
+  evidenceListFixture,
+  exceptionFixture,
+  letThroughListFixture,
+} from '../../../test-support/pickup-work-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
@@ -199,16 +203,8 @@ describe('a stop the form is not for', () => {
   });
 
   it('tells a stop that was let through already, and shows no form', async () => {
-    open({}, OFFICER, undefined, () =>
-      json(
-        200,
-        evidenceListFixture({
-          items: [],
-          parcel_photos: { declared: 0, stored: 0, pending: 0, expired: 0 },
-          parcel_photo_exception: exceptionFixture(),
-        }),
-      ),
-    );
+    // What the server answers for a stop the camera failed at, after the exception: no photo, the progress at zero, the exception on the list.
+    open({}, OFFICER, undefined, () => json(200, letThroughListFixture()));
 
     expect(
       await screen.findByText(/This stop has already been let through without photos/),
