@@ -336,6 +336,20 @@ describe('the words of the screens', () => {
     }
   });
 
+  // Break caught (the pictures' review, defect 12): "(optional)" typed into a label, drawn as bold as the label while the kit's "(required)" is muted. A field is optional in its help ("Optional. …"), as it
+  // is in the product's other forms.
+  it('say a field is optional in its help, and never in its label', () => {
+    for (const [path, said] of sentences) expect(said, path).not.toMatch(/\(optional\)/i);
+    for (const help of [
+      RECEIVING_WORDS.extra.noteHelp,
+      RECEIVING_WORDS.damage.noteHelp,
+      RECEIVING_WORDS.blindDamage.noteHelp,
+      RECEIVING_WORDS.decision.photosHelp,
+    ]) {
+      expect(help).toMatch(/^Optional\. /);
+    }
+  });
+
   // Break caught: the confirmation of "All N here" said another way, so that it is not the statement the officer is asked to make.
   it('say the confirmation of "All 12 here" as the owner worded it', () => {
     expect(RECEIVING_WORDS.vendor.allHere(12)).toBe('All 12 here');

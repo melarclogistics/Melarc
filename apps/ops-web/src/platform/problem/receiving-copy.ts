@@ -689,7 +689,6 @@ export const RECEIVING_WORDS = {
 
   /** The viewer of a vendor's photos, one at a time. */
   viewer: {
-    note: 'A photo is read only while this window is open.',
     act: 'Open this parcel',
     lookAt: 'Look at the photos',
   },
@@ -723,8 +722,9 @@ export const RECEIVING_WORDS = {
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the parcel.',
     onePhoto: 'One photo of the parcel is enough. Remove the others.',
-    noteLabel: 'Note (optional)',
-    noteHelp: 'What is it, and who is it from? Leave out phone numbers and email addresses.',
+    noteLabel: 'Note',
+    noteHelp:
+      'Optional. What is it, and who is it from? Leave out phone numbers and email addresses.',
     confirm: 'Add this parcel',
   },
 
@@ -736,9 +736,9 @@ export const RECEIVING_WORDS = {
     photoLabel: 'Photo of the damage',
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the damage.',
-    noteLabel: 'What is damaged? (optional)',
+    noteLabel: 'What is damaged?',
     noteHelp:
-      'A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
+      'Optional. A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
     confirm: 'Record the damage',
   },
 
@@ -875,9 +875,9 @@ export const RECEIVING_WORDS = {
     photoLabel: 'Photo of the damage',
     photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
     photoNeeded: 'Take a photo of the damage.',
-    noteLabel: 'What is damaged? (optional)',
+    noteLabel: 'What is damaged?',
     noteHelp:
-      'A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
+      'Optional. A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
     confirm: 'Record the damage',
   },
 
@@ -909,8 +909,8 @@ export const RECEIVING_WORDS = {
     },
     reasonLabel: 'Why you decided this',
     reasonHelp: 'A few words. Leave out phone numbers and email addresses.',
-    photosLabel: 'Photos for this decision (optional)',
-    photosHelp: 'Take a photo with the camera. Each is sent as soon as you take it.',
+    photosLabel: 'Photos for this decision',
+    photosHelp: 'Optional. Take a photo with the camera. Each is sent as soon as you take it.',
     chooseOutcome: 'Choose what you decide.',
     writeReason: 'Write why you decided this.',
     review: 'Review',

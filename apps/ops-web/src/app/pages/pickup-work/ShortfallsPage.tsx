@@ -85,7 +85,7 @@ function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly 
  * Count differences (surfaces/ops-portal.md section 7, `/collection-shortfalls`; S1.30; D-D5: *Short counts* until Run D, and now the over counts too): the counts the office was flagged on, short and over, from `listCollectionShortfalls`, **oldest first**: what was declared and
  * counted, the reason the rider gave and its note (staff's own), when the flag was raised and the pickup. Views: *In progress* (the rider is still out with the parcels the office was told are
  * missing), *Ended runs* and *All*. A row opens the stop. It supplements the rider's phone call and replaces nothing; **nothing marks a shortfall as read or worked yet, so the page offers no such
- * act and says so.** No price, total or fee is drawn.
+ * act.** It says nothing of what it does not do: a sentence about the list is not a word of the floor. No price, total or fee is drawn.
  */
 export function ShortfallsPage() {
   const me = useSignedInSession();
@@ -161,7 +161,6 @@ export function ShortfallsPage() {
       choice={KINDS}
       useList={useCollectionShortfalls}
       rowId={(item) => item.id}
-      note="This list supplements the rider’s phone call and replaces nothing. Nothing marks a count difference as read or worked yet, so there is no act here."
       table={{
         columns,
         density: 'two-line',

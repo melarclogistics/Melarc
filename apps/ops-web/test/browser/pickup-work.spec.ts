@@ -309,7 +309,9 @@ test.describe('the handshakes that need Ops', () => {
 
 test.describe('the short counts and the collection disputes', () => {
   // Break caught: an act drawn that the API does not have, or a price, a total or a fee on a count.
-  test('show what was counted, offer no act, and say so', async ({ page }) => {
+  test('show what was counted and offer no act, with no sentence about the list', async ({
+    page,
+  }) => {
     const { api, watch } = await open(page, SHORTFALLS);
 
     const row = table(page, 'Count differences')
@@ -319,7 +321,7 @@ test.describe('the short counts and the collection disputes', () => {
     await expect(row).toContainText('Short by 2');
     await expect(
       page.getByText(/Nothing marks a count difference as read or worked yet/),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page
         .getByRole('main')

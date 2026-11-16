@@ -894,6 +894,16 @@ describe('the photos of a vendor, one at a time (the kit’s viewer)', () => {
     for (const parcel of parcels) expect(requestsTo(arrivalOf(parcel.id))).toHaveLength(0);
   });
 
+  // Break caught (the pictures' review, defect 4): "A photo is read only while this window is open." under every photo, a sentence of the people who built the viewer about how a photo is fetched, which says
+  // nothing the officer can use.
+  it('says nothing of how a photo is read', async () => {
+    const { user } = open({ run: finished });
+    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Checked in' }));
+    await screen.findByRole('dialog', { name: 'Parcel 2' });
+
+    expect(body()).not.toMatch(/read only|while this window is open/i);
+  });
+
   // Break caught: the viewer as the only way to a parcel's acts (a missing parcel could not be found), or acts in it that decide for the page.
   it('leads from the viewer to the parcel’s own dialog, where the acts are, for an officer who may act', async () => {
     const { user } = open({ run: finished });

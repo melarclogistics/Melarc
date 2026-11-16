@@ -243,9 +243,17 @@ describe('the form: the facts first, then the decision', () => {
     expect(requestsTo(DECIDE)).toHaveLength(0);
   });
 
-  it('has the photos of a decision optional, and the camera among its fields', async () => {
+  // Break caught (the pictures' review, defect 12): "(optional)" typed into the label, as bold as the label while the kit's "(required)" is muted. The photos are optional, which the help says as the product's
+  // other forms do ("Optional. …").
+  it('has the photos of a decision optional, said in their help and not in their label, and the camera among its fields', async () => {
     open();
-    expect(await screen.findByText('Photos for this decision (optional)')).toBeVisible();
+    expect(await screen.findByText('Photos for this decision')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Optional. Take a photo with the camera. Each is sent as soon as you take it.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/\(optional\)/)).toBeNull();
   });
 });
 

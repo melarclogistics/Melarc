@@ -63,12 +63,12 @@ function MissingFor({ item }: { readonly item: MissingParcelView }) {
   );
 }
 
+/** A parcel as a card, where the vendor is the card's title and is said there once, not again as a row under it. */
 function MissingCard({ item }: { readonly item: MissingParcelView }) {
   return (
     <CardFacts
       lead={<MissingPicture item={item} size="tile" />}
       facts={[
-        { label: WORDS.missingList.columns.vendor, value: item.vendor_name },
         { label: WORDS.missingList.columns.run, value: item.run_code },
         {
           label: WORDS.missingList.columns.missingFor,

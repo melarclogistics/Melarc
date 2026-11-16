@@ -17,6 +17,7 @@ import {
   photoLinkHandlers,
   runPage,
 } from '../../../test-support/receiving-fixture';
+import { narrowRoom, restoreRoom } from '../../../test-support/narrow-room';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
@@ -36,6 +37,7 @@ let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
   api.restore();
+  restoreRoom();
 });
 
 const photosOf = (items: readonly ReturnType<typeof missingParcelFixture>[]) =>
@@ -123,6 +125,17 @@ describe('the list of missing parcels: what it shows', () => {
     // The photo is the parcel's own, drawn by the kit's picture: nothing of its identifier is on the page.
     expect(document.querySelectorAll('img.photo-picture--tile').length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(/retrieval-authorization|photos\.example\.test/);
+  });
+
+  // Break caught (the pictures' review, defect 10): at a phone's width the vendor was said twice in a card, as its title and again as a "Vendor" row under it.
+  it('says the vendor once in a card, as its title, in a room too narrow for the columns', async () => {
+    narrowRoom();
+    open();
+
+    const cards = within(await screen.findByRole('list', { name: 'Missing parcels' }));
+    expect(cards.getByRole('heading', { name: KENTE })).toBeVisible();
+    expect(cards.getAllByText(KENTE)).toHaveLength(1);
+    expect(cards.getByText(RUN_CODE)).toBeVisible();
   });
 
   // Break caught: a list that asks for no view, or the wrong one, so that the written-off parcels are shown as being searched for.
