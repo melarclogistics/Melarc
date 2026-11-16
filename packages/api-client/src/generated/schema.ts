@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.108.0
- *   SHA-256 aac54b3dc55062e4a7ab8a84ef78a626790d6257f795c8e3f82f6b8c6c3ba2cd (of the contract, line endings normalized to LF)
+ *   SHA-256 dcc2f0b056dbc0487779f9c7203238b296f8dfc684daf81e760324b9317d5a9c (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1572,6 +1572,11 @@ export interface paths {
          *     `VALIDATION_FAILED` (rule `parcel_required`). A **blind-count** intake records one condition for
          *     the intake, after the count, as above (the unique index of migration `0097` becomes two partial
          *     ones, in a new migration). The response of a photo intake is its third shape (see `getHubIntake`).
+         *
+         *     **The `STATE_CONFLICT` rules** (`details.rule`), each held by the database for every writer: `stale` (the `ETag` is not the intake's current one),
+         *     `intake_not_counted` (a blind-count intake still waiting for its count), `itemization_started`, `condition_already_recorded` (once for a blind-count
+         *     intake, once for each parcel of a photo one) and, in photo mode, `parcel_not_arrived`. `VALIDATION_FAILED` names `parcel_required` (photo mode, no parcel) and
+         *     a `parcel_id` given for a blind-count intake or for a parcel that is not this intake's.
          */
         post: operations["recordIntakeCondition"];
         delete?: never;
@@ -1680,7 +1685,8 @@ export interface paths {
          *     officer and the Platform Admin, never Ops Staff** (`PERMISSION_DENIED` before the body is read); for staff of the Ops Portal alone, by the hubs of
          *     the grant. The safety net for a mistaken count or check-in now that an intake has no cap on its parcels. **A reason in words is mandatory** (blank is
          *     `REASON_REQUIRED`; there is no catalogue) and the correction is allowed **before itemizing starts only** (`STATE_CONFLICT`, rule
-         *     `itemization_started`, after). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
+         *     `itemization_started`, after) **and after the count has been made** (`STATE_CONFLICT`, rule `intake_not_counted`: a vendor still being checked in, or a blind-count
+         *     intake waiting for its count). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
          *
          *     **The body follows the intake's mode and names the correction exactly once** (`VALIDATION_FAILED`, rule `mode_mismatch`, for the other mode's
          *     member, for both and for neither). A **photo** intake takes `parcel_changes`, each naming a parcel of this intake and the state it is to have: a
@@ -2898,6 +2904,10 @@ export interface paths {
          *     intake and once (`STATE_CONFLICT`, `details.rule` `not_written_off`, `vendor_already_told`), it may
          *     be recorded when the intake is past reconciliation, and it moves no state. A count or a
          *     check-in is corrected by `correctIntakeCount` (D-D8), never by an adjudication.
+         *
+         *     **The `STATE_CONFLICT` rules** (`details.rule`): `stale` (the `ETag`), `not_awaiting_resolution` (the intake is not in reconciliation: resolved already, waiting for
+         *     its count or being itemized; *Vendor told* is not asked this), and, for *Vendor told* alone, `not_written_off` and `vendor_already_told`. A condition given with *Vendor told*
+         *     is `VALIDATION_FAILED`: it records what was said to the vendor and sets nothing.
          */
         post: operations["adjudicateDiscrepancy"];
         delete?: never;
