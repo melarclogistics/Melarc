@@ -1,9 +1,10 @@
 -- Run D, S1.35b (the reads of receiving by run): the queue BY RUN, the run's page and the missing parcels need the run's CODE, its service date and the hub's name, and a vendor's name to find a run by. The run is a pickup manifest,
--- which the key hub.read cannot read (the policies of pickup_manifest name the keys of the pickup domain), and the receiving side must not be given the manifest's other columns. Hand-written throughout (no table or column
--- changes here). This migration is applied as melarc_migration_elevated, a member of melarc_owner (MIGRATION_AND_SEEDING.md section 5.1). Forward of 0106; nothing earlier is edited.
+-- which the key hub.read cannot read (the policies of pickup_manifest name the keys of the pickup domain). Hand-written throughout (no table or column changes here). This migration is applied as
+-- melarc_migration_elevated, a member of melarc_owner (MIGRATION_AND_SEEDING.md section 5.1). Forward of 0106; nothing earlier is edited.
 --
---   * ONE POLICY: the owner reads the manifests of the hubs of the grant under the three keys that read intakes (hub.read, hub.intake.count, hub.osd.adjudicate), and only as the owner (`current_user`), so that no
---     statement of the runtime login reaches a manifest by it: the policy exists for the three functions below, which select the code, the service date and nothing else of a manifest.
+--   * ONE POLICY: staff that hold one of the three keys that read intakes (hub.read, hub.intake.count, hub.osd.adjudicate) read the manifests of the hubs of the grant **that the hub has been handed** (a manifest that has an
+--     intake: the run is the hub's to receive, and no other manifest is reached by these keys). It serves the three functions below, which select the code, the service date and nothing else of a manifest, and the
+--     guard of the route that names a run (`getReceivingRun`: the record is asked of the key the route runs under, and a run of another hub is told by the probe policy of 0058).
 --   * melarc.receiving_runs(hub, view, q, after, limit, run): THE ONE CRITERIA of the queue by run. A row for each run whose hub handover opened intakes in the hubs of the grant: its code, its hub, its date, the rider who
 --     handed it over (the first intake's), the earliest handover, and the counts of its vendors (waiting, needing a decision, blind-count), the parcels its door photos expect and the parcels of its open cases that are
 --     missing. `view` is the list's filter (waiting = a vendor still waits to be checked in, needs_decision = a vendor is in reconciliation, all); `q` finds a run by its code and an intake by its code, its run's code or its
@@ -17,8 +18,9 @@
 
 CREATE POLICY "pickup_manifest_receiving_read" ON "pickup_manifest" FOR SELECT USING (
   CASE melarc.principal_type()
-    WHEN 'STAFF' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') IN ('hub.read', 'hub.intake.count', 'hub.osd.adjudicate')
+    WHEN 'STAFF' THEN coalesce(current_setting('melarc.authorization_key', true), '') IN ('hub.read', 'hub.intake.count', 'hub.osd.adjudicate')
       AND (melarc.hub_scope_mode() = 'ALL' OR "pickup_manifest"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
+      AND EXISTS (SELECT 1 FROM "pickup_intake" AS i WHERE i.pickup_manifest_id = "pickup_manifest"."id")
     ELSE false
   END
 );
