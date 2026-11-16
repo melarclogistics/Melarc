@@ -6,6 +6,7 @@ import { MANIFEST_ID, REQUEST_ONE_ID } from '../../../src/test-support/manifest-
 import { PICKUP_HUB_ID } from '../../../src/test-support/pickup-fixture';
 import { freezeClock } from './clock';
 import { answerQueueSummary } from './queue-summary';
+import { answerRuns, parcelRow, type RunRow } from './receiving-runs-api';
 
 /**
  * What the browser tests of the receiving screens (S1.35) put in place of the API: a small, stateful stand-in for the operations the five screens use. It is the real shape of the contract's answers
@@ -103,6 +104,11 @@ interface EvidenceRow {
 export interface World {
   permissions: string[];
   intakes: Row[];
+  /**
+   * The runs of the receiving screens (S1.35c): each a handover of one rider with its vendors, a vendor with door photos holding its parcels. A vendor counted blind is one of `intakes` (the blind count page
+   * reads it there), and its state follows that row.
+   */
+  runs: RunRow[];
   evidence: EvidenceRow[];
   /** After this the holder of a lock has been idle past the hub's idle time, so that the lock is taken over by the next to ask. */
   holderIdle: boolean;
@@ -132,6 +138,7 @@ export function world(setup: Partial<World> = {}): World {
         physical: MATCHED_COUNT,
       }),
     ],
+    runs: defaultRuns(),
     evidence: [],
     holderIdle: false,
     raceOnCount: false,
@@ -139,6 +146,101 @@ export function world(setup: Partial<World> = {}): World {
     pageSize: 100,
   };
   return { ...base, ...setup };
+}
+
+export const RUNS = {
+  /** Three vendors: two with door photos (four and two parcels) and one counted blind. Waiting to be checked in. */
+  waiting: '8b2c3d4e-5f60-4b7c-8d8e-0f1a2b3c4d01',
+  /** One vendor with door photos, finished, one parcel missing: a senior officer's decision. */
+  decision: '8b2c3d4e-5f60-4b7c-8d8e-0f1a2b3c4d02',
+  kente: '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c01',
+  shea: '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c02',
+  yaw: '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c03',
+} as const;
+
+/** The runs of a world: the first waits, with a vendor of four parcels, one of two and one counted blind (the old intake that waits); the second was checked in and has a parcel missing. */
+function defaultRuns(): RunRow[] {
+  return [
+    {
+      id: RUNS.waiting,
+      code: 'ACC-MF-7KQ2MZ',
+      riderName: 'Kofi Boateng',
+      handedOverAt: '2026-11-03T07:00:00Z',
+      hubId: IDS.hub,
+      hubName: 'Accra Central',
+      vendors: [
+        {
+          id: RUNS.kente,
+          code: 'ACC-IN-3HN7WD',
+          name: 'Kente Crafts',
+          mode: 'PHOTO_CHECK_IN',
+          state: 'AWAITING_COUNT',
+          version: 1,
+          parcels: [1, 2, 3, 4].map((n) => parcelRow(1, n)),
+          lock: null,
+          received: null,
+          blindCounted: null,
+          riderNumber: 0,
+        },
+        {
+          id: RUNS.shea,
+          code: 'ACC-IN-9BC2KE',
+          name: 'Shea Naturals',
+          mode: 'PHOTO_CHECK_IN',
+          state: 'AWAITING_COUNT',
+          version: 1,
+          parcels: [1, 2].map((n) => parcelRow(2, n)),
+          lock: null,
+          received: null,
+          blindCounted: null,
+          riderNumber: 0,
+        },
+        {
+          id: IDS.waiting,
+          code: 'ACC-IN-7KQ2MZ',
+          name: 'Adwoa Stalls',
+          mode: 'BLIND_COUNT',
+          state: 'AWAITING_COUNT',
+          version: 1,
+          parcels: [],
+          lock: null,
+          received: null,
+          blindCounted: null,
+          riderNumber: DECLARED,
+        },
+      ],
+    },
+    {
+      id: RUNS.decision,
+      code: 'ACC-MF-4PX8RT',
+      riderName: 'Efua Sarpong',
+      handedOverAt: '2026-11-03T08:00:00Z',
+      hubId: IDS.hub,
+      hubName: 'Accra Central',
+      vendors: [
+        {
+          id: RUNS.yaw,
+          code: 'ACC-IN-6TF5MJ',
+          name: 'Yaw Textiles',
+          mode: 'PHOTO_CHECK_IN',
+          state: 'RECONCILIATION_REQUIRED',
+          version: 2,
+          parcels: [
+            parcelRow(3, 1, {
+              state: 'ARRIVED',
+              arrivedBy: 'Synthetic Officer',
+              arrivedAt: '2026-11-03T08:20:00Z',
+            }),
+            parcelRow(3, 2, { state: 'MISSING', missingAt: '2026-11-03T08:20:00Z' }),
+          ],
+          lock: null,
+          received: 1,
+          blindCounted: null,
+          riderNumber: 0,
+        },
+      ],
+    },
+  ];
 }
 
 function row(
@@ -271,7 +373,7 @@ function paged<T>(items: readonly T[], query: URLSearchParams, cap: number) {
 
 const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 
-function answer(route: Route, state: ReceivingApi, call: Call): Promise<void> {
+async function answer(route: Route, state: ReceivingApi, call: Call): Promise<void> {
   const { world: w } = state;
   const { method, path } = call;
   const query = new URL(route.request().url()).searchParams;
@@ -297,6 +399,38 @@ function answer(route: Route, state: ReceivingApi, call: Call): Promise<void> {
         authorized_hubs: [{ id: IDS.hub, display_name: 'Accra Central' }],
       },
     });
+  }
+
+  // The runs of the receiving screens: the queue by run, a run's page, the lock of a vendor, a tap, the finish of a vendor, an extra and damage on a parcel. A vendor counted blind is one of the intakes: its state
+  // is the intake's, so that the blind count page and the run's page agree.
+  for (const run of w.runs) {
+    for (const vendor of run.vendors) {
+      const intake =
+        vendor.mode === 'BLIND_COUNT' ? w.intakes.find((r) => r.id === vendor.id) : undefined;
+      if (intake !== undefined) {
+        vendor.state = intake.state;
+        vendor.blindCounted = intake.physical;
+        vendor.version = intake.version;
+        vendor.lock = null;
+      }
+    }
+  }
+  if (
+    await answerRuns(route, call, {
+      runs: w.runs,
+      holds,
+      leak: w.leak,
+      stored: (evidenceId, ownerId) =>
+        w.evidence.some(
+          (record) =>
+            record.id === evidenceId && record.owner === ownerId && record.state === 'STORED',
+        ),
+      me: IDS.me,
+      pageSize: w.pageSize,
+      note: () => undefined,
+    })
+  ) {
+    return;
   }
 
   if (method === 'GET' && path === '/api/v1/hub-intakes') {
@@ -451,12 +585,18 @@ function answer(route: Route, state: ReceivingApi, call: Call): Promise<void> {
   // Evidence: declare, complete, and the authorization of one stored photo.
   if (method === 'POST' && path === '/api/v1/evidence') {
     if (call.idempotencyKey === undefined) return route.fulfill(error(400, 'VALIDATION_FAILED'));
-    const r = w.intakes.find((candidate) => candidate.id === body.owner_id);
+    const intake = w.intakes.find((candidate) => candidate.id === body.owner_id);
+    // A vendor of a run that has door photos: its photos (an extra's, a parcel's damage) are the receiver's, under the key of the count, whatever the purpose and wherever the vendor stands.
+    const vendor = w.runs
+      .flatMap((run) => run.vendors)
+      .find((candidate) => candidate.id === body.owner_id && candidate.mode === 'PHOTO_CHECK_IN');
+    const r = intake ?? vendor;
     if (r === undefined || body.owner_type !== 'PICKUP_INTAKE')
       return route.fulfill(error(404, 'NOT_FOUND'));
-    const needed = body.purpose === 'OSD' ? 'hub.osd.adjudicate' : 'hub.intake.count';
+    const needed =
+      vendor === undefined && body.purpose === 'OSD' ? 'hub.osd.adjudicate' : 'hub.intake.count';
     if (!holds(needed)) return route.fulfill(error(403, 'PERMISSION_DENIED'));
-    if (r.physical === null)
+    if (intake?.physical === null)
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'intake_not_counted' }));
     if (!/^[0-9a-f]{64}$/.test(String(body.checksum_sha256)) || Number(body.byte_size) < 1)
       return route.fulfill(error(400, 'VALIDATION_FAILED'));
