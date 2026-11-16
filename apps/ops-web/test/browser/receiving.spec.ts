@@ -122,6 +122,16 @@ async function expectBlind(page: Page, opened: Opened): Promise<void> {
 const gallery = (scope: Page | ReturnType<Page['locator']>) =>
   scope.locator('input[type="file"][multiple]');
 
+/** A press on a tile opens the photo in the viewer (D-D2); *Open this parcel* leads from it to the parcel's own dialog, where the acts are. */
+async function openParcel(page: Page, tile: ReturnType<Page['locator']>, name: string) {
+  await tile.click();
+  await page.getByRole('button', { name: 'Open this parcel' }).click();
+  await expect(page.getByRole('button', { name: 'Open this parcel' })).toHaveCount(0);
+  const dialog = page.getByRole('dialog', { name });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 async function enterCount(page: Page, text: string): Promise<void> {
   await page.getByRole('textbox', { name: /Parcels counted/ }).fill(text);
   await page.getByRole('button', { name: 'Review the count' }).click();
@@ -342,8 +352,11 @@ test.describe('the run’s page: a finished run', () => {
     const opened = await open(page, runPath(RUNS.decision));
     const yaw = page.getByRole('region', { name: 'Yaw Textiles' });
 
-    await yaw.getByRole('button', { name: 'Parcel 2, Missing' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Parcel 2' });
+    const dialog = await openParcel(
+      page,
+      yaw.getByRole('button', { name: 'Parcel 2, Missing' }),
+      'Parcel 2',
+    );
     await expect(dialog.getByText(/Missing since /)).toBeVisible();
     await dialog.getByRole('button', { name: 'Found it' }).click();
 
@@ -454,11 +467,12 @@ test.describe('the run’s page: a photo taken at the hub', () => {
     await page.getByRole('button', { name: 'Yes, all 4 are here' }).click();
     await expect(kente.getByText('Kente Crafts is checked in.')).toBeVisible();
 
-    await kente.getByRole('button', { name: 'Parcel 2, Checked in' }).click();
-    await page
-      .getByRole('dialog', { name: 'Parcel 2' })
-      .getByRole('button', { name: 'Damaged' })
-      .click();
+    const parcel = await openParcel(
+      page,
+      kente.getByRole('button', { name: 'Parcel 2, Checked in' }),
+      'Parcel 2',
+    );
+    await parcel.getByRole('button', { name: 'Damaged' }).click();
     const dialog = page.getByRole('alertdialog', { name: 'Record damage on Parcel 2?' });
     await dialog.getByRole('button', { name: 'Record the damage' }).click();
     await expect(dialog.getByText('Take a photo of the damage.')).toBeVisible();
@@ -1196,11 +1210,25 @@ const SCREENS: readonly Screen[] = [
     heading: false,
     reach: async (page) => {
       await open(page, runPath(RUNS.decision));
+      await openParcel(
+        page,
+        page
+          .getByRole('region', { name: 'Yaw Textiles' })
+          .getByRole('button', { name: 'Parcel 2, Missing' }),
+        'Parcel 2',
+      );
+    },
+  },
+  {
+    name: 'a vendor’s photo in the viewer',
+    heading: false,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.decision));
       await page
         .getByRole('region', { name: 'Yaw Textiles' })
         .getByRole('button', { name: 'Parcel 2, Missing' })
         .click();
-      await expect(page.getByRole('dialog', { name: 'Parcel 2' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Open this parcel' })).toBeVisible();
     },
   },
   {
@@ -1323,7 +1351,8 @@ const SCREENS: readonly Screen[] = [
     heading: true,
     reach: async (page) => {
       await open(page, MISSING);
-      await expect(table(page, 'Missing parcels')).toContainText('Yaw Textiles');
+      // A table at the wide widths and cards at the narrow ones: the vendor's name is on both.
+      await expect(page.getByText('Yaw Textiles').first()).toBeVisible();
     },
   },
 ];
