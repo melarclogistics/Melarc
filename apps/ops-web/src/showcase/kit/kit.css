@@ -138,6 +138,19 @@
   padding: 0;
 }
 
+/*
+ * A specimen drawn in the room a screen gives it (`edge`): no padding at its sides, and the frame keeps its line and its space above and below. The page is framed twice and a specimen a third time (98px at 390px),
+ * where a receiving screen is framed once (66px): a grid of photos has 324px there and 292px in a frame of padding, which is two tiles to a row and not three.
+ */
+.showcase-kit-specimen__body--edge {
+  padding-inline: 0;
+}
+
+/* What is drawn beside a component in an edge specimen keeps the frame's space at its sides. */
+.showcase-kit-specimen__note {
+  margin: var(--space-3) var(--space-4) 0;
+}
+
 .showcase-kit-row {
   display: flex;
   flex-wrap: wrap;

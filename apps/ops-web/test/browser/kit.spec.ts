@@ -2821,10 +2821,13 @@ test.describe('the photo kit in a browser', () => {
       const columns = await frame
         .getByRole('list', { name: 'Sample photos of one stop' })
         .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
-      const measured = `the list is ${String(list.width)}px wide, in ${String(columns)} columns`;
-      expect(firstRow, measured).toBe(Math.min(7, columns));
-      // A 390px phone has three to a row, in the showcase's frame and in the receiving run's (the grid's room there is 324px).
-      if (width === 390) expect(firstRow, measured).toBe(3);
+      // What the stylesheet says, from the room measured: a column is 6rem (96px) at least and the gap is 12px, so a room holds as many columns as `floor((room + 12) / (96 + 12))`. The count is never written
+      // down as a number of the phone: the room is measured, and the specimen is given the room a receiving screen gives a grid (`edge`), where a 390px phone has 324px and so three columns.
+      const held = Math.floor((list.width + 12) / (96 + 12));
+      const measured = `the list is ${String(list.width)}px wide: ${String(held)} columns of 96px and a gap of 12px, the browser has ${String(columns)}`;
+      expect(columns, measured).toBe(held);
+      expect(firstRow, measured).toBe(Math.min(7, held));
+      if (width === 390) expect(list.width, measured).toBeGreaterThanOrEqual(3 * 96 + 2 * 12);
       for (const each of boxes) {
         expect(each.width).toBeGreaterThanOrEqual(56);
         expect(each.height).toBeGreaterThanOrEqual(56);
@@ -2843,12 +2846,15 @@ test.describe('the photo kit in a browser', () => {
     const tile = (n: number): Locator =>
       frame.getByRole('button', { name: new RegExp(`^Sample parcel ${String(n)}(,|$)`) });
 
+    // A row down is as many tiles on as the grid has columns (what the room holds: 6rem and a gap of 12px, measured, as in the spec above), so from the second tile it is tile 2 plus the columns, the fifth at 390px.
+    const room = await box(frame.getByRole('list', { name: 'Sample photos of one stop' }));
+    const columns = Math.floor((room.width + 12) / (96 + 12));
+    expect(columns, `the list is ${String(room.width)}px wide`).toBeGreaterThanOrEqual(3);
     await tile(1).focus();
     await page.keyboard.press('ArrowRight');
     await expect(tile(2)).toBeFocused();
-    // Three to a row at 390px: a row down from the second tile is the fifth.
     await page.keyboard.press('ArrowDown');
-    await expect(tile(5)).toBeFocused();
+    await expect(tile(2 + columns)).toBeFocused();
     await page.keyboard.press('End');
     await expect(tile(7)).toBeFocused();
     await page.keyboard.press('Home');
