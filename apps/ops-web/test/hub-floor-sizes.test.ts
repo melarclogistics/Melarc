@@ -3,23 +3,12 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { ruleOf } from './support/css-rule';
+
 const UI = join(resolve(import.meta.dirname, '..'), 'src', 'components', 'ui');
 const TOKENS = join(resolve(import.meta.dirname, '..'), 'src', 'styles', 'tokens.css');
 
 const css = (file: string): string => readFileSync(join(UI, file), 'utf8');
-
-/**
- * The body of the first rule whose selector list contains `selector` exactly (a rule written as `a, b { … }` counts for both), with its comments taken out. The stylesheets of the kit are flat
- * (no nesting), so a rule ends at the first closing brace.
- */
-function ruleOf(text: string, selector: string): string | undefined {
-  const clean = text.replace(/\/\*[\s\S]*?\*\//g, '');
-  for (const match of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const selectors = (match[1] ?? '').split(',').map((part) => part.trim());
-    if (selectors.includes(selector)) return match[2] ?? '';
-  }
-  return undefined;
-}
 
 /**
  * The hub floor's 56 px (DESIGN_SYSTEM sections 11 and 12, the Product Owner's decision of 5 November 2026: hub-floor tasks are tablet-first at 768 px, with 56 px touch rows and controls). The size is
