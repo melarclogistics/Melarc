@@ -21,6 +21,8 @@ import {
   Funnel,
   Gavel,
   Handshake,
+  Image,
+  ImageOff,
   Info,
   LaptopMinimalCheck,
   ListChecks,
@@ -118,6 +120,9 @@ export const ICONS = {
   'lock-open': LockOpen,
   // The kit (redesign step R5): the overflow menu of a record's acts. (The "+" of adding a filter is `plus`, the shell's.)
   'more-actions': Ellipsis,
+  // The photo kit (Run D, S1.35c-0): a photo that is on its way, and one that cannot be shown (the words say which: the icon never does alone).
+  photo: Image,
+  'photo-unavailable': ImageOff,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
