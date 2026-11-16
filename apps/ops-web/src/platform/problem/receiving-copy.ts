@@ -589,6 +589,8 @@ export const RECEIVING_WORDS = {
     checkedIn: (count: number): string => `${String(count)} checked in`,
     missing: (count: number): string => `${String(count)} missing`,
     extra: (count: number): string => `${String(count)} extra`,
+    /** A parcel that is not on the list is checked in: it is said inside the count of the ones checked in ("4 checked in (1 not on the list, 1 damaged)"), not beside it as one parcel more. */
+    notOnTheList: (count: number): string => `${String(count)} not on the list`,
     damaged: (count: number): string => `${String(count)} damaged`,
   },
 

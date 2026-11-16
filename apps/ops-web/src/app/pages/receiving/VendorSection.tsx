@@ -38,6 +38,8 @@ export interface VendorSectionProps {
   readonly acts: RunActs;
   /** The vendor to check in after this one, or nothing when none waits. */
   readonly next: VendorView | undefined;
+  /** This is the first vendor of the run that waits to be checked in: the one the officer works in until they begin on another. Its bar of acts stays at the foot of the screen. */
+  readonly firstToCheck: boolean;
   /** What the page says of the last act done on this vendor, and the way to send the officer on. */
   readonly notice: string | undefined;
   readonly onNotice: (text: string) => void;
@@ -112,20 +114,29 @@ function Notice({
   );
 }
 
+/**
+ * The bar of a vendor's acts. **Only the bar of the vendor in work is kept at the foot of the screen** (the first vendor that waits, and any vendor the officer is checking in): a bar kept there for every vendor is
+ * drawn over the top of its own card, over the vendor's name, whenever the card begins at the foot of the screen. The bar of every other vendor stands at the end of its card, where the officer meets it.
+ */
+const barClass = (inWork: boolean): string =>
+  inWork ? 'receiving-actions receiving-actions--sticky' : 'receiving-actions';
+
 /** A vendor whose parcels are counted and not checked in (Ops excused the door photos): one line says how, and the count is typed before the rider's number is shown. Nothing of that number is here. */
 function BlindVendor({
   vendor,
   mayCount,
+  firstToCheck,
 }: {
   readonly vendor: VendorView;
   readonly mayCount: boolean;
+  readonly firstToCheck: boolean;
 }) {
   if (vendor.state === 'AWAITING_COUNT') {
     return (
       <>
         <p>{WORDS.vendor.blind.explain}</p>
         {mayCount ? (
-          <div className="receiving-actions">
+          <div className={barClass(firstToCheck)}>
             <ButtonLink to={countPath(vendor.intake_id)} size="lg">
               {WORDS.vendor.blind.countButton}
             </ButtonLink>
@@ -156,10 +167,14 @@ function BlindVendor({
 function PhotoVendor({
   vendor,
   mayCount,
+  firstToCheck,
   acts,
   onNotice,
   readAgain,
-}: Pick<VendorSectionProps, 'vendor' | 'mayCount' | 'acts' | 'onNotice' | 'readAgain'>) {
+}: Pick<
+  VendorSectionProps,
+  'vendor' | 'mayCount' | 'firstToCheck' | 'acts' | 'onNotice' | 'readAgain'
+>) {
   const [chosen, setChosen] = useState(false);
   const [dialog, setDialog] = useState<'all' | 'finish' | 'extra' | undefined>(undefined);
   const [openId, setOpenId] = useState<string | undefined>(undefined);
@@ -253,7 +268,7 @@ function PhotoVendor({
         </div>
       ) : null}
       {mayAddExtra ? (
-        <div className="receiving-actions">
+        <div className={barClass(tapping || firstToCheck)}>
           {waiting && tapping ? (
             <Button
               type="button"
@@ -416,6 +431,7 @@ export function VendorSection({
   mayCount,
   acts,
   next,
+  firstToCheck,
   notice,
   onNotice,
   onGoTo,
@@ -432,13 +448,19 @@ export function VendorSection({
       </div>
       <p>{photographedText(vendor)}</p>
       <LockLine vendor={vendor} status={acts.lockStatus(vendor.intake_id)} />
-      <Notice text={notice} next={next} onGoTo={onGoTo} />
+      {/* The way on is told of a vendor that is finished: while this one still waits (a parcel not on the list was added, a damage recorded, a parcel taken back) the officer is not sent to another. */}
+      <Notice
+        text={notice}
+        next={vendor.state === 'AWAITING_COUNT' ? undefined : next}
+        onGoTo={onGoTo}
+      />
       {vendor.receiving_mode === 'BLIND_COUNT' ? (
-        <BlindVendor vendor={vendor} mayCount={mayCount} />
+        <BlindVendor vendor={vendor} mayCount={mayCount} firstToCheck={firstToCheck} />
       ) : (
         <PhotoVendor
           vendor={vendor}
           mayCount={mayCount}
+          firstToCheck={firstToCheck}
           acts={acts}
           onNotice={onNotice}
           readAgain={readAgain}

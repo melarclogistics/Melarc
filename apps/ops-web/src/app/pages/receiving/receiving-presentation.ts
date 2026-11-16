@@ -126,17 +126,25 @@ export function photographedText(vendor: VendorView): string {
 }
 
 /**
- * What a finished vendor came to, from its counts, in the floor's words ("11 checked in, 1 missing"). **The counts are the API's**: this draws them and works out nothing. A vendor still waiting says how
- * many have been checked in so far.
+ * What a finished vendor came to, from its counts, in the floor's words ("11 checked in, 1 missing"). **The counts are the API's**: this draws them and works out nothing. **A parcel that is not on the list and
+ * a damaged parcel are checked in**, so they are told inside the count of the ones checked in ("4 checked in (1 not on the list, 1 damaged), 1 missing"), where beside it they read as more parcels than came
+ * (seven for a vendor of five). A vendor with no count of ones checked in (counted without photos) says each as it is.
  */
 export function countsText(vendor: Pick<VendorView, 'state'> & CountsView): string {
-  const parts: string[] = [];
-  const arrived = vendor.arrived_count;
-  if (arrived !== null) parts.push(WORDS.counts.checkedIn(arrived));
-  if (vendor.missing_count > 0) parts.push(WORDS.counts.missing(vendor.missing_count));
-  if (vendor.extra_count > 0) parts.push(WORDS.counts.extra(vendor.extra_count));
-  if (vendor.damaged_count > 0) parts.push(WORDS.counts.damaged(vendor.damaged_count));
-  return parts.join(', ');
+  const missing = vendor.missing_count > 0 ? [WORDS.counts.missing(vendor.missing_count)] : [];
+  const damaged = vendor.damaged_count > 0 ? [WORDS.counts.damaged(vendor.damaged_count)] : [];
+  if (vendor.arrived_count === null) {
+    const extra = vendor.extra_count > 0 ? [WORDS.counts.extra(vendor.extra_count)] : [];
+    return [...missing, ...extra, ...damaged].join(', ');
+  }
+  const among = [
+    ...(vendor.extra_count > 0 ? [WORDS.counts.notOnTheList(vendor.extra_count)] : []),
+    ...damaged,
+  ];
+  const checkedIn = WORDS.counts.checkedIn(vendor.arrived_count);
+  return [among.length === 0 ? checkedIn : `${checkedIn} (${among.join(', ')})`, ...missing].join(
+    ', ',
+  );
 }
 
 /** One finding of a vendor as the record says it: what it is, in the floor's words, with its note, its photos and who made it. */

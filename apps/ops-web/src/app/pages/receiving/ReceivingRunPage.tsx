@@ -99,7 +99,8 @@ function Run({
     void query.refetch();
   });
 
-  const waiting = page.vendors.some((vendor) => vendor.state === 'AWAITING_COUNT');
+  const firstWaiting = page.vendors.find((vendor) => vendor.state === 'AWAITING_COUNT');
+  const waiting = firstWaiting !== undefined;
   // Whether a vendor has waited on this page: the summary that appears after that is one the officer has just earned, and is read first. (State kept from what the page is given, set while it is drawn.)
   const [sawWaiting, setSawWaiting] = useState(waiting);
   if (waiting && !sawWaiting) setSawWaiting(true);
@@ -146,6 +147,7 @@ function Run({
           mayCount={mayCount}
           acts={acts}
           next={nextWaiting(page.vendors, vendor)}
+          firstToCheck={vendor.intake_id === firstWaiting?.intake_id}
           notice={notices[vendor.intake_id]}
           onNotice={(text) => {
             setNotices((all) => ({ ...all, [vendor.intake_id]: text }));
