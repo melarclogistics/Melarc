@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.107.0
- *   SHA-256 d479ad8036174fa8d99040394c2b49cab9068129ef4031ef77669525ff8893ce (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.108.0
+ *   SHA-256 eefdefffd988f09d621cd3cc05331aab3add14cb44c191a1af42aa873fc7db3c (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -108,8 +108,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the short counts flagged to the office
-         * @description Where the office finds a shortfall in the system (21.3, `AC-SLICE-001-21`; plan S1.30; `OB-S1-51`, `OB-S1-70`): every collection counted fewer than declared,
+         * List the count differences flagged to the office - short and over
+         * @description **Run D (5.108.0; D-D5; designed, built by S1.35a): this is the office's list of count differences.** The operationId
+         *     is kept and the list holds **the short counts and the over counts together** (a count above the booking is accepted from
+         *     5.108.0, see `recordCollection`), each item stating its `variance` (`SHORT` or `OVER`), with a `variance` filter beside
+         *     `open`; the screens call it *Count differences*. The text below describes the short counts it listed until then, and it
+         *     holds for both.
+         *
+         *     Where the office finds a shortfall in the system (21.3, `AC-SLICE-001-21`; plan S1.30; `OB-S1-51`, `OB-S1-70`): every collection counted fewer than declared,
          *     oldest first, each with what was declared and counted, the reason the rider gave and its note, the moment the office flag was raised and the pickup it
          *     is about. It supplements the rider's phone call and never replaces it. The key is the one the collection feature gives for working the shortfall
          *     flag (`pickup.handshake.override`).
@@ -909,8 +915,19 @@ export interface paths {
          *     `ZERO_COLLECTION_IS_FAILURE`, and nothing is made - no record, no promoted sender, no handover.
          *     `variance` is recorded on every collection: `MATCH` when the counts are equal, `SHORT` when
          *     fewer were collected. **More than was declared is `VALIDATION_FAILED`** (`details.violations`
-         *     `/collected_count`, rule `above_declared`): neither section of the specification names a
-         *     variance for it, and nothing is invented.
+         *     `/collected_count`, rule `above_declared`) in 5.107.0 and before: neither section of the
+         *     specification named a variance for it, and nothing was invented. **From 5.108.0 it is an `OVER`
+         *     count** (Run D, D-D5, the Product Owner's decision of 15 and 16 November 2026; *designed here and
+         *     built by S1.35a, so the schema and the answer follow with that code*). The record's `variance` is
+         *     then `OVER`, with a difference of `collected_count` minus `declared_count`; a reason of the
+         *     `PICKUP_OVER_COUNT` catalogue (draft codes `VENDOR_ADDED_PARCELS`, `BOOKED_NUMBER_WRONG` and
+         *     `OTHER`, the last with a note) is required (`REASON_REQUIRED`, `REASON_NOT_ACTIVE`) and kept as the
+         *     catalogue held it, as a short count's is; **the office is flagged and the Ops feed is told in the
+         *     same transaction** (`office_notified_at`; the feed entry `COLLECTION_OVER_OPS_FEED`, titled
+         *     *Pickup counted over* and reading *Pickup request {code} for {date} was counted {n} over the
+         *     booking ({reason}).*, words the owner approved on 16 November 2026); the vendor confirms the
+         *     counted number with the code as today; no hold is placed and no inspection is ordered; and the
+         *     stop closes `COLLECTED` when the handshake is verified or overridden.
          *
          *     **A short count** requires `variance_reason_code`, a code of the `PICKUP_SHORT_COUNT` catalogue,
          *     or `REASON_REQUIRED` (and `REASON_NOT_ACTIVE` for a code the catalogue refuses); the reason's
@@ -967,7 +984,8 @@ export interface paths {
          *     A retried collection (the same `Idempotency-Key`) replays the original answer and makes one
          *     record; the same key for another body is `IDEMPOTENCY_KEY_CONFLICT`.
          *
-         *     **The hub blind count still runs independently.** `collected_count` never seeds
+         *     **The hub's own check still runs independently** (against the door photos, or a blind count for
+         *     a stop with none: D-D1, D-D3). `collected_count` never seeds
          *     `HubIntake.rider_declared_count`. They are two checks, and a package lost between the
          *     door and the hub is visible only in the second (MSC-DEC-194 part 3). One event is written
          *     in the rider's name, the count's own, `pickup.collection.recorded`, the same for a clean count and
@@ -1230,6 +1248,12 @@ export interface paths {
          *     intake outside the actor's own hub is audited without contents, as every staff read is.
          *     An item that has been counted is `HubIntakePostCount`, whose declaration the database
          *     answers for it alone; no item carries a parcel photo or their number.
+         *
+         *     **Run D (5.108.0; designed, built by S1.35b).** The queue the screens draw is by run
+         *     (`listReceivingRuns`, added with the code); this list stays the list of intakes. An item of a **photo**
+         *     intake is a third shape (see `getHubIntake`) that carries what a photo intake hides from no one
+         *     (D-D1); the rule above, that no item carries a photo, their number or a declaration, holds for a
+         *     **blind-count** intake (D-D3).
          */
         get: operations["listHubIntakes"];
         put?: never;
@@ -1272,6 +1296,15 @@ export interface paths {
          *     on, so a receiver who read the intake keeps its `ETag` through every refresh and every
          *     takeover of the lock (`submitBlindCount` takes it as `If-Match`). No answer carries a
          *     parcel photo or their number.
+         *
+         *     **Run D (5.108.0; designed, built by S1.35b).** The shape follows the receiving mode. A
+         *     **blind-count** intake (a stop Ops let through without photos, D-D3) is `HubIntakePreCount` before
+         *     its count and `HubIntakePostCount` after it, with everything this description says of them, and the
+         *     sentence above holds for it. **A photo intake is a third shape**: its door photos, its parcels (their
+         *     states, who checked each in and when, the findings of each), the rider's declaration as a recorded
+         *     fact, the comparison, and the names the receiving screens draw (the vendor's, the rider's and the
+         *     officer's, **never a phone number**); it hides nothing (D-D1, D-D2). The discriminator's `mapping`
+         *     gains the third value with the shape.
          */
         get: operations["getHubIntake"];
         put?: never;
@@ -1371,6 +1404,12 @@ export interface paths {
          *     comparison, and **`parcel_photo_ids`, the photos of the parcels counted at the door, which
          *     are readable on the intake only from this response on** (D-A10); a stop Ops let through
          *     without photos has none.
+         *
+         *     **Run D (5.108.0; designed, built by S1.35b).** This operation is for a **blind-count intake**
+         *     only (D-D3): the intake of a stop Ops let through without parcel photos. A photo intake is
+         *     checked in (`finishCheckIn`) and never counted blind: it is `STATE_CONFLICT` with
+         *     `details.rule` `photo_check_in`. For a blind-count intake nothing here changes: the declaration
+         *     is withheld until this answer, and a mismatch goes to Senior Ops.
          */
         post: operations["submitBlindCount"];
         delete?: never;
@@ -1419,6 +1458,15 @@ export interface paths {
          *     `RECONCILIATION_REQUIRED`**, so that the case routes to Senior Ops. **No count changes**: the
          *     declared count, the hub count and the variance survive every finding. The response is the intake
          *     as `HubIntakePostCount`, with its `condition_findings`.
+         *
+         *     **Run D (5.108.0; designed, built by S1.35b).** In **photo mode** the condition is a finding of
+         *     **one parcel**: the body names the parcel (`parcel_id`, added with the schema), the parcel must
+         *     have arrived (`STATE_CONFLICT`, `details.rule` `parcel_not_arrived`), and the finding is recorded
+         *     **once for each parcel** (`condition_already_recorded`), **whether or not the vendor is finished**
+         *     and before itemizing starts; a condition for the whole intake of a photo intake is
+         *     `VALIDATION_FAILED` (rule `parcel_required`). A **blind-count** intake records one condition for
+         *     the intake, after the count, as above (the unique index of migration `0097` becomes two partial
+         *     ones, in a new migration). The response of a photo intake is its third shape (see `getHubIntake`).
          */
         post: operations["recordIntakeCondition"];
         delete?: never;
@@ -2320,6 +2368,14 @@ export interface paths {
          *     `HubIntakePreCount`, which has no such property by schema. A package lost between the
          *     last door and the hub is visible only because these two numbers are produced
          *     independently (MSC-DEC-194 part 3).
+         *
+         *     **Run D (5.108.0; designed, built by S1.35b).** The intake's receiving mode is fixed here, from the
+         *     stop: **a stop whose count carries door photos opens its intake in photo mode, with one expected
+         *     parcel for each photo in the order the photos were taken; a stop Ops let through without photos
+         *     opens in blind-count mode, with none** (D-D1 to D-D3). The rows, the idempotency and the refusals
+         *     are as above, and each intake in the answer states its mode. A photo intake hides nothing: its
+         *     declaration is a recorded fact beside the number of photos. For a blind-count intake the declaration
+         *     stays withheld as the paragraph above says.
          */
         post: operations["submitHubHandover"];
         delete?: never;
@@ -2567,6 +2623,16 @@ export interface paths {
          *     adjudicator's own (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`, under this
          *     key). **No count changes.** The response is the intake as `HubIntakePostCount`, with its
          *     `condition_findings`; `hub.osd.resolved` is written, enhanced, for every adjudication.
+         *
+         *     **Run D (5.108.0; designed, built by S1.35b; D-D4).** The wire values stay and the officers'
+         *     words change. `ESCALATED` is *Still searching*, offered first: it leaves the case open and keeps
+         *     the missing parcels in the list of those being searched for. `ACCEPTED` is *Accept the count*.
+         *     `WRITTEN_OFF` is *Write off*: the search is closed as **not found**. `ACCEPTED` and `WRITTEN_OFF`
+         *     resolve the case. **`VENDOR_NOTIFIED` is *Vendor told*: a record only.** It says that someone
+         *     told the vendor and **sends nothing**; it is accepted only after an earlier `WRITTEN_OFF` of the
+         *     intake and once (`STATE_CONFLICT`, `details.rule` `not_written_off`, `vendor_already_told`), it may
+         *     be recorded when the intake is past reconciliation, and it moves no state. A count or a
+         *     check-in is corrected by `correctIntakeCount` (D-D8), never by an adjudication.
          */
         post: operations["adjudicateDiscrepancy"];
         delete?: never;

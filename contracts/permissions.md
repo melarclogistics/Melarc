@@ -153,7 +153,7 @@ Legend: **A** Ops Staff · **S** Senior Ops · **P** Platform Admin · **V** Ven
 | `hub.intake.close`| A S P| own hub · P: all hubs| State precondition: parity met (§35.6.11)|
 | `hub.intake.close_exception`| S P| own hub · P: all hubs| The only route to closing without parity (§35.5.5)|
 | `hub.intake.reopen`| **P only**| all hubs| Privileged, audited (§36.6)|
-| `hub.osd.adjudicate`| S P| own hub · P: all hubs| §11.4 row 12. **Not Ops Staff**. **As built (S1.34):** `adjudicateDiscrepancy`, and the evidence of an adjudication (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`); a user without the key is `PERMISSION_DENIED` before the body is read (`AC-SLICE-001-42`, `-76`)|
+| `hub.osd.adjudicate`| S P| own hub · P: all hubs| §11.4 row 12. **Not Ops Staff**. **As built (S1.34):** `adjudicateDiscrepancy`, and the evidence of an adjudication (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`); a user without the key is `PERMISSION_DENIED` before the body is read (`AC-SLICE-001-42`, `-76`). **Designed (Run D, D-D4 and D-D8, 16 November 2026; no key is added):** the senior's decision with its outcomes ("Still searching", accept, write off) and the record "Vendor told", and `correctIntakeCount`, a senior officer's correction of a count or a check-in with a required reason, use this key|
 | `hub.setting.propose`| S| own hub| Zones, service days, boundaries (§35.10, `HUB-028`)|
 | `hub.setting.approve`| **P only**| all hubs||
 
@@ -310,7 +310,7 @@ One key per domain. **Scope is on the grant, not the key**: `pickup.read` held w
 
 **Sixteen keys, not seventeen.** `audit` already holds `audit.log.read` and `audit.log.export`, both explicitly confirmed, and gains nothing here.
 
-**`hub.read` deliberately does not unlock the blind count.** §35.5.2 guards `hub.intake.count` on read as well as write, and that guard is **structural**: `HubIntakePreCount` has no `rider_declared_count` property at all. A domain-level read key must not be mistaken for a route around it — **the count is withheld by schema, not by permission**, so no grant can expose it and no bundle needs to be trimmed to prevent it.
+**`hub.read` deliberately does not unlock the blind count.** §35.5.2 guards `hub.intake.count` on read as well as write, and that guard is **structural**: `HubIntakePreCount` has no `rider_declared_count` property at all. A domain-level read key must not be mistaken for a route around it — **the count is withheld by schema, not by permission**, so no grant can expose it and no bundle needs to be trimmed to prevent it. **Run D (D-D1 and D-D3, 16 November 2026):** this holds for the intake of a stop with no parcel photos (the blind-count mode). A photo-mode intake hides nothing, so `hub.read` reads its declaration and its door photos from the handover on. **No key is added for the receiving by run:** `hub.read` serves the queue of runs, a run and the missing list; `hub.intake.count` the check-in acts (a tap, a finish, an extra, a found parcel), a parcel's condition and the blind count; `hub.osd.adjudicate` the decision and the correction.
 
 **`staff.read` is withheld from Ops Staff on purpose.** Every other domain read follows the work. This one does not: colleague identity records are personal data, and working alongside someone is not a reason to read their record (§19.9, §38.2).
 
