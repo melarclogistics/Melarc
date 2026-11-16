@@ -6,7 +6,7 @@ import { HUB_INTAKE_COPY } from './hub-intake-copy';
 import { problemOf, PROBLEM_COPY } from './problem-copy';
 
 /**
- * What is left of the first words of the receiving screens (S1.35), in the one table the Ops Portal keeps, keyed by operation, context and code: the old list of intakes and **the steps of a photo** that every
+ * What is left of the first words of the receiving screens (S1.35), in the one table the Ops Portal keeps, keyed by operation, context and code: **the steps of a photo** that every
  * receiving screen shares. The words of a vendor's record, its count, its damage and its decision are `receiving-copy.ts`'s, in the floor's voice, and are held by `receiving-copy.test.ts`. The tests pin that
  * each refused act names its own capability and no key or role, that a step of a photo made for a senior's decision is refused in the decision's capability, and that no wording draws a figure of a count or names
  * an officer.
@@ -17,7 +17,6 @@ const conflict = (rule: string | undefined): OperationFailure =>
   new OperationFailure(refused('STATE_CONFLICT', 409), [], rule === undefined ? {} : { rule });
 
 const OPERATIONS = [
-  'listHubIntakes',
   'createEvidence',
   'completeEvidenceUpload',
   'createEvidenceRetrievalAuthorization',
@@ -62,14 +61,14 @@ describe('the words of the table', () => {
 
 describe('the words of the refusals of authority', () => {
   // Break caught (PRODUCT_DESIGN_DIRECTION section 6.5): a refusal that names a key, or the wrong act, so that an administrator is asked to grant the wrong access.
-  it.each([
-    ['listHubIntakes', /see what has been handed over at a hub/],
-    ['createEvidence', /check in the parcels received at a hub/],
-  ])('names the capability of %s and never a key', (operation, words) => {
-    const message = problemOf(refused('PERMISSION_DENIED', 403), { operation }).message;
-    expect(message).toMatch(words);
-    expect(message).not.toMatch(/\bhub\.[a-z_]+|permission|\brole\b|Ops Staff|Senior Ops/i);
-  });
+  it.each([['createEvidence', /check in the parcels received at a hub/]])(
+    'names the capability of %s and never a key',
+    (operation, words) => {
+      const message = problemOf(refused('PERMISSION_DENIED', 403), { operation }).message;
+      expect(message).toMatch(words);
+      expect(message).not.toMatch(/\bhub\.[a-z_]+|permission|\brole\b|Ops Staff|Senior Ops/i);
+    },
+  );
 
   // Break caught: a photo made for a senior's decision refused in the receiver's capability, or with a way out through an administrator, who cannot make a senior officer's decision.
   it('refuses a photo made for a decision as a senior officer’s, and one made at the door in the receiver’s', () => {

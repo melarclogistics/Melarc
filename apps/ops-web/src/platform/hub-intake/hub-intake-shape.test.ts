@@ -10,9 +10,7 @@ import {
   INTAKE_PHOTO_ONE,
   INTAKE_PHOTO_TWO,
   INTAKE_RECEIVER_ID,
-  OTHER_INTAKE_ID,
   findingFixture,
-  intakePage,
   postCountFixture,
   preCountFixture,
   shortCountFixture,
@@ -20,7 +18,6 @@ import {
 import {
   parseFinding,
   parseIntake,
-  parseIntakePage,
   parsePostCountIntake,
   receiverHoldOf,
 } from './hub-intake-shape';
@@ -86,15 +83,6 @@ describe('an intake that has not been counted', () => {
     let nested: unknown = { rider_declared_count: DECLARED };
     for (let level = 0; level < 12; level += 1) nested = { wrapper: nested };
     expect(parseIntake({ ...preCountFixture(), extra: nested })).toBeUndefined();
-  });
-
-  // Break caught: a page of the queue that shows the intakes that are waiting and is given one with a declaration among them.
-  it('is refused in a list as well, and a list with one such item is refused whole', () => {
-    const page = intakePage([
-      preCountFixture(),
-      { ...preCountFixture({ id: OTHER_INTAKE_ID }), rider_declared_count: 0 },
-    ]);
-    expect(parseIntakePage(page)).toBeUndefined();
   });
 
   // Break caught: an intake in the queue's phase whose state is another, or one that is waiting for its count and says it has been counted: neither is one the API sends.
@@ -286,54 +274,6 @@ describe('the findings of an intake', () => {
     expect(
       parseIntake(shortCountFixture({ condition_findings: [earlier, earlier] })),
     ).toBeUndefined();
-  });
-});
-
-describe('a list of intakes', () => {
-  it('gives a screen the base of each intake and the phase, and never a declaration, counted or not', () => {
-    const page = parseIntakePage(
-      intakePage(
-        [preCountFixture(), shortCountFixture({ id: OTHER_INTAKE_ID, code: 'ACC-IN-9XM4TQ' })],
-        'next-1',
-      ),
-    );
-
-    expect(page?.nextPageToken).toBe('next-1');
-    expect(page?.items.map((item) => [item.code, item.count_phase, item.state])).toEqual([
-      ['ACC-IN-7KQ2MZ', 'PRE_COUNT', 'AWAITING_COUNT'],
-      ['ACC-IN-9XM4TQ', 'POST_COUNT', 'RECONCILIATION_REQUIRED'],
-    ]);
-    for (const item of page?.items ?? []) {
-      expect(Object.keys(item)).not.toEqual(expect.arrayContaining(['rider_declared_count']));
-      expect(JSON.stringify(item)).not.toContain('declared');
-      expect(JSON.stringify(item)).not.toContain('physical_count');
-    }
-  });
-
-  // Break caught: an intake listed twice, a page that is not a page, or one with a position that is not one: none is the API's, and none is shown in part.
-  it.each([
-    ['an intake listed twice', intakePage([preCountFixture(), preCountFixture()])],
-    ['no items', { next_page_token: null }],
-    ['items that are not a list', { items: 'x', next_page_token: null }],
-    ['a position that is blank', intakePage([], '')],
-    ['a position that is a number', intakePage([], 3 as unknown as string)],
-    ['an item that is not one', intakePage([preCountFixture(), { id: INTAKE_ID }])],
-    [
-      'a page of more than the contract allows',
-      intakePage(
-        Array.from({ length: 101 }, (_, index) =>
-          preCountFixture({
-            id: `${index.toString(16).padStart(8, '0')}-3a5f-4b7c-8d9e-0f1a2b3c4d5e`,
-          }),
-        ),
-      ),
-    ],
-  ])('is refused whole with %s', (_name, body) => {
-    expect(parseIntakePage(body)).toBeUndefined();
-  });
-
-  it('is an empty page, with its end, when there is nothing', () => {
-    expect(parseIntakePage(intakePage([]))).toEqual({ items: [], nextPageToken: null });
   });
 });
 

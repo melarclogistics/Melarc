@@ -3,25 +3,12 @@ import type { CopyRule } from './problem-copy';
 import { SENIOR_DECIDES } from './receiving-copy';
 
 /**
- * What is left of the first words of the receiving screens (S1.35) after Run D reworked them in the voice of the floor: the list of the old intake queue and **the steps of a photo** (its declaration, its
+ * What is left of the first words of the receiving screens (S1.35) after Run D reworked them in the voice of the floor: **the steps of a photo** (its declaration, its
  * confirmation once the file is in the store, and its opening), which every receiving screen shares. The words of the record, the count, the damage and the decision of a vendor are in
  * `receiving-copy.ts`, in the one voice: *run, vendor, parcels, check in, missing, decide*. A refusal here names the capability in plain words and never a key or a role (PRODUCT_DESIGN_DIRECTION
  * section 6.5), and says what to do next, because a refusal shown as a dead end misrepresents the policy.
  */
-const STALE_LIST =
-  'That page of the list could not be opened: its place in the list was not accepted. Go back to the first page to start again.';
-
 export const HUB_INTAKE_COPY: readonly CopyRule[] = [
-  // The old list of intakes.
-  { operation: 'listHubIntakes', text: 'The intakes could not be loaded.' },
-  { operation: 'listHubIntakes', code: 'PERMISSION_DENIED', text: cannotText('hub.read') },
-  {
-    operation: 'listHubIntakes',
-    code: 'VALIDATION_FAILED',
-    text: 'That filter was not accepted. Choose one of the views of the list.',
-  },
-  { operation: 'listHubIntakes', context: 'cursor', code: 'VALIDATION_FAILED', text: STALE_LIST },
-
   // A photo of what was found: its declaration, and its confirmation once the file is in the store.
   {
     operation: 'createEvidence',

@@ -1,60 +1,7 @@
 /*
- * The receiving screens (S1.35; design/COMPONENT_PATTERNS.md, the record template and the task form). Presentation only: what a page shows and offers is its own and the server's.
- * Every size, space and colour is a token. The facts of a record are the kit's `DescriptionList` and `Panel`; what is drawn here is what the kit does not have: the comparison line of a count,
- * the findings of an intake in the order they were made, and the row of buttons that opens one photo at a time.
+ * The photos of a counted vendor (S1.35; design/COMPONENT_PATTERNS.md). Presentation only: what a page shows and offers is its own and the API's. Every size, space and colour is a token. What is drawn here is
+ * what the kit does not have: the row of buttons that opens one photo at a time. (The record's findings and the rest of the receiving screens are styled in `../receiving/receiving-pages.css`.)
  */
-
-/* The server's variance as a badge, with the difference in words beside it: they wrap together under a narrow value column. */
-.intake-comparison {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-/* The findings, one under the other, each in a box of its own so that two of them never run together. */
-.intake-findings {
-  display: grid;
-  gap: var(--space-3);
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.intake-finding {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-default);
-}
-
-.intake-finding p {
-  margin: 0;
-}
-
-.intake-finding__title {
-  font-weight: var(--text-label-md-weight);
-}
-
-.intake-finding__facts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-
-.intake-finding__note {
-  overflow-wrap: anywhere;
-  white-space: pre-line;
-}
-
-.intake-finding__by {
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm-size);
-  line-height: var(--text-body-sm-line-height);
-}
 
 /* The photos of an intake: a row of buttons that wraps, each as wide as its words, so that a hundred photos are a few lines and not a column. */
 .intake-photos {
@@ -64,10 +11,4 @@
   margin: var(--space-3) 0 0;
   padding: 0;
   list-style: none;
-}
-
-@media (forced-colors: active) {
-  .intake-finding {
-    border-color: CanvasText;
-  }
 }

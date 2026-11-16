@@ -134,8 +134,6 @@ const OUTSIDE_HUBS_OF = {
   'count differences': 'These count differences are at a hub your account does not work in.',
   'collection disputes': 'These collection disputes are at a hub your account does not work in.',
   'this stop': 'This stop is at a hub your account does not work in.',
-  intakes: 'These intakes are at a hub your account does not work in.',
-  'this intake': 'This intake is at a hub your account does not work in.',
   runs: 'These runs were handed over at a hub your account does not work in.',
   'this run': 'This run was handed over at a hub your account does not work in.',
   'missing parcels': 'These parcels went missing at a hub your account does not work in.',

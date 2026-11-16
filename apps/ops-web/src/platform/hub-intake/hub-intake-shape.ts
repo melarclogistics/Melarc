@@ -48,9 +48,6 @@ export const ADJUDICATION_OUTCOMES = [
 ] as const;
 export const FINDING_KINDS = ['CONDITION', 'ADJUDICATION'] as const;
 
-/** The most a page of the list can hold (the contract's largest `page_size`). */
-export const MAX_PAGE_ITEMS = 100;
-const MAX_TOKEN = 2048;
 /** The longest note the audit ledger keeps, and so the longest a screen is shown. */
 const MAX_NOTE = 1000;
 /**
@@ -123,11 +120,6 @@ export interface IntakeBaseView {
   /** The last time the holder showed it was working: the database's moment, refreshed by the holder. */
   readonly lock_acquired_at: string | null;
   readonly state: IntakeState;
-}
-
-/** What a list gives a screen of an intake, counted or not: the base and nothing of the count, so that no list can draw a declaration. */
-export interface IntakeSummaryView extends IntakeBaseView {
-  readonly count_phase: (typeof COUNT_PHASES)[number];
 }
 
 /** An intake that has not been counted: **no declaration, no count, no comparison, no photo** (the type has no place for one). */
@@ -382,59 +374,6 @@ export function parseIntake(body: unknown): IntakeView | undefined {
 export function parsePostCountIntake(body: unknown): PostCountIntakeView | undefined {
   const intake = parseIntake(body);
   return intake?.count_phase === 'POST_COUNT' ? intake : undefined;
-}
-
-/** What a list says of one intake: the base and the phase, and nothing of a count even where the item carries one. */
-function parseSummary(entry: unknown): IntakeSummaryView | undefined {
-  const intake = parseIntake(entry);
-  if (intake === undefined) return undefined;
-  const {
-    id,
-    code,
-    hub_id,
-    pickup_request_id,
-    pickup_manifest_id,
-    handed_over_by,
-    handed_over_at,
-  } = intake;
-  return {
-    id,
-    code,
-    hub_id,
-    pickup_request_id,
-    pickup_manifest_id,
-    handed_over_by,
-    handed_over_at,
-    active_receiver_id: intake.active_receiver_id,
-    lock_acquired_at: intake.lock_acquired_at,
-    state: intake.state,
-    count_phase: intake.count_phase,
-  };
-}
-
-export interface IntakePageView {
-  readonly items: readonly IntakeSummaryView[];
-  readonly nextPageToken: string | null;
-}
-
-/** A page of `listHubIntakes`. */
-export function parseIntakePage(body: unknown): IntakePageView | undefined {
-  if (!isRecord(body) || !Array.isArray(body.items) || body.items.length > MAX_PAGE_ITEMS) {
-    return undefined;
-  }
-  const token = body.next_page_token;
-  if (token !== null && !(typeof token === 'string' && token !== '' && token.length <= MAX_TOKEN)) {
-    return undefined;
-  }
-  const items: IntakeSummaryView[] = [];
-  const seen = new Set<string>();
-  for (const entry of body.items as unknown[]) {
-    const item = parseSummary(entry);
-    if (item === undefined || seen.has(item.id.toLowerCase())) return undefined;
-    seen.add(item.id.toLowerCase());
-    items.push(item);
-  }
-  return { items, nextPageToken: token };
 }
 
 /** Whether the person holds the lock, and whether another receiver does: from the intake as the server read it and the session's principal. */

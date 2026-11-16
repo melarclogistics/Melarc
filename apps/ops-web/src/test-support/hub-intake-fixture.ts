@@ -119,8 +119,3 @@ export function findingFixture(
     ...overrides,
   };
 }
-
-export const intakePage = (items: unknown[], next: string | null = null) => ({
-  items,
-  next_page_token: next,
-});
