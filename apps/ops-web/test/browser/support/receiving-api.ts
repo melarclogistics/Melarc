@@ -326,7 +326,9 @@ function intakeWire(w: World, r: Row) {
     code: r.code,
     hub_id: IDS.hub,
     pickup_request_id: IDS.request,
-    pickup_manifest_id: IDS.run,
+    // The run that holds the vendor (the page that names a vendor counted without photos reads its run for the name).
+    pickup_manifest_id:
+      w.runs.find((run) => run.vendors.some((vendor) => vendor.id === r.id))?.id ?? IDS.run,
     handed_over_by: IDS.rider,
     handed_over_at: r.handedOverAt,
     declaration_captured_at: '2026-11-03T07:30:00Z',

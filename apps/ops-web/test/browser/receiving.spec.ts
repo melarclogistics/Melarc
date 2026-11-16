@@ -561,6 +561,182 @@ test.describe('the run’s page: the hub floor', () => {
   });
 });
 
+test.describe('the hub floor on the receiving screens, measured (the review of the pictures)', () => {
+  const FLOOR = 56;
+  /** The code of a row opens its page from the height of the row, less the 1px separator inside it. */
+  const ROW_REACH = FLOOR - 1;
+  const SIZES = [
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+  ] as const;
+  /** The layout height of the first element it finds (a dialog opens with a transform that scales it for a moment, which a bounding box would measure). */
+  const heightOf = (locator: ReturnType<Page['locator']>): Promise<number> =>
+    locator.first().evaluate((node) => (node as HTMLElement).offsetHeight);
+  /** Every view of the queue is in sight: a row of views that scrolls hides one behind its edge (a phone's second view that ended at it looked complete, and the third lay wholly out of sight). */
+  const viewsAllInSight = (page: Page): Promise<boolean> =>
+    page.evaluate(() => {
+      const strip = document.querySelector<HTMLElement>('.ui-view-tabs__scroll');
+      if (strip === null) return false;
+      const edge = strip.getBoundingClientRect().right;
+      const tabs = [...strip.querySelectorAll<HTMLElement>('[role="tab"]')];
+      return (
+        strip.scrollWidth <= strip.clientWidth &&
+        tabs.length > 0 &&
+        tabs.every((tab) => tab.getBoundingClientRect().right <= edge + 1)
+      );
+    });
+
+  for (const size of SIZES) {
+    // Break caught (defects 6 and 7): the views, the lookup, its button or the code of a run at the working height (44, 44, 36 and 17 to 22 px), or a row of views that scrolls under the page's edge.
+    test(`the receiving queue: the views, the lookup, its button, Refresh and the code of a run are 56 px, and every view is in sight, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, QUEUE);
+      const main = page.getByRole('main');
+      await expect(main.getByRole('link', { name: /^ACC-MF-/ }).first()).toBeVisible();
+
+      for (const tab of await main.getByRole('tab').all()) {
+        expect(await heightOf(tab)).toBeGreaterThanOrEqual(FLOOR);
+      }
+      expect(await heightOf(main.getByRole('searchbox'))).toBeGreaterThanOrEqual(FLOOR);
+      expect(
+        await heightOf(main.getByRole('button', { name: 'Search', exact: true })),
+      ).toBeGreaterThanOrEqual(FLOOR);
+      expect(await heightOf(main.getByRole('button', { name: /^Refresh/ }))).toBeGreaterThanOrEqual(
+        FLOOR,
+      );
+      expect(await heightOf(main.getByRole('link', { name: /^ACC-MF-/ }))).toBeGreaterThanOrEqual(
+        ROW_REACH,
+      );
+      expect(await viewsAllInSight(page)).toBe(true);
+    });
+
+    // Break caught (defects 6, 7 and 10): the views of the missing list at the working height or behind the edge ("Written off, vendor not to…"), and the control that opens a parcel under the floor.
+    test(`the list of missing parcels: the views and the control that opens a parcel are 56 px, and every view is in sight, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, MISSING, { permissions: SENIOR });
+      const main = page.getByRole('main');
+      const opener = main.getByRole('button', { name: /^Open the missing parcel from/ });
+      await expect(opener.first()).toBeVisible();
+
+      for (const tab of await main.getByRole('tab').all()) {
+        expect(await heightOf(tab)).toBeGreaterThanOrEqual(FLOOR);
+      }
+      expect(await heightOf(opener)).toBeGreaterThanOrEqual(ROW_REACH);
+      expect(await viewsAllInSight(page)).toBe(true);
+    });
+  }
+
+  // Break caught (defects 3 and 7): the bar of a vendor whose card begins at the foot of the first screen drawn over its own card's name (every bar was kept at the foot of the screen), and the way up
+  // the trail and Refresh at 20 and 24 px.
+  test('the run: no bar is drawn over the name of a vendor on the first screen, and the trail and Refresh are 56 px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 800 });
+    await open(page, runPath(RUNS.waiting));
+    const main = page.getByRole('main');
+    await expect(main.getByRole('heading', { level: 2, name: 'Shea Naturals' })).toBeVisible();
+
+    // The name of each vendor that is on the screen is the topmost thing at its own middle: nothing is drawn over it.
+    const covered = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('main h2')]
+        .filter((heading) => {
+          const box = heading.getBoundingClientRect();
+          if (box.bottom <= 0 || box.top >= window.innerHeight) return false;
+          const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return top === null || !heading.contains(top);
+        })
+        .map((heading) => heading.textContent),
+    );
+    expect(covered).toEqual([]);
+    expect(await heightOf(main.getByRole('link', { name: 'Receiving' }))).toBeGreaterThanOrEqual(
+      FLOOR,
+    );
+    expect(await heightOf(main.getByRole('button', { name: /^Refresh/ }))).toBeGreaterThanOrEqual(
+      FLOOR,
+    );
+  });
+
+  // Break caught (defect 7): the buttons of a photo that was taken (Retake, Leave out) at the working height among the 56 px buttons that took it, in a dialog of the floor.
+  test('a photo taken in a dialog: Retake and Leave out are 56 px', async ({ page }) => {
+    await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await kente.getByRole('button', { name: 'Add a parcel not on the list' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Add a parcel that is not on the list' });
+    await gallery(dialog).setInputFiles({
+      name: 'parcel.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.from('photo'),
+    });
+    await expect(dialog.getByText('Stored', { exact: true })).toBeVisible();
+
+    expect(
+      await heightOf(dialog.getByRole('button', { name: 'Retake photo 1' })),
+    ).toBeGreaterThanOrEqual(FLOOR);
+    expect(
+      await heightOf(dialog.getByRole('button', { name: 'Leave out photo 1' })),
+    ).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  for (const size of SIZES) {
+    // Break caught (defects 2 and 7): the decision before the facts at a narrow width (the form's own summary slot follows its fields), or the outcomes at 46 px rows.
+    test(`the decision: the facts come before the outcomes, and each outcome is a 56 px row, at ${String(size.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, discrepancy(RUNS.yaw), { permissions: SENIOR });
+      const facts = page.getByRole('region', { name: 'What happened to this vendor' });
+      const outcomes = page.getByRole('group', { name: /What do you decide\?/ });
+      await expect(outcomes).toBeVisible();
+
+      const factsBox = await facts.boundingBox();
+      const outcomesBox = await outcomes.boundingBox();
+      if (factsBox === null || outcomesBox === null) throw new Error('the page is not drawn');
+      expect(factsBox.y + factsBox.height).toBeLessThanOrEqual(outcomesBox.y);
+      for (const label of await outcomes.locator('label').all()) {
+        expect(await heightOf(label)).toBeGreaterThanOrEqual(FLOOR);
+      }
+      // The vendor is said by its name, never by its code alone.
+      await expect(page.getByText(/^Yaw Textiles\. Say what happens next/)).toBeVisible();
+    });
+  }
+
+  // Break caught (defect 5): the page's heading said twice, and a field the width of the page and 44 px high for a few digits; the vendor said by its code alone.
+  test('the count of a vendor with no photos: one heading, the vendor by its name, a field for a few digits at 56 px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, count(IDS.waiting));
+    const field = page.getByRole('textbox', { name: /Parcels counted/ });
+    await expect(field).toBeVisible();
+
+    await expect(page.getByRole('heading', { name: 'Count the parcels' })).toHaveCount(1);
+    expect(await heightOf(field)).toBeGreaterThanOrEqual(FLOOR);
+    const width = await field.evaluate((node) => (node as HTMLElement).offsetWidth);
+    expect(width).toBeLessThanOrEqual(160);
+    await expect(page.getByText(/^Adwoa Stalls\. Count what was handed over/)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Adwoa Stalls' })).toBeVisible();
+  });
+
+  // Break caught (defect 8): the heading of the finished run's summary set smaller than the sentence under it.
+  test('the finished run: the summary’s heading is not smaller than the sentence under it', async ({
+    page,
+  }) => {
+    await open(page, runPath(RUNS.decision));
+    const summary = page.getByRole('region', { name: 'Before the rider leaves' });
+    await expect(summary).toBeVisible();
+
+    const size = (locator: ReturnType<Page['locator']>): Promise<number> =>
+      locator.evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize));
+    const heading = await size(summary.getByRole('heading', { name: 'Before the rider leaves' }));
+    const lead = await size(summary.getByText('Check the rider’s bag before they leave.'));
+    expect(heading).toBeGreaterThanOrEqual(lead);
+  });
+});
+
 test.describe('the blind count', () => {
   // Break caught: the declaration in any form on the count page, whatever it was sent: not greyed, not in a tooltip, not in a response the page discards; a lock taken by opening the page.
   test('asks for the number alone in one line, takes the lock on the first digit, with the declaration in no form, then reveals the comparison once the count commits', async ({
