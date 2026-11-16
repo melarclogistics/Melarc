@@ -21,7 +21,7 @@
 #   5.105.0 C    Run C (SLICE-001, Stage 6, S1.33): `submitBlindCount` says what it does as built (staff of the Ops Portal, by the hubs of the grant; the count is committed once, so a second count, a stale ETag and a missing one are STATE_CONFLICT whoever holds the lock; the database makes the comparison and the intake goes to READY_FOR_ITEMIZATION or RECONCILIATION_REQUIRED, a zero declaration always to the latter) and declares HUB_SCOPE_VIOLATION and NOT_FOUND (with its 404); `HubIntakePostCount` gains the optional `parcel_photo_ids` (the photos of the parcels counted at the door, readable only from the response to the committed count on, D-A10)
 #   5.106.0 C    Run C (SLICE-001, Stage 6, S1.34): `recordIntakeCondition` and `adjudicateDiscrepancy` say what they do as built (staff of the Ops Portal by the hubs of the grant; the condition after the count and before itemization, once, and a condition on a cleared intake sends it back to RECONCILIATION_REQUIRED; the adjudication under a key Ops Staff do not hold, with a mandatory reason, ESCALATED leaving the case open and the other outcomes clearing it; no count ever changes) and declare HUB_SCOPE_VIOLATION and NOT_FOUND (and STATE_CONFLICT and VALIDATION_FAILED on the adjudication, with their responses); `HubIntakePostCount.condition_findings` is described (no shape changes)
 #   5.107.0 C    The audit of 15 November 2026 of Run C (SLICE-001, Stage 6): the three discriminators on `count_phase` (`listHubIntakes`, `getHubIntake`, `acquireIntakeLock`) name their values by an explicit `mapping` (`PRE_COUNT`, `POST_COUNT`), so that the generated types can be satisfied (the generator took the schema names, which `count_phase` never carries, and the two shapes were `never`); `recordIntakeCondition` says that "once" is judged by the intake's findings and not by its `condition` (the behaviour of 5.106.0 was a defect: a second recording after `OK` was accepted; no shape changes)
-#   5.108.0 D    Run D (SLICE-001, Stage 6 reworked, the Product Owner's decisions D-D1 to D-D8 of 15 and 16 November 2026). **One version for the run.** *Part 1 (the specification) changed prose only*: `recordCollection` (a count above the booking is an `OVER` count, D-D5), `listCollectionShortfalls` (the office's count differences, short and over together), `submitHubHandover` (a photo intake opens with one expected parcel for each door photo), `getHubIntake`, `listHubIntakes`, `submitBlindCount` (blind-count intakes only, D-D3), `recordIntakeCondition` (a condition is a finding of one parcel in photo mode, once for each) and `adjudicateDiscrepancy` ("Still searching" leaves the case open; "Vendor told" is a record after a write-off) say what they will do. **The shapes and the operations follow with the code of the later parts under this same version** (S1.35a to S1.35c): the `OVER` variance and its reason catalogue, `listReceivingRuns`, `getReceivingRun`, `listMissingParcels`, `getEvidenceLimits`, `recordParcelArrival`, `finishCheckIn`, `addExtraParcel` and `correctIntakeCount`, a third intake shape beside `HubIntakePreCount` and `HubIntakePostCount`, the `STATE_CONFLICT` rules in the operations' text (OB-S1-112) and the removal of `INSUFFICIENT_AUTHORITY` from the operations that never raise it
+#   5.108.0 D    Run D (SLICE-001, Stage 6 reworked, the Product Owner's decisions D-D1 to D-D8 of 15 and 16 November 2026). **One version for the run.** *Part 1 (the specification) changed prose only*: `recordCollection` (a count above the booking is an `OVER` count, D-D5), `listCollectionShortfalls` (the office's count differences, short and over together), `submitHubHandover` (a photo intake opens with one expected parcel for each door photo), `getHubIntake`, `listHubIntakes`, `submitBlindCount` (blind-count intakes only, D-D3), `recordIntakeCondition` (a condition is a finding of one parcel in photo mode, once for each) and `adjudicateDiscrepancy` ("Still searching" leaves the case open; "Vendor told" is a record after a write-off) say what they will do. **The shapes and the operations follow with the code of the later parts under this same version** (S1.35a to S1.35c): the `OVER` variance and its reason catalogue, `listReceivingRuns`, `getReceivingRun`, `listMissingParcels`, `getEvidenceLimits`, `recordParcelArrival`, `finishCheckIn`, `addExtraParcel` and `correctIntakeCount`, a third intake shape beside `HubIntakePreCount` and `HubIntakePostCount`, the `STATE_CONFLICT` rules in the operations' text (OB-S1-112) and the removal of `INSUFFICIENT_AUTHORITY` from the operations that never raise it. **Part 3.0 (S1.35b-0, the contract-first step of the receiving rework: shapes only, no code)** declares the eight new operations with their schemas: `listReceivingRuns`, `getReceivingRun`, `listMissingParcels`, `getEvidenceLimits`, `recordParcelArrival`, `finishCheckIn`, `addExtraParcel` and `correctIntakeCount`; `ReceivingMode`, `IntakeParcel` (and its state, origin and condition), `IntakeFinding` (the named finding, OB-S1-109), `ReceivingLock`, `HubIntakeCheckIn` (the third intake shape, `count_phase` `CHECK_IN`), `ReceivingVendor`, `ReceivingRun`, `ReceivingRunSummary`, `MissingParcel`, `EvidenceLimits` and the bodies and answers of the acts; they are in no `IMPLEMENTED_OPERATIONS` and are built by S1.35b. **The changes to the schemas of the operations that are already implemented are not here yet, on purpose**: `pnpm run contract:check` compares an implemented operation with the application that serves it, so these are made in the same change as the application's own description by S1.35b, and the plan's S1.35b block lists each one: the third member (`HubIntakeCheckIn`, mapping `CHECK_IN`) of the intake read of `listHubIntakes`, `getHubIntake`, `acquireIntakeLock`, `recordIntakeCondition` and `adjudicateDiscrepancy`; `parcel_id` on `IntakeConditionRecord`; the two queues of `QueueId`; `INSUFFICIENT_AUTHORITY` out of `adjudicateDiscrepancy`
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -2141,6 +2141,174 @@ paths:
         '422': { $ref: '#/components/responses/RuleViolation' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /receiving-runs:
+    get:
+      operationId: listReceivingRuns
+      # SAFE READ. No CSRF: a read changes nothing. Ops Portal staff only (a Vendor and a Rider are refused). Run D, 5.108.0: declared by S1.35b-0, built by S1.35b.
+      security:
+        - browserSession: []
+      x-permission: hub.read
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
+      tags: [hub-intakes]
+      summary: List the runs that have parcels to receive - the receiving queue, by run
+      description: |
+        **Run D (5.108.0; D-D2, OB-S1-104 to OB-S1-106; designed, built by S1.35b).** Permission `hub.read`, **hub-scoped**, for staff of the Ops
+        Portal alone (a vendor and a rider read none: `PERMISSION_DENIED`). The receiving queue **by run**: one row for each run whose hub handover
+        opened intakes to receive, oldest first (the earliest `handed_over_at` of the run's intakes, then the run's id, so that a page does not move
+        under a reader who is paging). A row names **the run's code, the rider and the vendors by name and never a phone number**, how many parcels
+        the door photos expect, how many vendors still wait to be checked in or need a senior officer's decision, how many parcels are still being
+        searched for, and who is checking in (a name, and whether it is the caller). **The declared count of a blind-count vendor is in no row**
+        (D-D3): such a vendor is counted (`blind_count_vendors`) and nothing of its number is said; a photo intake hides nothing (D-D1).
+
+        **`view` is the server's filter**: `waiting` (the default) is the runs that have a vendor still waiting to be checked in, `needs_decision`
+        the runs that have a vendor in `RECONCILIATION_REQUIRED`, and `all` every run that has an intake. **`q` is the lookup**: it finds a run by its
+        code and an intake by its own code, its run's code or its vendor's name (2 to 64 characters; the server trims it and ignores case; fewer is
+        `VALIDATION_FAILED`, as is a `view` that is not one, a `hub_id` that is not a UUID, a `page_size` out of range and a `page_token` that is not
+        one). `hub_id` is the work lists' filter: it narrows and never widens, and a hub outside the caller's grant matches nothing (an empty page,
+        never `HUB_SCOPE_VIOLATION`). An authorised read of an intake outside the actor's own hub is audited without contents, as every staff read is.
+        **The count of the runs that wait** is not computed by the page: it is `getQueueSummary`'s queue `HUB_RECEIVING_RUNS_WAITING` (reporting data
+        dictionary §5.5.7), the number of runs this list returns for `view=waiting`.
+      parameters:
+        - $ref: '#/components/parameters/WorkListHubId'
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, minLength: 2, maxLength: 64 }
+          description: >-
+            What to find: a run's code, an intake's code or a vendor's name, of 2 to 64 characters as sent. Combined with the other filters as "and".
+        - name: view
+          in: query
+          required: false
+          schema: { type: string, enum: [waiting, needs_decision, all], default: waiting }
+          description: >-
+            `waiting`: runs with a vendor still waiting to be checked in (the default). `needs_decision`: runs with a vendor in `RECONCILIATION_REQUIRED`.
+            `all`: every run that has an intake.
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: Runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_page_token]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReceivingRunSummary' }
+                  next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /receiving-runs/{manifest_id}:
+    parameters:
+      - name: manifest_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: The run (the pickup manifest) whose receiving page this is. UUID v7; the run's code is an attribute, never a path parameter.
+    get:
+      operationId: getReceivingRun
+      # SAFE READ. No CSRF: a read changes nothing. Ops Portal staff only. Run D, 5.108.0: declared by S1.35b-0, built by S1.35b.
+      security:
+        - browserSession: []
+      x-permission: hub.read
+      x-error-codes:
+        [
+          HUB_SCOPE_VIOLATION,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          VALIDATION_FAILED,
+        ]
+      tags: [hub-intakes]
+      summary: Read a run's receiving page - its vendors, their door photos and their parcels
+      description: |
+        **Run D (5.108.0; D-D2; designed, built by S1.35b).** Permission `hub.read`, hub-scoped, for staff of the Ops Portal alone: a run that exists
+        in a hub outside the caller's grant is `HUB_SCOPE_VIOLATION`, one that does not exist or has no intake is `NOT_FOUND`, and a vendor and a
+        rider read none (`PERMISSION_DENIED`). **The run's receiving page**: the run, the rider by name, the moment the run was handed over (the
+        earliest of its intakes) and **one `ReceivingVendor` for each intake of the run**, in the order the handover opened them. A **photo** vendor
+        carries its parcels in the order the door photos were taken (an extra follows them), each with its photo's evidence identifier, its state,
+        who checked it in and when and the condition found on it (`null` until someone has recorded one: the screen says *Not checked yet*, never
+        *Good condition*), and the counts that follow from them. A **blind-count** vendor (D-D3) carries no parcel and, **before its count, no number
+        of the rider's**: its `parcels_expected` is `null`.
+
+        **There is no `ETag` header: each vendor carries its own `intake_etag`**, the `If-Match` of that vendor's acts (`finishCheckIn`,
+        `correctIntakeCount`, `recordIntakeCondition`, `adjudicateDiscrepancy` and `submitBlindCount`). It is the intake's `ETag` as `getHubIntake` sets
+        it, and **it does not move with the advisory lock, with a tap or an untap of a parcel or with an extra added before the vendor is finished**,
+        so an officer who is tapping keeps the token the finish of the vendor takes; it moves when the vendor is finished, when a parcel is found,
+        an extra is added or a parcel is changed after that, when a finding is recorded, when the case is decided and when the count is corrected.
+        **No object key and no address is in the answer**: each photo is read, one at a time, with `createEvidenceRetrievalAuthorization` when it is
+        shown. The read writes no lock and no event but the audited foreign read of a run in another hub that the grant reaches.
+      responses:
+        '200':
+          description: The run's receiving page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceivingRun' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /missing-parcels:
+    get:
+      operationId: listMissingParcels
+      # SAFE READ. No CSRF: a read changes nothing. Ops Portal staff only. Run D, 5.108.0: declared by S1.35b-0, built by S1.35b.
+      security:
+        - browserSession: []
+      x-permission: hub.read
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID, VALIDATION_FAILED]
+      tags: [hub-intakes]
+      summary: List the missing parcels - being searched for, or written off and waiting for the vendor to be told
+      description: |
+        **Run D (5.108.0; D-D4; designed, built by S1.35b).** Permission `hub.read`, **hub-scoped**, for staff of the Ops Portal alone. The list
+        *Missing - being searched for*: **a parcel that a vendor's check-in was finished without**, each with its picture (the door photo's evidence
+        identifier: no address, no key), the vendor, the run and **how long it has been missing**, oldest first (`missing_since`, then the parcel's id).
+        **Missing parcels are searched for first, inside the hub**, and the case stays in this list until a senior officer closes it.
+
+        `view` is the server's filter. **`searching`** (the default) is the parcels in state `MISSING` of an intake in `RECONCILIATION_REQUIRED`: a
+        parcel that is found (checked in) or whose case a senior officer accepts or writes off leaves it. **`vendor_to_tell`** is the parcels of an
+        intake that has a `WRITTEN_OFF` finding and no `VENDOR_NOTIFIED` one, the write-offs that still wait for the record *Vendor told* (a
+        record only: **the system sends the vendor nothing**; a provisional second view, hub-intake.md §5.7). A `view` that is not one, a `hub_id`
+        that is not a UUID, a `page_size` out of range and a `page_token` that is not one are `VALIDATION_FAILED`. `hub_id` is the work lists' filter:
+        it narrows and never widens, and a hub outside the caller's grant matches nothing. An authorised read of another hub's parcel is audited
+        without contents, as every staff read is. **The count of the parcels being searched for** is `getQueueSummary`'s queue
+        `HUB_MISSING_PARCELS_SEARCHING` (reporting data dictionary §5.5.8), the number of items this list returns for `view=searching`.
+      parameters:
+        - $ref: '#/components/parameters/WorkListHubId'
+        - name: view
+          in: query
+          required: false
+          schema: { type: string, enum: [searching, vendor_to_tell], default: searching }
+          description: >-
+            `searching`: missing parcels of a case that is open (the default). `vendor_to_tell`: missing parcels written off whose vendor has not been
+            recorded as told.
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageToken'
+      responses:
+        '200':
+          description: Missing parcels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_page_token]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/MissingParcel' }
+                  next_page_token: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /hub-intakes:
     get:
       operationId: listHubIntakes
@@ -2527,6 +2695,258 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /hub-intakes/{id}/check-in:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: finishCheckIn
+      x-permission: hub.intake.count
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
+          IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [hub-intakes]
+      summary: Finish a vendor's check-in - All N here, or as tapped
+      description: |
+        **Run D (5.108.0; D-D2; designed, built by S1.35b).** Permission `hub.intake.count`, the receiver, an Ops Staff user included; for staff of the Ops
+        Portal alone, by the hubs of the session's grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that does not exist). **One
+        operation for the two ways a vendor is finished, for a photo intake only**: a blind-count intake is counted with `submitBlindCount`, and this
+        refuses it (`STATE_CONFLICT`, `details.rule` `blind_count_intake`).
+
+        **"All N here" (`all_arrived: true`).** The officer counted the vendor's pile on the table and says it has every parcel the door photos show. The
+        body carries the number the officer counted (`confirmed_count`, required with `all_arrived`), and it must be the number of parcels the intake
+        expects: otherwise nothing is recorded (`STATE_CONFLICT`, rule `count_changed`: the photos or the intake changed since the page was read). It is
+        refused while an extra parcel that is not void stands (`has_extra_parcels`): a pile with an extra is not "all N here", and the officer finishes
+        the vendor as tapped. Confirmed, **every parcel still `EXPECTED` becomes `ARRIVED`**, with the officer and the database's moment.
+        **"The count is different" (`all_arrived: false`).** The parcels the officer tapped are `ARRIVED` already (`recordParcelArrival`) and **every
+        parcel not tapped becomes `MISSING`**; `confirmed_count` is then not allowed (`VALIDATION_FAILED`).
+
+        **One change** in the database writes the count (the number of `ARRIVED` parcels, the extras that are not void included: never a number the client
+        typed), its variance and its difference against the **expected** number (the door photos), the officer and the moment, and **the System moves the
+        intake**: to `READY_FOR_ITEMIZATION` only when no parcel is missing, no extra stands, no condition other than `OK` was found and the rider's
+        declaration is above zero; to `RECONCILIATION_REQUIRED` otherwise, **a missing parcel and an extra of equal number included**
+        (state-machines.md section 7). `hub.intake.counted` is written once, and `hub.osd.opened` when a case opens.
+
+        A vendor is finished once: another finish, with another key, of a vendor that is finished is `STATE_CONFLICT` (`check_in_finished`); a stale
+        `ETag`, or none, is `STATE_CONFLICT` (`stale`); itemizing begun is `itemization_started`. The same key with another body is
+        `IDEMPOTENCY_KEY_CONFLICT`, and the same key and body replay the original answer. `If-Match` is the vendor's `intake_etag` (`getReceivingRun`) or
+        the `ETag` of `getHubIntake`; **the lock does not move it and nor does a tap**, so the taps that led here never make the finish stale. The answer is
+        the vendor's record as `HubIntakeCheckIn` (its parcels, those now `MISSING` among them, and its findings), with the vendor's new `ETag`.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckInFinish' }
+      responses:
+        '200':
+          description: The vendor is finished; its count, its variance and its next step are recorded
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HubIntakeCheckIn' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /hub-intakes/{id}/extra-parcels:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: addExtraParcel
+      x-permission: hub.intake.count
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          EVIDENCE_NOT_STORED,
+          HUB_SCOPE_VIOLATION,
+          IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [hub-intakes]
+      summary: Add a parcel that is on the table and not on the list - an extra at the hub
+      description: |
+        **Run D (5.108.0; D-D2; designed, built by S1.35b).** Permission `hub.intake.count`, the receiver; for staff of the Ops Portal alone, by the hubs of
+        the grant (`HUB_SCOPE_VIOLATION`, `NOT_FOUND`). A parcel on the table that has **no door photo** is recorded with a photo the officer took at the
+        hub: the body names a `STORED` evidence record of **this intake** (the owner `PICKUP_INTAKE`, the purpose `OSD`, declared with `createEvidence`
+        under this key), used once (`EVIDENCE_NOT_STORED` otherwise). The parcel is an **extra** (`origin` `HUB_EXTRA`), `ARRIVED` at once and counted in the
+        intake's received count (variance `OVER` once the vendor is finished); **the intake goes to a senior officer's decision**
+        (`RECONCILIATION_REQUIRED`) however the vendor is finished. *Provisional (hub-intake.md section 5.6):* the senior's *Accept* accepts it; there is no
+        "refuse an extra" in this run.
+
+        Allowed while the vendor is open (`AWAITING_COUNT`) and while the case is open (`RECONCILIATION_REQUIRED`); a vendor whose case was resolved is
+        `STATE_CONFLICT` (`check_in_finished`), an intake being itemized or closed is `itemization_started`, and a blind-count intake has no parcels
+        (`blind_count_intake`). An extra added by mistake is taken back with `recordParcelArrival` (`arrived: false`: it becomes `VOID`) while the
+        vendor is open, and by a senior officer's correction after. **There is no `If-Match`: nothing the officer read is judged, and two extras are two
+        parcels.** `Idempotency-Key`: the same key and body replay the original answer and add no second parcel, another body under the key is
+        `IDEMPOTENCY_KEY_CONFLICT`. `hub.parcel.extra_added` is written. The answer is the new parcel, the vendor's `intake_etag` and its counts.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExtraParcelAdd' }
+      responses:
+        '200':
+          description: The extra parcel, as it now is, with the vendor's counts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntakeParcelAnswer' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/RuleViolation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /hub-intakes/{id}/correction:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: correctIntakeCount
+      x-permission: hub.osd.adjudicate
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
+          IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          REASON_REQUIRED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [hub-intakes]
+      summary: A senior officer corrects a count or a check-in, with a reason
+      description: |
+        **Run D (5.108.0; D-D8, approved by the Product Owner on 16 November 2026; designed, built by S1.35b).** Permission `hub.osd.adjudicate`: **a senior
+        officer and the Platform Admin, never Ops Staff** (`PERMISSION_DENIED` before the body is read); for staff of the Ops Portal alone, by the hubs of
+        the grant. The safety net for a mistaken count or check-in now that an intake has no cap on its parcels. **A reason in words is mandatory** (blank is
+        `REASON_REQUIRED`; there is no catalogue) and the correction is allowed **before itemizing starts only** (`STATE_CONFLICT`, rule
+        `itemization_started`, after). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
+
+        **The body follows the intake's mode and names the correction exactly once** (`VALIDATION_FAILED`, rule `mode_mismatch`, for the other mode's
+        member, for both and for neither). A **photo** intake takes `parcel_changes`, each naming a parcel of this intake and the state it is to have: a
+        door parcel `ARRIVED` or `MISSING`, an extra `ARRIVED` or `VOID`; any other change, and a parcel that is not this intake's, is `VALIDATION_FAILED`
+        naming the place. A **blind-count** intake takes `physical_count`, the corrected number of parcels. The count, its variance and its difference are
+        recomputed in the same change from the parcels (or from the corrected number), the officer and the moment are the database's, and **the System
+        routes the intake again by the rule of `finishCheckIn`**: a clean intake goes to `READY_FOR_ITEMIZATION`, any other to `RECONCILIATION_REQUIRED`,
+        with a `hub.osd.opened` when a case opens.
+
+        **The old and the new numbers, the reason and the parcels changed are recorded in the enhanced event `hub.intake.corrected`.** A correction explains
+        nothing away: the rider's declaration and the door photos are never changed, and no finding is. The answer is the intake as it now stands,
+        `HubIntakeCheckIn` for a photo intake and `HubIntakePostCount` for a blind-count one, with its new `ETag`.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IntakeCorrection' }
+      responses:
+        '200':
+          description: Corrected
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
+                  - $ref: '#/components/schemas/HubIntakePostCount'
+                discriminator:
+                  propertyName: count_phase
+                  mapping:
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/RuleViolation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /intake-parcels/{parcel_id}/arrival:
+    parameters:
+      - name: parcel_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: The parcel of an intake (`IntakeParcel.id`). UUID v7.
+    put:
+      operationId: recordParcelArrival
+      x-permission: hub.intake.count
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [hub-intakes]
+      summary: Tap a parcel's photo - check a parcel in, take the tap back, void an extra, or find a missing parcel
+      description: |
+        **Run D (5.108.0; D-D2, D-D4; designed, built by S1.35b).** Permission `hub.intake.count`, the receiver; for staff of the Ops Portal alone, by the
+        hubs of the grant (`HUB_SCOPE_VIOLATION` for a parcel of an intake outside them, `NOT_FOUND` for one that does not exist). **A tap on a parcel's
+        photo.** The body states the parcel's desired state, `arrived: true` or `arrived: false`, so the act is **idempotent by nature and takes neither
+        an `Idempotency-Key` nor an `If-Match`**: the same tap twice is the same answer, and **a tap does not move the intake's `ETag`** (the finish of the
+        vendor must never be refused for the taps that led to it). The lock is not taken here: the page takes it on the officer's first act.
+
+        - `arrived: true` checks the parcel in (`EXPECTED` to `ARRIVED`) with the officer and the database's moment, while the vendor is open (the intake is
+          `AWAITING_COUNT`). **A parcel that is `MISSING` is found by the same act, while the case is open** (the intake is `RECONCILIATION_REQUIRED`):
+          `MISSING` to `ARRIVED`, the intake's received count and variance are recomputed in the same change, `hub.parcel.found` is written, and the intake
+          **stays in `RECONCILIATION_REQUIRED`** (a senior officer closes the case even when nothing is missing any more).
+        - `arrived: false` takes a tap back (`ARRIVED` to `EXPECTED` while the vendor is open) and **voids an extra** (`ARRIVED` to `VOID`, an extra only,
+          while the vendor is open).
+
+        Anything else is `STATE_CONFLICT`: the vendor is finished and the parcel is not being found (`check_in_finished`: a parcel then changes only by
+        being found, by an extra or by a senior officer's correction), itemizing has begun (`itemization_started`), or the intake is a blind-count one
+        (`blind_count_intake`: its stop has no photos to check against). A body that is not `{ arrived: boolean }` is `VALIDATION_FAILED`. The answer is the
+        parcel as it now is, the vendor's `intake_etag` and its counts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParcelArrival' }
+      responses:
+        '200':
+          description: The parcel, as it now is, with the vendor's counts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntakeParcelAnswer' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /hub-intakes/{id}/summary:
@@ -6201,6 +6621,34 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/RuleViolation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /evidence-limits:
+    get:
+      operationId: getEvidenceLimits
+      # SAFE READ. Browser surface only: an Ops Portal staff session; a Vendor or a Rider is refused. No CSRF, a read changes nothing. Run D, 5.108.0: declared by S1.35b-0, built by S1.35b.
+      security:
+        - browserSession: []
+      x-permission: self
+      x-error-codes: [PERMISSION_DENIED, RATE_LIMITED, SESSION_INVALID]
+      tags: [evidence]
+      summary: What a file of evidence may be - its allowed types and its largest size
+      description: |
+        **Run D (5.108.0; OB-S1-110; designed, built by S1.35b).** The platform's limits on a file of evidence, so that a screen can judge a file **before
+        it reads it whole** (a photo taken at the hub is refused above the size limit without being read) and offer only the types the platform takes.
+        `x-permission: self`: any signed-in Ops Portal staff session may ask, and a Vendor or a Rider is refused. The answer is the two platform
+        settings `evidence_upload_allowed_mime_types` and `evidence_upload_max_bytes`, as `createEvidence` judges them (`content_type` and `byte_size`),
+        **never defaulted**: a setting that is missing or unusable ends the read as the platform's failed read (`503`, no code), and the screen then
+        judges nothing in the browser (the platform still refuses a file that is not allowed). **A read of configuration only**: no record, no secret and
+        no address, `background` activity, and the answer is `Cache-Control: no-store`.
+      responses:
+        '200':
+          description: The limits
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceLimits' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /evidence:
@@ -15364,6 +15812,519 @@ components:
                 the physical count commits, nor their number, and readable on the intake only from
                 the response to the committed count on.** Absent for a stop that Ops let through
                 without photos (`authoriseParcelPhotoException`).
+
+    ReceivingMode:
+      type: string
+      enum: [PHOTO_CHECK_IN, BLIND_COUNT]
+      description: |
+        **Run D (5.108.0; D-D1 to D-D3; the schemas below are declared by S1.35b-0 and built by S1.35b).** How an intake is received, **fixed by the hub
+        handover from its stop and never changed** (a value a writer gives is not kept). `PHOTO_CHECK_IN`: the stop's count carries door photos, the vendor's
+        parcels are checked in one by one against them and nothing is hidden from the officer. `BLIND_COUNT`: Ops let the stop's count through without
+        photos, so the officer types the count before the rider's number is shown (hub-intake.md section 5.5). Every intake that existed before Run D is
+        `BLIND_COUNT`.
+
+    IntakeParcelState:
+      type: string
+      enum: [EXPECTED, ARRIVED, MISSING, VOID]
+      description: |
+        The state of a parcel of an intake (domain-model.md section 6.6a; state-machines.md section 7). `EXPECTED`: a door parcel not checked in yet.
+        `ARRIVED`: checked in (or an extra, born so). `MISSING`: its vendor was finished without it, and it is searched for first, inside the hub.
+        `VOID`: an extra taken back; it counts nowhere and stays in the history.
+
+    IntakeParcelOrigin:
+      type: string
+      enum: [DOOR_PHOTO, HUB_EXTRA]
+      description: |
+        `DOOR_PHOTO`: one of the parcels the rider photographed at the door (one parcel for each door photo, in the order the photos were taken).
+        `HUB_EXTRA`: a parcel an officer found on the table with no door photo, recorded with a photo taken at the hub.
+
+    IntakeParcelCondition:
+      type: object
+      required: [condition, note, evidence_ids, recorded_by_name, recorded_at]
+      additionalProperties: false
+      properties:
+        condition: { type: string, enum: [OK, DAMAGED, TAMPERED, OTHER] }
+        note: { type: [string, 'null'] }
+        evidence_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: The stored photos taken at the hub that show it (`PICKUP_INTAKE` evidence, purpose `CONDITION`); each is read with `createEvidenceRetrievalAuthorization`.
+        recorded_by_name: { type: string, description: 'The officer who recorded it, by display name.' }
+        recorded_at: { type: string, format: date-time }
+      description: >-
+        The condition found on one parcel (a finding of kind `CONDITION` of that parcel), recorded once for each parcel; only a senior officer changes it
+        after deciding. The words on the floor are *Damaged*, *Tampered*, *Something else* and *Fine*; a parcel with none recorded reads *Not checked
+        yet*.
+
+    IntakeParcel:
+      type: object
+      required:
+        [id, ordinal, origin, state, photo_evidence_id, arrived_by_name, arrived_at, missing_marked_at, condition]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        ordinal:
+          type: integer
+          minimum: 1
+          description: The place of the parcel's photo among the stop's, so that the parcels are drawn in the order they were taken; an extra follows the last door parcel.
+        origin: { $ref: '#/components/schemas/IntakeParcelOrigin' }
+        state: { $ref: '#/components/schemas/IntakeParcelState' }
+        photo_evidence_id:
+          type: string
+          format: uuid
+          description: >-
+            The photo to draw for this parcel: the rider's door photo (`DOOR_PHOTO`) or the officer's photo of an extra (`HUB_EXTRA`). An evidence identifier and
+            nothing more: **no object key and no address**; the image is read, one at a time, with `createEvidenceRetrievalAuthorization`.
+        arrived_by_name:
+          type: [string, 'null']
+          description: The officer who checked the parcel in (or found it, or added the extra), by display name; null until then.
+        arrived_at:
+          type: [string, 'null']
+          format: date-time
+          description: The database's moment of that act.
+        missing_marked_at:
+          type: [string, 'null']
+          format: date-time
+          description: The moment the vendor was finished without this parcel; null for a parcel that was never missing. It stays after the parcel is found.
+        condition:
+          oneOf:
+            - $ref: '#/components/schemas/IntakeParcelCondition'
+            - type: 'null'
+          description: The condition found on this parcel; null until someone has recorded one (*Not checked yet*).
+      description: >-
+        One physical parcel as the hub checks it (domain-model.md section 6.6a): a door parcel for each photo the rider took, and an extra for each parcel an
+        officer found with none. Names are display names; no phone number, key or address is ever here.
+
+    IntakeFinding:
+      type: object
+      required:
+        [id, kind, intake_parcel_id, condition, outcome, note, evidence_ids, recorded_by, recorded_by_name, recorded_at]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [CONDITION, ADJUDICATION] }
+        intake_parcel_id:
+          type: [string, 'null']
+          format: uuid
+          description: The parcel a condition is a finding of (photo mode); null for a finding of the whole intake and for every adjudication.
+        condition: { type: [string, 'null'], enum: [OK, DAMAGED, TAMPERED, OTHER, null] }
+        outcome:
+          type: [string, 'null']
+          enum: [ACCEPTED, ESCALATED, WRITTEN_OFF, VENDOR_NOTIFIED, null]
+          description: >-
+            The senior officer's outcome of an adjudication. The wire values are stable and the words on the floor are *Accept the count*, *Still searching*
+            (`ESCALATED`), *Write off* and *Vendor told* (`VENDOR_NOTIFIED`, a record only).
+        note: { type: [string, 'null'] }
+        evidence_ids:
+          type: array
+          items: { type: string, format: uuid }
+        recorded_by: { type: string, format: uuid }
+        recorded_by_name: { type: string, description: 'The officer, by display name.' }
+        recorded_at: { type: string, format: date-time }
+      description: |
+        What was found at an intake, as the screens read it (**OB-S1-109: the named finding**; `HubIntakePostCount.condition_findings` is the same members left
+        untyped): a recording of a condition by the receiver and an adjudication by a senior officer, in the order they were made. A finding explains a
+        discrepancy and **never changes a count**.
+
+    ReceivingLock:
+      type: object
+      required: [holder_name, held_by_you, opened_at, last_seen_at]
+      additionalProperties: false
+      properties:
+        holder_name: { type: string, description: 'The officer who opened this check-in, by display name (never an identifier or a phone number).' }
+        held_by_you: { type: boolean, description: 'Whether the caller is the holder: the page says *You*.' }
+        opened_at:
+          type: string
+          format: date-time
+          description: >-
+            The moment the holder **first** took the lock, which its refreshes do not change: *Ama Owusu opened this check-in at 09:12*. The database's clock.
+        last_seen_at:
+          type: string
+          format: date-time
+          description: The holder's last refresh (the intake's `lock_acquired_at`); another receiver may take the lock over after the hub's idle time.
+      description: >-
+        The advisory receive lock as the receiving screens say it (state-machines.md section 7, section 22.8): who opened the check-in and when. **It
+        stops nobody, and no act is refused for it.**
+
+    IntakeCounts:
+      type: object
+      required:
+        [parcels_expected, arrived_count, received_count, count_variance, missing_count, extra_count, damaged_count]
+      additionalProperties: false
+      properties:
+        parcels_expected:
+          type: [integer, 'null']
+          minimum: 0
+          description: The number of door photos of a photo intake; `null` for a blind-count intake, whose expected number is the rider's declaration and is never given here.
+        arrived_count:
+          type: [integer, 'null']
+          minimum: 0
+          description: The parcels `ARRIVED` now, the extras that are not void included, live (before the vendor is finished too); `null` for a blind-count intake.
+        received_count:
+          type: [integer, 'null']
+          minimum: 0
+          description: The count the vendor was finished with (or the blind count that was typed); `null` until then.
+        count_variance: { type: [string, 'null'], enum: [MATCH, SHORT, OVER, null] }
+        missing_count: { type: integer, minimum: 0, description: 'The parcels `MISSING` now.' }
+        extra_count: { type: integer, minimum: 0, description: 'The extras that are not void.' }
+        damaged_count: { type: integer, minimum: 0, description: 'The parcels with a recorded condition other than `OK`.' }
+      description: The counts of one vendor's check-in, derived by the database from its parcels and never typed.
+
+    HubIntakeCheckIn:
+      type: object
+      required:
+        [
+          id,
+          code,
+          hub_id,
+          pickup_request_id,
+          pickup_manifest_id,
+          run_code,
+          state,
+          count_phase,
+          receiving_mode,
+          vendor_name,
+          handed_over_by_name,
+          handed_over_at,
+          parcels_expected,
+          rider_declared_count,
+          arrived_count,
+          received_count,
+          count_variance,
+          count_difference,
+          counted_at,
+          counted_by_name,
+          lock,
+          parcels,
+          missing_count,
+          extra_count,
+          damaged_count,
+          condition,
+          condition_findings,
+        ]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        hub_id: { type: string, format: uuid }
+        pickup_request_id: { type: string, format: uuid }
+        pickup_manifest_id: { type: string, format: uuid, description: 'The run whose hub handover opened this intake.' }
+        run_code: { type: string, description: 'The run''s operational code, for people who say it aloud.' }
+        state:
+          type: string
+          enum:
+            [
+              AWAITING_COUNT,
+              COUNTED,
+              RECONCILIATION_REQUIRED,
+              READY_FOR_ITEMIZATION,
+              ITEMIZING,
+              CLOSED,
+            ]
+        count_phase: { type: string, const: CHECK_IN }
+        receiving_mode: { type: string, const: PHOTO_CHECK_IN }
+        vendor_name: { type: string, description: 'The vendor organisation, by name; for a sender with no organisation, the sender''s display name.' }
+        handed_over_by_name: { type: string, description: 'The rider who handed the run over, by display name.' }
+        handed_over_at: { type: string, format: date-time }
+        parcels_expected: { type: integer, minimum: 1, description: 'The number of door photos: what the intake expects.' }
+        rider_declared_count:
+          type: integer
+          minimum: 0
+          description: >-
+            **Shown, as a recorded fact beside the number photographed** (D-D1: a photo intake hides nothing). The rider's number at the handover; a declaration
+            of zero still goes to a senior officer.
+        arrived_count: { type: integer, minimum: 0 }
+        received_count: { type: [integer, 'null'], minimum: 0 }
+        count_variance: { type: [string, 'null'], enum: [MATCH, SHORT, OVER, null] }
+        count_difference: { type: [integer, 'null'], description: 'Signed: the received count minus the number expected.' }
+        counted_at: { type: [string, 'null'], format: date-time }
+        counted_by_name: { type: [string, 'null'], description: 'The officer who finished the vendor, by display name.' }
+        lock:
+          oneOf:
+            - $ref: '#/components/schemas/ReceivingLock'
+            - type: 'null'
+        parcels:
+          type: array
+          items: { $ref: '#/components/schemas/IntakeParcel' }
+          description: In the order the door photos were taken, the extras after them.
+        missing_count: { type: integer, minimum: 0 }
+        extra_count: { type: integer, minimum: 0 }
+        damaged_count: { type: integer, minimum: 0 }
+        condition:
+          type: string
+          enum: [OK, DAMAGED, TAMPERED, OTHER]
+          description: >-
+            The intake's own condition column, `OK` until a condition other than `OK` is recorded or a senior officer sets one. **It is not a finding**: a screen
+            says *Not checked yet* for a parcel with no recorded condition and never *Good condition* from this default.
+        condition_findings:
+          type: array
+          items: { $ref: '#/components/schemas/IntakeFinding' }
+          description: The findings in the order they were made; empty until one is.
+        dispute_state: { type: [string, 'null'] }
+        parity_exception_id: { type: [string, 'null'], format: uuid }
+      description: |
+        **The third intake shape** (Run D, 5.108.0; `count_phase` `CHECK_IN`): the intake of a stop with door photos, as the record of the vendor draws it. **It
+        hides nothing** (D-D1, D-D2): the door photos' parcels, the rider's declaration as a recorded fact, the comparison, who checked each parcel in, the
+        findings, and the names the receiving screens draw (never a phone number). The two shapes of the blind-count intake, `HubIntakePreCount` and
+        `HubIntakePostCount`, are unchanged and keep the withholding of the declaration (D-D3). The `ETag` of the answer, or of the read that serves this
+        shape, is the intake's.
+
+    ReceivingVendor:
+      type: object
+      required:
+        [
+          intake_id,
+          intake_code,
+          intake_etag,
+          receiving_mode,
+          state,
+          vendor_name,
+          parcels_expected,
+          arrived_count,
+          received_count,
+          count_variance,
+          lock,
+          missing_count,
+          extra_count,
+          damaged_count,
+          parcels,
+        ]
+      additionalProperties: false
+      properties:
+        intake_id: { type: string, format: uuid }
+        intake_code: { type: string }
+        intake_etag:
+          type: string
+          description: >-
+            The intake's `ETag`: the `If-Match` of this vendor's acts. It does not move with the lock, with a tap or an untap, or with an extra added before the
+            vendor is finished (`getReceivingRun`).
+        receiving_mode: { $ref: '#/components/schemas/ReceivingMode' }
+        state:
+          type: string
+          enum:
+            [
+              AWAITING_COUNT,
+              COUNTED,
+              RECONCILIATION_REQUIRED,
+              READY_FOR_ITEMIZATION,
+              ITEMIZING,
+              CLOSED,
+            ]
+        vendor_name: { type: string, description: 'The vendor organisation, by name; for a sender with no organisation, the sender''s display name.' }
+        parcels_expected:
+          type: [integer, 'null']
+          minimum: 0
+          description: 'The door photos of a photo vendor. **`null` for a blind-count vendor, always: the rider''s number is not given by this read** (D-D3).'
+        arrived_count: { type: [integer, 'null'], minimum: 0, description: 'Live: the parcels `ARRIVED` now; null for a blind-count vendor.' }
+        received_count: { type: [integer, 'null'], minimum: 0 }
+        count_variance: { type: [string, 'null'], enum: [MATCH, SHORT, OVER, null] }
+        lock:
+          oneOf:
+            - $ref: '#/components/schemas/ReceivingLock'
+            - type: 'null'
+        missing_count: { type: integer, minimum: 0 }
+        extra_count: { type: integer, minimum: 0 }
+        damaged_count: { type: integer, minimum: 0 }
+        parcels:
+          type: array
+          items: { $ref: '#/components/schemas/IntakeParcel' }
+          description: A photo vendor's parcels in the order the door photos were taken, the extras after them; empty for a blind-count vendor.
+      description: >-
+        One vendor's section of a run's receiving page: the intake it is, with its mode, its state, its counts and, for a photo vendor, its parcels with their
+        photos. **For a blind-count vendor it carries no parcel and no number of the rider's before the count.** The full record of a photo vendor is
+        `HubIntakeCheckIn`.
+
+    ReceivingRun:
+      type: object
+      required: [run, rider_name, handed_over_at, vendors]
+      additionalProperties: false
+      properties:
+        run:
+          type: object
+          required: [id, code, hub_id, hub_name, service_date]
+          additionalProperties: false
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            hub_id: { type: string, format: uuid }
+            hub_name: { type: string }
+            service_date: { type: string, format: date }
+        rider_name: { type: string, description: 'The rider who handed the run over, by display name; never a phone number.' }
+        handed_over_at: { type: string, format: date-time, description: 'The earliest handover of the run''s intakes.' }
+        vendors:
+          type: array
+          items: { $ref: '#/components/schemas/ReceivingVendor' }
+          description: One for each intake of the run, in the order the handover opened them.
+      description: 'A run''s receiving page (`getReceivingRun`): the run, the rider by name and one section for each vendor.'
+
+    ReceivingRunSummary:
+      type: object
+      required:
+        [
+          run_id,
+          run_code,
+          hub_id,
+          hub_name,
+          rider_name,
+          vendor_names,
+          vendors_total,
+          vendors_waiting,
+          vendors_needing_decision,
+          blind_count_vendors,
+          parcels_expected,
+          missing_searching,
+          handed_over_at,
+          checking_in,
+        ]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, format: uuid }
+        run_code: { type: string }
+        hub_id: { type: string, format: uuid }
+        hub_name: { type: string }
+        rider_name: { type: string, description: 'The rider, by display name; never a phone number.' }
+        vendor_names:
+          type: array
+          items: { type: string }
+          description: The vendors of the run, by name, in the order the handover opened their intakes.
+        vendors_total: { type: integer, minimum: 1 }
+        vendors_waiting: { type: integer, minimum: 0, description: 'The vendors still waiting to be checked in (`AWAITING_COUNT`).' }
+        vendors_needing_decision: { type: integer, minimum: 0, description: 'The vendors in `RECONCILIATION_REQUIRED`.' }
+        blind_count_vendors:
+          type: integer
+          minimum: 0
+          description: >-
+            The vendors of the run whose stop has no photos and that are counted blind. **Their declared count is in no row**: they are counted and nothing of
+            their number is said (D-D3).
+        parcels_expected: { type: integer, minimum: 0, description: 'The door photos of the run''s photo vendors, together.' }
+        missing_searching: { type: integer, minimum: 0, description: 'The parcels of the run still being searched for.' }
+        handed_over_at: { type: string, format: date-time, description: 'The earliest handover of the run''s intakes: what the queue is ordered by.' }
+        checking_in:
+          type: array
+          items:
+            type: object
+            required: [name, is_you]
+            additionalProperties: false
+            properties:
+              name: { type: string, description: 'The officer, by display name.' }
+              is_you: { type: boolean }
+          description: 'The officers who hold the lock of a vendor of this run (empty: *No one*).'
+      description: >-
+        One row of the receiving queue (`listReceivingRuns`): a run, named by its code, its rider and its vendors, with what waits. No phone number, no declared
+        count and no photo.
+
+    MissingParcel:
+      type: object
+      required:
+        [parcel_id, photo_evidence_id, intake_id, intake_code, run_id, run_code, vendor_name, missing_since, written_off_at]
+      additionalProperties: false
+      properties:
+        parcel_id: { type: string, format: uuid }
+        photo_evidence_id: { type: string, format: uuid, description: 'The door photo of the missing parcel; read with `createEvidenceRetrievalAuthorization`.' }
+        intake_id: { type: string, format: uuid, description: 'The vendor''s intake; the record where a senior officer decides and where an officer who finds the parcel checks it in.' }
+        intake_code: { type: string }
+        run_id: { type: string, format: uuid }
+        run_code: { type: string }
+        vendor_name: { type: string }
+        missing_since: { type: string, format: date-time, description: 'The moment the vendor was finished without this parcel: how long it has been missing.' }
+        written_off_at:
+          type: [string, 'null']
+          format: date-time
+          description: The moment a senior officer wrote the case off as not found; null while it is being searched for.
+      description: One missing parcel of the list *Missing - being searched for* (`listMissingParcels`).
+
+    EvidenceLimits:
+      type: object
+      required: [allowed_content_types, max_byte_size]
+      additionalProperties: false
+      properties:
+        allowed_content_types:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: The types a file of evidence may have (`content_type` of `createEvidence`), without parameters.
+        max_byte_size: { type: integer, minimum: 1, description: 'The largest file of evidence, in bytes (`byte_size` of `createEvidence`).' }
+      description: >-
+        The platform's limits on a file of evidence (`getEvidenceLimits`; OB-S1-110), so that a screen refuses a file above the size limit before it reads it
+        whole. Configuration only: no secret and no address.
+
+    ParcelArrival:
+      type: object
+      required: [arrived]
+      additionalProperties: false
+      properties:
+        arrived: { type: boolean, description: 'The parcel''s desired state: true checks it in (or finds it); false takes the tap back or voids an extra.' }
+      description: 'The body of `recordParcelArrival`: the desired state, so that the act is idempotent by nature.'
+
+    CheckInFinish:
+      type: object
+      required: [all_arrived]
+      additionalProperties: false
+      properties:
+        all_arrived: { type: boolean, description: 'True: "All N here" (every parcel still expected arrives). False: finish as tapped (every parcel not tapped is missing).' }
+        confirmed_count:
+          type: integer
+          minimum: 1
+          description: >-
+            The number of parcels the officer counted on the table. **Required with `all_arrived: true` and not allowed without it** (`VALIDATION_FAILED`);
+            it must equal the number of parcels the intake expects (`STATE_CONFLICT`, rule `count_changed`). It is the officer's own statement, never a default.
+      description: The body of `finishCheckIn`.
+
+    ExtraParcelAdd:
+      type: object
+      required: [photo_evidence_id]
+      additionalProperties: false
+      properties:
+        photo_evidence_id: { type: string, format: uuid, description: 'The photo taken at the hub: a `STORED` evidence record of this intake (`PICKUP_INTAKE`, purpose `OSD`), used once.' }
+        note: { type: string, maxLength: 1000 }
+      description: The body of `addExtraParcel`.
+
+    IntakeParcelChange:
+      type: object
+      required: [parcel_id, state]
+      additionalProperties: false
+      properties:
+        parcel_id: { type: string, format: uuid }
+        state:
+          type: string
+          enum: [ARRIVED, MISSING, VOID]
+          description: 'The state the parcel is to have: a door parcel `ARRIVED` or `MISSING`, an extra `ARRIVED` or `VOID`.'
+      description: One parcel of a senior officer's correction of a photo intake.
+
+    IntakeCorrection:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Mandatory, in words (blank is `REASON_REQUIRED`); there is no reason catalogue for a correction.
+        parcel_changes:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/IntakeParcelChange' }
+          description: The correction of a photo intake. Not allowed for a blind-count intake (`VALIDATION_FAILED`, rule `mode_mismatch`).
+        physical_count:
+          type: integer
+          minimum: 0
+          description: The correction of a blind-count intake. Not allowed for a photo intake (`VALIDATION_FAILED`, rule `mode_mismatch`).
+      description: >-
+        The body of `correctIntakeCount` (D-D8): a reason and exactly one of `parcel_changes` (photo mode) and `physical_count` (blind-count mode). The old and
+        the new numbers are recorded by the database and the ledger, never sent.
+
+    IntakeParcelAnswer:
+      type: object
+      required: [parcel, intake_etag, counts]
+      additionalProperties: false
+      properties:
+        parcel: { $ref: '#/components/schemas/IntakeParcel' }
+        intake_etag:
+          type: string
+          description: The vendor's current `ETag`, so that the page keeps the token its next act takes.
+        counts: { $ref: '#/components/schemas/IntakeCounts' }
+      description: 'The answer of `recordParcelArrival` and `addExtraParcel`: the parcel as it now is and the vendor''s counts after the act.'
 
     OrderItemize:
       type: object

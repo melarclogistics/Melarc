@@ -153,20 +153,21 @@ Harvested from every transition table in [state-machines.md](state-machines.md) 
 | `details.rule`| Code| Raised by| When|
 |---|---|---|---|
 | `already_counted`| `STATE_CONFLICT`| `submitBlindCount`| The blind-count intake was counted already: of two receivers who both count, the second|
-| `stale`| `STATE_CONFLICT`| every act that takes the intake's `If-Match`: `submitBlindCount`, `recordIntakeCondition`, `adjudicateDiscrepancy` (as built) and, designed by Run D, `finishCheckIn`, `addExtraParcel`, `correctIntakeCount`| The `ETag` sent is not the intake's current one, or none was sent|
+| `stale`| `STATE_CONFLICT`| every act that takes the intake's `If-Match`: `submitBlindCount`, `recordIntakeCondition`, `adjudicateDiscrepancy` (as built) and, declared by Run D, `finishCheckIn` and `correctIntakeCount` (`addExtraParcel` and `recordParcelArrival` take none: nothing the officer read is judged)| The `ETag` sent is not the intake's current one, or none was sent|
 | `intake_not_counted`| `STATE_CONFLICT`| `recordIntakeCondition`| A blind-count intake that has not been counted: a condition is recorded after the count|
-| `itemization_started`| `STATE_CONFLICT`| `recordIntakeCondition`, `adjudicateDiscrepancy` (as built) and `correctIntakeCount` (designed)| Itemizing has begun or the intake is closed|
+| `itemization_started`| `STATE_CONFLICT`| `recordIntakeCondition`, `adjudicateDiscrepancy` (as built) and, declared by Run D, `correctIntakeCount`, `recordParcelArrival` and `addExtraParcel`| Itemizing has begun or the intake is closed|
 | `condition_already_recorded`| `STATE_CONFLICT`| `recordIntakeCondition`| A condition was recorded already: **once for each parcel (photo mode) or once for an intake that has no parcel**, judged by the findings, held by the database; or the intake's condition is not `OK` and stands until it is adjudicated|
 | `not_awaiting_resolution`| `STATE_CONFLICT`| `adjudicateDiscrepancy`| The intake is not in `RECONCILIATION_REQUIRED` (resolved already, waiting, or being itemized). *Not raised for the record "Vendor told", which follows a write-off (designed)*|
 | `photo_check_in`| `STATE_CONFLICT`| `submitBlindCount`| *Designed (Run D).* The intake is in photo mode: it is checked in, never counted blind|
 | `blind_count_intake`| `STATE_CONFLICT`| `recordParcelArrival`, `finishCheckIn`, `addExtraParcel`| *Designed.* The intake is a blind-count one: its stop has no photos to check against|
 | `count_changed`| `STATE_CONFLICT`| `finishCheckIn` with `all_arrived`| *Designed.* The confirmed number is not the number of parcels the intake expects: nothing is recorded|
 | `has_extra_parcels`| `STATE_CONFLICT`| `finishCheckIn` with `all_arrived`| *Designed.* An extra that is not void stands: a pile with an extra is not "all N here"|
-| `check_in_finished`| `STATE_CONFLICT`| `recordParcelArrival`| *Designed.* The vendor is finished: a parcel then changes only by being found (while the case is open), by an extra or by a senior's correction|
+| `check_in_finished`| `STATE_CONFLICT`| `recordParcelArrival`, `finishCheckIn` and `addExtraParcel`| *Declared by Run D.* The vendor is finished: a parcel then changes only by being found (while the case is open), by an extra or by a senior's correction; a vendor is finished once, and an extra is not added to a case that was resolved|
 | `parcel_not_arrived`| `STATE_CONFLICT`| `recordIntakeCondition`| *Designed.* The parcel named has not arrived|
 | `not_written_off`| `STATE_CONFLICT`| `adjudicateDiscrepancy` (`VENDOR_NOTIFIED`)| *Designed.* "Vendor told" before an earlier write-off of the intake|
 | `vendor_already_told`| `STATE_CONFLICT`| `adjudicateDiscrepancy` (`VENDOR_NOTIFIED`)| *Designed.* "Vendor told" a second time|
 | `parcel_required`| `VALIDATION_FAILED`| `recordIntakeCondition`| *Designed.* A condition for the whole intake of a photo intake: damage is a parcel's|
+| `mode_mismatch`| `VALIDATION_FAILED`| `correctIntakeCount`| *Declared by Run D.* The body names the other mode's member (`physical_count` for a photo intake, `parcel_changes` for a blind-count one), both, or neither|
 
 The rules of the door that the screens also word (`collection_recorded`, `stop_not_arrived`, `stop_resolved`, `parcel_photo_count`, `duplicate`, `not_short`) are in the operations' text and in [pickup-collection.md](../features/pickup/pickup-collection.md); Run D's over count touches one of them: `not_short` is told of a reason sent with a count that matches, and the build of S1.35a decides whether it keeps the name now that a reason is also valid for an over count. **Provisional:** the names marked designed are the build's to confirm when S1.35a and S1.35b declare them in the contract.
 

@@ -370,7 +370,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**200 operations: 117 `CRITICAL_WRITE` · 0 `ASYNC` · 83 `NORMAL`.**
+**208 operations: 120 `CRITICAL_WRITE` · 0 `ASYNC` · 88 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -478,6 +478,14 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `getHubIntake`| `NORMAL`| —|
 | `listHubIntakes`| `NORMAL`| —|
 | `acquireIntakeLock`| `NORMAL`| advisory — the count's own transition and idempotency guards decide the outcome (§22.8)|
+| `listReceivingRuns`| `NORMAL`| — A read: the receiving queue by run, with names and no phone number (Run D, S1.35b; `hub.read`). It returns no declared count of a blind-count vendor|
+| `getReceivingRun`| `NORMAL`| — A read: a run's receiving page, each vendor with its parcels and its own `ETag` (Run D, S1.35b; `hub.read`). A read of a run in another hub writes one `auth.hub_boundary.crossed`|
+| `listMissingParcels`| `NORMAL`| — A read: the parcels being searched for, or written off and awaiting the record "Vendor told" (Run D, S1.35b; `hub.read`)|
+| `getEvidenceLimits`| `NORMAL`| — A read of configuration: the allowed types and the largest size of a file of evidence (Run D, S1.35b; OB-S1-110). It moves no custody, money or allocation and returns no secret|
+| `recordParcelArrival`| `NORMAL`| a tap on a parcel's photo, idempotent by nature and reversible while its vendor is open (Run D, S1.35b); the vendor's finish is the authoritative act|
+| `finishCheckIn`| `CRITICAL_WRITE`| the hub's count of a vendor is the close authority and routes the case to Senior Ops (Run D, S1.35b)|
+| `addExtraParcel`| `CRITICAL_WRITE`| records a parcel in the hub's custody that the rider never photographed, and sends the case to Senior Ops (Run D, S1.35b)|
+| `correctIntakeCount`| `CRITICAL_WRITE`| a senior officer changes an authoritative count or check-in, with a reason, audited as an enhanced event (Run D, S1.35b; D-D8)|
 | `getPaymentCollection`| `NORMAL`| —|
 | `getPickupManifest`| `NORMAL`| —|
 | `getPickupRequest`| `NORMAL`| —|
