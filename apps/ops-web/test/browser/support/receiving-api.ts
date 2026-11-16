@@ -417,9 +417,43 @@ async function answer(route: Route, state: ReceivingApi, call: Call): Promise<vo
       }
     }
   }
+  // An intake that none of the world's runs holds points at the stand-in's own run (`IDS.run`). That run holds exactly those intakes, as vendors counted without photos, and is answered when it is asked for
+  // by id (a page that reads the run for the name of a vendor): it is no run of the queue, which lists the world's own. A world whose intakes are all in its runs answers nothing for it, as before.
+  const strays = w.intakes.filter(
+    (intake) => !w.runs.some((run) => run.vendors.some((vendor) => vendor.id === intake.id)),
+  );
+  const runs: RunRow[] =
+    method === 'GET' &&
+    path === `/api/v1/receiving-runs/${IDS.run}` &&
+    strays.length > 0 &&
+    !w.runs.some((run) => run.id === IDS.run)
+      ? [
+          {
+            id: IDS.run,
+            code: 'ACC-MF-0ZZZZZ',
+            riderName: 'Kofi Boateng',
+            handedOverAt: '2026-11-03T07:00:00Z',
+            hubId: IDS.hub,
+            hubName: 'Accra Central',
+            vendors: strays.map((intake) => ({
+              id: intake.id,
+              code: intake.code,
+              name: 'Counted Vendor',
+              mode: 'BLIND_COUNT' as const,
+              state: intake.state,
+              version: intake.version,
+              parcels: [],
+              lock: null,
+              received: null,
+              blindCounted: intake.physical,
+              riderNumber: intake.declared,
+            })),
+          },
+        ]
+      : w.runs;
   if (
     await answerRuns(route, call, {
-      runs: w.runs,
+      runs,
       holds,
       leak: w.leak,
       stored: (evidenceId, ownerId) =>

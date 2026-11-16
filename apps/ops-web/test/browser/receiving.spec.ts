@@ -526,6 +526,11 @@ test.describe('the run’s page: the hub floor', () => {
     );
     expect(before.trim()).toBe('0px');
 
+    // The officer is at the vendor's photos, so the page is scrolled to its card. A bar is kept within its own card, so it can be lifted above the keyboard only where its card is in view: with the
+    // floor's 56 px links the page's header is taller, and the card of an unscrolled page began below the 400 px that the keyboard leaves.
+    await kente.evaluate((node) => {
+      node.scrollIntoView({ block: 'start' });
+    });
     // The keyboard opens: the part of the page the person can see is 400 px high.
     await page.evaluate(() => {
       const viewport = window.visualViewport;
