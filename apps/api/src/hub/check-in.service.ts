@@ -155,7 +155,8 @@ export class HubCheckIns {
       const owner = await tx.execute(
         sql`select pickup_intake_id from intake_parcel where id = ${parcelId}::uuid`,
       );
-      const intakeId = (owner.rows[0] as { pickup_intake_id: string } | undefined)?.pickup_intake_id;
+      const intakeId = (owner.rows[0] as { pickup_intake_id: string } | undefined)
+        ?.pickup_intake_id;
       if (intakeId === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
       // The intake first, then the parcel: the order of every act of the database layer.
       const before = await this.#lock(handle, authorized, intakeId);
@@ -425,11 +426,18 @@ export class HubCheckIns {
             from melarc.correct_intake_count(${id}::uuid, ${reason}, ${body.parcel_changes === undefined ? null : JSON.stringify(body.parcel_changes)}::jsonb, ${body.physical_count ?? null}::integer)`);
         moved = done.rows[0] as typeof moved;
       } catch (error) {
-        throw receivingRefusalOf(error, body.parcel_changes === undefined ? '/physical_count' : '/parcel_changes') ?? error;
+        throw (
+          receivingRefusalOf(
+            error,
+            body.parcel_changes === undefined ? '/physical_count' : '/parcel_changes',
+          ) ?? error
+        );
       }
       if (moved === undefined) throw new Error('A locked intake was not corrected');
       const after = await this.#reload(tx, id, caller);
-      const changed = Array.isArray(moved.changed) ? (moved.changed as Record<string, unknown>[]) : [];
+      const changed = Array.isArray(moved.changed)
+        ? (moved.changed as Record<string, unknown>[])
+        : [];
       await this.#options.audit.write(handle, {
         code: 'hub.intake.corrected',
         enhanced: true,
@@ -462,7 +470,10 @@ export class HubCheckIns {
           parcels_changed: changed.length,
         },
       });
-      if (moved.previous_state !== 'RECONCILIATION_REQUIRED' && moved.resulting_state === 'RECONCILIATION_REQUIRED') {
+      if (
+        moved.previous_state !== 'RECONCILIATION_REQUIRED' &&
+        moved.resulting_state === 'RECONCILIATION_REQUIRED'
+      ) {
         await this.#opened(handle, after.row, moved.previous_state, {
           dimension: 'CORRECTION',
           count_variance: moved.new_variance,

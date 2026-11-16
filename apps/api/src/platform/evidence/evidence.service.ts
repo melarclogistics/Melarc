@@ -546,14 +546,19 @@ export class EvidenceService {
   async limits(
     authorized: AuthorizedRequest,
     correlationId: string,
-  ): Promise<{ readonly allowed_content_types: readonly string[]; readonly max_byte_size: number }> {
+  ): Promise<{
+    readonly allowed_content_types: readonly string[];
+    readonly max_byte_size: number;
+  }> {
     if (authorized.session.principalType !== 'STAFF') throw denied();
     return this.#options.runner.read(authorized, correlationId, async (handle) => {
       const { settings } = this.#options;
       const maxBytes = await settings.integer(handle, EVIDENCE_SETTINGS.maxBytes);
       const allowed = await settings.list(handle, EVIDENCE_SETTINGS.allowedMimeTypes);
       // A list that holds anything but types is not a usable setting: the read fails as the platform's own, and nothing is defaulted.
-      const types = allowed.filter((type): type is string => typeof type === 'string' && type !== '');
+      const types = allowed.filter(
+        (type): type is string => typeof type === 'string' && type !== '',
+      );
       if (types.length === 0 || types.length !== allowed.length) {
         throw new SettingMissingError(EVIDENCE_SETTINGS.allowedMimeTypes);
       }

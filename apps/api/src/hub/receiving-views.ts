@@ -178,9 +178,12 @@ export async function namesOf(tx: Tx, intakeIds: readonly string[]): Promise<Nam
     intake_id: string | null;
     display_name: string;
   }[]) {
-    if (row.party === 'VENDOR' && row.intake_id !== null) vendor.set(row.intake_id, row.display_name);
-    else if (row.party === 'RIDER' && row.party_id !== null) rider.set(row.party_id, row.display_name);
-    else if (row.party === 'STAFF' && row.party_id !== null) staff.set(row.party_id, row.display_name);
+    if (row.party === 'VENDOR' && row.intake_id !== null)
+      vendor.set(row.intake_id, row.display_name);
+    else if (row.party === 'RIDER' && row.party_id !== null)
+      rider.set(row.party_id, row.display_name);
+    else if (row.party === 'STAFF' && row.party_id !== null)
+      staff.set(row.party_id, row.display_name);
   }
   return { vendor, rider, staff };
 }
@@ -238,7 +241,9 @@ export async function findingRowsOf(
 export async function declarationsOf(
   tx: Tx,
   intakeIds: readonly string[],
-): Promise<ReadonlyMap<string, { readonly declared: number; readonly photoIds: readonly string[] }>> {
+): Promise<
+  ReadonlyMap<string, { readonly declared: number; readonly photoIds: readonly string[] }>
+> {
   if (intakeIds.length === 0) return new Map();
   const answered = await tx.execute(
     sql`select intake_id, rider_declared_count, parcel_photo_ids from melarc.hub_intake_after_count(array[${idList(intakeIds)}]::uuid[])`,
@@ -250,7 +255,10 @@ export async function declarationsOf(
         rider_declared_count: number;
         parcel_photo_ids: readonly string[];
       }[]
-    ).map((row) => [row.intake_id, { declared: row.rider_declared_count, photoIds: row.parcel_photo_ids }]),
+    ).map((row) => [
+      row.intake_id,
+      { declared: row.rider_declared_count, photoIds: row.parcel_photo_ids },
+    ]),
   );
 }
 
@@ -280,7 +288,8 @@ export function parcelViewOf(
   const found = findings.find(
     (finding) => finding.kind === 'CONDITION' && finding.intake_parcel_id === parcel.id,
   );
-  const photo = parcel.origin === 'DOOR_PHOTO' ? parcel.door_photo_evidence_id : parcel.hub_photo_evidence_id;
+  const photo =
+    parcel.origin === 'DOOR_PHOTO' ? parcel.door_photo_evidence_id : parcel.hub_photo_evidence_id;
   if (photo === null) throw new Error('A parcel has the photo of its origin');
   return {
     id: parcel.id,
@@ -331,15 +340,20 @@ export function countsOf(
 ): IntakeCountsView {
   const photo = row.receiving_mode === 'PHOTO_CHECK_IN';
   const damaged = findings.filter(
-    (finding) => finding.kind === 'CONDITION' && finding.condition !== null && finding.condition !== 'OK',
+    (finding) =>
+      finding.kind === 'CONDITION' && finding.condition !== null && finding.condition !== 'OK',
   ).length;
   return {
-    parcels_expected: photo ? parcels.filter((parcel) => parcel.origin === 'DOOR_PHOTO').length : null,
+    parcels_expected: photo
+      ? parcels.filter((parcel) => parcel.origin === 'DOOR_PHOTO').length
+      : null,
     arrived_count: photo ? parcels.filter((parcel) => parcel.state === 'ARRIVED').length : null,
     received_count: row.physical_count,
     count_variance: varianceOf(row.count_variance),
     missing_count: parcels.filter((parcel) => parcel.state === 'MISSING').length,
-    extra_count: parcels.filter((parcel) => parcel.origin === 'HUB_EXTRA' && parcel.state !== 'VOID').length,
+    extra_count: parcels.filter(
+      (parcel) => parcel.origin === 'HUB_EXTRA' && parcel.state !== 'VOID',
+    ).length,
     damaged_count: damaged,
   };
 }
@@ -430,7 +444,10 @@ export function checkInEtagOf(view: HubIntakeCheckInView, version: number): stri
 
 /** What every read and act of the receiving side loads for the intakes it is about, in two shapes: a photo intake's third shape, and a blind-count intake's own two. */
 export interface LoadedIntakes {
-  readonly checkIns: ReadonlyMap<string, { readonly view: HubIntakeCheckInView; readonly etag: string }>;
+  readonly checkIns: ReadonlyMap<
+    string,
+    { readonly view: HubIntakeCheckInView; readonly etag: string }
+  >;
   readonly blind: ReadonlyMap<
     string,
     { readonly view: HubIntakeView; readonly etag: string; readonly after: AfterCount | undefined }
@@ -463,7 +480,10 @@ export async function loadIntakes(
     .map((row) => row.id);
   const declarations = await declarationsOf(tx, wantsDeclaration);
   const checkIns = new Map<string, { view: HubIntakeCheckInView; etag: string }>();
-  const blind = new Map<string, { view: HubIntakeView; etag: string; after: AfterCount | undefined }>();
+  const blind = new Map<
+    string,
+    { view: HubIntakeView; etag: string; after: AfterCount | undefined }
+  >();
   for (const row of rows) {
     const declaration = declarations.get(row.id);
     if (row.receiving_mode === 'PHOTO_CHECK_IN') {
@@ -533,7 +553,11 @@ export function parcelAnswerOf(
   view: HubIntakeCheckInView,
   etag: string,
   parcelId: string,
-): { readonly parcel: IntakeParcelView; readonly intake_etag: string; readonly counts: IntakeCountsView } {
+): {
+  readonly parcel: IntakeParcelView;
+  readonly intake_etag: string;
+  readonly counts: IntakeCountsView;
+} {
   const parcel = view.parcels.find((each) => each.id === parcelId);
   if (parcel === undefined) throw new Error('A parcel is one of its intake’s parcels');
   return {

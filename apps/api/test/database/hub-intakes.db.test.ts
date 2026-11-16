@@ -583,7 +583,11 @@ describe('the door photos on the receiving reads (AC-SLICE-001-92; D-D1 reverses
     expect([queue.status, one.status, locked.status]).toEqual([200, 200, 200]);
 
     const listed = (queue.json() as { items: PhotoIntake[] }).items;
-    const ofFirst = [listed.find((item) => item.id === id), one.json(), locked.json()] as PhotoIntake[];
+    const ofFirst = [
+      listed.find((item) => item.id === id),
+      one.json(),
+      locked.json(),
+    ] as PhotoIntake[];
     for (const shown of ofFirst) {
       expect(shown.count_phase).toBe('CHECK_IN');
       expect(shown.receiving_mode).toBe('PHOTO_CHECK_IN');

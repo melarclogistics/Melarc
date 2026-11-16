@@ -205,14 +205,18 @@ describe('listReceivingRuns: the queue by run', () => {
     expect(all.map((row) => row.run_id).toSorted()).toEqual(
       [idOfRun(photoRunA), idOfRun(blindRunA), idOfRun(photoRunB)].toSorted(),
     );
-    expect(
-      (await runsOf(admin, `?hub_id=${HUB_B}`)).map((row) => row.run_id),
-    ).toEqual([idOfRun(photoRunB)]);
+    expect((await runsOf(admin, `?hub_id=${HUB_B}`)).map((row) => row.run_id)).toEqual([
+      idOfRun(photoRunB),
+    ]);
 
     const after = await crossings('listReceivingRuns');
     // The first read crossed to both hubs (one event each), the second to the second hub alone.
-    expect(after.filter((hub) => hub === HUB_A).length - before.filter((hub) => hub === HUB_A).length).toBe(1);
-    expect(after.filter((hub) => hub === HUB_B).length - before.filter((hub) => hub === HUB_B).length).toBe(2);
+    expect(
+      after.filter((hub) => hub === HUB_A).length - before.filter((hub) => hub === HUB_A).length,
+    ).toBe(1);
+    expect(
+      after.filter((hub) => hub === HUB_B).length - before.filter((hub) => hub === HUB_B).length,
+    ).toBe(2);
   });
 
   // Break caught: a search that matches on the wrong thing (a run's code only, so a vendor or an intake cannot be found; or case-sensitive), a view that ignores what a vendor needs, or a filter that widens: `q`
@@ -250,12 +254,20 @@ describe('listReceivingRuns: the queue by run', () => {
     expect(one.items.map((row) => row.run_id)).toEqual([idOfRun(photoRunA)]);
     expect(one.next_page_token).not.toBeNull();
     const second = pageOf<RunRow>(
-      await a.client.get(`${RUNS}?page_size=1&page_token=${encodeURIComponent(one.next_page_token ?? '')}`),
+      await a.client.get(
+        `${RUNS}?page_size=1&page_token=${encodeURIComponent(one.next_page_token ?? '')}`,
+      ),
     );
     expect(second.items.map((row) => row.run_id)).toEqual([idOfRun(blindRunA)]);
     expect(second.next_page_token).toBeNull();
 
-    for (const query of ['?page_size=0', '?page_size=1000', '?page_token=not-a-token', '?view=everything', '?hub_id=not-a-uuid']) {
+    for (const query of [
+      '?page_size=0',
+      '?page_size=1000',
+      '?page_token=not-a-token',
+      '?view=everything',
+      '?hub_id=not-a-uuid',
+    ]) {
       const refused = await a.client.get(`${RUNS}${query}`);
       expect([refused.status, codeOf(refused)], query).toEqual([400, 'VALIDATION_FAILED']);
     }
@@ -283,7 +295,11 @@ describe('getReceivingRun: one run is one page', () => {
     expect(read.status).toBe(200);
     const page = read.json() as RunPage;
 
-    expect(page.run).toMatchObject({ id: idOfRun(photoRunA), code: codeOfRun(photoRunA), hub_id: HUB_A });
+    expect(page.run).toMatchObject({
+      id: idOfRun(photoRunA),
+      code: codeOfRun(photoRunA),
+      hub_id: HUB_A,
+    });
     expect(page.run.service_date).toBe(days.today);
     expect(page.rider_name).not.toBe('');
     expect(page.vendors.map((section) => section.intake_id)).toEqual(
@@ -314,7 +330,11 @@ describe('getReceivingRun: one run is one page', () => {
       photoRunA.photoIds.slice(2).toSorted(),
     );
     for (const parcel of [...(first?.parcels ?? []), ...(second?.parcels ?? [])]) {
-      expect([parcel.arrived_by_name, parcel.arrived_at, parcel.missing_marked_at]).toEqual([null, null, null]);
+      expect([parcel.arrived_by_name, parcel.arrived_at, parcel.missing_marked_at]).toEqual([
+        null,
+        null,
+        null,
+      ]);
     }
     // Each vendor's `ETag` is the token of its own intake: the one a read of the intake gives, so that the act on that vendor takes it back.
     for (const section of page.vendors) {
@@ -367,7 +387,10 @@ describe('getReceivingRun: one run is one page', () => {
       const read = await officer.client.get(path);
       expect(read.status, path).toBe(200);
       expect(read.text, path).not.toContain(A_PHONE);
-      expect(keysOf(read.json()).filter((key) => /phone|email|address|credential|secret/i.test(key)), path).toEqual([]);
+      expect(
+        keysOf(read.json()).filter((key) => /phone|email|address|credential|secret/i.test(key)),
+        path,
+      ).toEqual([]);
     }
   });
 });
@@ -404,12 +427,12 @@ describe('listMissingParcels and getEvidenceLimits', () => {
 describe('getQueueSummary: the two queues of the receiving side', () => {
   const entryOf = (queues: readonly { queue: string }[], queue: string) =>
     queues.find((each) => each.queue === queue) as
-      | { queue: string; count: number; oldest_at?: string }
-      | undefined;
+      { queue: string; count: number; oldest_at?: string } | undefined;
   const summaryOf = async (actor: Actor, hub?: string) => {
     const read = await actor.client.get(hub === undefined ? SUMMARY : `${SUMMARY}?hub_id=${hub}`);
     expect(read.status).toBe(200);
-    return (read.json() as { queues: { queue: string; count: number; oldest_at?: string }[] }).queues;
+    return (read.json() as { queues: { queue: string; count: number; oldest_at?: string }[] })
+      .queues;
   };
 
   // Break caught: a count that is not its list's (the run of two vendors counted twice, or a blind run left out), a moment that is not the oldest handover, or a hub that narrows nothing: runs, not vendors, with
@@ -470,8 +493,12 @@ describe('the manifest of a run, as the keys that read intakes see it (migration
     });
     const seenBy = async (key: string, hubs: readonly string[]): Promise<string[]> =>
       (
-        await routes.built.service.transactionWithContext(context(key, hubs), async (tx) =>
-          (await tx.execute(sql`select id from pickup_manifest`)).rows as unknown as { id: string }[],
+        await routes.built.service.transactionWithContext(
+          context(key, hubs),
+          async (tx) =>
+            (await tx.execute(sql`select id from pickup_manifest`)).rows as unknown as {
+              id: string;
+            }[],
         )
       )
         .map((row) => row.id)

@@ -17,7 +17,10 @@ const NULLABLE_DATE_TIME = { type: ['string', 'null'], format: 'date-time' } as 
 const NULLABLE_STRING = { type: ['string', 'null'] } as const;
 const COUNT = { type: 'integer', minimum: 0 } as const;
 const NULLABLE_COUNT = { type: ['integer', 'null'], minimum: 0 } as const;
-const VARIANCE_OR_NULL = { type: ['string', 'null'], enum: ['MATCH', 'SHORT', 'OVER', null] } as const;
+const VARIANCE_OR_NULL = {
+  type: ['string', 'null'],
+  enum: ['MATCH', 'SHORT', 'OVER', null],
+} as const;
 const CONDITIONS = ['OK', 'DAMAGED', 'TAMPERED', 'OTHER'] as const;
 const STATE = { type: 'string', enum: [...INTAKE_STATES] } as const;
 

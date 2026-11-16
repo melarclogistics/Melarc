@@ -200,9 +200,10 @@ export class EvidenceLimitsController {
   @DescribeSecurity(['browserSession'])
   @DescribeErrors(ErrorCode.PermissionDenied, ErrorCode.SessionInvalid)
   @Self({ surfaces: ['OPS_PORTAL'], activity: 'background' })
-  limits(
-    @Authorized() authorized: AuthorizedRequest,
-  ): Promise<{ readonly allowed_content_types: readonly string[]; readonly max_byte_size: number }> {
+  limits(@Authorized() authorized: AuthorizedRequest): Promise<{
+    readonly allowed_content_types: readonly string[];
+    readonly max_byte_size: number;
+  }> {
     if (this.service === undefined) {
       return Promise.reject(new OperationUnavailableError('getEvidenceLimits'));
     }

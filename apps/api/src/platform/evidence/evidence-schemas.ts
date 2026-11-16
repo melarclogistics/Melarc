@@ -113,4 +113,3 @@ export const EVIDENCE_LIMITS_SCHEMA = described({
     max_byte_size: { type: 'integer', minimum: 1 },
   },
 });
-

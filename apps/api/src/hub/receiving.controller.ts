@@ -57,13 +57,21 @@ function filterOf(query: Record<string, unknown>): ReceivingListFilter {
   };
 }
 
-const HUB_ID_QUERY = { name: 'hub_id', required: false, schema: { type: 'string', format: 'uuid' } } as const;
+const HUB_ID_QUERY = {
+  name: 'hub_id',
+  required: false,
+  schema: { type: 'string', format: 'uuid' },
+} as const;
 const PAGE_SIZE_QUERY = {
   name: 'page_size',
   required: false,
   schema: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE, default: 25 },
 } as const;
-const PAGE_TOKEN_QUERY = { name: 'page_token', required: false, schema: { type: 'string' } } as const;
+const PAGE_TOKEN_QUERY = {
+  name: 'page_token',
+  required: false,
+  schema: { type: 'string' },
+} as const;
 
 /**
  * The receiving side's reads by run (Run D, S1.35b; D-D2, D-D4; features/hub/hub-intake.md sections 5.1 and 5.6): `GET /receiving-runs` (the queue by run), `GET /receiving-runs/{manifest_id}` (a run's

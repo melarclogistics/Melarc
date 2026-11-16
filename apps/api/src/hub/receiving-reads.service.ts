@@ -258,7 +258,10 @@ export class ReceivingReads {
           const holders = [
             ...new Set(
               own
-                .filter((intake) => intake.state === 'AWAITING_COUNT' && intake.active_receiver_id !== null)
+                .filter(
+                  (intake) =>
+                    intake.state === 'AWAITING_COUNT' && intake.active_receiver_id !== null,
+                )
                 .map((intake) => intake.active_receiver_id as string),
             ),
           ];
@@ -312,7 +315,13 @@ export class ReceivingReads {
             from melarc.receiving_runs(null::uuid, 'all'::text, null::text, null::timestamptz, null::uuid, 1::integer, ${manifestId}::uuid) as r`);
         const run = found.rows[0] as unknown as RunRow | undefined;
         if (run === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
-        await noteForeignHubs(this.#options.audit, handle, authorized, [run.hub_id], 'getReceivingRun');
+        await noteForeignHubs(
+          this.#options.audit,
+          handle,
+          authorized,
+          [run.hub_id],
+          'getReceivingRun',
+        );
         const intakes = (
           await tx.execute(sql`
             select ${RECEIVING_INTAKE_COLUMNS} from pickup_intake where pickup_manifest_id = ${manifestId}::uuid order by handed_over_at, id`)
@@ -367,19 +376,17 @@ export class ReceivingReads {
         );
         const last = page.at(-1);
         return {
-          items: page.map(
-            (row): MissingParcelView => ({
-              parcel_id: row.parcel_id,
-              photo_evidence_id: row.photo_evidence_id,
-              intake_id: row.intake_id,
-              intake_code: row.intake_code,
-              run_id: row.run_id,
-              run_code: row.run_code,
-              vendor_name: row.vendor_name ?? NAME_MISSING,
-              missing_since: isoOf(row.missing_since),
-              written_off_at: row.written_off_at === null ? null : isoOf(row.written_off_at),
-            }),
-          ),
+          items: page.map((row): MissingParcelView => ({
+            parcel_id: row.parcel_id,
+            photo_evidence_id: row.photo_evidence_id,
+            intake_id: row.intake_id,
+            intake_code: row.intake_code,
+            run_id: row.run_id,
+            run_code: row.run_code,
+            vendor_name: row.vendor_name ?? NAME_MISSING,
+            missing_since: isoOf(row.missing_since),
+            written_off_at: row.written_off_at === null ? null : isoOf(row.written_off_at),
+          })),
           next_page_token:
             read.length > size && last !== undefined
               ? encodePageToken({ createdAt: last.position_text, id: last.parcel_id })

@@ -118,7 +118,9 @@ export const hubProviders: readonly FactoryProvider[] = [
       runner: OperationRunner | undefined,
       audit: AuditWriter | undefined,
     ): ReceivingReads | undefined =>
-      runner === undefined || audit === undefined ? undefined : new ReceivingReads({ runner, audit }),
+      runner === undefined || audit === undefined
+        ? undefined
+        : new ReceivingReads({ runner, audit }),
     inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
   },
   {

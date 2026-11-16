@@ -47,13 +47,20 @@ describe('the acts of the evidence owners', () => {
   // Break caught: the photo of an extra parcel declared only under the adjudication's key (a receiver could then never add an extra with a photo), the second act the purpose has made the first one's answer, or an act for
   // another intake than a photo intake's: the intake's OSD purpose has the adjudication's evidence first and the extra's photo second, which is for a photo intake alone.
   it('give the intake’s OSD purpose two acts, the second the photo of an extra parcel for a photo intake alone', () => {
-    expect(ownerActsOf('PICKUP_INTAKE', 'OSD').map((act) => [act.write.key, act.photoIntakeOnly === true])).toEqual([
+    expect(
+      ownerActsOf('PICKUP_INTAKE', 'OSD').map((act) => [
+        act.write.key,
+        act.photoIntakeOnly === true,
+      ]),
+    ).toEqual([
       ['hub.osd.adjudicate', false],
       ['hub.intake.count', true],
     ]);
     expect(ownerActsOf('PICKUP_INTAKE', 'CONDITION')).toHaveLength(1);
     // A purpose the owner has no act for is answered by the owner's first act alone, so that the caller's permission is still asked of first.
-    expect(ownerActsOf('PICKUP_INTAKE', 'COLLECTION_PROOF').map((act) => act.write.key)).toEqual(['hub.intake.count']);
+    expect(ownerActsOf('PICKUP_INTAKE', 'COLLECTION_PROOF').map((act) => act.write.key)).toEqual([
+      'hub.intake.count',
+    ]);
     expect(ownerActsOf('ORDER', 'DELIVERY_PROOF')).toEqual([]);
     // The first act of a purpose is still the one `ownerActOf` answers.
     expect(ownerActOf('PICKUP_INTAKE', 'OSD')?.write.key).toBe('hub.osd.adjudicate');

@@ -5,7 +5,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { countIntake, handOver } from './support/handed-over.js';
-import { declareIntakeEvidence, intakeEvidenceBody, storedIntakeEvidence } from './support/intake-evidence.js';
+import {
+  declareIntakeEvidence,
+  intakeEvidenceBody,
+  storedIntakeEvidence,
+} from './support/intake-evidence.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -100,7 +104,10 @@ interface CheckIn {
   readonly extra_count: number;
   readonly damaged_count: number;
   readonly condition: string;
-  readonly condition_findings: readonly { readonly kind: string; readonly condition: string | null }[];
+  readonly condition_findings: readonly {
+    readonly kind: string;
+    readonly condition: string | null;
+  }[];
 }
 interface ParcelAnswer {
   readonly parcel: Parcel;
@@ -117,7 +124,9 @@ interface ParcelAnswer {
 }
 
 /** A photo intake of `count` parcels, handed over to the first hub through the real routes, read as the officer reads it. */
-async function arrange(count = 2): Promise<{ id: string; code: string; parcels: readonly Parcel[]; etag: string }> {
+async function arrange(
+  count = 2,
+): Promise<{ id: string; code: string; parcels: readonly Parcel[]; etag: string }> {
   const done = await handOver(routes, vendor, days, { collected: [count], photos: true });
   const id = done.intakes[0]?.id ?? '';
   const read = await receiver.client.get(ONE(id));
@@ -153,7 +162,12 @@ async function finish(
   });
 }
 
-const extra = (actor: Actor, id: string, body: unknown, key: string | null = randomUUID()): Promise<TestResponse> =>
+const extra = (
+  actor: Actor,
+  id: string,
+  body: unknown,
+  key: string | null = randomUUID(),
+): Promise<TestResponse> =>
   actor.client.post(EXTRA(id), body, {
     origin: OPS,
     headers: key === null ? {} : { 'Idempotency-Key': key },
@@ -209,11 +223,17 @@ const eventRow = async (code: string, id: string) =>
 const queueCount = async (actor: Actor, queue: string): Promise<number> => {
   const response = await actor.client.get(`${API}/ops/queue-summary`);
   expect(response.status).toBe(200);
-  return (response.json() as { queues: { queue: string; count: number }[] }).queues.find((each) => each.queue === queue)?.count ?? -1;
+  return (
+    (response.json() as { queues: { queue: string; count: number }[] }).queues.find(
+      (each) => each.queue === queue,
+    )?.count ?? -1
+  );
 };
 
 const versionOf = async (id: string): Promise<number> =>
-  (await routes.rows<{ version: number }>(`select version from pickup_intake where id = $1`, [id]))[0]?.version ?? -1;
+  (
+    await routes.rows<{ version: number }>(`select version from pickup_intake where id = $1`, [id])
+  )[0]?.version ?? -1;
 
 describe('recordParcelArrival: a tap', () => {
   // Break caught: a tap that moves the intake's token (so the finish the officer read before it is stale), that is not idempotent, that cannot be taken back, that names nobody, or that leaves an event: the
@@ -251,7 +271,12 @@ describe('recordParcelArrival: a tap', () => {
     const back = await tap(receiver, target, false);
     expect(back.status).toBe(200);
     const taken = back.json() as ParcelAnswer;
-    expect(taken.parcel).toMatchObject({ id: target, state: 'EXPECTED', arrived_by_name: null, arrived_at: null });
+    expect(taken.parcel).toMatchObject({
+      id: target,
+      state: 'EXPECTED',
+      arrived_by_name: null,
+      arrived_at: null,
+    });
     expect(taken.counts.arrived_count).toBe(0);
 
     expect((await read(receiver, id)).etag).toBe(etag);
@@ -266,13 +291,31 @@ describe('recordParcelArrival: a tap', () => {
 
     for (const body of [{}, { arrived: 'yes' }, { arrived: 1 }, { arrived: true, extra: 1 }]) {
       const refused = await receiver.client.request('PUT', ARRIVAL(target), { body, origin: OPS });
-      expect([refused.status, codeOf(refused)], JSON.stringify(body)).toEqual([400, 'VALIDATION_FAILED']);
+      expect([refused.status, codeOf(refused)], JSON.stringify(body)).toEqual([
+        400,
+        'VALIDATION_FAILED',
+      ]);
     }
-    expect(outcome(await tap(receiver, 'not-a-parcel', true)).slice(0, 2)).toEqual([400, 'VALIDATION_FAILED']);
-    expect(outcome(await tap(receiver, randomUUID(), true)).slice(0, 2)).toEqual([404, 'NOT_FOUND']);
-    expect(outcome(await tap(otherHub, target, true)).slice(0, 2)).toEqual([403, 'HUB_SCOPE_VIOLATION']);
-    const readOnly = await routes.actor(await newBundle(routes.admin, [grant('hub.read', 'own')]), HUB_A);
-    expect(outcome(await tap(readOnly, target, true)).slice(0, 2)).toEqual([403, 'PERMISSION_DENIED']);
+    expect(outcome(await tap(receiver, 'not-a-parcel', true)).slice(0, 2)).toEqual([
+      400,
+      'VALIDATION_FAILED',
+    ]);
+    expect(outcome(await tap(receiver, randomUUID(), true)).slice(0, 2)).toEqual([
+      404,
+      'NOT_FOUND',
+    ]);
+    expect(outcome(await tap(otherHub, target, true)).slice(0, 2)).toEqual([
+      403,
+      'HUB_SCOPE_VIOLATION',
+    ]);
+    const readOnly = await routes.actor(
+      await newBundle(routes.admin, [grant('hub.read', 'own')]),
+      HUB_A,
+    );
+    expect(outcome(await tap(readOnly, target, true)).slice(0, 2)).toEqual([
+      403,
+      'PERMISSION_DENIED',
+    ]);
     // Nothing of the above moved the parcel.
     const { intake } = await read(receiver, await intakeOfParcel(target));
     expect(intake.parcels.find((parcel) => parcel.id === target)?.state).toBe('EXPECTED');
@@ -298,7 +341,12 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
     const { id, parcels, etag } = await arrange(3);
     const key = randomUUID();
 
-    const done = await finish(receiver, id, { all_arrived: true, confirmed_count: 3 }, { etag, key });
+    const done = await finish(
+      receiver,
+      id,
+      { all_arrived: true, confirmed_count: 3 },
+      { etag, key },
+    );
     expect(done.status).toBe(200);
     const intake = done.json() as CheckIn;
     expect(intake).toMatchObject({
@@ -319,9 +367,9 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
       condition: 'OK',
     });
     expect(intake.counted_at).not.toBeNull();
-    expect(intake.parcels.map((parcel) => [parcel.id, parcel.state, parcel.arrived_by_name])).toEqual(
-      parcels.map((parcel) => [parcel.id, 'ARRIVED', receiver.identity.fullName]),
-    );
+    expect(
+      intake.parcels.map((parcel) => [parcel.id, parcel.state, parcel.arrived_by_name]),
+    ).toEqual(parcels.map((parcel) => [parcel.id, 'ARRIVED', receiver.identity.fullName]));
     // The token moved with the version, and is the one a read gives now.
     expect(done.header('etag')).not.toBe(etag);
     expect(done.header('etag')).toBe((await read(receiver, id)).etag);
@@ -337,7 +385,12 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
       count_variance: 'MATCH',
     });
 
-    const replay = await finish(receiver, id, { all_arrived: true, confirmed_count: 3 }, { etag, key });
+    const replay = await finish(
+      receiver,
+      id,
+      { all_arrived: true, confirmed_count: 3 },
+      { etag, key },
+    );
     expect(replay.status).toBe(200);
     expect(replay.text).toBe(done.text);
     expect(await eventsOf(id)).toEqual(['hub.intake.counted']);
@@ -371,10 +424,17 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
       {},
     ]) {
       const refused = await finish(receiver, id, body);
-      expect([refused.status, codeOf(refused)], JSON.stringify(body)).toEqual([400, 'VALIDATION_FAILED']);
+      expect([refused.status, codeOf(refused)], JSON.stringify(body)).toEqual([
+        400,
+        'VALIDATION_FAILED',
+      ]);
     }
     const { intake } = await read(receiver, id);
-    expect([intake.state, intake.arrived_count, intake.received_count]).toEqual(['AWAITING_COUNT', 0, null]);
+    expect([intake.state, intake.arrived_count, intake.received_count]).toEqual([
+      'AWAITING_COUNT',
+      0,
+      null,
+    ]);
     expect(intake.parcels.map((parcel) => parcel.state)).toEqual(parcels.map(() => 'EXPECTED'));
     expect(await versionOf(id)).toBe(version);
     expect(await eventsOf(id)).toEqual([]);
@@ -393,11 +453,10 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
     const none = await finish(receiver, id, { all_arrived: false }, { etag: null });
     expect([none.status, codeOf(none)]).toEqual([400, 'VALIDATION_FAILED']);
     for (const bad of [`W/${etag}`, other.etag, '"not-a-token"']) {
-      expect(outcome(await finish(receiver, id, { all_arrived: false }, { etag: bad })), String(bad)).toEqual([
-        409,
-        'STATE_CONFLICT',
-        'stale',
-      ]);
+      expect(
+        outcome(await finish(receiver, id, { all_arrived: false }, { etag: bad })),
+        String(bad),
+      ).toEqual([409, 'STATE_CONFLICT', 'stale']);
     }
     const done = await finish(receiver, id, { all_arrived: false }, { etag });
     expect(done.status).toBe(200);
@@ -413,7 +472,10 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
       extra_count: 0,
     });
     const missing = intake.parcels.find((parcel) => parcel.id === third?.id);
-    expect(missing).toMatchObject({ state: 'MISSING', photo_evidence_id: third?.photo_evidence_id });
+    expect(missing).toMatchObject({
+      state: 'MISSING',
+      photo_evidence_id: third?.photo_evidence_id,
+    });
     expect(missing?.missing_marked_at).not.toBeNull();
     expect(await eventsOf(id)).toEqual(['hub.intake.counted', 'hub.osd.opened']);
     expect((await eventRow('hub.osd.opened', id))?.resulting_state).toBe('RECONCILIATION_REQUIRED');
@@ -423,7 +485,9 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
   // exist makes: each refused with the code and the rule the contract names.
   it('is made once, is for a photo intake alone, and is judged by hub and key', async () => {
     const { id } = await arrange(2);
-    expect((await finish(receiver, id, { all_arrived: true, confirmed_count: 2 })).status).toBe(200);
+    expect((await finish(receiver, id, { all_arrived: true, confirmed_count: 2 })).status).toBe(
+      200,
+    );
     expect(outcome(await finish(receiver, id, { all_arrived: true, confirmed_count: 2 }))).toEqual([
       409,
       'STATE_CONFLICT',
@@ -439,19 +503,27 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
     ]);
 
     const fresh = await arrange(2);
-    expect(outcome(await finish(otherHub, fresh.id, { all_arrived: false }, { etag: fresh.etag })).slice(0, 2)).toEqual([
-      403,
-      'HUB_SCOPE_VIOLATION',
-    ]);
-    expect(outcome(await finish(receiver, randomUUID(), { all_arrived: false }, { etag: fresh.etag })).slice(0, 2)).toEqual([
-      404,
-      'NOT_FOUND',
-    ]);
-    const readOnly = await routes.actor(await newBundle(routes.admin, [grant('hub.read', 'own')]), HUB_A);
-    expect(outcome(await finish(readOnly, fresh.id, { all_arrived: false }, { etag: fresh.etag })).slice(0, 2)).toEqual([
-      403,
-      'PERMISSION_DENIED',
-    ]);
+    expect(
+      outcome(await finish(otherHub, fresh.id, { all_arrived: false }, { etag: fresh.etag })).slice(
+        0,
+        2,
+      ),
+    ).toEqual([403, 'HUB_SCOPE_VIOLATION']);
+    expect(
+      outcome(
+        await finish(receiver, randomUUID(), { all_arrived: false }, { etag: fresh.etag }),
+      ).slice(0, 2),
+    ).toEqual([404, 'NOT_FOUND']);
+    const readOnly = await routes.actor(
+      await newBundle(routes.admin, [grant('hub.read', 'own')]),
+      HUB_A,
+    );
+    expect(
+      outcome(await finish(readOnly, fresh.id, { all_arrived: false }, { etag: fresh.etag })).slice(
+        0,
+        2,
+      ),
+    ).toEqual([403, 'PERMISSION_DENIED']);
   });
 
   // Break caught: two officers finishing the same vendor at once both succeeding (a count made twice, two events), or neither: with the token both read, one is answered 200 and the other STATE_CONFLICT, whoever
@@ -480,23 +552,47 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
     // The run is out of the queue of the waiting, however much a senior officer has still to decide (its decision is a view of the list, with no count of its own).
     expect(await queueCount(receiver, 'HUB_RECEIVING_RUNS_WAITING')).toBe(waitingBefore);
 
-    const manifest = (await routes.rows<{ pickup_manifest_id: string }>(`select pickup_manifest_id from pickup_intake where id = $1`, [id]))[0]
-      ?.pickup_manifest_id;
+    const manifest = (
+      await routes.rows<{ pickup_manifest_id: string }>(
+        `select pickup_manifest_id from pickup_intake where id = $1`,
+        [id],
+      )
+    )[0]?.pickup_manifest_id;
     const page = (await receiver.client.get(`${RUNS}/${manifest}`)).json() as {
-      vendors: { intake_id: string; state: string; arrived_count: number; missing_count: number; extra_count: number; damaged_count: number; received_count: number }[];
+      vendors: {
+        intake_id: string;
+        state: string;
+        arrived_count: number;
+        missing_count: number;
+        extra_count: number;
+        damaged_count: number;
+        received_count: number;
+      }[];
     };
-    expect(page.vendors.map((vendorSection) => [vendorSection.intake_id, vendorSection.state, vendorSection.arrived_count, vendorSection.missing_count])).toEqual([
-      [id, 'RECONCILIATION_REQUIRED', 1, 1],
-    ]);
+    expect(
+      page.vendors.map((vendorSection) => [
+        vendorSection.intake_id,
+        vendorSection.state,
+        vendorSection.arrived_count,
+        vendorSection.missing_count,
+      ]),
+    ).toEqual([[id, 'RECONCILIATION_REQUIRED', 1, 1]]);
     const rows = (await receiver.client.get(`${RUNS}?view=needs_decision`)).json() as {
-      items: { run_id: string; vendors_waiting: number; vendors_needing_decision: number; missing_searching: number }[];
+      items: {
+        run_id: string;
+        vendors_waiting: number;
+        vendors_needing_decision: number;
+        missing_searching: number;
+      }[];
     };
     expect(rows.items.find((row) => row.run_id === manifest)).toMatchObject({
       vendors_waiting: 0,
       vendors_needing_decision: 1,
       missing_searching: 1,
     });
-    const waiting = (await receiver.client.get(`${RUNS}?view=waiting`)).json() as { items: { run_id: string }[] };
+    const waiting = (await receiver.client.get(`${RUNS}?view=waiting`)).json() as {
+      items: { run_id: string }[];
+    };
     expect(waiting.items.some((row) => row.run_id === manifest)).toBe(false);
   });
 });
@@ -510,7 +606,12 @@ describe('addExtraParcel: a parcel with no door photo', () => {
     const photo = await storedIntakeEvidence(routes, receiver, id, 'OSD');
     const key = randomUUID();
 
-    const added = await extra(receiver, id, { photo_evidence_id: photo, note: 'A box with no photo at the door' }, key);
+    const added = await extra(
+      receiver,
+      id,
+      { photo_evidence_id: photo, note: 'A box with no photo at the door' },
+      key,
+    );
     expect(added.status).toBe(200);
     const answer = added.json() as ParcelAnswer;
     expect(answer.parcel).toMatchObject({
@@ -523,12 +624,21 @@ describe('addExtraParcel: a parcel with no door photo', () => {
     expect(answer.counts).toMatchObject({ parcels_expected: 2, arrived_count: 1, extra_count: 1 });
     expect(answer.intake_etag).toBe(etag);
 
-    const replay = await extra(receiver, id, { photo_evidence_id: photo, note: 'A box with no photo at the door' }, key);
+    const replay = await extra(
+      receiver,
+      id,
+      { photo_evidence_id: photo, note: 'A box with no photo at the door' },
+      key,
+    );
     expect(replay.status).toBe(200);
     expect(replay.text).toBe(added.text);
     expect((await read(receiver, id)).intake.parcels).toHaveLength(3);
-    expect((await eventsOf(id)).filter((code) => code === 'hub.parcel.extra_added')).toHaveLength(1);
-    expect((await eventRow('hub.parcel.extra_added', id))?.note).toBe('A box with no photo at the door');
+    expect((await eventsOf(id)).filter((code) => code === 'hub.parcel.extra_added')).toHaveLength(
+      1,
+    );
+    expect((await eventRow('hub.parcel.extra_added', id))?.note).toBe(
+      'A box with no photo at the door',
+    );
 
     expect(outcome(await finish(receiver, id, { all_arrived: true, confirmed_count: 2 }))).toEqual([
       409,
@@ -558,25 +668,42 @@ describe('addExtraParcel: a parcel with no door photo', () => {
     const foreign = await storedIntakeEvidence(routes, receiver, other.id, 'OSD');
 
     for (const photo of [randomUUID(), foreign]) {
-      expect(outcome(await extra(receiver, id, { photo_evidence_id: photo })).slice(0, 2), photo).toEqual([
-        422,
-        'EVIDENCE_NOT_STORED',
-      ]);
+      expect(
+        outcome(await extra(receiver, id, { photo_evidence_id: photo })).slice(0, 2),
+        photo,
+      ).toEqual([422, 'EVIDENCE_NOT_STORED']);
     }
-    for (const body of [{}, { photo_evidence_id: 'nope' }, { photo_evidence_id: own, note: 7 }, { photo_evidence_id: own, parcel_id: randomUUID() }]) {
+    for (const body of [
+      {},
+      { photo_evidence_id: 'nope' },
+      { photo_evidence_id: own, note: 7 },
+      { photo_evidence_id: own, parcel_id: randomUUID() },
+    ]) {
       const refused = await extra(receiver, id, body);
-      expect([refused.status, codeOf(refused)], JSON.stringify(body)).toEqual([400, 'VALIDATION_FAILED']);
+      expect([refused.status, codeOf(refused)], JSON.stringify(body)).toEqual([
+        400,
+        'VALIDATION_FAILED',
+      ]);
     }
     const added = await extra(receiver, id, { photo_evidence_id: own });
     expect(added.status).toBe(200);
     // The one photo is one parcel's.
-    expect(outcome(await extra(receiver, id, { photo_evidence_id: own })).slice(0, 2)).toEqual([422, 'EVIDENCE_NOT_STORED']);
+    expect(outcome(await extra(receiver, id, { photo_evidence_id: own })).slice(0, 2)).toEqual([
+      422,
+      'EVIDENCE_NOT_STORED',
+    ]);
 
     const parcel = (added.json() as ParcelAnswer).parcel;
     const taken = await tap(receiver, parcel.id, false);
     expect(taken.status).toBe(200);
-    expect(taken.json()).toMatchObject({ parcel: { id: parcel.id, state: 'VOID' }, counts: { extra_count: 0 } });
-    expect(outcome(await extra(otherHub, id, { photo_evidence_id: own })).slice(0, 2)).toEqual([403, 'HUB_SCOPE_VIOLATION']);
+    expect(taken.json()).toMatchObject({
+      parcel: { id: parcel.id, state: 'VOID' },
+      counts: { extra_count: 0 },
+    });
+    expect(outcome(await extra(otherHub, id, { photo_evidence_id: own })).slice(0, 2)).toEqual([
+      403,
+      'HUB_SCOPE_VIOLATION',
+    ]);
   });
 
   // Break caught: an extra added to a vendor whose case is resolved (a settled count moved by an extra), or added to a blind-count intake, or one added after the vendor was finished that is not counted at once: while
@@ -587,28 +714,59 @@ describe('addExtraParcel: a parcel with no door photo', () => {
     expect((await tap(receiver, first?.id ?? '', true)).status).toBe(200);
     expect((await finish(receiver, id, { all_arrived: false })).status).toBe(200);
     const before = await read(receiver, id);
-    expect(before.intake).toMatchObject({ state: 'RECONCILIATION_REQUIRED', received_count: 1, count_variance: 'SHORT' });
+    expect(before.intake).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      received_count: 1,
+      count_variance: 'SHORT',
+    });
 
     const photo = await storedIntakeEvidence(routes, receiver, id, 'OSD');
     const added = await extra(receiver, id, { photo_evidence_id: photo });
     expect(added.status).toBe(200);
     expect((added.json() as ParcelAnswer).intake_etag).not.toBe(before.etag);
     const after = await read(receiver, id);
-    expect(after.intake).toMatchObject({ state: 'RECONCILIATION_REQUIRED', received_count: 2, count_variance: 'MATCH', extra_count: 1, missing_count: 1 });
-    expect((await eventRow('hub.parcel.extra_added', id))?.detail).toMatchObject({ extra_counted: true, received_count: 2, extra_count: 1 });
+    expect(after.intake).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      received_count: 2,
+      count_variance: 'MATCH',
+      extra_count: 1,
+      missing_count: 1,
+    });
+    expect((await eventRow('hub.parcel.extra_added', id))?.detail).toMatchObject({
+      extra_counted: true,
+      received_count: 2,
+      extra_count: 1,
+    });
 
     // A vendor settled clean: the photo declared while it was open takes no parcel (check_in_finished), and no photo is declared for it any more.
     const clean = await arrange(2);
     const late = await storedIntakeEvidence(routes, receiver, clean.id, 'OSD');
-    expect((await finish(receiver, clean.id, { all_arrived: true, confirmed_count: 2 })).status).toBe(200);
-    expect(outcome(await extra(receiver, clean.id, { photo_evidence_id: late }))).toEqual([409, 'STATE_CONFLICT', 'check_in_finished']);
-    expect(outcome(await declareIntakeEvidence(receiver, intakeEvidenceBody(clean.id, 'OSD')))).toEqual([409, 'STATE_CONFLICT', 'check_in_finished']);
+    expect(
+      (await finish(receiver, clean.id, { all_arrived: true, confirmed_count: 2 })).status,
+    ).toBe(200);
+    expect(outcome(await extra(receiver, clean.id, { photo_evidence_id: late }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'check_in_finished',
+    ]);
+    expect(
+      outcome(await declareIntakeEvidence(receiver, intakeEvidenceBody(clean.id, 'OSD'))),
+    ).toEqual([409, 'STATE_CONFLICT', 'check_in_finished']);
 
     // A blind-count intake has no parcels: the receiver has no act to declare the photo of one, and an extra for it is refused before any photo is judged.
     const blind = await handOver(routes, vendor, days, { collected: [3] });
     const blindId = blind.intakes[0]?.id ?? '';
-    expect(outcome(await declareIntakeEvidence(receiver, intakeEvidenceBody(blindId, 'OSD'))).slice(0, 2)).toEqual([403, 'PERMISSION_DENIED']);
-    expect(outcome(await extra(receiver, blindId, { photo_evidence_id: randomUUID() }))).toEqual([409, 'STATE_CONFLICT', 'blind_count_intake']);
+    expect(
+      outcome(await declareIntakeEvidence(receiver, intakeEvidenceBody(blindId, 'OSD'))).slice(
+        0,
+        2,
+      ),
+    ).toEqual([403, 'PERMISSION_DENIED']);
+    expect(outcome(await extra(receiver, blindId, { photo_evidence_id: randomUUID() }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'blind_count_intake',
+    ]);
   });
 });
 
@@ -624,27 +782,54 @@ describe('recordIntakeCondition: damage is a finding of one parcel', () => {
     // The condition of the whole intake is damage's own parcel's: refused, naming the field.
     const whole = await record(receiver, id, { condition: 'DAMAGED', evidence_ids: [evidence] });
     expect([whole.status, codeOf(whole)]).toEqual([400, 'VALIDATION_FAILED']);
-    expect(JSON.stringify((whole.json() as { details?: unknown }).details)).toContain('parcel_required');
+    expect(JSON.stringify((whole.json() as { details?: unknown }).details)).toContain(
+      'parcel_required',
+    );
     // A parcel that has not arrived has no condition to find.
-    expect(outcome(await record(receiver, id, { condition: 'DAMAGED', evidence_ids: [evidence], parcel_id: first?.id }))).toEqual([
-      409,
-      'STATE_CONFLICT',
-      'parcel_not_arrived',
-    ]);
+    expect(
+      outcome(
+        await record(receiver, id, {
+          condition: 'DAMAGED',
+          evidence_ids: [evidence],
+          parcel_id: first?.id,
+        }),
+      ),
+    ).toEqual([409, 'STATE_CONFLICT', 'parcel_not_arrived']);
     expect((await tap(receiver, first?.id ?? '', true)).status).toBe(200);
     expect((await tap(receiver, second?.id ?? '', true)).status).toBe(200);
     // Damage without evidence is a reason's absence; a parcel of another intake is not this intake's parcel.
-    expect(outcome(await record(receiver, id, { condition: 'DAMAGED', parcel_id: first?.id })).slice(0, 2)).toEqual([422, 'REASON_REQUIRED']);
+    expect(
+      outcome(await record(receiver, id, { condition: 'DAMAGED', parcel_id: first?.id })).slice(
+        0,
+        2,
+      ),
+    ).toEqual([422, 'REASON_REQUIRED']);
     const stranger = await arrange(2);
     expect(
-      outcome(await record(receiver, id, { condition: 'DAMAGED', evidence_ids: [evidence], parcel_id: stranger.parcels[0]?.id })).slice(0, 2),
+      outcome(
+        await record(receiver, id, {
+          condition: 'DAMAGED',
+          evidence_ids: [evidence],
+          parcel_id: stranger.parcels[0]?.id,
+        }),
+      ).slice(0, 2),
     ).toEqual([400, 'VALIDATION_FAILED']);
 
     const version = await versionOf(id);
-    const done = await record(receiver, id, { condition: 'DAMAGED', evidence_ids: [evidence], note: 'Crushed corner', parcel_id: first?.id });
+    const done = await record(receiver, id, {
+      condition: 'DAMAGED',
+      evidence_ids: [evidence],
+      note: 'Crushed corner',
+      parcel_id: first?.id,
+    });
     expect(done.status).toBe(200);
     const intake = done.json() as CheckIn;
-    expect(intake).toMatchObject({ count_phase: 'CHECK_IN', state: 'AWAITING_COUNT', condition: 'DAMAGED', damaged_count: 1 });
+    expect(intake).toMatchObject({
+      count_phase: 'CHECK_IN',
+      state: 'AWAITING_COUNT',
+      condition: 'DAMAGED',
+      damaged_count: 1,
+    });
     expect(intake.parcels.find((parcel) => parcel.id === first?.id)?.condition).toMatchObject({
       condition: 'DAMAGED',
       note: 'Crushed corner',
@@ -653,13 +838,23 @@ describe('recordIntakeCondition: damage is a finding of one parcel', () => {
     });
     expect(intake.parcels.find((parcel) => parcel.id === second?.id)?.condition).toBeNull();
     expect(await versionOf(id)).toBeGreaterThan(version);
-    expect((await eventRow('hub.intake.condition_recorded', id))?.related_ids).toMatchObject({ parcel_id: first?.id });
+    expect((await eventRow('hub.intake.condition_recorded', id))?.related_ids).toMatchObject({
+      parcel_id: first?.id,
+    });
 
     // Once for each parcel: the same parcel again, whatever it says, is the receiver's no second turn.
-    expect(outcome(await record(receiver, id, { condition: 'OK', parcel_id: first?.id }))).toEqual([409, 'STATE_CONFLICT', 'condition_already_recorded']);
+    expect(outcome(await record(receiver, id, { condition: 'OK', parcel_id: first?.id }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'condition_already_recorded',
+    ]);
     // The second parcel's finding does not overwrite the intake's condition (the first one found stands) and is counted.
     const evidenceTwo = await storedIntakeEvidence(routes, receiver, id, 'CONDITION');
-    const twice = await record(receiver, id, { condition: 'TAMPERED', evidence_ids: [evidenceTwo], parcel_id: second?.id });
+    const twice = await record(receiver, id, {
+      condition: 'TAMPERED',
+      evidence_ids: [evidenceTwo],
+      parcel_id: second?.id,
+    });
     expect(twice.status).toBe(200);
     expect(twice.json()).toMatchObject({ condition: 'DAMAGED', damaged_count: 2 });
   });
@@ -670,12 +865,30 @@ describe('recordIntakeCondition: damage is a finding of one parcel', () => {
     const { id, parcels } = await arrange(2);
     const evidence = await storedIntakeEvidence(routes, receiver, id, 'CONDITION');
     for (const parcel of parcels) expect((await tap(receiver, parcel.id, true)).status).toBe(200);
-    expect((await record(receiver, id, { condition: 'DAMAGED', evidence_ids: [evidence], parcel_id: parcels[0]?.id })).status).toBe(200);
+    expect(
+      (
+        await record(receiver, id, {
+          condition: 'DAMAGED',
+          evidence_ids: [evidence],
+          parcel_id: parcels[0]?.id,
+        })
+      ).status,
+    ).toBe(200);
 
     const done = await finish(receiver, id, { all_arrived: true, confirmed_count: 2 });
     expect(done.status).toBe(200);
-    expect(done.json()).toMatchObject({ state: 'RECONCILIATION_REQUIRED', count_variance: 'MATCH', missing_count: 0, damaged_count: 1, condition: 'DAMAGED' });
-    expect(await eventsOf(id)).toEqual(['hub.intake.condition_recorded', 'hub.intake.counted', 'hub.osd.opened']);
+    expect(done.json()).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      count_variance: 'MATCH',
+      missing_count: 0,
+      damaged_count: 1,
+      condition: 'DAMAGED',
+    });
+    expect(await eventsOf(id)).toEqual([
+      'hub.intake.condition_recorded',
+      'hub.intake.counted',
+      'hub.osd.opened',
+    ]);
 
     const blind = await handOver(routes, vendor, days, { collected: [3] });
     const blindId = blind.intakes[0]?.id ?? '';
@@ -693,10 +906,14 @@ describe('submitBlindCount: a blind count is for a blind-count intake alone', ()
     const version = await versionOf(id);
 
     for (const token of [etag, '"not-a-token"']) {
-      const refused = await receiver.client.post(`${ONE(id)}/count`, { physical_count: 2 }, {
-        origin: OPS,
-        headers: { 'If-Match': token, 'Idempotency-Key': randomUUID() },
-      });
+      const refused = await receiver.client.post(
+        `${ONE(id)}/count`,
+        { physical_count: 2 },
+        {
+          origin: OPS,
+          headers: { 'If-Match': token, 'Idempotency-Key': randomUUID() },
+        },
+      );
       expect(outcome(refused), token).toEqual([409, 'STATE_CONFLICT', 'photo_check_in']);
     }
     const { intake } = await read(receiver, id);
@@ -704,7 +921,9 @@ describe('submitBlindCount: a blind count is for a blind-count intake alone', ()
     expect(await versionOf(id)).toBe(version);
     expect(await eventsOf(id)).toEqual([]);
     // The photo intake is checked in as before, and a stop with no photos is counted by number.
-    expect((await finish(receiver, id, { all_arrived: true, confirmed_count: 2 })).status).toBe(200);
+    expect((await finish(receiver, id, { all_arrived: true, confirmed_count: 2 })).status).toBe(
+      200,
+    );
     const blind = await handOver(routes, vendor, days, { collected: [3] });
     expect((await countIntake(receiver, blind.intakes[0]?.id ?? '', 3)).status).toBe(200);
   });
@@ -712,7 +931,14 @@ describe('submitBlindCount: a blind count is for a blind-count intake alone', ()
 
 /** The identifier of the intake a parcel belongs to. */
 async function intakeOfParcel(parcel: string): Promise<string> {
-  return (await routes.rows<{ pickup_intake_id: string }>(`select pickup_intake_id from intake_parcel where id = $1`, [parcel]))[0]?.pickup_intake_id ?? '';
+  return (
+    (
+      await routes.rows<{ pickup_intake_id: string }>(
+        `select pickup_intake_id from intake_parcel where id = $1`,
+        [parcel],
+      )
+    )[0]?.pickup_intake_id ?? ''
+  );
 }
 
 /** The hubs of the audited crossings written about an intake, in the order they were written: one `auth.hub_boundary.crossed` for each act or read of a hub other than the actor's own. */
