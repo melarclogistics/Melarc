@@ -114,8 +114,9 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *               the contract and answered by the stand-in).
  *   pickup-work the failed pickups, the handshakes that need Ops, the short counts, the collection disputes, a stop with its photos and the form that lets a count through
  *               without them (S1.30), the same two ways, with a stateful stand-in for the API that plants a code, a digest, a phone number and an object key in answers that never carry them.
- *   receiving   the receiving screens (S1.35): the queue, the blind count (proved from outside: the declaration in no response and nowhere on the page before the count), the lock, the record, the condition
- *               with its photos and the adjudication, the same two ways, with a stateful stand-in for the API that carries the declaration only where the contract does and, on demand, everywhere.
+ *   receiving   the receiving screens (S1.35, S1.35c): the queue by run and the run's page (All N here, a tap on each parcel, the lock, the photos, a parcel that is not on the list, damage, the summary and the
+ *               rider's bag, the hub floor's 56 px and the action bar above the keyboard), the blind count (proved from outside: the rider's number in no response and nowhere on the page before the count), the
+ *               record, the condition with its photos and the decision, the same two ways, with a stateful stand-in for the API that carries the rider's number only where the contract does and, on demand, everywhere.
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
  *   queue-summary the counts of the queues (task C1), the same two ways: the sidebar's counts, My work's cards, a failed read and the read again on
@@ -297,8 +298,8 @@ export default defineConfig({
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
     {
-      // The receiving screens (S1.35) against the production build, with a stateful stand-in for the API that carries the rider's declaration only in an answer about an intake that has been counted, and
-      // (world.leak) in every answer, to prove the screens refuse it. The bytes of an upload and the picture of a photo are served from the page's own origin (the policy is `connect-src 'self'` and `img-src 'self'`).
+      // The receiving screens (S1.35, S1.35c) against the production build, with a stateful stand-in for the API that keeps the rules the API keeps and carries the rider's number of a vendor counted blind
+      // nowhere, and (world.leak) in every answer, to prove the screens refuse it. The bytes of an upload and the picture of a photo are served from the page's own origin (the policy is `connect-src 'self'` and `img-src 'self'`).
       name: `receiving-${engine}`,
       testMatch: 'receiving.spec.ts',
       use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },

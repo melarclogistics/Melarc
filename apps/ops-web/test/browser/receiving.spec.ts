@@ -8,6 +8,7 @@ import {
   DECLARED,
   IDS,
   PLANTED,
+  RUNS,
   SENIOR,
   stubReceivingApi,
   world,
@@ -35,7 +36,8 @@ const VIEWPORTS = [
 ] as const;
 const KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-const QUEUE = '/intakes';
+const QUEUE = '/receiving';
+const runPath = (id: string) => `/receiving/${id}`;
 const record = (id: string) => `/intakes/${id}`;
 const count = (id: string) => `/intakes/${id}/count`;
 const condition = (id: string) => `/intakes/${id}/condition`;
@@ -123,64 +125,421 @@ async function enterCount(page: Page, text: string): Promise<void> {
 
 test.describe('moving through the screens', () => {
   // Break caught: a menu entry that goes nowhere, or a page whose heading a screen reader never hears.
-  test('the menu leads to the queue, which lands on its heading, and a row opens its intake', async ({
+  test('the menu leads to the queue by run, which lands on its heading, and a row opens its run', async ({
     page,
   }) => {
     const opened = await open(page, '/');
 
     await menuEntry(page, 'Receiving').click();
     await expect(page.getByRole('heading', { level: 1, name: 'Receiving' })).toBeFocused();
-    await table(page, 'Intakes').getByRole('link', { name: 'ACC-IN-7KQ2MZ' }).click();
-    await expect(page.getByRole('heading', { level: 1, name: 'ACC-IN-7KQ2MZ' })).toBeFocused();
-    expect(new URL(page.url()).pathname).toBe(record(IDS.waiting));
+    await table(page, 'Runs').getByRole('link', { name: 'ACC-MF-7KQ2MZ' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'ACC-MF-7KQ2MZ' })).toBeFocused();
+    expect(new URL(page.url()).pathname).toBe(runPath(RUNS.waiting));
     expect(opened.api.unexpected).toEqual([]);
     expect(opened.watch.problems).toEqual([]);
   });
+
+  // Break caught: the address of the queue before Run D (`/intakes`) dead, so that a link made before it goes nowhere.
+  test('the old address of the queue leads to the queue by run', async ({ page }) => {
+    const opened = await open(page, '/intakes');
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Receiving' })).toBeVisible();
+    await expect(table(page, 'Runs')).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe(QUEUE);
+    expect(opened.api.unexpected).toEqual([]);
+  });
 });
 
-test.describe('the receiving queue', () => {
-  // Break caught: the queue drawing a declared count, a zero one included, or any part of the comparison; a request that is not the server's own filter; a hub the operation does not take.
-  test('lists the intakes that wait, oldest handover first, and nothing of any count: not in a response, not on the page', async ({
+test.describe('the receiving queue, by run', () => {
+  // Break caught: the queue drawing a declared count (a blind vendor's included), a request that is not the server's own filter, or a rider named by a number.
+  test('lists the runs that wait, oldest first, naming the rider and the vendors, and nothing of any count: not in a response, not on the page', async ({
     page,
   }) => {
     const opened = await open(page, QUEUE);
 
-    const rows = table(page, 'Intakes').getByRole('row');
-    await expect(rows.filter({ hasText: 'ACC-IN-3HT6NC' })).toHaveCount(0);
-    await expect(rows.filter({ hasText: 'ACC-IN-7KQ2MZ' })).toContainText('Awaiting count');
-    await expect(rows.filter({ hasText: 'ACC-IN-7KQ2MZ' })).toContainText('No one');
-    await expect(rows.filter({ hasText: 'ACC-IN-9XM4TQ' })).toContainText(
-      'Another receiver, last active',
-    );
-    await expect(page.getByText(/whichever hub is chosen at the top/)).toBeVisible();
+    const rows = table(page, 'Runs').getByRole('row');
+    await expect(rows.filter({ hasText: 'ACC-MF-4PX8RT' })).toHaveCount(0);
+    const waiting = rows.filter({ hasText: 'ACC-MF-7KQ2MZ' });
+    await expect(waiting).toContainText('Kofi Boateng');
+    await expect(waiting).toContainText('Kente Crafts, Shea Naturals +1 more');
+    await expect(waiting).toContainText('3 of 3 vendors still to check in');
+    await expect(waiting).toContainText('No one');
 
-    const [list] = reads(opened.api, '/hub-intakes');
-    expect(list?.search).toContain('state=AWAITING_COUNT');
+    const [list] = reads(opened.api, '/receiving-runs');
     expect(list?.search).not.toContain('hub_id');
     await expectBlind(page, opened);
     expect(opened.api.unexpected).toEqual([]);
     expect(opened.watch.problems).toEqual([]);
   });
 
-  test('has the views of the server’s state filter, and a counted intake there carries no count', async ({
+  test('has the views of the server’s filter, and a lookup the server answers', async ({
     page,
   }) => {
-    const opened = await open(page, `${QUEUE}?view=decision`);
+    const opened = await open(page, `${QUEUE}?view=needs_decision`);
 
-    const rows = table(page, 'Intakes').getByRole('row');
-    await expect(rows.filter({ hasText: 'ACC-IN-3HT6NC' })).toContainText('Needs a decision');
-    expect(reads(opened.api, '/hub-intakes').at(-1)?.search).toContain(
-      'state=RECONCILIATION_REQUIRED',
+    const rows = table(page, 'Runs').getByRole('row');
+    await expect(rows.filter({ hasText: 'ACC-MF-4PX8RT' })).toContainText(
+      '1 vendor needs a decision',
     );
+    await expect(rows.filter({ hasText: 'ACC-MF-4PX8RT' })).toContainText(
+      '1 parcel being searched for',
+    );
+    expect(reads(opened.api, '/receiving-runs').at(-1)?.search).toContain('view=needs_decision');
 
-    await page.goto(`${QUEUE}?view=all`);
-    await expect(rows.filter({ hasText: 'ACC-IN-5JK8PD' })).toContainText('Ready to itemise');
-    expect(reads(opened.api, '/hub-intakes').at(-1)?.search).not.toContain('state=');
-    // The list of counted intakes carries the declaration on the wire (the contract's counted shape); no screen draws it, a zero or a match included.
-    expect(await table(page, 'Intakes').textContent()).not.toMatch(
-      /\b(?:137|130|24|declared|counted)\b/i,
+    await page.goto(`${QUEUE}?view=all&q=Shea`);
+    await expect(rows.filter({ hasText: 'ACC-MF-7KQ2MZ' })).toBeVisible();
+    await expect(rows.filter({ hasText: 'ACC-MF-4PX8RT' })).toHaveCount(0);
+    expect(reads(opened.api, '/receiving-runs').at(-1)?.search).toContain('q=Shea');
+    expect(opened.api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the run’s page: All N here', () => {
+  // Break caught: a confirmation in other words than the owner's, a Cancel that is not a button, a number sent that is not the number shown, a key or a version missing, or a lock taken by opening the page.
+  test('asks in the owner’s words, sends the number shown with a key and the vendor’s version, and takes the lock only on the act', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await expect(kente.getByText('4 parcels photographed')).toBeVisible();
+    expect(sent(opened.api, '/lock')).toHaveLength(0);
+
+    await kente.getByRole('button', { name: 'All 4 here' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Confirm 4 parcels from Kente Crafts?' });
+    await expect(
+      dialog.getByText('I counted 4 parcels from this vendor on the table.'),
+    ).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    expect(sent(opened.api, '/check-in')).toHaveLength(0);
+    await dialog.getByRole('button', { name: 'Yes, all 4 are here' }).click();
+
+    await expect(kente.getByText('Kente Crafts is checked in.')).toBeVisible();
+    await expect(kente.getByText('Next: Shea Naturals')).toBeVisible();
+    await expect(kente.getByText('Checked in and cleared')).toBeVisible();
+    const [finish] = sent(opened.api, '/check-in');
+    expect(finish?.body).toEqual({ all_arrived: true, confirmed_count: 4 });
+    expect(finish?.ifMatch).toBe('"r1"');
+    expect(finish?.idempotencyKey).toMatch(KEY);
+    expect(sent(opened.api, '/lock')).toHaveLength(1);
+    expect(opened.api.unexpected).toEqual([]);
+    expect(opened.watch.problems).toEqual([]);
+  });
+
+  // Break caught: the photos drawn before they are near, or a picture whose address is shown as text.
+  test('draws each parcel’s photo from an address of its own and shows no address', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    await expect(
+      page.getByRole('region', { name: 'Kente Crafts' }).getByRole('button', { name: 'Parcel 1' }),
+    ).toBeVisible();
+
+    await expect.poll(() => opened.api.images.length).toBeGreaterThanOrEqual(6);
+    expect(await page.locator('body').innerText()).not.toMatch(
+      /test-evidence-store|token=|https?:\/\//,
     );
     expect(opened.api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the run’s page: the count is different', () => {
+  // Break caught: a tap that sends a key or a version (it states a desired state), a tile that is a toggle before the officer chose, a finish that sends a number, a parcel not tapped that is not missing.
+  test('taps each parcel that is here, finishes the vendor as tapped, and shows what is missing with its photo', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await expect(kente.getByRole('button', { name: 'Parcel 1' })).not.toHaveAttribute(
+      'aria-pressed',
+    );
+    await kente.getByRole('button', { name: 'The count is different' }).click();
+
+    for (const n of [1, 2, 3]) {
+      await kente.getByRole('button', { name: `Parcel ${String(n)}`, exact: true }).click();
+      await expect(
+        kente.getByRole('button', { name: `Parcel ${String(n)}, Checked in` }),
+      ).toHaveAttribute('aria-pressed', 'true');
+    }
+    await expect(kente.getByText('3 of 4 checked in')).toBeVisible();
+    const taps = opened.api.calls.filter((call) => call.method === 'PUT');
+    expect(taps.map((call) => call.body)).toEqual([
+      { arrived: true },
+      { arrived: true },
+      { arrived: true },
+    ]);
+    for (const tap of taps) {
+      expect(tap.ifMatch).toBeUndefined();
+      expect(tap.idempotencyKey).toBeUndefined();
+    }
+    // The run is read once: a tap is taken into the page from the answer.
+    expect(reads(opened.api, `/receiving-runs/${RUNS.waiting}`)).toHaveLength(1);
+
+    await kente.getByRole('button', { name: 'Finish this vendor' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Finish Kente Crafts?' });
+    await expect(
+      dialog.getByText('1 parcel you did not tap will be marked missing.'),
+    ).toBeVisible();
+    await dialog.getByRole('button', { name: 'Finish this vendor' }).click();
+
+    await expect(kente.getByText('A senior officer will decide about this vendor.')).toBeVisible();
+    await expect(kente.getByRole('button', { name: 'Parcel 4, Missing' })).toBeVisible();
+    const [finish] = sent(opened.api, '/check-in');
+    expect(finish?.body).toEqual({ all_arrived: false });
+    expect(opened.api.unexpected).toEqual([]);
+    expect(opened.watch.problems).toEqual([]);
+  });
+
+  // Break caught: a count finished on a vendor read before another officer finished it: the finish is refused as stale, in words, and the page reads the vendor again.
+  test('says in words that the vendor changed when it was finished by someone else, and offers to read it again', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await kente.getByRole('button', { name: 'All 4 here' }).click();
+    // Another officer finishes the vendor between the page's read and the confirmation.
+    const vendor = opened.api.world.runs[0]?.vendors[0];
+    if (vendor === undefined) throw new Error('no vendor');
+    vendor.version += 1;
+    await page.getByRole('button', { name: 'Yes, all 4 are here' }).click();
+
+    await expect(
+      page.getByRole('alert').filter({ hasText: /This vendor changed after you opened it/ }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Reload the record' }).click();
+    await expect(
+      page.getByRole('alertdialog', { name: 'Confirm 4 parcels from Kente Crafts?' }),
+    ).toBeVisible();
+    expect(opened.api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the run’s page: a finished run', () => {
+  // Break caught: a finished run that leaves the officer to work out the next step, or that does not show the rider the picture of what is missing.
+  test('leads with the rider’s bag, says what each vendor came to, and shows the missing parcel’s photo', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.decision));
+    const summary = page.getByRole('region', { name: 'Before the rider leaves' });
+
+    await expect(summary.getByText('Check the rider’s bag before they leave.')).toBeVisible();
+    await expect(summary.getByText('Yaw Textiles: 1 checked in, 1 missing')).toBeVisible();
+    await expect(
+      summary.getByRole('list', { name: 'Photos of Yaw Textiles’s missing parcels' }),
+    ).toBeVisible();
+    await expect(
+      summary.getByText('A senior officer will decide about Yaw Textiles.'),
+    ).toBeVisible();
+    await expect.poll(() => opened.api.images.length).toBeGreaterThanOrEqual(1);
+    expect(opened.api.unexpected).toEqual([]);
+  });
+
+  // Break caught: a missing parcel that cannot be found again, or a found parcel that closes the case (a senior officer closes it).
+  test('checks a missing parcel in when it is found, and the case stays open', async ({ page }) => {
+    const opened = await open(page, runPath(RUNS.decision));
+    const yaw = page.getByRole('region', { name: 'Yaw Textiles' });
+
+    await yaw.getByRole('button', { name: 'Parcel 2, Missing' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Parcel 2' });
+    await expect(dialog.getByText(/Missing since /)).toBeVisible();
+    await dialog.getByRole('button', { name: 'Found it' }).click();
+
+    await expect(yaw.getByText('Parcel 2 is found and checked in.')).toBeVisible();
+    await expect(yaw.getByRole('button', { name: 'Parcel 2, Checked in' })).toBeVisible();
+    await expect(yaw.getByText('A senior officer will decide about this vendor.')).toBeVisible();
+    const found = opened.api.calls.filter((call) => call.method === 'PUT');
+    expect(found.map((call) => call.body)).toEqual([{ arrived: true }]);
+    expect(opened.api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the run’s page: a vendor counted without photos', () => {
+  // Break caught (D-D3): the rider's number, or a photo, on the page of a vendor whose photos Ops excused: not in a response, not on the page, not in the title, the accessible tree or the console.
+  test('says one line, offers the count, and shows nothing of the rider’s number', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    const blind = page.getByRole('region', { name: 'Adwoa Stalls' });
+
+    await expect(blind.getByText('No photos at the door: counted, not checked in')).toBeVisible();
+    await expect(
+      blind.getByText(/The rider’s number is shown only after you have typed yours\./),
+    ).toBeVisible();
+    await expect(blind.getByRole('link', { name: 'Count the parcels' })).toHaveAttribute(
+      'href',
+      count(IDS.waiting),
+    );
+    await expect(blind.locator('img')).toHaveCount(0);
+    await expectBlind(page, opened);
+    expect(opened.api.unexpected).toEqual([]);
+  });
+
+  // Break caught: a server that carries the rider's number in the run's page drawn, or half drawn: the answer is refused whole and the number is nowhere on the page.
+  test('refuses an answer that carries the rider’s number, and the number is nowhere on the page', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting), { leak: true });
+
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'This run could not be loaded.' }),
+    ).toBeVisible();
+    expect(opened.received.some((answer) => THE_NUMBER.test(answer.text))).toBe(true);
+    expect(await page.content()).not.toMatch(THE_NUMBER);
+    expect(await page.locator('body').ariaSnapshot()).not.toMatch(THE_NUMBER);
+    for (const line of opened.console) expect(line).not.toMatch(THE_NUMBER);
+    expect(opened.api.unexpected).toEqual([]);
+  });
+});
+
+test.describe('the run’s page: a photo taken at the hub', () => {
+  const PHOTO = { name: 'parcel.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('photo') };
+
+  // Break caught: a parcel added with no photo, a photo cited before it is stored, an upload that carries credentials or a referrer, or an extra sent with a version.
+  test('adds a parcel that is not on the list: the photo is stored in its three steps, then cited once', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+
+    await kente.getByRole('button', { name: 'Add a parcel not on the list' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Add a parcel that is not on the list' });
+    await dialog.getByRole('button', { name: 'Add this parcel' }).click();
+    await expect(dialog.getByText('Take a photo of the parcel.', { exact: true })).toBeVisible();
+    expect(sent(opened.api, '/extra-parcels')).toHaveLength(0);
+
+    await dialog.getByLabel(/Photo of the parcel/).setInputFiles(PHOTO);
+    await expect(dialog.getByText('Stored', { exact: true })).toBeVisible();
+    await dialog.getByLabel(/Note/).fill('A box of soap');
+    await dialog.getByRole('button', { name: 'Add this parcel' }).click();
+
+    await expect(
+      kente.getByText('The parcel was added. A senior officer will decide about it.'),
+    ).toBeVisible();
+    await expect(kente.getByRole('button', { name: 'Extra parcel 5, Checked in' })).toBeVisible();
+    await expect(kente.getByRole('button', { name: /^All \d+ here$/ })).toHaveCount(0);
+    const order = opened.api.calls
+      .filter((call) => call.method !== 'GET' && !call.path.endsWith('/retrieval-authorization'))
+      .map((call) => `${call.method} ${call.path.replace(/[0-9a-f-]{36}/g, ':id')}`);
+    // The photo is stored when it is chosen; confirming is the act that takes the vendor's lock, and then cites the photo.
+    expect(order).toEqual([
+      'POST /api/v1/evidence',
+      'POST /api/v1/evidence/:id/complete',
+      'POST /api/v1/hub-intakes/:id/lock',
+      'POST /api/v1/hub-intakes/:id/extra-parcels',
+    ]);
+    expect(opened.api.uploads).toHaveLength(1);
+    for (const name of Object.keys(opened.api.uploads[0]?.headers ?? {})) {
+      expect(name, 'a header of the upload').not.toMatch(
+        /csrf|idempotency|authorization|cookie|referer/i,
+      );
+    }
+    const [extra] = sent(opened.api, '/extra-parcels');
+    expect(extra?.ifMatch).toBeUndefined();
+    expect(extra?.idempotencyKey).toMatch(KEY);
+    expect(extra?.body).toMatchObject({ note: 'A box of soap' });
+    expect(opened.api.unexpected).toEqual([]);
+    expect(opened.watch.problems).toEqual([]);
+  });
+
+  // Break caught: damage recorded with no photo, on no parcel, or on a version the officer did not read.
+  test('records damage on a parcel: its own photo, a note, once, on the vendor’s version', async ({
+    page,
+  }) => {
+    const opened = await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await kente.getByRole('button', { name: 'All 4 here' }).click();
+    await page.getByRole('button', { name: 'Yes, all 4 are here' }).click();
+    await expect(kente.getByText('Kente Crafts is checked in.')).toBeVisible();
+
+    await kente.getByRole('button', { name: 'Parcel 2, Checked in' }).click();
+    await page
+      .getByRole('dialog', { name: 'Parcel 2' })
+      .getByRole('button', { name: 'Damaged' })
+      .click();
+    const dialog = page.getByRole('alertdialog', { name: 'Record damage on Parcel 2?' });
+    await dialog.getByRole('button', { name: 'Record the damage' }).click();
+    await expect(dialog.getByText('Take a photo of the damage.')).toBeVisible();
+    await dialog.getByLabel(/Photo of the damage/).setInputFiles(PHOTO);
+    await expect(dialog.getByText('Stored', { exact: true })).toBeVisible();
+    await dialog.getByLabel(/What is damaged/).fill('A torn corner');
+    await dialog.getByRole('button', { name: 'Record the damage' }).click();
+
+    await expect(kente.getByText('The damage to Parcel 2 is recorded.')).toBeVisible();
+    await expect(kente.getByRole('button', { name: 'Parcel 2, Damaged' })).toBeVisible();
+    const [condition] = sent(opened.api, '/condition');
+    expect(condition?.ifMatch).toBe('"r2"');
+    expect(condition?.body).toMatchObject({ condition: 'DAMAGED', note: 'A torn corner' });
+    expect(opened.api.unexpected).toEqual([]);
+    expect(opened.watch.problems).toEqual([]);
+  });
+});
+
+test.describe('the run’s page: the hub floor', () => {
+  // Break caught (DESIGN_SYSTEM sections 11 and 12): a control under the 56 px the hub floor asks of a thumb: a tile, a button of the bar, a button of the confirmation.
+  test('every control the officer presses is at least 56 px high', async ({ page }) => {
+    await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await expect(kente.getByRole('button', { name: 'All 4 here' })).toBeVisible();
+
+    const heights = async (selector: ReturnType<Page['locator']>): Promise<number[]> =>
+      // The layout height (a dialog opens with a transform that scales it for a moment, which a bounding box would measure).
+      selector.evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).offsetHeight));
+    for (const height of await heights(kente.locator('.receiving-actions button'))) {
+      expect(height).toBeGreaterThanOrEqual(56);
+    }
+    for (const height of await heights(kente.locator('.ui-photo-tile'))) {
+      expect(height).toBeGreaterThanOrEqual(56);
+    }
+    await kente.getByRole('button', { name: 'All 4 here' }).click();
+    for (const height of await heights(page.getByRole('alertdialog').locator('button.ui-button'))) {
+      expect(height).toBeGreaterThanOrEqual(56);
+    }
+  });
+
+  // Break caught: an action bar that is behind the on-screen keyboard at 768 px (the visual viewport is shorter than the window), so that the officer closes the keyboard to reach the button.
+  test('lifts the action bar above the on-screen keyboard at 768 px, by what the visual viewport says', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, runPath(RUNS.waiting));
+    const kente = page.getByRole('region', { name: 'Kente Crafts' });
+    await expect(kente.getByRole('button', { name: 'All 4 here' })).toBeVisible();
+    const before = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--keyboard-inset'),
+    );
+    expect(before.trim()).toBe('0px');
+
+    // The keyboard opens: the part of the page the person can see is 400 px high.
+    await page.evaluate(() => {
+      const viewport = window.visualViewport;
+      if (viewport === null) throw new Error('this browser has no visual viewport');
+      Object.defineProperty(viewport, 'height', { configurable: true, get: () => 400 });
+      viewport.dispatchEvent(new Event('resize'));
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          getComputedStyle(document.documentElement).getPropertyValue('--keyboard-inset'),
+        ),
+      )
+      .toBe('624px');
+    const bar = kente.locator('.receiving-actions');
+    const bottom = await bar.evaluate((node) => node.getBoundingClientRect().bottom);
+    expect(bottom).toBeLessThanOrEqual(400);
+  });
+
+  // Break caught: a page that says nothing when the connection is lost, so that the officer goes on checking parcels in and none of it is saved.
+  test('says what the officer does now is not saved when the browser goes offline, and says nothing when it is back', async ({
+    context,
+    page,
+  }) => {
+    await open(page, runPath(RUNS.waiting));
+    await expect(page.getByRole('region', { name: 'Kente Crafts' })).toBeVisible();
+    await expect(page.getByText('No connection. What you do now is not saved.')).toHaveCount(0);
+
+    await context.setOffline(true);
+    await expect(page.getByText('No connection. What you do now is not saved.')).toBeVisible();
+    await context.setOffline(false);
+    await expect(page.getByText('No connection. What you do now is not saved.')).toHaveCount(0);
   });
 });
 
@@ -241,8 +600,9 @@ test.describe('the blind count', () => {
   test('refuses every answer that carries the declaration before the count, and the number is nowhere on the page', async ({
     page,
   }) => {
-    const opened = await open(page, QUEUE, { leak: true });
-    await expect(page.getByText('The intakes could not be loaded.').first()).toBeVisible();
+    // The run's page is what the old queue was here: the first screen of the receiving side that reads a vendor counted blind.
+    const opened = await open(page, runPath(RUNS.waiting), { leak: true });
+    await expect(page.getByText('This run could not be loaded.').first()).toBeVisible();
     // The test is sensitive: the leaking server did send it.
     expect(opened.received.some((answer) => THE_NUMBER.test(answer.text))).toBe(true);
     expect(await page.content()).not.toMatch(THE_NUMBER);
@@ -647,11 +1007,82 @@ interface Screen {
 
 const SCREENS: readonly Screen[] = [
   {
-    name: 'the receiving queue',
+    name: 'the receiving queue, by run',
     heading: true,
     reach: async (page) => {
       await open(page, QUEUE);
-      await expect(page.getByText('ACC-IN-7KQ2MZ').first()).toBeVisible();
+      await expect(page.getByText('ACC-MF-7KQ2MZ').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'the run’s page',
+    heading: true,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.waiting));
+      await expect(
+        page
+          .getByRole('region', { name: 'Kente Crafts' })
+          .getByRole('button', { name: 'All 4 here' }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: 'the run’s page while the officer taps',
+    heading: true,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.waiting));
+      const kente = page.getByRole('region', { name: 'Kente Crafts' });
+      await kente.getByRole('button', { name: 'The count is different' }).click();
+      await kente.getByRole('button', { name: 'Parcel 1', exact: true }).click();
+      await expect(kente.getByText('1 of 4 checked in')).toBeVisible();
+    },
+  },
+  {
+    name: 'a finished run, with the rider’s bag first',
+    heading: true,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.decision));
+      await expect(page.getByRole('region', { name: 'Before the rider leaves' })).toBeVisible();
+    },
+  },
+  {
+    name: 'the confirmation of All N here',
+    heading: false,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.waiting));
+      await page
+        .getByRole('region', { name: 'Kente Crafts' })
+        .getByRole('button', { name: 'All 4 here' })
+        .click();
+      await expect(
+        page.getByRole('alertdialog', { name: 'Confirm 4 parcels from Kente Crafts?' }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: 'a parcel opened',
+    heading: false,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.decision));
+      await page
+        .getByRole('region', { name: 'Yaw Textiles' })
+        .getByRole('button', { name: 'Parcel 2, Missing' })
+        .click();
+      await expect(page.getByRole('dialog', { name: 'Parcel 2' })).toBeVisible();
+    },
+  },
+  {
+    name: 'the form of a parcel that is not on the list',
+    heading: false,
+    reach: async (page) => {
+      await open(page, runPath(RUNS.waiting));
+      await page
+        .getByRole('region', { name: 'Kente Crafts' })
+        .getByRole('button', { name: 'Add a parcel not on the list' })
+        .click();
+      await expect(
+        page.getByRole('alertdialog', { name: 'Add a parcel that is not on the list' }),
+      ).toBeVisible();
     },
   },
   {
@@ -771,7 +1202,8 @@ test.describe('enlarged text and forced colours', () => {
     for (const [name, path, ready] of [
       ['the blind count', count(IDS.held), 'Held by someone else'],
       ['the record after the count', record(IDS.short), 'The count'],
-      ['the receiving queue', QUEUE, 'ACC-IN-7KQ2MZ'],
+      ['the receiving queue', QUEUE, 'ACC-MF-7KQ2MZ'],
+      ['the run’s page', runPath(RUNS.waiting), 'Kente Crafts'],
     ] as const) {
       test(`${name} at 200% text keeps its layout at ${String(width)} px`, async ({ page }) => {
         await page.setViewportSize({ width, height });
