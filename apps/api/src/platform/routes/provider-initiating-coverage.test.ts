@@ -196,6 +196,11 @@ const FIXED_OPERATION_WRITERS: Readonly<Record<string, { operation: string; call
     operation: 'recordCollection',
     caller: 'pickup/collection.service.ts',
   },
+  // D-D5 (migration 0099): the envelope of a count above the booking, the mirror of the short count's, written in the same operation and called from the same file.
+  'melarc.over_count_envelope': {
+    operation: 'recordCollection',
+    caller: 'pickup/collection.service.ts',
+  },
 };
 
 /** The operation a writer function names in its own envelope: the literal that follows the originating principal in its `VALUES`. */
@@ -274,6 +279,7 @@ describe('the provider-initiating ceiling covers every operation that writes a n
     ).toEqual([
       'melarc.failure_envelope',
       'melarc.handshake_envelope',
+      'melarc.over_count_envelope',
       'melarc.shortfall_envelope',
     ]);
     for (const [name, expected] of Object.entries(FIXED_OPERATION_WRITERS)) {

@@ -189,6 +189,19 @@ export const TEMPLATES: readonly Template[] = [
     approvedOn: '2026-11-12',
     approvedDigest: '07b770c030f3a0a5bf45ba5eefcbcd911182d9095f57320aab04b6c085f82568',
   },
+  {
+    // D-D5 (Run D, Part 2): the Ops feed entry for a count ABOVE the booking, the mirror of a short count, written in the same transaction as the count. The one number it holds is how many
+    // parcels over the booking were counted (`{n}`, a whole number above zero: `parametersOf` and the table's check hold the shape); it holds none of the rider's note. Approved by the
+    // Product Owner on 16 November 2026, for exactly these words and this title: wording only.
+    kind: 'COLLECTION_OVER_OPS_FEED',
+    version: 1,
+    title: 'Pickup counted over',
+    wording: 'Pickup request {code} for {date} was counted {n} over the booking ({reason}).',
+    placeholders: ['code', 'date', 'n', 'reason'],
+    approvedBy: 'Mathias Elorm, Product Owner',
+    approvedOn: '2026-11-16',
+    approvedDigest: 'c1bfcb12d2a9112df7354269441253bd57b90b095c3ff7ba18087f18b3a86185',
+  },
 ];
 
 export class TemplateError extends Error {

@@ -2024,6 +2024,7 @@ Offboarding a staff member or rider immediately revokes system access and creden
 | Pickup failure | Ops event; registered vendor in-app/email; ad-hoc PII-safe SMS |
 | Pickup stop skipped by Ops (MSC-DEC-412) | Registered vendor: in-app feed, with the reason and the requested action; no raw note |
 | Pickup counted short (MSC-DEC-194) | Ops feed: the office is told in the system when the shortfall is recorded (AC-SLICE-001-21); no text, no count, no raw note |
+| Pickup counted over (D-D5) | Ops feed: the office is told in the system when a count above the booking is recorded (the Product Owner, 16 November 2026: title "Pickup counted over", the count over the booking and the reason as a token); no text, no raw note |
 | Failure escalation | Senior Ops internal queue/notification |
 | Hub handover submitted | Ops receive queue |
 | Intake completed | Registered vendor in-app order summary; ad-hoc tracking SMS |

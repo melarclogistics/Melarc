@@ -135,6 +135,8 @@ const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
 
 const SPEC_31_2 = 'PROJECT_MASTER_SPECIFICATION.md §31.2';
+/** The one parameter of a notification that is a whole number and not a closed token: the count over the booking in the office's entry for an over count (D-D5). */
+const COUNT_PARAMETER = 'n';
 
 /** The messages whose events exist now. */
 export const MESSAGES: readonly MessageDefinition[] = [
@@ -294,6 +296,22 @@ export const MESSAGES: readonly MessageDefinition[] = [
     carries: ['reason'],
     source: `${SPEC_31_2}: "Pickup counted short (MSC-DEC-194)" (Ops feed); pickup-collection.md AC-SLICE-001-21; OB-S1-51`,
   },
+  {
+    // D-D5: the mirror of the entry above, for a count above the booking (the Product Owner, 15 and 16 November 2026), in the transaction of `recordCollection` (the envelope
+    // `pickup.collection.over_count_flagged`, written by the database from the record the rider has just made). The entry names the request, the reason as a closed token and how many parcels
+    // over the booking were counted, the one number a feed entry holds. Whoever the sender is, the office is told.
+    kind: 'COLLECTION_OVER_OPS_FEED',
+    event: 'pickup.collection.over_count_flagged',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'OPS_FEED',
+    channel: 'FEED',
+    templateVersion: 1,
+    timeToLiveMs: 90 * DAY_MS,
+    appliesTo: () => true,
+    stillTrue: () => true,
+    carries: ['reason', COUNT_PARAMETER],
+    source: `${SPEC_31_2}: "Pickup counted over (D-D5)" (Ops feed); pickup-collection.md; D-D5`,
+  },
 ];
 
 /** A message the documents ask for whose event no operation raises yet: the task that builds the operation wires it. */
@@ -387,11 +405,15 @@ export const PLANNED_MESSAGES: readonly PlannedMessage[] = [
 ];
 
 const PARAMETER_TOKEN = /^[A-Z][A-Z0-9_]{0,63}$/;
+/** The one member of a notification's parameters that is a number, and the one shape a number may have: a whole number above zero, with no leading zero and at most nine digits (D-D5). */
+const COUNT_VALUE = /^[1-9][0-9]{0,8}$/;
 
 /**
  * The parameters a message copies from the payload of its envelope (`MessageBase.carries`): the declared members whose value is a closed
  * token, under the same names, and nothing else. The notification table holds them under a check of the same shape, so a value that is
- * not a token can only be left out here and never reach the table.
+ * not a token can only be left out here and never reach the table. **One member is a number instead of a token: `n`**, the count over
+ * the booking that the office's entry for an over count says (D-D5); it is carried only as a whole number above zero (`COUNT_VALUE`), which the table's check holds the same way
+ * (migration `0099`), and no other member may be a number.
  */
 export function parametersOf(
   message: Pick<MessageBase, 'carries'>,
@@ -400,7 +422,10 @@ export function parametersOf(
   const parameters: Record<string, string> = {};
   for (const key of message.carries ?? []) {
     const value = payload[key];
-    if (typeof value === 'string' && PARAMETER_TOKEN.test(value)) parameters[key] = value;
+    if (typeof value !== 'string') continue;
+    if (key === COUNT_PARAMETER ? COUNT_VALUE.test(value) : PARAMETER_TOKEN.test(value)) {
+      parameters[key] = value;
+    }
   }
   return parameters;
 }
