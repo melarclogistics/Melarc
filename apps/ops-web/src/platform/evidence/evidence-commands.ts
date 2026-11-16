@@ -1,6 +1,10 @@
 import type { ApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
-import { parseEvidenceTicket, parseStoredEvidence, type EvidenceTicket } from './evidence-shape';
+import {
+  parseEvidenceDeclaration,
+  parseStoredEvidence,
+  type EvidenceTicket,
+} from './evidence-shape';
 
 /**
  * The two calls that make one file of evidence a record the platform can be told about (`createEvidence`, then `completeEvidenceUpload`), and nothing else of it: the bytes go between them
@@ -24,17 +28,24 @@ export interface EvidenceDeclaration {
   readonly checksumSha256: string;
 }
 
-/** The record declared, with the instruction to send its bytes and the version to complete it on. */
-export interface DeclaredEvidence {
-  readonly ticket: EvidenceTicket;
-  readonly version: string;
-}
+/**
+ * What the declaration came back as. **A record that waits for its bytes** carries the instruction to send them and the version to complete it on. A retry under the key an earlier attempt used is told the
+ * record as it is now: **`STORED`** (the completion was done and its answer was lost: the file is a success and there is nothing to send) or **`EXPIRED`** (its address is of no use: a new record is asked for).
+ */
+export type DeclaredEvidence =
+  | { readonly state: 'PENDING_UPLOAD'; readonly ticket: EvidenceTicket; readonly version: string }
+  | { readonly state: 'STORED'; readonly evidenceId: string }
+  | { readonly state: 'EXPIRED'; readonly evidenceId: string };
 
-/** `createEvidence` (the key of the act): step one of two. The answer carries a bearer capability to write one object, which the caller uses once and does not keep. */
+/**
+ * `createEvidence` (the key of the act): step one of two. The answer carries a bearer capability to write one object, which the caller uses once and does not keep. `signal` abandons the request (the person
+ * left the file out, or its time ran out).
+ */
 export async function declareEvidence(
   client: ApiClient,
   declaration: EvidenceDeclaration,
   idempotencyKey: string,
+  signal?: AbortSignal,
 ): Promise<DeclaredEvidence> {
   const answer = answerOf(
     await client.POST('/evidence', {
@@ -48,14 +59,18 @@ export async function declareEvidence(
         byte_size: declaration.byteSize,
         checksum_sha256: declaration.checksumSha256,
       },
+      ...(signal === undefined ? {} : { signal }),
     }),
   );
-  const ticket = parseEvidenceTicket(answer.data, {
+  const declared = parseEvidenceDeclaration(answer.data, {
     owner_id: declaration.ownerId,
     purpose: declaration.purpose,
   });
-  if (ticket === undefined || answer.etag === undefined) throw unexpectedResponse(answer.status);
-  return { ticket, version: answer.etag };
+  if (declared === undefined) throw unexpectedResponse(answer.status);
+  if (declared.state !== 'PENDING_UPLOAD') return declared;
+  // A record that waits for its bytes is completed on the version this answer carries: without one the bytes would be sent and could never be confirmed.
+  if (answer.etag === undefined) throw unexpectedResponse(answer.status);
+  return { state: 'PENDING_UPLOAD', ticket: declared.ticket, version: answer.etag };
 }
 
 /** `completeEvidenceUpload`: step two of two, which the server answers only for bytes it finds as declared. The answer is the identifier of the stored record. */
@@ -63,10 +78,12 @@ export async function completeEvidence(
   client: ApiClient,
   evidenceId: string,
   version: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const answer = answerOf(
     await client.POST('/evidence/{id}/complete', {
       params: { path: { id: evidenceId }, header: { 'If-Match': version } },
+      ...(signal === undefined ? {} : { signal }),
     }),
   );
   const stored = parseStoredEvidence(answer.data, evidenceId);

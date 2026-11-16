@@ -493,7 +493,8 @@ function answer(route: Route, state: ReceivingApi, call: Call): Promise<void> {
           method: 'PUT',
           url: `/test-evidence-store/upload/${record.id}?sig=${PLANTED.signature}`,
           headers: { 'content-type': record.contentType },
-          expires_at: '2026-11-03T08:45:00Z',
+          // An address the platform has just made lives for minutes from now: the portal judges it by the clock.
+          expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
           storage_ref: PLANTED.objectKey,
         },
       },

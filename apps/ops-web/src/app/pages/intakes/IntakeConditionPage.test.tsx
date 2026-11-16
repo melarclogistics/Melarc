@@ -18,6 +18,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
@@ -63,7 +64,8 @@ const ticket = () => ({
     method: 'PUT',
     url: 'https://store.example/object-store/photo-1?sig=bearer-capability',
     headers: { 'Content-Type': 'image/jpeg' },
-    expires_at: '2026-11-14T10:15:00Z',
+    // An address the platform has just made lives for minutes from now: the portal judges it by the clock, and one that had run out is asked for again.
+    expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
   },
 });
 
@@ -244,6 +246,18 @@ describe('the form', () => {
   });
 
   // Break caught: a failed photo shown in the server's words or the store's address, or one that cannot be tried again.
+  // Break caught: a photo of the receiver's work refused in the senior's capability, the mirror of the adjudication's: each form names its own act.
+  it('tells a photo the platform refused for this condition in the receiver’s own capability', async () => {
+    const { user } = open(shortCountFixture(), {
+      'POST /evidence': () => refusal(403, 'PERMISSION_DENIED'),
+    });
+    await choose(user, /Damaged/);
+    await user.upload(screen.getByLabelText(/Photos of what you found/), photo());
+
+    expect(await screen.findByText(cannotText('hub.intake.count'))).toBeVisible();
+    expect(screen.queryByText(cannotText('hub.osd.adjudicate'))).toBeNull();
+  });
+
   it('tells a photo the store declined in plain words, never the address, and tries it again', async () => {
     let attempts = 0;
     const { user } = open(shortCountFixture(), {

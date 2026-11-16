@@ -19,6 +19,7 @@ import {
   describeInterfaceStates,
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
+import { cannotText } from '../../../platform/problem/capability-words';
 import { renderApp } from '../../../test-support/render-app';
 import { etag, refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
@@ -63,7 +64,8 @@ const ticket = () => ({
     method: 'PUT',
     url: 'https://store.example/object-store/photo-1?sig=bearer-capability',
     headers: { 'Content-Type': 'image/jpeg' },
-    expires_at: '2026-11-14T10:15:00Z',
+    // An address the platform has just made lives for minutes from now: the portal judges it by the clock, and one that had run out is asked for again.
+    expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
   },
 });
 
@@ -207,6 +209,22 @@ describe('the form', () => {
   });
 
   // Break caught: a condition set with the decision that is sent without its photos, uploaded for the receiver's purpose, or not cited.
+  // Break caught: a photo made for a senior's decision refused in the receiver's capability ("your account can't count parcels"), which sends an officer to ask for the wrong access.
+  it('tells a photo the platform refused for this decision in the decision’s own capability', async () => {
+    const { user } = open(shortCountFixture(), {
+      [CREATE]: () => refusal(403, 'PERMISSION_DENIED'),
+    });
+    await decide(user, /Escalate/, 'Seal broken.');
+    await user.click(
+      screen.getByRole('checkbox', { name: /Also record the condition of the parcels/ }),
+    );
+    await user.click(await screen.findByRole('radio', { name: /Tampered with/ }));
+    await user.upload(screen.getByLabelText(/Photos of what you found/), photo());
+
+    expect(await screen.findByText(cannotText('hub.osd.adjudicate'))).toBeVisible();
+    expect(screen.queryByText(cannotText('hub.intake.count'))).toBeNull();
+  });
+
   it('sets a condition with the decision, uploads the photos for the adjudicator’s own purpose, and cites them', async () => {
     const { user } = open(shortCountFixture(), {
       [ACT]: () =>

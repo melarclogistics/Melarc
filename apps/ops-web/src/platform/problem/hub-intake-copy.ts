@@ -172,6 +172,14 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
     code: 'PERMISSION_DENIED',
     text: cannotText('hub.intake.count'),
   },
+  // A photo made for a senior's decision is refused in the decision's own capability (the platform asks for the key of the act the photo belongs to), never the receiver's: the page that draws the
+  // upload says which use it is (`use: 'decision'`).
+  {
+    operation: 'createEvidence',
+    context: 'decision',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.osd.adjudicate'),
+  },
   {
     operation: 'createEvidence',
     code: 'VALIDATION_FAILED',
@@ -246,11 +254,28 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
   },
 ];
 
-/** The words of the failures of a file's trip that are not the API's: the store that could not be reached or declined the file, and a browser that cannot compute its checksum. */
+/**
+ * The words of the failures of a file's trip that are not the API's: the store that could not be reached or declined the file, **the store the browser's own policy blocked** (told apart from a lost connection:
+ * a policy does not allow the bucket, and a retry can never help), a step that ran out of time, an upload address that ran out twice, a file the platform's limits refuse before it is read, and a browser that
+ * cannot compute a file's checksum. Drafts for the Product Owner to review; none draws an address, a key or a status.
+ */
 export const STORE_UNREACHABLE =
   'The photo could not be sent to the store. Check the connection and try again.';
 export const STORE_DECLINED =
   'The store declined this photo. Choose it again, or try another file.';
+export const STORE_BLOCKED =
+  'The browser blocked sending this photo. The portal’s settings do not allow it to send photos to the photo store, so the photo itself is not at fault. Tell the person who looks after the portal.';
+export const UPLOAD_TIMED_OUT =
+  'Sending the photo took too long, so it was stopped. Check the connection and try again.';
+export const UPLOAD_ADDRESS_RAN_OUT = 'The time to send this photo ran out twice. Try again.';
+export const FILE_TYPE_NOT_TAKEN =
+  'This kind of file is not one the platform takes. Take a photo with the camera, or choose one from the gallery.';
 export const CHECKSUM_UNAVAILABLE =
   'This browser cannot check a file before sending it, so the photo was not sent. Open the portal in a current browser.';
 export const FILE_EMPTY = 'This file is empty. Choose another.';
+
+/** The words of a file above the platform's limit: the limit in megabytes, with one decimal only where it is not whole (the officer reads "10 MB", never a number of bytes). */
+export function fileTooLarge(limitBytes: number): string {
+  const megabytes = Number((limitBytes / (1024 * 1024)).toFixed(1));
+  return `This photo is larger than the platform takes (up to ${String(megabytes)} MB). Take it again, or choose a smaller one.`;
+}

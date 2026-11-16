@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseEvidenceTicket, parseStoredEvidence } from './evidence-shape';
+import {
+  parseEvidenceDeclaration,
+  parseEvidenceTicket,
+  parseStoredEvidence,
+} from './evidence-shape';
 
 /**
  * What the upload of a file believes of the two answers it takes. **The instruction to send the bytes is a bearer capability**, so an instruction the portal cannot follow as it is (another method, a form to
@@ -103,6 +107,72 @@ describe('the ticket createEvidence answers with', () => {
     ]) {
       expect(parseEvidenceTicket(body, EXPECTED)).toBeUndefined();
     }
+  });
+});
+
+/**
+ * What `createEvidence` answers for **a retry under the key it already answered** (the contract: "a retry with the same `Idempotency-Key` is told the same record and the same capability, made again from
+ * the record"): the record in whatever state it has reached by now. A record that was completed while its answer was lost is `STORED`, and that is a success of the file, not a ticket to send bytes for.
+ */
+describe('the declaration createEvidence answers with, whatever state the record is in', () => {
+  it('is a ticket for a record still waiting for its bytes', () => {
+    expect(parseEvidenceDeclaration(ticket(), EXPECTED)).toEqual({
+      state: 'PENDING_UPLOAD',
+      ticket: parseEvidenceTicket(ticket(), EXPECTED),
+    });
+  });
+
+  // Break caught: a lost answer taken for a refusal for ever: the retry is told the record is stored, and the portal calls the answer "not the API's" and offers "Try again" again.
+  it('is the record, stored, whatever instruction it still carries', () => {
+    expect(parseEvidenceDeclaration(ticket({ evidence: { state: 'STORED' } }), EXPECTED)).toEqual({
+      state: 'STORED',
+      evidenceId: RECORD,
+    });
+    // A stored record needs no instruction: one that cannot be followed, or none at all, changes nothing.
+    expect(
+      parseEvidenceDeclaration(
+        { evidence: ticket({ evidence: { state: 'STORED' } }).evidence },
+        EXPECTED,
+      ),
+    ).toEqual({ state: 'STORED', evidenceId: RECORD });
+    expect(
+      parseEvidenceDeclaration(
+        ticket({ evidence: { state: 'STORED' }, upload: { method: 'POST' } }),
+        EXPECTED,
+      ),
+    ).toEqual({ state: 'STORED', evidenceId: RECORD });
+  });
+
+  it('is the record, expired, whatever instruction it still carries', () => {
+    expect(parseEvidenceDeclaration(ticket({ evidence: { state: 'EXPIRED' } }), EXPECTED)).toEqual({
+      state: 'EXPIRED',
+      evidenceId: RECORD,
+    });
+  });
+
+  // Break caught: the record that is not the one declared, taken as success in a state that needs no instruction (another owner's file counted as this one's).
+  it.each([
+    ['another owner', { owner_id: '2c5e7d1f-4b60-4c8d-9e0f-1a2b3c4d5e6f' }],
+    ['another purpose', { purpose: 'OSD' }],
+    ['no identifier', { id: 'record-1' }],
+  ])('is refused whole when the record is of %s, in every state', (_name, evidence) => {
+    for (const state of ['PENDING_UPLOAD', 'STORED', 'EXPIRED']) {
+      expect(
+        parseEvidenceDeclaration(ticket({ evidence: { ...evidence, state } }), EXPECTED),
+      ).toBeUndefined();
+    }
+  });
+
+  // Break caught: a record still waiting for bytes that the portal sends nowhere safe: its instruction is judged as before, and a record in another state the portal does not know is refused.
+  it('refuses a record that waits for its bytes with an instruction it cannot follow, and a state it does not know', () => {
+    expect(
+      parseEvidenceDeclaration(ticket({ upload: { method: 'POST' } }), EXPECTED),
+    ).toBeUndefined();
+    expect(parseEvidenceDeclaration({ evidence: ticket().evidence }, EXPECTED)).toBeUndefined();
+    expect(
+      parseEvidenceDeclaration(ticket({ evidence: { state: 'ARCHIVED' } }), EXPECTED),
+    ).toBeUndefined();
+    expect(parseEvidenceDeclaration(null, EXPECTED)).toBeUndefined();
   });
 });
 

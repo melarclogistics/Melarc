@@ -27,6 +27,12 @@ export const EVIDENCE_FIELDS = {
     optional: ['headers', 'form_fields'],
     enums: {},
   },
+  // `getEvidenceLimits` (OB-S1-110): the platform's limits on a file, read by `evidence-limits.ts`.
+  EvidenceLimits: {
+    required: ['allowed_content_types', 'max_byte_size'],
+    optional: [],
+    enums: {},
+  },
 } as const;
 
 /** What an upload follows: one `PUT` of the file's bytes to the address, with these headers and no others. It is held by the upload only, and is not a value any screen is given. */
@@ -113,6 +119,39 @@ export function parseEvidenceTicket(
     return undefined;
   }
   return { evidenceId: id, state: 'PENDING_UPLOAD', upload };
+}
+
+/**
+ * What `createEvidence` answered, in whatever state the record is in. The first answer is a record that waits for its bytes (a ticket). **A retry under the key it already answered is told the same record
+ * as it is now** (the contract), so a file whose completion was done while its answer was lost comes back `STORED`: that is the file's success and there is nothing to send. A record that ran out of time
+ * comes back `EXPIRED`: its address is of no use and a new record is asked for. Whatever the state, the record is the one declared (its owner and its purpose are the request's own): another's is refused whole.
+ */
+export type EvidenceDeclarationAnswer =
+  | { readonly state: 'PENDING_UPLOAD'; readonly ticket: EvidenceTicket }
+  | { readonly state: 'STORED'; readonly evidenceId: string }
+  | { readonly state: 'EXPIRED'; readonly evidenceId: string };
+
+export function parseEvidenceDeclaration(
+  body: unknown,
+  expected: { readonly owner_id: string; readonly purpose: string },
+): EvidenceDeclarationAnswer | undefined {
+  if (!isRecord(body) || !isRecord(body.evidence)) return undefined;
+  const record = body.evidence;
+  const id = uuidOf(record.id);
+  const owner = uuidOf(record.owner_id);
+  if (
+    id === undefined ||
+    owner?.toLowerCase() !== expected.owner_id.toLowerCase() ||
+    record.purpose !== expected.purpose
+  ) {
+    return undefined;
+  }
+  // A stored or an expired record needs no instruction: whatever one it still carries is not followed, and not judged.
+  if (record.state === 'STORED') return { state: 'STORED', evidenceId: id };
+  if (record.state === 'EXPIRED') return { state: 'EXPIRED', evidenceId: id };
+  if (record.state !== 'PENDING_UPLOAD') return undefined;
+  const ticket = parseEvidenceTicket(body, expected);
+  return ticket === undefined ? undefined : { state: 'PENDING_UPLOAD', ticket };
 }
 
 /** The record `completeEvidenceUpload` made referenceable: it must be `STORED` and the one completed. */

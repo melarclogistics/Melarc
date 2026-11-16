@@ -231,6 +231,7 @@ function Form({
               <IntakeEvidence
                 intakeId={intake.id}
                 purpose="OSD"
+                use="decision"
                 required={needsPhoto}
                 error={errors.photos}
                 onChange={(stored) => {
