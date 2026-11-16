@@ -124,3 +124,88 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* The button that leads from a photo in the viewer to the parcel's own dialog: under the picture, at the floor's size, never narrower than the picture lets it be. */
+.receiving-viewer__act {
+  display: flex;
+  justify-content: center;
+  margin-block-start: var(--space-3);
+}
+
+/* The record of a vendor (S1.35c): the parcels that need someone, group by group, each group the photos of its parcels. */
+.receiving-record__group {
+  display: grid;
+  gap: var(--space-2);
+  margin-block-end: var(--space-4);
+}
+
+.receiving-record__group-title {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-body-lg-size);
+  font-weight: var(--text-label-md-weight);
+}
+
+/* What was found, in the order it was made: one block for each finding, set apart by a quiet line, with its photos and who made it and when. */
+.receiving-findings {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.receiving-finding {
+  display: grid;
+  gap: var(--space-2);
+  padding-block-end: var(--space-3);
+  border-block-end: 1px solid var(--color-border-subtle);
+}
+
+.receiving-finding:last-child {
+  padding-block-end: 0;
+  border-block-end: 0;
+}
+
+.receiving-finding p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.receiving-finding__title {
+  font-weight: var(--text-label-md-weight);
+}
+
+.receiving-finding__by {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The correction of a count: a tick for each parcel that is here, each a row of the floor's size (the checkbox draws it), in a group that has no box of its own. */
+.receiving-correction__parcels {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.receiving-correction__parcels legend {
+  padding: 0;
+  font-weight: var(--text-label-md-weight);
+}
+
+.receiving-correction__parcels p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* The photo of a missing parcel in its row of the list: a small square, cropped to its box and never stretched, so that two rows are the same height. */
+.receiving-missing__picture {
+  display: block;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
