@@ -325,6 +325,41 @@ describe('usePhotoLink', () => {
     expect(asked()).toBe(2);
   });
 
+  // Break caught: a viewer that told a read's failure with a "Try again" that goes nowhere (the person's own act of asking again is not the hook's renewal, which is spent), or one that asked again by itself.
+  it('asks again, once for each time the person says so, after the platform could not give a link', async () => {
+    api = installFakeApi({
+      [ROUTE]: links(
+        () => errorResponse(503, 'SERVICE_UNAVAILABLE'),
+        () => errorResponse(503, 'SERVICE_UNAVAILABLE'),
+        () => link(ONE),
+      ),
+    });
+    const into = held();
+    renderWithProviders(<Probe into={into} />, { signedIn: true });
+    await waitFor(() => {
+      expect(into.current?.link.status).toBe('failed');
+    });
+    expect(asked()).toBe(1);
+
+    act(() => {
+      void into.current?.retry();
+    });
+    await waitFor(() => {
+      expect(asked()).toBe(2);
+    });
+    await waitFor(() => {
+      expect(into.current?.link.status).toBe('failed');
+    });
+
+    act(() => {
+      void into.current?.retry();
+    });
+    await waitFor(() => {
+      expect(into.current?.link).toEqual({ status: 'ready', url: ONE });
+    });
+    expect(asked()).toBe(3);
+  });
+
   // Break caught: a link kept after its photo is gone (a bearer capability that outlives the screen that asked for it): the next drawing of the photo, in the same session, asks again.
   it('keeps no link once nothing draws the photo, and asks again when it is drawn again', async () => {
     api = installFakeApi({ [ROUTE]: () => link(ONE) });

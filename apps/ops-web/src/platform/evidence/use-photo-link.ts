@@ -37,6 +37,11 @@ export interface PhotoLinkView {
   readonly link: PhotoLink;
   /** The `<img>` says its picture would not load: a new link is asked for, once, unless the browser blocked the picture. */
   readonly onImageError: () => void;
+  /**
+   * The person asked to try again after the platform could not give a link (`failed`): the link is asked for again, as often as they say so. It is **not** the one renewal of a picture that would not load, which
+   * is the hook's own and is spent once, and it is never called by the hook: a read that failed is not asked again by itself.
+   */
+  readonly retry: () => Promise<unknown>;
 }
 
 /** What was concluded of one link: judged when it arrived, and never again by the clock. */
@@ -123,5 +128,5 @@ export function usePhotoLink(evidenceId: string, enabled: boolean): PhotoLinkVie
     link = { status: 'loading' };
   } else if (verdict.failure !== undefined) link = { status: verdict.failure };
   else link = { status: 'ready', url };
-  return { link, onImageError };
+  return { link, onImageError, retry: refetch };
 }
