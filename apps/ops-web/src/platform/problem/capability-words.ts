@@ -37,8 +37,8 @@ const CAPABILITY = {
   'fleet.custody.accept': 'accept a custody handover',
   // Receiving at a hub: the intakes, the blind count and the adjudication of what is found.
   'hub.read': 'see what has been handed over at a hub',
-  'hub.intake.count': 'count the parcels received at a hub',
-  'hub.osd.adjudicate': 'decide a discrepancy found at receiving',
+  'hub.intake.count': 'check in the parcels received at a hub',
+  'hub.osd.adjudicate': 'decide what happens to missing or damaged parcels',
   // The message log and the reasons a screen reads.
   'notification.read': 'see the message log',
   'settings.reason.read': 'see the reasons for this act',
@@ -131,7 +131,7 @@ const OUTSIDE_HUBS_OF = {
   'pickup runs': 'These pickup runs are at a hub your account does not work in.',
   'failed pickups': 'These failed pickups are at a hub your account does not work in.',
   handshakes: 'These handshakes are at a hub your account does not work in.',
-  'short counts': 'These short counts are at a hub your account does not work in.',
+  'count differences': 'These count differences are at a hub your account does not work in.',
   'collection disputes': 'These collection disputes are at a hub your account does not work in.',
   'this stop': 'This stop is at a hub your account does not work in.',
   intakes: 'These intakes are at a hub your account does not work in.',

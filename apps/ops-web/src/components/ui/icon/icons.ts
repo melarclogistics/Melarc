@@ -3,6 +3,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Bike,
+  Binoculars,
   Calendar,
   Camera,
   ChevronDown,
@@ -87,6 +88,8 @@ export const ICONS = {
   'collection-disputes': Flag,
   // Receiving at a hub (S1.35): the awaiting-receive queue's entry.
   receiving: Warehouse,
+  // The parcels being searched for (S1.35c, D-D4): the list's entry.
+  'missing-parcels': Binoculars,
   messages: MessageSquareText,
   staff: Users,
   'add-staff': UserPlus,

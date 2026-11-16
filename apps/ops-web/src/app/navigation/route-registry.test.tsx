@@ -74,8 +74,8 @@ describe('the real registry', () => {
     expect(menusFor(everyKey)).toEqual({
       groups: [
         ['Today', ['My work', 'Decisions', 'Handshakes']],
-        ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-        ['Hub', ['Receiving']],
+        ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes']],
+        ['Hub', ['Receiving', 'Missing parcels']],
         ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
         ['System', ['Message log']],
       ],
@@ -141,7 +141,7 @@ describe('the real registry', () => {
     ]);
     expect(menusFor(['pickup.handshake.override']).groups).toEqual([
       ['Today', ['My work', 'Handshakes']],
-      ['Pickups', ['Short counts']],
+      ['Pickups', ['Count differences']],
     ]);
     // The resolution by hand is the act of a second key, offered inside the list: it opens no list of its own.
     expect(menusFor(['pickup.handshake.resolve']).groups).toEqual([['Today', ['My work']]]);
@@ -153,7 +153,7 @@ describe('the real registry', () => {
       [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS],
       SIGNED_IN_ROUTES,
     ).groups.flatMap((group) => group.entries);
-    for (const label of ['Handshakes', 'Failed pickups', 'Short counts', 'Disputes']) {
+    for (const label of ['Handshakes', 'Failed pickups', 'Count differences', 'Disputes']) {
       expect(entries.find((entry) => entry.label === label)?.queue, label).toBeUndefined();
     }
     // The stop's page and its form are reached from the run and the lists, and have no entry; each is behind its own key.
@@ -171,7 +171,7 @@ describe('the real registry', () => {
   it('offers the receiving queue to the holders of its read alone, and gives the acts on an intake no entry', () => {
     expect(menusFor(['hub.read']).groups).toEqual([
       ['Today', ['My work']],
-      ['Hub', ['Receiving']],
+      ['Hub', ['Receiving', 'Missing parcels']],
     ]);
     // The count and the adjudication open no queue of their own: a holder of either alone is offered nothing.
     expect(menusFor(['hub.intake.count']).groups).toEqual([['Today', ['My work']]]);
@@ -190,7 +190,17 @@ describe('the real registry', () => {
     expect(route('/intakes')?.access).toEqual({ permission: 'hub.read' });
     expect(route('/intakes/:id')?.access).toEqual({ permission: 'hub.read' });
     expect(route('/intakes/:id/count')?.access).toEqual({ permission: 'hub.intake.count' });
-    expect(route('/intakes/:id/condition')?.access).toEqual({ permission: 'hub.intake.count' });
+    // The page of a vendor's one condition is gone (damage is recorded where it is seen): its address is a way to the vendor's record, open for the read.
+    expect(route('/intakes/:id/condition')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/intakes/:id/condition')?.menu).toBeNull();
+    // The list of the parcels being searched for opens for the read alone and is the second entry of the Hub group.
+    expect(route('/missing-parcels')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/missing-parcels')?.menu).toMatchObject({
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Missing parcels',
+      order: 1,
+    });
     expect(route('/intakes/:id/discrepancy')?.access).toEqual({ permission: 'hub.osd.adjudicate' });
     for (const path of [
       '/intakes/:id',
@@ -249,8 +259,11 @@ describe('the real registry', () => {
       {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
-          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-          ['Hub', ['Receiving']],
+          [
+            'Pickups',
+            ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
+          ],
+          ['Hub', ['Receiving', 'Missing parcels']],
           ['People and access', ['Riders', 'Vendors']],
           ['System', ['Message log']],
         ],
@@ -263,8 +276,11 @@ describe('the real registry', () => {
       {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
-          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-          ['Hub', ['Receiving']],
+          [
+            'Pickups',
+            ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
+          ],
+          ['Hub', ['Receiving', 'Missing parcels']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],
@@ -277,8 +293,11 @@ describe('the real registry', () => {
       {
         groups: [
           ['Today', ['My work', 'Decisions', 'Handshakes']],
-          ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Short counts', 'Disputes']],
-          ['Hub', ['Receiving']],
+          [
+            'Pickups',
+            ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
+          ],
+          ['Hub', ['Receiving', 'Missing parcels']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],

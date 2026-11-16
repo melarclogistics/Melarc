@@ -77,7 +77,7 @@ function open(
 }
 
 const table = async (): Promise<HTMLElement> => {
-  const found = await screen.findByRole('table', { name: 'Short counts' });
+  const found = await screen.findByRole('table', { name: 'Count differences' });
   await waitFor(() => {
     expect(found).not.toHaveAttribute('aria-busy', 'true');
   });
@@ -100,7 +100,9 @@ describe('the short counts: what the list shows', () => {
   it('shows what was declared and counted, the reason and its note, and when the office was told', async () => {
     open();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Short counts' })).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Count differences' }),
+    ).toBeVisible();
     const row = within((await screen.findByText('ACC-PR-7KQ2MZ')).closest('tr') as HTMLElement);
     expect(row.getByText('3 counted of 5 declared')).toBeVisible();
     expect(row.getByText('Short by 2')).toBeVisible();
@@ -145,7 +147,7 @@ describe('the short counts: what the list shows', () => {
 
     expect(
       screen.getByText(
-        /Nothing marks a short count as read or worked yet, so there is no act here\./,
+        /Nothing marks a count difference as read or worked yet, so there is no act here\./,
       ),
     ).toBeVisible();
     expect(screen.queryByRole('button', { name: /mark|worked|resolve|read/i })).toBeNull();
@@ -174,13 +176,15 @@ describeInterfaceStates('the short counts list', {
   loading: {
     test: async () => {
       open(() => new Promise<Response>(() => undefined));
-      expect(await screen.findByText('Loading short counts')).toBeVisible();
+      expect(await screen.findByText('Loading count differences')).toBeVisible();
     },
   },
   empty: {
     test: async () => {
       open(() => page([]));
-      expect(await screen.findByRole('heading', { name: 'No short counts yet' })).toBeVisible();
+      expect(
+        await screen.findByRole('heading', { name: 'No count differences yet' }),
+      ).toBeVisible();
     },
   },
   'validation error': {
@@ -196,7 +200,7 @@ describeInterfaceStates('the short counts list', {
   error: {
     test: async () => {
       open(() => refusal(500, 'INTERNAL_ERROR'));
-      await alertSaying('The short counts could not be loaded.');
+      await alertSaying('The count differences could not be loaded.');
       expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
     },
   },

@@ -111,7 +111,7 @@ test.describe('moving through the screens', () => {
     for (const [label, heading] of [
       ['Handshakes', 'Handshakes that need Ops'],
       ['Failed pickups', 'Failed pickups'],
-      ['Short counts', 'Short counts'],
+      ['Count differences', 'Count differences'],
       ['Disputes', 'Collection disputes'],
     ] as const) {
       await menuEntry(page, label).click();
@@ -127,7 +127,7 @@ test.describe('moving through the screens', () => {
     page,
   }) => {
     const { api, watch } = await open(page, SHORTFALLS);
-    await table(page, 'Short counts').getByRole('link', { name: 'ACC-PR-7KQ2MZ' }).click();
+    await table(page, 'Count differences').getByRole('link', { name: 'ACC-PR-7KQ2MZ' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Stop 1' })).toBeFocused();
     expect(new URL(page.url()).pathname).toBe(STOP);
 
@@ -312,10 +312,14 @@ test.describe('the short counts and the collection disputes', () => {
   test('show what was counted, offer no act, and say so', async ({ page }) => {
     const { api, watch } = await open(page, SHORTFALLS);
 
-    const row = table(page, 'Short counts').getByRole('row').filter({ hasText: 'ACC-PR-7KQ2MZ' });
+    const row = table(page, 'Count differences')
+      .getByRole('row')
+      .filter({ hasText: 'ACC-PR-7KQ2MZ' });
     await expect(row).toContainText('3 counted of 5 declared');
     await expect(row).toContainText('Short by 2');
-    await expect(page.getByText(/Nothing marks a short count as read or worked yet/)).toBeVisible();
+    await expect(
+      page.getByText(/Nothing marks a count difference as read or worked yet/),
+    ).toBeVisible();
     await expect(
       page
         .getByRole('main')

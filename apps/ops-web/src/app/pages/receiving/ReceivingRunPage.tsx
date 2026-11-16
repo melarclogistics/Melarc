@@ -1,6 +1,6 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useLayoutEffect, useState, type ReactNode } from 'react';
-import { useParams } from 'react-router';
+import { useLocation, useParams } from 'react-router';
 
 import { PageHeading } from '../../../components/PageHeading';
 import { ConnectionBanner } from '../../../components/ui/connection-banner/ConnectionBanner';
@@ -86,6 +86,9 @@ function Run({
 }) {
   const me = useSignedInSession();
   const mayCount = me?.holds('hub.intake.count') === true;
+  // An officer sent here from the count of a vendor that was photographed at the door is told why, once: that vendor is checked in on this page and is never counted.
+  const sentHere =
+    (useLocation().state as { readonly told?: string } | null)?.told === 'photographed';
   const acts = useRunActs(page.run.id, query.refetch);
   const [notices, setNotices] = useState<Readonly<Record<string, string>>>({});
   useFocusFallenToHeading();
@@ -128,6 +131,11 @@ function Run({
       {mayCount ? null : (
         <p className="receiving-note">{WORDS.run.lookOnly(cannotText('hub.intake.count'))}</p>
       )}
+      {sentHere ? (
+        <p className="receiving-note" role="status">
+          {WORDS.blindCount.photographed}
+        </p>
+      ) : null}
       {!waiting && page.vendors.length > 0 ? (
         <RunSummary vendors={page.vendors} focusOnAppear={sawWaiting} />
       ) : null}

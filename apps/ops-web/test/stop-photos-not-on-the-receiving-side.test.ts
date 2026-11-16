@@ -58,11 +58,11 @@ const DIALOG_USERS = [
   'app/pages/evidence/EvidencePhotoDialog.tsx',
   'app/pages/intakes/IntakePhotos.tsx',
 ];
-/** The photos of a counted intake, and who may name them: the file itself and the intake's record page. */
+/** The photos of a counted vendor, and who may name them: the file itself and the parts of the vendor's record page. */
 const INTAKE_PHOTOS = 'IntakePhotos';
 const INTAKE_PHOTOS_USERS = [
   'app/pages/intakes/IntakePhotos.tsx',
-  'app/pages/intakes/IntakePage.tsx',
+  'app/pages/receiving/RecordParts.tsx',
 ];
 
 /**
@@ -83,6 +83,8 @@ const PICTURE_COMPONENT_USERS = [
   'app/pages/receiving/ParcelDialog.tsx',
   // The viewer of a vendor's parcels: one photo at a time, among the grid's (D-D1: the door photos are the officer's reference).
   'app/pages/receiving/ParcelViewer.tsx',
+  // The photo of a missing parcel, in its row of the list of those being searched for and whole in the panel of the row (D-D4).
+  'app/pages/receiving/MissingPicture.tsx',
 ];
 const PHOTO_GRID = 'PhotoGrid';
 const GRID_USERS = [
@@ -276,7 +278,7 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
     it.each([
       [
         'an intake page drawing a photo by the kit’s picture',
-        'app/pages/intakes/IntakeCountPage.tsx',
+        'app/pages/receiving/BlindCountPage.tsx',
         '<PhotoPicture evidenceId={id} near />',
       ],
       [
@@ -312,7 +314,7 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ],
       [
         'the blind count drawing a picture',
-        'app/pages/intakes/IntakeCountPage.tsx',
+        'app/pages/receiving/BlindCountPage.tsx',
         'const link = usePhotoLink(id, true);',
       ],
       [
@@ -338,7 +340,7 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ],
       [
         'the count page opening a photo',
-        'app/pages/intakes/IntakeCountPage.tsx',
+        'app/pages/receiving/BlindCountPage.tsx',
         '<EvidencePhotoDialog evidenceId={id} />',
       ],
       [
@@ -348,12 +350,12 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ],
       [
         'the count page drawing the photos of a counted intake',
-        'app/pages/intakes/IntakeCountPage.tsx',
+        'app/pages/receiving/BlindCountPage.tsx',
         '<IntakePhotos ids={ids} />',
       ],
       [
         'the adjudication drawing the photos of a counted intake',
-        'app/pages/intakes/IntakeDiscrepancyPage.tsx',
+        'app/pages/receiving/DecisionPage.tsx',
         'import { IntakePhotos } from "./IntakePhotos";',
       ],
     ])('finds %s', (_name, path, text) => {
@@ -403,7 +405,7 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ).toEqual([]);
       expect(
         synthetic(
-          'app/pages/intakes/IntakePage.tsx',
+          'app/pages/receiving/RecordParts.tsx',
           '<IntakePhotos ids={intake.parcel_photo_ids} />',
         ),
       ).toEqual([]);

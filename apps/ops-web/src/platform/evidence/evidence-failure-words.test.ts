@@ -13,6 +13,7 @@ import {
   fileTooLarge,
 } from '../problem/hub-intake-copy';
 import { cannotText } from '../problem/capability-words';
+import { SENIOR_DECIDES } from '../problem/receiving-copy';
 import { ChecksumUnavailableError } from './file-checksum';
 import { ObjectStoreError } from './object-store-upload';
 import {
@@ -118,7 +119,9 @@ describe('the words of a file that could not be stored', () => {
     const denied = failed('declaring', refused('PERMISSION_DENIED', 403));
 
     expect(evidenceFailureWords(denied, 'count')).toBe(cannotText('hub.intake.count'));
-    expect(evidenceFailureWords(denied, 'decision')).toBe(cannotText('hub.osd.adjudicate'));
+    // A photo made for the senior's decision is refused as a senior officer's, with the way out of asking one: an administrator cannot decide for them.
+    expect(evidenceFailureWords(denied, 'decision')).toBe(SENIOR_DECIDES);
+    expect(evidenceFailureWords(denied, 'decision')).not.toMatch(/administrator/i);
     // The use is the receiver's unless it is said to be the decision's.
     expect(evidenceFailureWords(denied)).toBe(cannotText('hub.intake.count'));
     for (const use of ['count', 'decision'] as const) {

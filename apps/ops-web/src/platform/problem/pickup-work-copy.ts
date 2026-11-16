@@ -47,7 +47,7 @@ const LISTS = [
   ],
   [
     'listCollectionShortfalls',
-    'The short counts could not be loaded.',
+    'The count differences could not be loaded.',
     cannotText('pickup.handshake.override'),
   ],
   [

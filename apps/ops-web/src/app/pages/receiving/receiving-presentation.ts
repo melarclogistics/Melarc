@@ -1,12 +1,17 @@
 import type { StatusMap } from '../../../components/ui/status-badge/StatusBadge';
-import type { IntakeState } from '../../../platform/hub-intake/hub-intake-shape';
+import type { CountVariance, IntakeState } from '../../../platform/hub-intake/hub-intake-shape';
+import type { FindingView as BlindFindingView } from '../../../platform/hub-intake/hub-intake-shape';
 import type {
+  CheckInView,
   CountsView,
+  FindingView,
   ParcelState,
   RunSummaryView,
   VendorView,
 } from '../../../platform/hub-receiving/receiving-shape';
 import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
+import { formatInstant } from '../../../platform/time/format-time';
+import { actorText } from '../pickup/pickup-presentation';
 
 /**
  * How the receiving screens of a run put a fact into words (S1.35c): the tone of a state and the sentences a run's and a vendor's counts are told in. **The words themselves are in one place**
@@ -16,6 +21,16 @@ import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-co
  */
 export const runPath = (manifestId: string): string => `/receiving/${manifestId}`;
 export const RECEIVING_QUEUE_PATH = '/receiving';
+export const MISSING_PARCELS_PATH = '/missing-parcels';
+/** A vendor's record, and the pages of the acts on it: the count of a vendor with no photos, and the senior officer's decision. */
+export const recordPath = (id: string): string => `/intakes/${id}`;
+export const countPath = (id: string): string => `/intakes/${id}/count`;
+export const decisionPath = (id: string): string => `/intakes/${id}/discrepancy`;
+
+/** What a page that did an act tells the record it brings the officer to, once: which act was done. */
+export interface DoneState {
+  readonly done?: 'counted' | 'damage' | 'decided';
+}
 
 /** The number of parcels, in words ("1 parcel", "12 parcels"). */
 export const parcelsText = WORDS.parcels;
@@ -71,6 +86,21 @@ export function conditionWords(condition: VendorView['parcels'][number]['conditi
   return WORDS.states.condition[condition.condition];
 }
 
+/**
+ * The comparison of what was checked in or counted with what was expected, in words: **the API's variance and its difference** (`MATCH`, `SHORT` or `OVER`, and by how many where it says), which this puts into
+ * words and works out nothing from. A difference the API did not state is said without its number.
+ */
+export function comparisonText(
+  variance: CountVariance | null,
+  difference: number | null,
+): string | undefined {
+  if (variance === null) return undefined;
+  if (variance === 'MATCH') return WORDS.record.came.same;
+  if (difference === null) return WORDS.record.came.differs[variance];
+  const by = Math.abs(difference);
+  return variance === 'SHORT' ? WORDS.record.came.fewer(by) : WORDS.record.came.more(by);
+}
+
 /** The sentence under a vendor's name: what was photographed at the door, or that it is counted without photos. */
 export function photographedText(vendor: VendorView): string {
   if (vendor.receiving_mode === 'BLIND_COUNT') return WORDS.vendor.blindPhotographed;
@@ -89,4 +119,103 @@ export function countsText(vendor: Pick<VendorView, 'state'> & CountsView): stri
   if (vendor.extra_count > 0) parts.push(WORDS.counts.extra(vendor.extra_count));
   if (vendor.damaged_count > 0) parts.push(WORDS.counts.damaged(vendor.damaged_count));
   return parts.join(', ');
+}
+
+/** One finding of a vendor as the record says it: what it is, in the floor's words, with its note, its photos and who made it. */
+export interface FindingLine {
+  readonly id: string;
+  readonly title: string;
+  /** What the decision was, for a decision. */
+  readonly facts: string | undefined;
+  readonly note: string | null;
+  /** The evidence records of its photos, in the order they were attached: never drawn, opened one at a time. */
+  readonly evidenceIds: readonly string[];
+  readonly byline: string;
+}
+
+/** What a finding of a check-in is called, by whether it is a condition (of a parcel, or of the whole vendor) or a decision. */
+export function checkInFindings(view: CheckInView): readonly FindingLine[] {
+  return view.condition_findings.map((finding: FindingView): FindingLine => {
+    const when = formatInstant(finding.recorded_at) ?? '';
+    const byline = WORDS.record.found.by(finding.recorded_by_name, when);
+    if (finding.kind === 'ADJUDICATION') {
+      return {
+        id: finding.id,
+        title: WORDS.record.found.decision,
+        facts: finding.outcome === null ? undefined : WORDS.record.found.outcomes[finding.outcome],
+        note: finding.note,
+        evidenceIds: finding.evidence_ids,
+        byline,
+      };
+    }
+    const what = finding.condition === null ? '' : WORDS.states.condition[finding.condition];
+    const parcel =
+      finding.intake_parcel_id === null
+        ? undefined
+        : view.parcels.find(
+            (candidate) => candidate.id.toLowerCase() === finding.intake_parcel_id?.toLowerCase(),
+          );
+    return {
+      id: finding.id,
+      title:
+        parcel === undefined
+          ? WORDS.record.found.wholeVendor(what)
+          : WORDS.record.found.onParcel(
+              WORDS.parcel.label(parcel.ordinal, parcel.origin === 'HUB_EXTRA'),
+              what,
+            ),
+      facts: undefined,
+      note: finding.note,
+      evidenceIds: finding.evidence_ids,
+      byline,
+    };
+  });
+}
+
+/** The findings of a vendor counted without photos: a person is an identifier there, so the line says *You* or *Another member of staff*, and never a name. */
+export function blindFindings(
+  findings: readonly BlindFindingView[],
+  principalId: string | undefined,
+): readonly FindingLine[] {
+  return findings.map((finding): FindingLine => {
+    const when = formatInstant(finding.recorded_at) ?? '';
+    const byline = WORDS.record.found.by(actorText(finding.recorded_by, principalId), when);
+    if (finding.kind === 'ADJUDICATION') {
+      return {
+        id: finding.id,
+        title: WORDS.record.found.decision,
+        facts: finding.outcome === null ? undefined : WORDS.record.found.outcomes[finding.outcome],
+        note: finding.note,
+        evidenceIds: finding.evidence_ids,
+        byline,
+      };
+    }
+    return {
+      id: finding.id,
+      title: WORDS.record.found.wholeVendor(
+        finding.condition === null ? '' : WORDS.states.condition[finding.condition],
+      ),
+      facts: undefined,
+      note: finding.note,
+      evidenceIds: finding.evidence_ids,
+      byline,
+    };
+  });
+}
+
+/**
+ * Whether a vendor's missing parcels were written off, and whether someone has since been recorded as telling the vendor: **from its findings, which are the API's** (a decision is a finding of the vendor).
+ * *Vendor told* is a record that follows a write-off and is made once, so the decision is offered only while a write-off stands and no such record does; the API judges it all the same.
+ */
+export function vendorTold(
+  findings: readonly {
+    readonly kind: 'CONDITION' | 'ADJUDICATION';
+    readonly outcome: string | null;
+  }[],
+): { readonly writtenOff: boolean; readonly told: boolean } {
+  const decisions = findings.filter((finding) => finding.kind === 'ADJUDICATION');
+  return {
+    writtenOff: decisions.some((finding) => finding.outcome === 'WRITTEN_OFF'),
+    told: decisions.some((finding) => finding.outcome === 'VENDOR_NOTIFIED'),
+  };
 }

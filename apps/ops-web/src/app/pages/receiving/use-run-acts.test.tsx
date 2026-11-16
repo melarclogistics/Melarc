@@ -243,7 +243,7 @@ describe('a tap on the run’s page', () => {
     const result = await actsNow().tap(KENTE_INTAKE_ID, parcelFixture(1).id, true);
 
     expect(result.problem?.message).toMatch(
-      /Your account can’t count the parcels received at a hub/,
+      /Your account can’t check in the parcels received at a hub/,
     );
     expect(requests(RUN_READ)).toHaveLength(1);
     expect(page?.vendors[0]?.parcels[0]?.state).toBe('EXPECTED');

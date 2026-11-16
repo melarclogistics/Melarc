@@ -9,11 +9,15 @@ import type { LockStatus } from '../../../platform/hub-receiving/use-receiving-l
 import type { Problem } from '../../../platform/problem/problem-copy';
 import { LOCK_WORDS, RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
 import { formatClock } from '../../../platform/time/format-time';
-import { countPath } from '../intakes/intake-presentation';
 import { ParcelDialog } from './ParcelDialog';
 import { ParcelGrid } from './ParcelGrid';
 import { ParcelViewer } from './ParcelViewer';
-import { countsText, photographedText, VENDOR_STATE_MAP } from './receiving-presentation';
+import {
+  countPath,
+  countsText,
+  photographedText,
+  VENDOR_STATE_MAP,
+} from './receiving-presentation';
 import type { RunActs } from './use-run-acts';
 import {
   AllHereDialog,

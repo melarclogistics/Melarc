@@ -31,6 +31,12 @@ const NO_PHOTOS =
 const FINISHED =
   'This vendor was finished already, so nothing was changed. If a missing parcel turns up, check it in from the missing list; a senior officer can correct anything else.';
 
+/**
+ * What an officer who may not decide is told of a decision about missing or damaged parcels, and of the photos made for it: a senior officer decides, and the way out is to ask one, never an administrator
+ * (the correction of a count says the same of itself).
+ */
+export const SENIOR_DECIDES = 'A senior officer decides this. Ask one to open this page.';
+
 /** What every act says when the vendor is no longer as the officer saw it. */
 const changed = (what: string): string =>
   `This vendor is no longer as you saw it, so ${what} was not recorded. ${REFRESH}`;
@@ -309,6 +315,167 @@ export const RECEIVING_COPY: readonly CopyRule[] = [
     text: `This vendor changed after you opened it, so the correction was not recorded. ${REFRESH}`,
   },
   { operation: 'correctIntakeCount', code: 'STATE_CONFLICT', text: changed('the correction') },
+
+  // A vendor's record, and the count of a vendor that has no photos (S1.31 to S1.34 as built, in the floor's voice).
+  { operation: 'getHubIntake', text: 'This vendor could not be loaded.' },
+  { operation: 'getHubIntake', code: 'PERMISSION_DENIED', text: cannotText('hub.read') },
+  { operation: 'getHubIntake', code: 'NOT_FOUND', text: VENDOR_NOT_FOUND },
+  {
+    operation: 'getHubIntake',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: 'This vendor belongs to a hub your account does not work in.',
+  },
+  {
+    operation: 'acquireIntakeLock',
+    text: 'The page could not tell whether someone else is checking this vendor in. You can carry on: if someone else records the count first, only theirs is kept.',
+  },
+  {
+    operation: 'acquireIntakeLock',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.intake.count'),
+  },
+  { operation: 'acquireIntakeLock', code: 'NOT_FOUND', text: VENDOR_NOT_FOUND },
+  {
+    operation: 'acquireIntakeLock',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: 'This vendor belongs to a hub your account does not work in.',
+  },
+  { operation: 'submitBlindCount', text: 'The count was not recorded. You can try again.' },
+  {
+    operation: 'submitBlindCount',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.intake.count'),
+  },
+  {
+    operation: 'submitBlindCount',
+    code: 'VALIDATION_FAILED',
+    text: 'That count was not accepted. Enter the number of parcels you counted, as a whole number from 0.',
+  },
+  { operation: 'submitBlindCount', code: 'NOT_FOUND', text: VENDOR_NOT_FOUND },
+  {
+    operation: 'submitBlindCount',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: 'This vendor belongs to a hub your account does not work in.',
+  },
+  {
+    operation: 'submitBlindCount',
+    context: 'already_counted',
+    code: 'STATE_CONFLICT',
+    text: 'Someone else counted this vendor first, so your count was not kept and nothing was changed. Their count is on the vendor’s page: open it to see it. Only the first count is kept.',
+  },
+  {
+    operation: 'submitBlindCount',
+    context: 'photo_check_in',
+    code: 'STATE_CONFLICT',
+    text: 'This vendor was photographed at the door, so it is checked in on its run’s page and is never counted. Open the run to check it in.',
+  },
+  {
+    operation: 'submitBlindCount',
+    context: 'stale',
+    code: 'STATE_CONFLICT',
+    text: `This vendor changed after you opened it, so your count was not recorded. ${REFRESH} Count again if it is still waiting.`,
+  },
+  { operation: 'submitBlindCount', code: 'STATE_CONFLICT', text: changed('your count') },
+  {
+    operation: 'recordIntakeCondition',
+    text: 'The damage was not recorded. You can try again.',
+  },
+  {
+    operation: 'recordIntakeCondition',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.intake.count'),
+  },
+  {
+    operation: 'recordIntakeCondition',
+    code: 'REASON_REQUIRED',
+    text: 'Damage needs a photo of what you found. Take at least one photo.',
+  },
+  {
+    operation: 'recordIntakeCondition',
+    code: 'EVIDENCE_NOT_STORED',
+    text: 'A photo is not stored yet, or is not a photo of this vendor. Take it again.',
+  },
+  { operation: 'recordIntakeCondition', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
+  { operation: 'recordIntakeCondition', code: 'NOT_FOUND', text: VENDOR_NOT_FOUND },
+  {
+    operation: 'recordIntakeCondition',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: 'This vendor belongs to a hub your account does not work in.',
+  },
+  {
+    operation: 'recordIntakeCondition',
+    context: 'intake_not_counted',
+    code: 'STATE_CONFLICT',
+    text: 'This vendor has not been counted yet. Damage is recorded after the count.',
+  },
+  {
+    operation: 'recordIntakeCondition',
+    context: 'itemization_started',
+    code: 'STATE_CONFLICT',
+    text: LISTING_STARTED,
+  },
+  {
+    operation: 'recordIntakeCondition',
+    context: 'condition_already_recorded',
+    code: 'STATE_CONFLICT',
+    text: 'Damage has been recorded for this vendor already. It is recorded once; a senior officer can change it.',
+  },
+  {
+    operation: 'recordIntakeCondition',
+    context: 'stale',
+    code: 'STATE_CONFLICT',
+    text: `This vendor changed after you opened it, so the damage was not recorded. ${REFRESH}`,
+  },
+  { operation: 'recordIntakeCondition', code: 'STATE_CONFLICT', text: changed('the damage') },
+
+  // A senior officer's decision about a case.
+  {
+    operation: 'adjudicateDiscrepancy',
+    text: 'The decision was not recorded. You can try again.',
+  },
+  { operation: 'adjudicateDiscrepancy', code: 'PERMISSION_DENIED', text: SENIOR_DECIDES },
+  {
+    operation: 'adjudicateDiscrepancy',
+    code: 'REASON_REQUIRED',
+    text: 'A reason is needed. Write why you decided this.',
+  },
+  {
+    operation: 'adjudicateDiscrepancy',
+    code: 'EVIDENCE_NOT_STORED',
+    text: 'A photo is not stored yet, or is not a photo of this vendor. Take it again.',
+  },
+  { operation: 'adjudicateDiscrepancy', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
+  { operation: 'adjudicateDiscrepancy', code: 'NOT_FOUND', text: VENDOR_NOT_FOUND },
+  {
+    operation: 'adjudicateDiscrepancy',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: 'This vendor belongs to a hub your account does not work in.',
+  },
+  {
+    operation: 'adjudicateDiscrepancy',
+    context: 'not_awaiting_resolution',
+    code: 'STATE_CONFLICT',
+    text: `This vendor is not waiting for a decision: it may have been decided already. ${REFRESH}`,
+  },
+  {
+    operation: 'adjudicateDiscrepancy',
+    context: 'not_written_off',
+    code: 'STATE_CONFLICT',
+    text: '“Vendor told” is recorded after the missing parcels are written off. Write them off first.',
+  },
+  {
+    operation: 'adjudicateDiscrepancy',
+    context: 'vendor_already_told',
+    code: 'STATE_CONFLICT',
+    text: 'Someone has already recorded that the vendor was told, so nothing was changed.',
+  },
+  {
+    operation: 'adjudicateDiscrepancy',
+    context: 'stale',
+    code: 'STATE_CONFLICT',
+    text: `This vendor changed after you opened it, so the decision was not recorded. ${REFRESH}`,
+  },
+  { operation: 'adjudicateDiscrepancy', code: 'STATE_CONFLICT', text: changed('the decision') },
 ];
 
 /**
@@ -582,5 +749,241 @@ export const RECEIVING_WORDS = {
     missingLabel: (vendor: string): string => `Photos of ${vendor}’s missing parcels`,
     decisionFor: (names: string): string => `A senior officer will decide about ${names}.`,
     vendorLine: (vendor: string, counts: string): string => `${vendor}: ${counts}`,
+  },
+
+  /** A vendor's record (`/intakes/{id}`): what came of the vendor, what needs someone, what was found. */
+  record: {
+    documentTitle: (code: string): string => `Vendor ${code}`,
+    loadingTitle: 'Vendor',
+    notFoundTitle: 'Vendor not found',
+    receiving: 'Receiving',
+    back: 'Back to receiving',
+    loading: 'Loading the vendor…',
+    waiting: 'This vendor is waiting to be checked in.',
+    came: {
+      title: 'What came of this vendor',
+      photographed: 'Photographed at the door',
+      riderSaid: 'The rider said at handover',
+      counted: 'Counted at the hub',
+      checkedIn: 'Checked in',
+      missing: 'Missing',
+      extra: 'Extra',
+      damaged: 'Damaged',
+      comparison: 'Compared with the photos',
+      comparisonBlind: 'Compared with the rider’s number',
+      same: 'The same',
+      fewer: (count: number): string => `${parcels(count)} fewer`,
+      more: (count: number): string => `${parcels(count)} more`,
+      /** Which side the count is on, when the API did not say by how many. */
+      differs: { SHORT: 'Fewer than expected', OVER: 'More than expected' },
+    },
+    needsSomeone: {
+      title: 'Parcels that need someone',
+      none: 'Nothing is missing, extra or damaged.',
+      missing: 'Missing',
+      extra: 'Extra',
+      damaged: 'Damaged',
+      gridLabel: (kind: string, vendor: string): string => `${kind} parcels of ${vendor}`,
+    },
+    found: {
+      title: 'What was found',
+      none: 'Nothing has been recorded yet.',
+      list: 'What was found, in the order it was made',
+      photoNoun: 'Photo',
+      onParcel: (parcel: string, what: string): string => `${parcel}: ${what}`,
+      wholeVendor: (what: string): string => `The vendor: ${what}`,
+      decision: 'A decision',
+      by: (who: string, at: string): string => `${who} at ${at}`,
+      photos: 'Photos of this finding',
+      outcomes: {
+        ACCEPTED: 'Accepted what arrived',
+        ESCALATED: 'Still searching',
+        WRITTEN_OFF: 'Written off: not found',
+        VENDOR_NOTIFIED: 'Vendor told',
+      },
+    },
+    photos: {
+      title: 'The door photos',
+      none: 'No photos were taken at the door for this vendor.',
+      label: (vendor: string): string => `Photos of ${vendor}’s parcels`,
+      noun: 'Door photo',
+      blindNote: 'Taken by the rider at the door. A photo is read only while it is open.',
+    },
+    facts: {
+      title: 'This vendor',
+      state: 'Where it stands',
+      hub: 'Hub',
+      run: 'Run',
+      openRun: 'Open the run',
+      handedOver: 'Handed over',
+      handedOverBy: 'Handed over by',
+      checkedInBy: 'Checked in by',
+      blindRider: 'A rider',
+    },
+    acts: {
+      decide: 'Decide',
+      correct: 'Correct the count',
+      checkIn: 'Check in this vendor',
+      vendorTold: 'Record that the vendor was told',
+      count: 'Count the parcels',
+      recordDamage: 'Record damage',
+      seniorDecides: 'A senior officer will decide this.',
+    },
+    done: {
+      counted: 'Your count is recorded. The rider’s number is shown below, with the comparison.',
+      damage: 'The damage is recorded.',
+      decided: 'Your decision is recorded.',
+      corrected: (before: number, now: number): string =>
+        `The correction is recorded. It was ${String(before)}; it is now ${String(now)}.`,
+    },
+    blindWaiting:
+      'This vendor was not photographed at the door, so its parcels are counted. The rider’s number is shown after you have typed yours.',
+  },
+
+  /** The count of a vendor whose parcels were not photographed (`/intakes/{id}/count`): the one page left of the counting, and it keeps one line of its own (`vendor.blind.explain`). */
+  blindCount: {
+    title: 'Count the parcels',
+    documentTitle: 'Count the parcels',
+    description: (code: string): string =>
+      `Vendor ${code}. Count what was handed over, then enter the number.`,
+    fieldLabel: 'Parcels counted',
+    fieldHelp: 'A whole number, 0 or more. Count what is in front of you, not what you expect.',
+    invalid: 'Enter the number of parcels you counted, as a whole number from 0.',
+    review: 'Review the count',
+    cancel: 'Cancel',
+    confirmTitle: (count: number): string => `Record a count of ${parcels(count)}?`,
+    consequence:
+      'This is the count of the parcels you received. It is recorded once: after it, the rider’s number is shown with the comparison. If someone else counts this vendor first, theirs is kept and yours is not.',
+    confirm: 'Record the count',
+    counted:
+      'Someone else counted this vendor first, so their count is the one that was recorded and nothing was changed by this page.',
+    photographed:
+      'This vendor was photographed at the door, so it is checked in on its run’s page and is never counted.',
+    openVendor: 'Open the vendor',
+    someoneElse: 'Someone else',
+  },
+
+  /** The whole-vendor damage dialog of a vendor counted without photos. */
+  blindDamage: {
+    title: 'Record damage for this vendor?',
+    consequence:
+      'Take a photo of the damage and say what you see. Damage is recorded once for the vendor, and a senior officer will decide about it.',
+    photoLabel: 'Photo of the damage',
+    photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
+    photoNeeded: 'Take a photo of the damage.',
+    noteLabel: 'What is damaged? (optional)',
+    noteHelp:
+      'A few words, for example a torn corner or a wet box. Leave out phone numbers and email addresses.',
+    confirm: 'Record the damage',
+  },
+
+  /** The senior's decision (`/intakes/{id}/discrepancy`): the facts first, then what to decide. */
+  decision: {
+    documentTitle: 'Decide about a vendor',
+    title: 'Decide',
+    description: (code: string): string =>
+      `Vendor ${code}. Say what happens next about what is missing, extra or damaged.`,
+    facts: 'What happened to this vendor',
+    section: 'Your decision',
+    outcomeLegend: 'What do you decide?',
+    outcomes: {
+      ESCALATED: {
+        label: 'Still searching',
+        help: 'The case stays open and the missing parcels stay on the list of parcels being searched for.',
+      },
+      ACCEPTED: {
+        label: 'Accept what arrived',
+        help: 'Close the case. What is here is received; anything missing stays missing.',
+      },
+      WRITTEN_OFF: {
+        label: 'Write off what is missing',
+        help: 'The search is over and the parcels were not found.',
+      },
+      VENDOR_NOTIFIED: {
+        label: 'Vendor told',
+        help: 'Records that someone told the vendor. Nothing is sent from here.',
+      },
+    },
+    reasonLabel: 'Why you decided this',
+    reasonHelp: 'A few words. Leave out phone numbers and email addresses.',
+    photosLabel: 'Photos for this decision (optional)',
+    photosHelp: 'Take a photo with the camera. Each is sent as soon as you take it.',
+    chooseOutcome: 'Choose what you decide.',
+    writeReason: 'Write why you decided this.',
+    review: 'Review',
+    cancel: 'Cancel',
+    /** The title of the confirmation, from the words of the outcome chosen, in lower case as the page says them. */
+    confirmTitle: (outcome: string): string => `Record this decision: ${outcome}?`,
+    consequence: {
+      ESCALATED: 'The case stays open for a later decision. What was checked in is not changed.',
+      ACCEPTED: 'The case is closed. What was checked in is not changed.',
+      WRITTEN_OFF: 'The search is closed as not found. What was checked in is not changed.',
+      VENDOR_NOTIFIED: 'This records that someone told the vendor. Nothing is sent from here.',
+    },
+    confirm: 'Record the decision',
+    notWaiting: 'This vendor is not waiting for a decision. It may have been decided already.',
+    notCounted: 'This vendor has not been counted yet, so there is nothing to decide.',
+    openVendor: 'Open the vendor',
+    photosBusyLabel: 'The photos for this decision',
+  },
+
+  /** A senior officer's correction of a count or a check-in (D-D8). */
+  correction: {
+    title: (vendor: string): string => `Correct the count for ${vendor}?`,
+    titleBlind: 'Correct the count?',
+    consequence:
+      'A correction changes what was checked in. It is recorded with your reason, and with what it was and what it is now.',
+    parcelsLegend: 'Which parcels are here?',
+    parcelsHelp:
+      'Untick a parcel that is not here. A parcel that is not on the list and was added by mistake is taken back.',
+    parcelHere: (parcel: string): string => `${parcel} is here`,
+    countLabel: 'The number of parcels on the table',
+    countHelp: 'A whole number from 0.',
+    countInvalid: 'Enter a whole number from 0.',
+    reasonLabel: 'Why you are correcting this',
+    reasonHelp: 'A few words. Leave out phone numbers and email addresses.',
+    writeReason: 'Write why you are correcting this.',
+    nothingChanged: 'Change at least one parcel before you record a correction.',
+    sameCount: 'That is the number already recorded. Enter the number you counted now.',
+    confirm: 'Record the correction',
+  },
+
+  /** The list of parcels being searched for (`/missing-parcels`). */
+  missingList: {
+    title: 'Missing — being searched for',
+    description:
+      'Parcels that were not on the table when a vendor was checked in. Look for them in the hub and in the rider’s bag, then tell a senior officer what you found.',
+    viewsLabel: 'Views of the missing parcels',
+    tableLabel: 'Missing parcels',
+    views: {
+      searching: {
+        label: 'Being searched for',
+        none: 'No parcel is being searched for. A parcel appears here when a vendor is checked in without it.',
+      },
+      vendor_to_tell: {
+        label: 'Written off, vendor not told yet',
+        none: 'No written-off parcel is waiting for the vendor to be told.',
+      },
+    },
+    columns: {
+      parcel: 'Parcel',
+      vendor: 'Vendor',
+      run: 'Run',
+      missingFor: 'Missing for',
+    },
+    facts: {
+      vendor: 'Vendor',
+      run: 'Run',
+      missingSince: 'Missing since',
+      missingFor: 'Missing for',
+      writtenOff: 'Written off at',
+    },
+    writtenOffNote:
+      'The search for this parcel is over. A senior officer records that the vendor was told, on the vendor’s page.',
+    photoOf: (vendor: string): string => `Photo of a parcel from ${vendor}`,
+    open: (vendor: string): string => `Open the missing parcel from ${vendor}`,
+    found: 'Found: check it in',
+    foundDone: (vendor: string): string => `A parcel from ${vendor} is checked in.`,
+    writtenOff: 'Written off',
   },
 } as const;

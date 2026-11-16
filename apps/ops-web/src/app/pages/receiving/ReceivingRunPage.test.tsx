@@ -878,7 +878,7 @@ describe('an officer who can look at the run and cannot check parcels in', () =>
 
     expect(
       screen.getByText(
-        /You can look at this run\. Your account can’t count the parcels received at a hub\./,
+        /You can look at this run\. Your account can’t check in the parcels received at a hub\./,
       ),
     ).toBeVisible();
     expect(

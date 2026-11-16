@@ -29,6 +29,11 @@ const OPERATIONS = [
   'addExtraParcel',
   'correctIntakeCount',
   'floor:recordIntakeCondition',
+  'getHubIntake',
+  'acquireIntakeLock',
+  'submitBlindCount',
+  'recordIntakeCondition',
+  'adjudicateDiscrepancy',
 ];
 
 describe('the words of the table', () => {
@@ -72,15 +77,28 @@ describe('the words of the refusals of authority', () => {
     ['listReceivingRuns', /see what has been handed over at a hub/],
     ['getReceivingRun', /see what has been handed over at a hub/],
     ['listMissingParcels', /see what has been handed over at a hub/],
-    ['recordParcelArrival', /count the parcels received at a hub/],
-    ['finishCheckIn', /count the parcels received at a hub/],
-    ['addExtraParcel', /count the parcels received at a hub/],
-    ['floor:recordIntakeCondition', /count the parcels received at a hub/],
-    ['createEvidence', /count the parcels received at a hub/],
+    ['getHubIntake', /see what has been handed over at a hub/],
+    ['recordParcelArrival', /check in the parcels received at a hub/],
+    ['finishCheckIn', /check in the parcels received at a hub/],
+    ['addExtraParcel', /check in the parcels received at a hub/],
+    ['floor:recordIntakeCondition', /check in the parcels received at a hub/],
+    ['recordIntakeCondition', /check in the parcels received at a hub/],
+    ['acquireIntakeLock', /check in the parcels received at a hub/],
+    ['submitBlindCount', /check in the parcels received at a hub/],
+    ['createEvidence', /check in the parcels received at a hub/],
   ])('names the capability of %s and never a key', (operation, words) => {
     const message = problemOf(refused('PERMISSION_DENIED', 403), { operation }).message;
     expect(message).toMatch(words);
     expect(message).not.toMatch(/\bhub\.[a-z_]+|permission|\brole\b|Ops Staff|Senior Ops/i);
+  });
+
+  // Break caught: a decision refused to an officer who is told to ask an administrator for access: a senior officer decides, and an administrator cannot decide for them.
+  it('tells an officer without the decision that a senior officer decides, and never to ask an administrator', () => {
+    const message = problemOf(refused('PERMISSION_DENIED', 403), {
+      operation: 'adjudicateDiscrepancy',
+    }).message;
+    expect(message).toBe('A senior officer decides this. Ask one to open this page.');
+    expect(message).not.toMatch(/administrator/i);
   });
 
   // Break caught: a correction refused to an officer who is told to ask an administrator for access: a senior officer makes it, and the words say so.
@@ -106,9 +124,76 @@ describe('the words of the conflicts', () => {
     ['floor:recordIntakeCondition', 'condition_already_recorded', /recorded once/],
     ['floor:recordIntakeCondition', 'parcel_not_arrived', /not been checked in/],
     ['correctIntakeCount', 'itemization_started', /can no longer be corrected/],
+    ['recordIntakeCondition', 'intake_not_counted', /has not been counted yet/],
+    [
+      'recordIntakeCondition',
+      'itemization_started',
+      /Listing the orders for this vendor has started/,
+    ],
+    ['recordIntakeCondition', 'condition_already_recorded', /recorded once/],
+    [
+      'recordIntakeCondition',
+      'stale',
+      /changed after you opened it, so the damage was not recorded/,
+    ],
+    ['submitBlindCount', 'already_counted', /Someone else counted this vendor first/],
+    ['submitBlindCount', 'photo_check_in', /photographed at the door.*Open the run/],
+    ['submitBlindCount', 'stale', /changed after you opened it, so your count was not recorded/],
+    ['adjudicateDiscrepancy', 'not_awaiting_resolution', /not waiting for a decision/],
+    ['adjudicateDiscrepancy', 'not_written_off', /Write them off first/],
+    ['adjudicateDiscrepancy', 'vendor_already_told', /already recorded that the vendor was told/],
+    [
+      'adjudicateDiscrepancy',
+      'stale',
+      /changed after you opened it, so the decision was not recorded/,
+    ],
   ])('words %s by the rule %s', (operation, rule, words) => {
     expect(problemOf(conflict(rule), { operation }).message).toMatch(words);
   });
+
+  // Break caught (surfaces/ops-portal.md section 9): the second receiver given a bare failure: the words say someone else counted first, that nothing was changed, and where the count they kept is.
+  it('tells the receiver who counted second what happened and where to look', () => {
+    const message = problemOf(conflict('already_counted'), {
+      operation: 'submitBlindCount',
+    }).message;
+    expect(message).toContain(
+      'Someone else counted this vendor first, so your count was not kept and nothing was changed.',
+    );
+    expect(message).toContain('open it to see it');
+    expect(message).toContain('Only the first count is kept');
+  });
+
+  // Break caught: any other conflict of the blind count and the decision told in words of the system's builders, or without what to do next.
+  it('tells any other conflict of the count, the damage and the decision in words of its own, with what to do next', () => {
+    for (const operation of [
+      'submitBlindCount',
+      'recordIntakeCondition',
+      'adjudicateDiscrepancy',
+    ]) {
+      expect(problemOf(conflict(undefined), { operation }).message).toMatch(
+        /no longer as you saw it.*Refresh the page/,
+      );
+    }
+  });
+
+  it('says a vendor that cannot be told whether someone else is checking it in leaves the receiver able to carry on', () => {
+    expect(problemOf(refused(undefined, 503), { operation: 'acquireIntakeLock' }).message).toMatch(
+      /You can carry on/,
+    );
+  });
+
+  // Break caught: a note the ledger would not keep repeated back to the officer, or told without saying what to change.
+  it.each(['recordIntakeCondition', 'adjudicateDiscrepancy'])(
+    'tells a refused note of %s at the note and never repeats it',
+    (operation) => {
+      const failure = new OperationFailure(refused('VALIDATION_FAILED', 400), [
+        { in: 'body', pointer: '/note', rule: 'format' },
+      ]);
+      expect(problemOf(failure, { operation }).message).toBe(
+        'Check the note marked below: it was not accepted as written.',
+      );
+    },
+  );
 
   it('tells any other conflict in words of its own, with what to do next', () => {
     for (const operation of ['recordParcelArrival', 'finishCheckIn', 'addExtraParcel']) {
@@ -123,6 +208,12 @@ describe('the words of the conflicts', () => {
       problemOf(refused('REASON_REQUIRED', 422), { operation: 'floor:recordIntakeCondition' })
         .message,
     ).toMatch(/need a photo/);
+    expect(
+      problemOf(refused('REASON_REQUIRED', 422), { operation: 'recordIntakeCondition' }).message,
+    ).toMatch(/needs a photo/);
+    expect(
+      problemOf(refused('REASON_REQUIRED', 422), { operation: 'adjudicateDiscrepancy' }).message,
+    ).toMatch(/A reason is needed/);
     expect(
       problemOf(refused('EVIDENCE_NOT_STORED', 422), { operation: 'addExtraParcel' }).message,
     ).toMatch(/not stored yet/);

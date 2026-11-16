@@ -2,10 +2,11 @@ import type { ReactElement } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 
 import { RequirePermission } from '../../platform/session/RequirePermission';
-import { IntakeConditionPage } from '../pages/intakes/IntakeConditionPage';
-import { IntakeCountPage } from '../pages/intakes/IntakeCountPage';
-import { IntakeDiscrepancyPage } from '../pages/intakes/IntakeDiscrepancyPage';
-import { IntakePage } from '../pages/intakes/IntakePage';
+import { BlindCountPage } from '../pages/receiving/BlindCountPage';
+import { ConditionRedirect } from '../pages/receiving/ConditionRedirect';
+import { DecisionPage } from '../pages/receiving/DecisionPage';
+import { IntakeRecordPage } from '../pages/receiving/IntakeRecordPage';
+import { MissingParcelsPage } from '../pages/receiving/MissingParcelsPage';
 import { ReceivingQueuePage } from '../pages/receiving/ReceivingQueuePage';
 import { ReceivingRunPage } from '../pages/receiving/ReceivingRunPage';
 import { MyWorkPage } from '../pages/my-work/MyWorkPage';
@@ -165,6 +166,22 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     access: { permission: 'hub.read' },
     menu: null,
   },
+  // The parcels that were not on the table when a vendor was checked in, and are being looked for: the list *Missing — being searched for* (D-D4), read with the same key as the queue. Its count is the queue
+  // summary's `HUB_MISSING_PARCELS_SEARCHING`, which the generated client does not carry until S1.35b-2, so no badge is registered yet (as for the queue).
+  {
+    path: '/missing-parcels',
+    element: <MissingParcelsPage />,
+    access: { permission: 'hub.read' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Missing parcels',
+      icon: 'missing-parcels',
+      order: 1,
+      description:
+        'Look for the parcels that were not on the table when a vendor was checked in, and check one in when it turns up.',
+    },
+  },
   {
     path: '/intakes',
     element: <Navigate to="/receiving" replace />,
@@ -173,25 +190,25 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
   },
   {
     path: '/intakes/:id',
-    element: <IntakePage />,
+    element: <IntakeRecordPage />,
     access: { permission: 'hub.read' },
     menu: null,
   },
   {
     path: '/intakes/:id/count',
-    element: <IntakeCountPage />,
+    element: <BlindCountPage />,
     access: { permission: 'hub.intake.count' },
     menu: null,
   },
   {
     path: '/intakes/:id/condition',
-    element: <IntakeConditionPage />,
-    access: { permission: 'hub.intake.count' },
+    element: <ConditionRedirect />,
+    access: { permission: 'hub.read' },
     menu: null,
   },
   {
     path: '/intakes/:id/discrepancy',
-    element: <IntakeDiscrepancyPage />,
+    element: <DecisionPage />,
     access: { permission: 'hub.osd.adjudicate' },
     menu: null,
   },
@@ -270,10 +287,11 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     menu: {
       place: 'sidebar',
       group: 'pickups',
-      label: 'Short counts',
+      label: 'Count differences',
       icon: 'short-counts',
       order: 3,
-      description: 'See the counts where a rider collected fewer parcels than were declared.',
+      description:
+        'See the counts where a rider collected fewer or more parcels than were booked, and what each came to.',
     },
   },
   {

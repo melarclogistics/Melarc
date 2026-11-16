@@ -1,21 +1,18 @@
 import { cannotText } from './capability-words';
 import type { CopyRule } from './problem-copy';
+import { SENIOR_DECIDES } from './receiving-copy';
 
 /**
- * The words of the receiving screens (S1.35), keyed by operation, context and code like the rest of the table, and proposed for the Product Owner to review with the composed screens. A refusal
- * names the capability in plain words and never a key or a role (PRODUCT_DESIGN_DIRECTION section 6.5); a refusal that declares a `details.rule` is worded by it (`problemOf` reads the rule as the
- * context when the page gave none), and says what to do next, because a refusal shown as a dead end misrepresents the policy. **Two conflicts are told at length because the lock is advisory** (surfaces/ops-portal.md
- * section 9): the receiver who counted second is told that the other receiver counted first, what that means for their count and where to look, and never given a bare failure. **No wording draws the
- * rider's declared number, and none names an officer** (the answers carry an identifier and the portal reads no staff directory).
+ * What is left of the first words of the receiving screens (S1.35) after Run D reworked them in the voice of the floor: the list of the old intake queue and **the steps of a photo** (its declaration, its
+ * confirmation once the file is in the store, and its opening), which every receiving screen shares. The words of the record, the count, the damage and the decision of a vendor are in
+ * `receiving-copy.ts`, in the one voice: *run, vendor, parcels, check in, missing, decide*. A refusal here names the capability in plain words and never a key or a role (PRODUCT_DESIGN_DIRECTION
+ * section 6.5), and says what to do next, because a refusal shown as a dead end misrepresents the policy.
  */
-const OTHER_HUB_INTAKE = 'This intake belongs to a hub your account does not work in.';
-const INTAKE_NOT_FOUND = 'This intake could not be found.';
 const STALE_LIST =
   'That page of the list could not be opened: its place in the list was not accepted. Go back to the first page to start again.';
-const NOTE_REFUSED = 'Check the note marked below: it was not accepted as written.';
 
 export const HUB_INTAKE_COPY: readonly CopyRule[] = [
-  // The queue and the record.
+  // The old list of intakes.
   { operation: 'listHubIntakes', text: 'The intakes could not be loaded.' },
   { operation: 'listHubIntakes', code: 'PERMISSION_DENIED', text: cannotText('hub.read') },
   {
@@ -24,146 +21,6 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
     text: 'That filter was not accepted. Choose one of the views of the list.',
   },
   { operation: 'listHubIntakes', context: 'cursor', code: 'VALIDATION_FAILED', text: STALE_LIST },
-  { operation: 'getHubIntake', text: 'This intake could not be loaded.' },
-  { operation: 'getHubIntake', code: 'PERMISSION_DENIED', text: cannotText('hub.read') },
-  { operation: 'getHubIntake', code: 'NOT_FOUND', text: INTAKE_NOT_FOUND },
-  { operation: 'getHubIntake', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB_INTAKE },
-
-  // The advisory lock: it is kept by the page, and a failure of it stops nobody from counting.
-  {
-    operation: 'acquireIntakeLock',
-    text: 'The page could not tell whether another receiver is counting this intake. You can still count it: if another receiver counts first, only their count is kept.',
-  },
-  {
-    operation: 'acquireIntakeLock',
-    code: 'PERMISSION_DENIED',
-    text: cannotText('hub.intake.count'),
-  },
-  { operation: 'acquireIntakeLock', code: 'NOT_FOUND', text: INTAKE_NOT_FOUND },
-  { operation: 'acquireIntakeLock', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB_INTAKE },
-
-  // The blind count.
-  { operation: 'submitBlindCount', text: 'The count was not recorded. You can try again.' },
-  {
-    operation: 'submitBlindCount',
-    code: 'PERMISSION_DENIED',
-    text: cannotText('hub.intake.count'),
-  },
-  {
-    operation: 'submitBlindCount',
-    code: 'VALIDATION_FAILED',
-    text: 'That count was not accepted. Enter the number of parcels you counted, as a whole number from 0.',
-  },
-  { operation: 'submitBlindCount', code: 'NOT_FOUND', text: INTAKE_NOT_FOUND },
-  { operation: 'submitBlindCount', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB_INTAKE },
-  {
-    operation: 'submitBlindCount',
-    context: 'already_counted',
-    code: 'STATE_CONFLICT',
-    text: 'Another receiver counted this intake first, so your count was not kept and nothing was changed. The count that was recorded is on the intake: open it to see it. A lock only shows who is working; it never stops a second count, and the first one is kept.',
-  },
-  {
-    operation: 'submitBlindCount',
-    context: 'stale',
-    code: 'STATE_CONFLICT',
-    text: 'This intake changed after you opened it, so your count was not recorded. Reload it to see where it stands, then count again if it is still waiting.',
-  },
-  {
-    operation: 'submitBlindCount',
-    code: 'STATE_CONFLICT',
-    text: 'This intake is no longer as you saw it, so your count was not recorded. Reload it to see where it stands.',
-  },
-
-  // The condition.
-  {
-    operation: 'recordIntakeCondition',
-    text: 'The condition was not recorded. You can try again.',
-  },
-  {
-    operation: 'recordIntakeCondition',
-    code: 'PERMISSION_DENIED',
-    text: cannotText('hub.intake.count'),
-  },
-  {
-    operation: 'recordIntakeCondition',
-    code: 'REASON_REQUIRED',
-    text: 'Damaged and tampered need a photo of what you found. Add at least one photo.',
-  },
-  {
-    operation: 'recordIntakeCondition',
-    code: 'EVIDENCE_NOT_STORED',
-    text: 'One of the photos is not stored yet, or is not a photo of this intake. Add it again.',
-  },
-  { operation: 'recordIntakeCondition', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
-  { operation: 'recordIntakeCondition', code: 'NOT_FOUND', text: INTAKE_NOT_FOUND },
-  { operation: 'recordIntakeCondition', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB_INTAKE },
-  {
-    operation: 'recordIntakeCondition',
-    context: 'intake_not_counted',
-    code: 'STATE_CONFLICT',
-    text: 'This intake has not been counted yet. A condition is recorded after the count.',
-  },
-  {
-    operation: 'recordIntakeCondition',
-    context: 'itemization_started',
-    code: 'STATE_CONFLICT',
-    text: 'Itemising this intake has begun, so its condition can no longer be recorded here.',
-  },
-  {
-    operation: 'recordIntakeCondition',
-    context: 'condition_already_recorded',
-    code: 'STATE_CONFLICT',
-    text: 'A condition has already been recorded for this intake. It is recorded once.',
-  },
-  {
-    operation: 'recordIntakeCondition',
-    context: 'stale',
-    code: 'STATE_CONFLICT',
-    text: 'This intake changed after you opened it, so the condition was not recorded. Reload it to see where it stands.',
-  },
-  {
-    operation: 'recordIntakeCondition',
-    code: 'STATE_CONFLICT',
-    text: 'This intake is no longer as you saw it, so the condition was not recorded. Reload it to see where it stands.',
-  },
-
-  // The adjudication: a senior officer's.
-  { operation: 'adjudicateDiscrepancy', text: 'The decision was not recorded. You can try again.' },
-  {
-    operation: 'adjudicateDiscrepancy',
-    code: 'PERMISSION_DENIED',
-    text: `A senior officer decides this. ${cannotText('hub.osd.adjudicate')}`,
-  },
-  {
-    operation: 'adjudicateDiscrepancy',
-    code: 'REASON_REQUIRED',
-    text: 'A reason is needed. Write why you decided this, and for damaged or tampered goods add a photo.',
-  },
-  {
-    operation: 'adjudicateDiscrepancy',
-    code: 'EVIDENCE_NOT_STORED',
-    text: 'One of the photos is not stored yet, or is not a photo of this intake. Add it again.',
-  },
-  { operation: 'adjudicateDiscrepancy', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
-  { operation: 'adjudicateDiscrepancy', code: 'NOT_FOUND', text: INTAKE_NOT_FOUND },
-  { operation: 'adjudicateDiscrepancy', code: 'HUB_SCOPE_VIOLATION', text: OTHER_HUB_INTAKE },
-  {
-    operation: 'adjudicateDiscrepancy',
-    context: 'not_awaiting_resolution',
-    code: 'STATE_CONFLICT',
-    text: 'This intake is not waiting for a decision: it may have been resolved already. Reload it to see where it stands.',
-  },
-  {
-    operation: 'adjudicateDiscrepancy',
-    context: 'stale',
-    code: 'STATE_CONFLICT',
-    text: 'This intake changed after you opened it, so the decision was not recorded. Reload it to see where it stands.',
-  },
-  {
-    operation: 'adjudicateDiscrepancy',
-    code: 'STATE_CONFLICT',
-    text: 'This intake is no longer as you saw it, so the decision was not recorded. Reload it to see where it stands.',
-  },
 
   // A photo of what was found: its declaration, and its confirmation once the file is in the store.
   {
@@ -176,12 +33,12 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
     text: cannotText('hub.intake.count'),
   },
   // A photo made for a senior's decision is refused in the decision's own capability (the platform asks for the key of the act the photo belongs to), never the receiver's: the page that draws the
-  // upload says which use it is (`use: 'decision'`).
+  // upload says which use it is (`use: 'decision'`). It is told as the decision is: a senior officer decides, and the way out is to ask one.
   {
     operation: 'createEvidence',
     context: 'decision',
     code: 'PERMISSION_DENIED',
-    text: cannotText('hub.osd.adjudicate'),
+    text: SENIOR_DECIDES,
   },
   {
     operation: 'createEvidence',
