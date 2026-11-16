@@ -74,16 +74,21 @@ const PICTURE_USERS = [
   PICTURE_HOOK_FILE,
   // The kit's one component that draws the picture of a stored photo from its link (the grid and the viewer are generic and draw what a page gives them).
   'app/pages/evidence/PhotoPicture.tsx',
-  'app/pages/receiving/ParcelPicture.tsx',
 ];
-/** The kit's component that draws a picture from a stored photo's link: named by itself and by the receiving run's picture. */
+/** The kit's component that draws a picture from a stored photo's link: named by itself and by the files of the receiving run's page that draw a parcel's photo (its grid and its open parcel). */
 const PICTURE_COMPONENT = 'PhotoPicture';
 const PICTURE_COMPONENT_USERS = [
   'app/pages/evidence/PhotoPicture.tsx',
-  'app/pages/receiving/ParcelPicture.tsx',
+  'app/pages/receiving/ParcelGrid.tsx',
+  'app/pages/receiving/ParcelDialog.tsx',
 ];
 const PHOTO_GRID = 'PhotoGrid';
-const GRID_USERS = ['components/ui/photo-grid/PhotoGrid.tsx', 'app/pages/receiving/ParcelGrid.tsx'];
+const GRID_USERS = [
+  'components/ui/photo-grid/PhotoGrid.tsx',
+  // The kit's picture is made for the grid's tile and says so in its words: it names the grid and draws none.
+  'app/pages/evidence/PhotoPicture.tsx',
+  'app/pages/receiving/ParcelGrid.tsx',
+];
 
 /** Where a failure's number of photos is drawn: the failure queue, and no other page. */
 const FAILURE_HOMES = [
@@ -257,7 +262,7 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ],
       [
         'a page of the receiving run that asks the platform for the stop’s picture instead of the parcel’s',
-        'app/pages/receiving/ParcelPicture.tsx',
+        'app/pages/receiving/ParcelGrid.tsx',
         'createRetrievalAuthorization(client, id)',
       ],
     ])('finds %s', (_name, path, text) => {
@@ -369,11 +374,11 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ).toEqual([]);
     });
 
-    it('finds nothing in the doors: the parcel’s picture, the run’s grid, the hook, the counted intake’s photos, the record page and the dialog', () => {
+    it('finds nothing in the doors: the kit’s picture, the run’s grid and open parcel, the hook, the counted intake’s photos, the record page and the dialog', () => {
       expect(
         synthetic(
-          'app/pages/receiving/ParcelPicture.tsx',
-          'import { usePhotoLink } from "../../../platform/evidence/use-photo-link"; usePhotoLink(evidenceId, near);',
+          'app/pages/receiving/ParcelDialog.tsx',
+          'import { PhotoPicture } from "../evidence/PhotoPicture"; <PhotoPicture evidenceId={id} wanted size="full" />',
         ),
       ).toEqual([]);
       expect(

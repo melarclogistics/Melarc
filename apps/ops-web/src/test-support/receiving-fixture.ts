@@ -1,5 +1,6 @@
 import type { components } from '@melarc/api-client';
 
+import { json, type Handler } from './fake-api';
 import { INTAKE_HUB_ID } from './hub-intake-fixture';
 
 /**
@@ -208,3 +209,23 @@ export const EVIDENCE_LIMITS = {
   allowed_content_types: ['image/jpeg', 'image/png'],
   max_byte_size: 10 * 1024 * 1024,
 } as const;
+
+/**
+ * The platform's answer to a request for the link of each of these parcels' photos (`createEvidenceRetrievalAuthorization`): a link that has five minutes to live, for a test that draws the pictures. The link is
+ * synthetic and points at no store.
+ */
+export function photoLinkHandlers(
+  parcels: readonly Pick<Parcel, 'photo_evidence_id' | 'ordinal'>[],
+): Record<string, Handler> {
+  return Object.fromEntries(
+    parcels.map((parcel): [string, Handler] => [
+      `POST /evidence/${parcel.photo_evidence_id}/retrieval-authorization`,
+      () =>
+        json(200, {
+          method: 'GET',
+          url: `https://photos.example.test/${String(parcel.ordinal)}.jpg`,
+          expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+        }),
+    ]),
+  );
+}

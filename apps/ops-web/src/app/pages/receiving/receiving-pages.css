@@ -1,0 +1,4 @@
+/* The receiving screens of a run (S1.35c): the queue's lines, the run's page, the parcels and the dialogs. Its layout and the hub floor's size are the presentation commit that follows. */
+.receiving-line {
+  display: block;
+}

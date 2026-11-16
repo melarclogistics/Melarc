@@ -499,10 +499,6 @@ export const RECEIVING_WORDS = {
       damaged: 'Damaged',
       takenBack: 'Taken back',
     },
-    picture: {
-      loading: 'Loading the photo…',
-      none: 'No photo',
-    },
     from: (vendor: string): string => `From ${vendor}.`,
     checkedInBy: (who: string, at: string): string => `Checked in by ${who} at ${at}.`,
     checkedInAt: (at: string): string => `Checked in at ${at}.`,
