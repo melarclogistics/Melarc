@@ -3,14 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { fileContractSource } from '../../src/platform/contract/contract-source.js';
+import { serverErrorIn } from '../../src/platform/database/database-failures.js';
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { parcelPhotosOf, photoOf } from './support/evidence-photo.js';
+import { backendPidOf, waitUntilBlockedBy } from './support/lock-wait.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { arrangeRun, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { API, HUB_A, HUB_B, OPS, codeOf, type Actor } from './support/staff-routes.js';
+import { clientFor } from './support/test-database.js';
 import {
   startVendorRoutes,
   type ArrangedVendor,
@@ -145,11 +148,10 @@ describe('what the evidence of a stop lists', () => {
     expect(response.status, response.text).toBe(200);
     const page = bodyOf(response);
 
-    // The order is the moment the platform made the record (to the second), then its identifier: read from the table, because records made within one second are told apart by their
-    // identifiers alone, and the test's clock makes those identifiers arbitrary within it.
+    // The order is the position the database gave each record when it was made (to the microsecond, under the stop's lock; finding F7), then its identifier: read from the table.
     const order = (
       await routes.rows<{ id: string }>(
-        `select id from evidence where owner_id = $1 order by created_at, id`,
+        `select id from evidence where owner_id = $1 order by coalesce(listed_at, created_at), id`,
         [stop],
       )
     ).map((row) => row.id);
@@ -236,9 +238,9 @@ describe('a page is a position', () => {
     expect(first.items.map((item) => item.id)).toEqual(whole.slice(0, 2));
     expect(first.next_page_token).not.toBeNull();
 
-    // A photo arrives while the officer reads. The moment a record is made is kept to the second, and records of one second are told apart by their identifiers (time-ordered in
-    // production, arbitrary under this test's clock), so the photo is made a second later: it is then the last record, whatever its identifier, and no page that was read moves.
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    // A photo arrives while the officer reads. It is the last record, whatever its identifier and however soon after the others it is made (finding F7: the position of a record is the
+    // database's, to the microsecond, and a later record is always after an earlier one), and no page that was read moves. This test waited a second here before F7, for the order of
+    // records made within one second was that of their identifiers.
     const arrived = (await photoOf(routes, run.rider, stop, { purpose: 'PARCEL_PHOTO' })).id;
 
     const seen = [...first.items.map((item) => item.id)];
@@ -364,5 +366,147 @@ describe('whose, and what is audited', () => {
       401,
       'SESSION_INVALID',
     ]);
+  });
+});
+
+/**
+ * Run D, Part 2, finding F7 of the review of Run B: **a page cannot skip a record that commits late.** The list was ordered by the moment a record was made, kept to the second, and then by its
+ * identifier, and the position of the next page was that pair. A record made by a transaction that began earlier and committed later than one that a reader had already paged past had the
+ * smaller identifier or the earlier second, and the reader never met it. The guard of the table now takes a lock for the stop, held to the end of the transaction, and only then gives the record
+ * its position (`listed_at`, the database's clock to the microsecond, and never behind a position the stop already holds), so that the records of a stop are written one transaction at a time and
+ * their positions are the order in which they became visible. **What a reader sees at any moment is a prefix of what it will see when the writers in flight have committed.**
+ */
+describe('the evidence of a stop is listed in the order it became visible (finding F7)', () => {
+  const newRun = (): Promise<ArrangedRun> =>
+    arrangeRun(routes.kit, routes.admin, {
+      vendorOrganizationId: vendorA.row.organizationId,
+      serviceDate: days.today,
+      state: 'IN_PROGRESS',
+      stops: 1,
+      stopStates: ['ARRIVED'],
+    });
+  /** The record a writer in flight makes: a copy of one the rider made, under the smallest identifier there is, so that no tie-break by identifier can put it after the later ones. */
+  const SMALLEST = '00000000-0000-4000-8000-000000000001';
+  const COPY_COLUMNS = `owner_type, owner_id, purpose, captured_at, captured_by_actor, captured_by_principal_type, device_context, responsible_hub_id, vendor_organization_id, access_rule,
+                        retention_policy, content_type, byte_size, checksum_sha256, upload_ttl_seconds, upload_expires_at`;
+  const copyOf = (position = ''): string =>
+    `insert into evidence (id, storage_ref, ${COPY_COLUMNS}${position === '' ? '' : ', listed_at'})
+     select $2::uuid, 'ev/' || md5($2::text), ${COPY_COLUMNS}${position === '' ? '' : `, ${position}`} from evidence where id = $1`;
+
+  /** Every record of the stop in the order the list gives them, read two at a time with the token each page gives. */
+  async function listed(stop: string): Promise<string[]> {
+    const ids: string[] = [];
+    let token: string | null = null;
+    do {
+      const query: string =
+        token === null ? '?page_size=2' : `?page_size=2&page_token=${encodeURIComponent(token)}`;
+      const page = bodyOf(await ops.client.get(EVIDENCE(stop, query)));
+      ids.push(...page.items.map((item) => item.id));
+      token = page.next_page_token;
+    } while (token !== null);
+    return ids;
+  }
+
+  // Break caught (fails before F7: the list read [first, B, C] while A was in flight and [A, first, B, C] or [first, A, B, C] after, because B and C were not made to wait for A and A had the smaller
+  // identifier): a reader paged past records that committed before one that committed late, and the late one is never met.
+  it('shows a reader, while a writer is in flight, a prefix of what it shows once the writer has committed: a record that begins later waits for the one that began first', async () => {
+    const arranged = await newRun();
+    const stop = stopOf(arranged);
+    const first = (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id;
+    const holder = clientFor(routes.database.urlFor('postgres'));
+    await holder.connect();
+    let held = false;
+    try {
+      // A: a writer in flight. Its record is made, its transaction is not ended.
+      await holder.query('begin');
+      held = true;
+      await holder.query(copyOf(), [first, SMALLEST]);
+      const pid = await backendPidOf(holder);
+      // B and C: the rider's own operations, one after the other, for the same stop.
+      const later = (async (): Promise<string[]> => [
+        (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id,
+        (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id,
+      ])();
+      const waited = await waitUntilBlockedBy(
+        routes.admin,
+        pid,
+        'the record of the stop that began after the one in flight',
+        later,
+      ).then(
+        () => true,
+        () => false,
+      );
+      const during = await listed(stop);
+
+      await holder.query('commit');
+      held = false;
+      const [second, third] = await later;
+      const after = await listed(stop);
+
+      expect(after.slice(0, during.length), 'what the reader saw while A was in flight').toEqual(
+        during,
+      );
+      expect(after).toEqual([first, SMALLEST, second, third]);
+      expect(waited, 'the later records were seen waiting for the one in flight').toBe(true);
+    } finally {
+      if (held) await holder.query('rollback').catch(() => undefined);
+      await holder.end().catch(() => undefined);
+    }
+  });
+
+  // Break caught (fails before F7: no such column): a position that is behind one the stop already holds because the database's clock stood still or was stepped back, which would put a later
+  // record before an earlier one, so that a reader that had passed the earlier one never meets the later.
+  it('gives a record a position after every record the stop already holds, though the clock is behind the position of one of them', async () => {
+    const arranged = await newRun();
+    const stop = stopOf(arranged);
+    const ahead = (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id;
+    // Its position is moved an hour ahead of the clock, as a clock stepped back leaves one (the guards are off for the one statement, as the tests age a row).
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query('set local session_replication_role = replica');
+      await routes.admin.query(
+        `update evidence set listed_at = now() + interval '1 hour' where id = $1`,
+        [ahead],
+      );
+      await routes.admin.query('commit');
+    } catch (error) {
+      await routes.admin.query('rollback').catch(() => undefined);
+      throw error;
+    }
+    const next = (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id;
+
+    expect(await listed(stop)).toEqual([ahead, next]);
+    const [moved] = await routes.rows<{ later: boolean; one_microsecond_after: boolean }>(
+      `select n.listed_at > a.listed_at as later, n.listed_at >= a.listed_at + interval '1 microsecond' as one_microsecond_after
+         from evidence n, evidence a where n.id = $1 and a.id = $2`,
+      [next, ahead],
+    );
+    expect(moved).toEqual({ later: true, one_microsecond_after: true });
+  });
+
+  // Break caught (fails before F7: no such column): a writer that chooses where its record is listed, or a statement that moves it afterwards.
+  it('takes the position from the database for every writer, and keeps it', async () => {
+    const arranged = await newRun();
+    const stop = stopOf(arranged);
+    const model = (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id;
+    const chosen = randomUUID();
+
+    // The administrator's statement names a position in the year 2000: the guard writes its own.
+    await routes.admin.query(copyOf(`'2000-01-01T00:00:00Z'::timestamptz`), [model, chosen]);
+    const [made] = await routes.rows<{ recent: boolean }>(
+      `select listed_at > now() - interval '1 minute' and listed_at <= clock_timestamp() as recent from evidence where id = $1`,
+      [chosen],
+    );
+    expect(made?.recent).toBe(true);
+    expect(await listed(stop)).toEqual([model, chosen]);
+
+    // No statement changes it afterwards, the owner's included: the guard keeps what was declared of a record.
+    const refused = await routes.admin
+      .query(`update evidence set listed_at = now() where id = $1`, [chosen])
+      .then(
+        () => null,
+        (error: unknown) => serverErrorIn(error)?.code ?? 'other',
+      );
+    expect(refused).toBe('23514');
   });
 });

@@ -77,6 +77,13 @@ export const evidence = pgTable(
     scannerSignatureVersion: text('scanner_signature_version'),
     scannedAt: timestamp('scanned_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Where the record is listed among the records of its owner (Run D, finding F7; migration 0102): the database's clock to the microsecond, taken by the guard **after it has taken a lock for the
+     * owner that is held to the end of the transaction**, and never behind a position the owner already holds. The records of an owner are therefore made one transaction at a time, and the position
+     * of a record is the order in which it became visible: a reader that pages by position never skips a record that commits late. Null for the records made before the migration, which are listed
+     * by `created_at` (to the second) as they were. The writer does not choose it and no statement changes it.
+     */
+    listedAt: timestamp('listed_at', { withTimezone: true }),
     /** The ETag source, moved by the database on every change and by nothing else. */
     version: integer('version').notNull().default(1),
   },

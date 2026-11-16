@@ -57,8 +57,11 @@ function invalid(place: 'path' | 'query', name: string, rule: string): ApiExcept
  * - **A closed projection**: no object key, no address, no signed operation (`pickup-stop-evidence-views.ts`). The image of a record is read with
  *   `createEvidenceRetrievalAuthorization`, one at a time, only when it is shown.
  * - **The progress is the server's, for the whole stop**: the counts of the parcel photos by state are the database's and do not depend on the page or on the `purpose` filter.
- * - **The order is the moment the platform made the record, then its identifier**, so that a page does not move under a reader who is paging and a photo that arrives while the officer
- *   reads comes last; the position of the next page is that moment and that identifier and nothing else.
+ * - **The order is the position the database gave the record when it was made, then its identifier**, so that a page does not move under a reader who is paging and a photo that arrives
+ *   while the officer reads comes last; the position of the next page is that position and that identifier and nothing else. **A page cannot skip a record that commits late** (Run D,
+ *   finding F7; migration 0102): the guard of the table takes a lock for the stop and only then gives the record its position (`listed_at`, to the microsecond), so that the records of a stop
+ *   are made one transaction at a time and a reader never sees a later record before an earlier one. A record made before the migration has no such position and is listed by when it was
+ *   made, to the second, as it was; every position given since is later than every one of those.
  */
 export class PickupStopEvidence {
   readonly #options: PickupStopEvidenceOptions;
@@ -96,7 +99,7 @@ export class PickupStopEvidence {
     const after: SQL =
       position === undefined
         ? sql``
-        : sql`and (e.created_at, e.id) > (${position.createdAt}::timestamptz, ${position.id}::uuid)`;
+        : sql`and (coalesce(e.listed_at, e.created_at), e.id) > (${position.createdAt}::timestamptz, ${position.id}::uuid)`;
 
     return this.#options.runner.read(
       authorized,
@@ -111,10 +114,10 @@ export class PickupStopEvidence {
 
         const listed = await tx.execute(sql`
           select e.id, e.purpose, e.state, e.captured_at, e.uploaded_at, e.content_type, (e.scanned_at is not null) as scanned_clean,
-                 e.created_at::text as position_text, e.id as position_id
+                 coalesce(e.listed_at, e.created_at)::text as position_text, e.id as position_id
             from evidence e
            where e.owner_type = 'PICKUP_STOP' and e.owner_id = ${stopId}::uuid ${purposeIs} ${after}
-           order by e.created_at, e.id
+           order by coalesce(e.listed_at, e.created_at), e.id
            limit ${size + 1}`);
         const read = listed.rows as unknown as StopEvidenceRow[];
         const page = read.slice(0, size);
