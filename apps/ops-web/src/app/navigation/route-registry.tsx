@@ -143,8 +143,8 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     },
   },
   // Receiving at a hub (S1.35c; D-D2): the queue BY RUN, and, from the intakes' side, one vendor's record, the blind count, the condition and the decision. Each is behind the key of the operation that is its
-  // point, and never a role: the queue and the records open for the read, the count and the condition for the key of the count, the decision for the key Ops Staff do not hold. The queue is the one entry, in the
-  // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING`, which the generated client does not carry until S1.35b-2, so no badge is registered yet. `/intakes` was the queue of S1.35 and is a
+  // point, and never a role: the queue and the records open for the read, the count and the condition for the key of the count, the decision for the key Ops Staff do not hold. The queue is the first entry, in the
+  // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING` (the runs that wait, never vendors). `/intakes` was the queue of S1.35 and is a
   // redirect now, so that a link made before it goes to the queue by run. Itemising and closing are later work and have no route.
   {
     path: '/receiving',
@@ -156,6 +156,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       label: 'Receiving',
       icon: 'receiving',
       order: 0,
+      queue: 'HUB_RECEIVING_RUNS_WAITING',
       description:
         'Check in the parcels a rider handed over at your hub, run by run, and decide what is found.',
     },
@@ -167,7 +168,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     menu: null,
   },
   // The parcels that were not on the table when a vendor was checked in, and are being looked for: the list *Missing — being searched for* (D-D4), read with the same key as the queue. Its count is the queue
-  // summary's `HUB_MISSING_PARCELS_SEARCHING`, which the generated client does not carry until S1.35b-2, so no badge is registered yet (as for the queue).
+  // summary's `HUB_MISSING_PARCELS_SEARCHING` (the parcels of a case that is open, never vendors).
   {
     path: '/missing-parcels',
     element: <MissingParcelsPage />,
@@ -178,6 +179,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       label: 'Missing parcels',
       icon: 'missing-parcels',
       order: 1,
+      queue: 'HUB_MISSING_PARCELS_SEARCHING',
       description:
         'Look for the parcels that were not on the table when a vendor was checked in, and check one in when it turns up.',
     },

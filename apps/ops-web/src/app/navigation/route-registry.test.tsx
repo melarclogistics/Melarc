@@ -180,7 +180,13 @@ describe('the real registry', () => {
       [...Object.values(BUNDLE_KEY_SETS).flat(), ...PICKUP_KEYS],
       SIGNED_IN_ROUTES,
     ).groups.flatMap((group) => group.entries);
-    expect(entries.find((entry) => entry.label === 'Receiving')?.queue).toBeUndefined();
+    // The count beside each entry is the queue summary's own: the runs that wait for the queue by run, the parcels of a case that is open for the list of missing parcels.
+    expect(entries.find((entry) => entry.label === 'Receiving')?.queue).toBe(
+      'HUB_RECEIVING_RUNS_WAITING',
+    );
+    expect(entries.find((entry) => entry.label === 'Missing parcels')?.queue).toBe(
+      'HUB_MISSING_PARCELS_SEARCHING',
+    );
 
     const route = (path: string) => SIGNED_IN_ROUTES.find((candidate) => candidate.path === path);
     // The queue by run and a run's page open for the read alone, and only the queue has a menu entry: a run is reached from it.
@@ -217,7 +223,7 @@ describe('the real registry', () => {
   });
 
   // Break caught: Decisions gathering the staff approver's count: it stays on Staff, and a merged inbox is a later page that is not built.
-  it('gives each queue to one entry (the exceptions to Decisions, the confirmations to Requests, the runs to Pickup runs, the staff profiles to Staff), and no other entry carries a queue', () => {
+  it('gives each queue to one entry (the exceptions to Decisions, the confirmations to Requests, the runs to Pickup runs, the staff profiles to Staff, the runs that wait to Receiving, the parcels being searched for to Missing parcels), and no other entry carries a queue', () => {
     const queues = Object.fromEntries(
       navigationFor(Object.values(BUNDLE_KEY_SETS).flat(), SIGNED_IN_ROUTES)
         .groups.flatMap((group) => group.entries)
@@ -230,6 +236,8 @@ describe('the real registry', () => {
       Requests: 'PICKUP_AWAITING_CONFIRMATION',
       'Pickup runs': 'PICKUP_RUNS_IN_PROGRESS',
       Staff: 'STAFF_AWAITING_APPROVAL',
+      Receiving: 'HUB_RECEIVING_RUNS_WAITING',
+      'Missing parcels': 'HUB_MISSING_PARCELS_SEARCHING',
     });
   });
 

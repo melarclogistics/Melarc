@@ -370,7 +370,7 @@ describe('the permission, the headers and the refusals of each operation', () =>
         'STATE_CONFLICT',
         'REASON_REQUIRED',
         'EVIDENCE_NOT_STORED',
-        'INSUFFICIENT_AUTHORITY',
+        'VALIDATION_FAILED',
         'PERMISSION_DENIED',
       ],
     ],
@@ -414,7 +414,13 @@ describe('the list and the bodies of the acts and the contract', () => {
     const body = bodyOf('recordIntakeCondition');
     expect(body.closed).toBe(true);
     expect(body.required).toEqual(['condition']);
-    expect(Object.keys(body.properties).toSorted()).toEqual(['condition', 'evidence_ids', 'note']);
+    // The condition of a vendor checked in against its door photos is the condition of one parcel (D-D7): it names the parcel.
+    expect(Object.keys(body.properties).toSorted()).toEqual([
+      'condition',
+      'evidence_ids',
+      'note',
+      'parcel_id',
+    ]);
     expect(valuesOf(body.properties.condition).toSorted()).toEqual(
       [...INTAKE_CONDITIONS].toSorted(),
     );

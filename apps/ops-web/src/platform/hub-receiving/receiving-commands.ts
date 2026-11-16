@@ -140,9 +140,6 @@ export interface ParcelConditionRecord {
   readonly evidenceIds?: readonly string[];
 }
 
-/** The generated body of the condition, widened by the parcel it is about. TODO(S1.35b-2): the generated body gains `parcel_id`, and this type goes. */
-type ConditionBody = components['schemas']['IntakeConditionRecord'] & { parcel_id?: string };
-
 /**
  * `recordIntakeCondition` for one parcel (`hub.intake.count`; `Idempotency-Key` and the vendor's `ETag`): damage is recorded on the parcel's own photo, once for each parcel. `DAMAGED` and `TAMPERED` carry the
  * identifiers of stored photos taken at the hub. The answer is the vendor's record, in which that parcel carries the condition.
@@ -154,7 +151,7 @@ export async function recordParcelCondition(
   version: string,
   idempotencyKey: string,
 ): Promise<CheckInWithVersion> {
-  const body: ConditionBody = {
+  const body: components['schemas']['IntakeConditionRecord'] = {
     condition: record.condition,
     parcel_id: record.parcelId,
     ...(record.note === undefined ? {} : { note: record.note }),
