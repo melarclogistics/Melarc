@@ -3,11 +3,15 @@ import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { after, ruleOf } from './support/css-rule';
+import { after, ruleOf, rulesOf } from './support/css-rule';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const GRID = readFileSync(
   join(ROOT, 'src', 'components', 'ui', 'photo-grid', 'photo-grid.css'),
+  'utf8',
+);
+const PICTURE = readFileSync(
+  join(ROOT, 'src', 'app', 'pages', 'evidence', 'photo-picture.css'),
   'utf8',
 );
 const TOKENS = readFileSync(join(ROOT, 'src', 'styles', 'tokens.css'), 'utf8');
@@ -133,6 +137,44 @@ describe('the photo grid’s stylesheet', () => {
   });
 });
 
+/**
+ * The look of the picture of a stored photo (`PhotoPicture`): in a tile it fills the box the tile makes and is cropped to it, never stretched; in the viewer it is drawn whole within its window, never wider
+ * than the box or taller than the screen; a picture that is not drawn yet, or cannot be, is an icon (and short words) centred in the box.
+ */
+describe('the stylesheet of the picture of a stored photo', () => {
+  // Break caught: a tile picture that is stretched out of its shape (a photo of a parcel made to look wide), or one that does not fill its box.
+  it('fills the box of a tile and crops the photo to it, never stretching it', () => {
+    const tile = ruleOf(PICTURE, '.photo-picture--tile');
+
+    expect(tile).toMatch(/width:\s*100%\s*;/);
+    expect(tile).toMatch(/height:\s*100%\s*;/);
+    expect(tile).toMatch(/object-fit:\s*cover\s*;/);
+  });
+
+  // Break caught: a photo in the viewer cropped to its window (a part of the evidence cut off), or one taller than the screen.
+  it('draws the photo of the viewer whole, within its window and the height of the screen', () => {
+    const full = ruleOf(PICTURE, '.photo-picture--full');
+
+    expect(full).toMatch(/object-fit:\s*contain\s*;/);
+    expect(full).toMatch(/max-inline-size:\s*100%\s*;/);
+    expect(full).toMatch(/max-block-size:\s*70vh\s*;/);
+  });
+
+  // Break caught: a placeholder or a line of words that sits at a corner of the tile, or in a colour the tokens do not own.
+  it('centres what stands for a photo that is not drawn, in the tokens’ colours', () => {
+    const placeholder = ruleOf(PICTURE, '.photo-picture__wait');
+    const unavailable = rulesOf(PICTURE, '.photo-picture__unavailable').join(' ');
+
+    expect(placeholder).toMatch(/justify-content:\s*center\s*;/);
+    expect(placeholder).toMatch(/align-items:\s*center\s*;/);
+    expect(unavailable).toMatch(/justify-content:\s*center\s*;/);
+    expect(unavailable).toMatch(/align-items:\s*center\s*;/);
+    expect(placeholder).toMatch(/color:\s*var\(--color-text-muted\)\s*;/);
+    expect(unavailable).toMatch(/color:\s*var\(--color-text-secondary\)\s*;/);
+    expect(unavailable).toMatch(/font-size:\s*var\(--text-label-sm-size\)\s*;/);
+  });
+});
+
 describe('the reader of a stylesheet’s blocks', () => {
   // The reader proved on text it must find and text it must leave alone.
   it('finds the rules after a marker, and not a marker that is in a comment or is not there', () => {
@@ -142,5 +184,13 @@ describe('the reader of a stylesheet’s blocks', () => {
     expect(ruleOf(after(text, '@media (forced-colors: active)') ?? '', '.a')).toContain('y: 2');
     expect(ruleOf(text, '.a')).toContain('x: 1');
     expect(after('.a { x: 1; }', '@media (forced-colors: active)')).toBeUndefined();
+  });
+
+  it('finds every rule of a selector, the shared one and its own, in the order written', () => {
+    const text = '.a, .b { x: 1; } .b { y: 2; } /* .b { z: 3; } */ .c { w: 4; }';
+
+    expect(rulesOf(text, '.b')).toEqual([' x: 1; ', ' y: 2; ']);
+    expect(rulesOf(text, '.c')).toEqual([' w: 4; ']);
+    expect(rulesOf(text, '.d')).toEqual([]);
   });
 });
