@@ -19,9 +19,19 @@
 /*
  * The views of a queue: at the touch height, and **a row that does not fit wraps** where the kit's own scrolls sideways under a fade (the end that is cut off fades): a view that is out of sight is not
  * found by a thumb, and on a phone a third view lay wholly behind the edge with a second that ended at it and looked complete.
+ *
+ * **Every row of wrapped views is a whole row with its own baseline, and the underline of the current view is on its own tab** (the second review of the pictures: the first view stood alone on a row with
+ * the underline under it, and the rest below the line, so that the underline read as the line between the rows): the views have no gap between them, each takes its share of its row, and each carries a
+ * 1px baseline on its own border. The underline of the current view (2px, drawn on that border by the kit) lies over its baseline as it lies over the list's track in the kit's own row.
  */
 .ui-hub-floor .ui-view-tabs__tab {
+  flex: 1 1 auto;
   min-height: var(--control-height-lg);
+  background-image: linear-gradient(var(--color-border-default), var(--color-border-default));
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 1px;
+  background-origin: border-box;
 }
 
 .ui-hub-floor .ui-view-tabs__scroll {
@@ -30,6 +40,7 @@
 
 .ui-hub-floor .ui-view-tabs__list {
   flex-wrap: wrap;
+  gap: 0;
 }
 
 /* A text field: the count of the parcels (the kit's Input), and a queue's lookup (the primitive's, which the filter bar draws and which has no class of the kit's Input). */

@@ -885,6 +885,55 @@ test.describe('what the pictures showed again, from the fixed build (the second 
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await expect(group.getByRole('radio').nth(1)).toBeChecked();
   });
+
+  // Break caught (new defect 4): the wrapped views of a phone with the first view alone on a row and its underline under it and the rest below the line, so that the underline reads as the line between the rows.
+  test('the views wrapped at 390 px: every row is a whole row with its own baseline, and the underline stays on its own tab', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, QUEUE);
+    await expect(page.getByRole('tab').first()).toBeVisible();
+
+    const strip = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('.ui-view-tabs__list');
+      if (list === null) throw new Error('the views are not drawn');
+      const room = list.getBoundingClientRect();
+      const tabs = [...list.querySelectorAll<HTMLElement>('[role="tab"]')].map((tab) => {
+        const box = tab.getBoundingClientRect();
+        const style = getComputedStyle(tab);
+        return {
+          top: box.top,
+          bottom: box.bottom,
+          left: box.left,
+          right: box.right,
+          baseline: style.backgroundImage,
+          border: style.borderBottomWidth,
+          underline: getComputedStyle(tab, '::after').bottom,
+        };
+      });
+      return { left: room.left, right: room.right, tabs };
+    });
+    const tops = [...new Set(strip.tabs.map((tab) => Math.round(tab.top)))].sort((a, b) => a - b);
+    // Three views do not fit one row at 390 px: they wrap (the floor's rule), and each row is told as a row.
+    expect(tops.length).toBeGreaterThanOrEqual(2);
+    for (const top of tops) {
+      const row = strip.tabs
+        .filter((tab) => Math.round(tab.top) === top)
+        .sort((a, b) => a.left - b.left);
+      expect(Math.abs((row[0]?.left ?? 0) - strip.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs((row[row.length - 1]?.right ?? 0) - strip.right)).toBeLessThanOrEqual(1);
+    }
+    for (const tab of strip.tabs) {
+      // Each tab carries its own baseline, and the underline is drawn on the tab's own border: it is never in a gap between the rows.
+      expect(tab.baseline).toContain('linear-gradient');
+      expect(tab.border).toBe('2px');
+      expect(tab.underline).toBe('-2px');
+    }
+    for (let index = 1; index < tops.length; index += 1) {
+      const above = strip.tabs.find((tab) => Math.round(tab.top) === tops[index - 1]);
+      expect(Math.abs((tops[index] ?? 0) - (above?.bottom ?? 0))).toBeLessThanOrEqual(1);
+    }
+  });
 });
 
 test.describe('the blind count', () => {

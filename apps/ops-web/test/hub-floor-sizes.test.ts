@@ -70,7 +70,8 @@ describe('the hub floor’s 56 px, held to the tokens', () => {
       const rule = ruleOf(floor, selector);
       expect(rule, selector).toBeDefined();
       expect(rule, selector).toMatch(/min-height:\s*var\(--control-height-lg\)\s*;/);
-      expect(rule, selector).not.toMatch(/\d+px/);
+      // No height is written as a literal (the 1px of a view's baseline is a line, not a height).
+      expect(rule, selector).not.toMatch(/(?:min-|max-)?height:\s*[\d.]+(?:px|rem)/);
     }
     // The code of a row is as tall as its row, which is its own token (56px at the touch density).
     expect(ruleOf(floor, '.ui-hub-floor .ui-data-table__title a')).toMatch(
@@ -86,6 +87,21 @@ describe('the hub floor’s 56 px, held to the tokens', () => {
     expect(ruleOf(floor, '.ui-hub-floor .ui-view-tabs__scroll')).toMatch(
       /overflow-x:\s*visible\s*;/,
     );
+  });
+
+  // Break caught (the second review of the pictures, new defect 4): wrapped views with a gap between the rows and a view alone on its row, so that the underline of the current view reads as the line between
+  // the rows; every view carries its own baseline (the line is a token's colour, 1px) and takes its share of its row.
+  it('gives each wrapped view its own baseline and its share of its row, with no gap between the rows', () => {
+    const floor = css('hub-floor/hub-floor.css');
+    const tab = ruleOf(floor, '.ui-hub-floor .ui-view-tabs__tab');
+
+    expect(ruleOf(floor, '.ui-hub-floor .ui-view-tabs__list')).toMatch(/gap:\s*0\s*;/);
+    expect(tab).toMatch(/flex:\s*1\s+1\s+auto\s*;/);
+    expect(tab).toMatch(
+      /background-image:\s*linear-gradient\(var\(--color-border-default\),\s*var\(--color-border-default\)\)\s*;/,
+    );
+    expect(tab).toMatch(/background-size:\s*100%\s+1px\s*;/);
+    expect(tab).toMatch(/background-origin:\s*border-box\s*;/);
   });
 
   // Break caught (the second review of the pictures, new defect 5): the help line of a choice back to floating midway between its own choice and the next, or a dead strip that a press on it does not reach.
