@@ -936,43 +936,46 @@ test.describe('what the pictures showed again, from the fixed build (the second 
   });
 
   // Break caught (defect 11): the three buttons of the vendor in work stacked at 390 px, a quarter of the screen: "All N here" takes the row and the other two share the next (their words wrap), every button the floor's 56 px.
-  test('at 390 px "All N here" takes the row and the other two share the next, each at least 56 px', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await open(page, runPath(RUNS.waiting), { runs: [tallRun()] });
-    const kente = page.getByRole('region', { name: 'Kente Crafts' });
-    await expect(kente.getByRole('button', { name: 'All 12 here' })).toBeVisible();
+  // The wider phone (460 px) is where "All N here" would share its row with the next button, if it did not take the row of itself.
+  for (const width of [390, 460]) {
+    test(`at ${String(width)} px "All N here" takes the row and the other two share the next, each at least 56 px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await open(page, runPath(RUNS.waiting), { runs: [tallRun()] });
+      const kente = page.getByRole('region', { name: 'Kente Crafts' });
+      await expect(kente.getByRole('button', { name: 'All 12 here' })).toBeVisible();
 
-    const bar = await kente
-      .locator('.receiving-actions')
-      .first()
-      .evaluate((node) => {
-        const style = getComputedStyle(node);
-        const room =
-          node.clientWidth -
-          Number.parseFloat(style.paddingLeft) -
-          Number.parseFloat(style.paddingRight);
-        const buttons = [...node.querySelectorAll('button')].map((button) => {
-          const box = button.getBoundingClientRect();
-          return { top: box.top, left: box.left, width: box.width, height: box.height };
+      const bar = await kente
+        .locator('.receiving-actions')
+        .first()
+        .evaluate((node) => {
+          const style = getComputedStyle(node);
+          const room =
+            node.clientWidth -
+            Number.parseFloat(style.paddingLeft) -
+            Number.parseFloat(style.paddingRight);
+          const buttons = [...node.querySelectorAll('button')].map((button) => {
+            const box = button.getBoundingClientRect();
+            return { top: box.top, left: box.left, width: box.width, height: box.height };
+          });
+          return { room, buttons };
         });
-        return { room, buttons };
-      });
-    const [all, different, add] = bar.buttons;
-    if (all === undefined || different === undefined || add === undefined) {
-      throw new Error('the bar has fewer than three buttons');
-    }
-    expect(all.width).toBeGreaterThanOrEqual(bar.room - 1);
-    expect(Math.abs(different.top - add.top)).toBeLessThanOrEqual(1);
-    expect(different.top).toBeGreaterThanOrEqual(all.top + all.height);
-    expect(different.left + different.width).toBeLessThanOrEqual(add.left + 1);
-    expect(different.width + add.width).toBeLessThanOrEqual(bar.room);
-    for (const button of bar.buttons) expect(button.height).toBeGreaterThanOrEqual(56);
-    // Less than three stacked (3 x 56 px and two gaps of 12 px).
-    const bottom = Math.max(...bar.buttons.map((button) => button.top + button.height));
-    expect(bottom - all.top).toBeLessThan(3 * 56 + 2 * 12);
-  });
+      const [all, different, add] = bar.buttons;
+      if (all === undefined || different === undefined || add === undefined) {
+        throw new Error('the bar has fewer than three buttons');
+      }
+      expect(all.width).toBeGreaterThanOrEqual(bar.room - 1);
+      expect(Math.abs(different.top - add.top)).toBeLessThanOrEqual(1);
+      expect(different.top).toBeGreaterThanOrEqual(all.top + all.height);
+      expect(different.left + different.width).toBeLessThanOrEqual(add.left + 1);
+      expect(different.width + add.width).toBeLessThanOrEqual(bar.room);
+      for (const button of bar.buttons) expect(button.height).toBeGreaterThanOrEqual(56);
+      // Less than three stacked (3 x 56 px and two gaps of 12 px).
+      const bottom = Math.max(...bar.buttons.map((button) => button.top + button.height));
+      expect(bottom - all.top).toBeLessThan(3 * 56 + 2 * 12);
+    });
+  }
 });
 
 test.describe('the blind count', () => {
