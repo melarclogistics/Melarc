@@ -1,0 +1,14 @@
+/*
+ * The photos of a counted vendor (S1.35; design/COMPONENT_PATTERNS.md). Presentation only: what a page shows and offers is its own and the API's. Every size, space and colour is a token. What is drawn here is
+ * what the kit does not have: the row of buttons that opens one photo at a time. (The record's findings and the rest of the receiving screens are styled in `../receiving/receiving-pages.css`.)
+ */
+
+/* The photos of an intake: a row of buttons that wraps, each as wide as its words, so that a hundred photos are a few lines and not a column. */
+.intake-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}

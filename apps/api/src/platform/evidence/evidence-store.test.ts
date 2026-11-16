@@ -140,6 +140,24 @@ describe('the in-process stand-in (Family N, as far as a stand-in lets it run)',
     });
   });
 
+  // Break caught (Run D, finding F8; fails before it: the address carries no such term): a photo read through an address a browser or a proxy may keep a copy of, after the capability that
+  // was good for five minutes is long dead. The term is part of what was signed, so an address stripped of it is not the one the store made.
+  it('F8: a retrieval address asks that no copy be kept, and the term is part of what was signed', () => {
+    const store = standIn();
+    const retrieval = store.presignRetrieval({ key: KEY, issuedAt: ISSUED, ttlSeconds: 300 });
+    const url = new URL(retrieval.url);
+    expect(url.searchParams.get('response-cache-control')).toBe('no-store');
+    url.searchParams.delete('response-cache-control');
+    expect(store.redeem({ method: 'GET', url: url.toString(), headers: {} })).toEqual({
+      status: 403,
+      reason: 'SIGNATURE_MISMATCH',
+    });
+    // An upload asks for no such thing: the term is the reader's.
+    expect(
+      new URL(store.presignUpload(uploadRequest()).url).searchParams.has('response-cache-control'),
+    ).toBe(false);
+  });
+
   it('GBT-N9: an address changed to another object is not the one that was signed', () => {
     const store = standIn();
     const capability = store.presignUpload(uploadRequest());
@@ -401,6 +419,36 @@ describe('the R2 adapter, through a fake transport (no network)', () => {
     expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
     expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('host');
     expect(url.pathname).toBe(`/test-evidence/${KEY}`);
+  });
+
+  // Break caught (Run D, finding F8; fails before it: the address carries no such term): the same, against the bucket's own address (R2 answers `Cache-Control: no-store` to a request that asks).
+  it('F8: a retrieval address asks that no copy be kept, signed with the rest and with no header added', () => {
+    const store = new R2EvidenceStore(options(never));
+    const capability = store.presignRetrieval({ key: KEY, issuedAt: ISSUED, ttlSeconds: 300 });
+    const url = new URL(capability.url);
+    expect(url.searchParams.get('response-cache-control')).toBe('no-store');
+    expect(capability.headers).toEqual({});
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('host');
+    // Signed with the rest: the address is the one the published algorithm makes for a request that carries the term, and not the one it makes for a request that does not.
+    const signedBy = (query: Record<string, string>): string =>
+      presignRequest(
+        { accessKeyId: 'TESTONLYACCESSKEY', secretAccessKey: SECRET },
+        ISSUED,
+        { region: 'auto', service: 's3' },
+        {
+          method: 'GET',
+          host: 'testaccount.r2.cloudflarestorage.com',
+          path: `/test-evidence/${KEY}`,
+          query,
+          expiresSeconds: 300,
+        },
+      ).url;
+    expect(capability.url).toBe(signedBy({ 'response-cache-control': 'no-store' }));
+    expect(capability.url).not.toBe(signedBy({}));
+    // An upload asks for no such thing: the term is the reader's.
+    expect(
+      new URL(store.presignUpload(uploadRequest()).url).searchParams.has('response-cache-control'),
+    ).toBe(false);
   });
 
   it('says only what the store answered when it is unavailable, and never the address or the credential', async () => {

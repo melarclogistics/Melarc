@@ -19,6 +19,21 @@ describe('Button', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('type', 'submit');
   });
 
+  // Break caught: the hub floor's 56 px button (DESIGN_SYSTEM section 11, `lg`) that is not asked for and is drawn anyway, or one that cannot be asked for (a tablet's thumb on a 44 px button).
+  it('is medium unless the floor size is asked for, and the floor size is a class of its own', () => {
+    render(
+      <>
+        <Button type="button">Medium</Button>
+        <Button type="button" size="lg">
+          Floor
+        </Button>
+      </>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Medium' })).not.toHaveClass('ui-button--lg');
+    expect(screen.getByRole('button', { name: 'Floor' })).toHaveClass('ui-button', 'ui-button--lg');
+  });
+
   it('is primary unless told otherwise, and can be secondary', () => {
     render(
       <>

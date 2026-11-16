@@ -367,6 +367,70 @@ export const CAPABILITY_ACCESS: Readonly<Record<TaskCapability, CapabilityAccess
     returns:
       'The kind of change, the new revision and floor, and the ids of the sessions it ended; the sessions and their audit events are written under the authentication capability inside the same transaction',
   },
+  collection_photo_check: {
+    identity: 'api',
+    opener:
+      'The deferred check of a collection record, `melarc.collection_photos_check` (migration `0090`), which runs as the owner for its own statements at the end of the transaction of whoever writes a count or a photo, and which no login may execute',
+    // No application context is opened under it: the database function asserts the capability for its own statements, and every policy that admits it names the owner, so a context the API
+    // opened under it would reach nothing. The one directory is the evidence platform's, so that the check of source text has a place where the label may be named should one ever be.
+    openedUnder: ['platform/evidence/'],
+    tables: [
+      ...on(
+        [
+          'CollectionRecord',
+          'CollectionParcelPhoto',
+          'ParcelPhotoException',
+          'PickupStopEvidence',
+          'Evidence',
+          'ReasonCode',
+        ],
+        ['SELECT'],
+        'only inside melarc.collection_photos_check, and only as the owner: the policies that admit the capability name the owner too, so the API login asserting the label reaches no row; no write',
+      ),
+    ],
+    lookups:
+      'By the identifier of the count the trigger event names (or of the count a photo names): its photos, the exception of its stop, the photos attached to its stop and the catalogue row of its reason',
+    returns:
+      'Nothing: the check ends quietly or refuses the transaction naming a constraint; no row leaves the function',
+  },
+  intake_parcel_check: {
+    identity: 'api',
+    opener:
+      'The two deferred checks of a photo intake’s parcels, `melarc.intake_parcel_set_check` and `melarc.intake_parcel_count_check` (migration `0103`), which run as the owner for their own statements at the end of the transaction of whoever opens or moves a parcel or counts an intake, and which no login may execute',
+    // No application context is opened under it: the database functions assert the capability for their own statements, and every policy that admits it names the owner, so a context the API
+    // opened under it would reach nothing. The one directory is the database platform's (the door's own), so that the check of source text has a place where the label may be named should one ever be.
+    openedUnder: ['platform/database/'],
+    tables: [
+      ...on(
+        ['PickupIntake', 'IntakeParcel', 'PickupStop', 'CollectionParcelPhoto'],
+        ['SELECT'],
+        'only inside those two functions, and only as the owner: the policies that admit the capability name the owner too, so the API login asserting the label reaches no row; no write',
+      ),
+    ],
+    lookups:
+      'By the identifier of the intake the trigger event names (or of the intake a parcel names): its parcels, the stop of its request on its run and the links of that stop’s photos',
+    returns:
+      'Nothing: the check ends quietly or refuses the transaction naming a constraint; no row leaves the function',
+  },
+  receiving_names: {
+    identity: 'api',
+    opener:
+      'The one function `melarc.receiving_names` (migration `0106`), which the API login may execute: it judges the caller as staff under one of the three keys that read intakes, finds the ids of the riders and officers on the intakes the caller may see, and only then asserts the capability for the one statement that reads their names, as the owner',
+    // No application context is opened under it: the database function asserts the capability for its own statements, and every policy that admits it names the owner, so a context the API
+    // opened under it would reach nothing. The one directory is the database platform's (the door's own), so that the check of source text has a place where the label may be named should one ever be.
+    openedUnder: ['platform/database/'],
+    tables: [
+      ...on(
+        ['StaffIdentity', 'RiderIdentity'],
+        ['SELECT'],
+        'only inside that function, and only as the owner: the policies that admit the capability name the owner too, so the API login asserting the label reaches no row; the function selects the identifier and the full name and no other column; no write',
+      ),
+    ],
+    lookups:
+      'By the identifiers of the riders and officers that appear on the intakes the caller may see (the rider who handed a run over, who counted, who holds the check-in, who checked a parcel in, who recorded a finding)',
+    returns:
+      'The display name of each such rider and officer, once, and never a phone number, an e-mail address or any other column of an identity',
+  },
 };
 
 /**

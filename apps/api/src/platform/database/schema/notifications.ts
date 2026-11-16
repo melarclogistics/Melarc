@@ -259,10 +259,11 @@ export const notification = pgTable(
       sql`${table.audience} IN (${list(NOTIFICATION_AUDIENCES)})`,
     ),
     check('notification_channel_closed', sql`${table.channel} IN (${list(NOTIFICATION_CHANNELS)})`),
-    // `strict`: in the default (lax) mode a path unwraps an array, so a list of tokens would pass for a token.
+    // `strict`: in the default (lax) mode a path unwraps an array, so a list of tokens would pass for a token. **Every value is a closed token except one member, `n`, which is a whole number
+    // above zero** (D-D5, migration 0099: the count over the booking that the office's entry for an over count says); no other member may be a number and `n` may not be a token.
     check(
       'notification_parameters_closed',
-      sql`jsonb_typeof(${table.parameters}) = 'object' AND jsonb_array_length(jsonb_path_query_array(${table.parameters}, 'strict $.keyvalue()')) <= 4 AND NOT jsonb_path_exists(${table.parameters}, 'strict $.keyvalue() ? (!(@.key like_regex "^[a-z][a-z0-9_]{0,31}$"))') AND NOT jsonb_path_exists(${table.parameters}, 'strict $.* ? (@.type() != "string" || !(@ like_regex "^[A-Z][A-Z0-9_]{0,63}$"))')`,
+      sql`jsonb_typeof(${table.parameters}) = 'object' AND jsonb_array_length(jsonb_path_query_array(${table.parameters}, 'strict $.keyvalue()')) <= 4 AND NOT jsonb_path_exists(${table.parameters}, 'strict $.keyvalue() ? (!(@.key like_regex "^[a-z][a-z0-9_]{0,31}$"))') AND NOT jsonb_path_exists(${table.parameters}, 'strict $.keyvalue() ? (@.value.type() != "string" || !((@.key != "n" && @.value like_regex "^[A-Z][A-Z0-9_]{0,63}$") || (@.key == "n" && @.value like_regex "^[1-9][0-9]{0,8}$")))')`,
     ),
     check('notification_state_closed', sql`${table.state} IN (${list(NOTIFICATION_STATES)})`),
     check(

@@ -138,7 +138,11 @@ passes in full.**
   third and fourth runs), in that order and in **one job**, because the refusal is a control only while the CA is not in the system store and
   the proofs need it there (the decision of 12 October 2026 holds: refused before, trusted after, on one machine). A run is never cut. A
   value that is not a shard of the harness is refused before anything is made; without the variable the command makes all four runs. Each
-  job makes its own CA.
+  job makes its own CA. **In CI WebKit is launched headed, under a virtual display** (the Product Owner's decision D-B4 of 13 November 2026:
+  headless WebKit stalls in the hosted runs): the job installs Xvfb and `xauth` and runs the command as `xvfb-run ... pnpm run test:e2e:https`
+  with `MELARC_WEBKIT_HEADED=1`, which `playwright.config.ts` reads to set `headless: false` on the three WebKit projects alone (Chromium and
+  Firefox stay headless, and so does every developer's machine, which does not set the value); the harness and the `sudo` that puts the CA in the
+  system store run inside the wrapper as before.
   **It refuses on Windows and macOS, and on Linux outside CI unless the person running it
   has declared the machine cleared for key material (`MELARC_E2E_KEYS_CLEARED=1`).** `pnpm run test:e2e` runs the plain projects
   (`chromium`, `chromium-secret`) only.

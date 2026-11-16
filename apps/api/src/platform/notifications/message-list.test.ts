@@ -75,6 +75,8 @@ const COVERAGE: Readonly<Record<string, readonly string[] | 'a later slice'>> = 
   'Pickup failure': ['PICKUP_FAILED_SENDER', 'PICKUP_FAILED_VENDOR_FEED', 'PICKUP_FAILED_OPS_FEED'],
   // Added to §31.2 on 12 November 2026 (OB-S1-51) for an event the acceptance criterion already signed: AC-SLICE-001-21, "an office notification is raised at that moment".
   'Pickup counted short (MSC-DEC-194)': ['COLLECTION_SHORT_OPS_FEED'],
+  // Added to §31.2 on 16 November 2026 (D-D5): the mirror of a short count, a count above the booking, which the office is told of in the system in the same transaction.
+  'Pickup counted over (D-D5)': ['COLLECTION_OVER_OPS_FEED'],
   // Added to §31.2 on 2 November 2026 (S1.23) for an event the contract already signed: MSC-DEC-412, "the Vendor is notified, always".
   'Pickup stop skipped by Ops (MSC-DEC-412)': ['PICKUP_SKIPPED_VENDOR_FEED'],
   'Failure escalation': ['PICKUP_FAILURE_ESCALATED_OPS_FEED'],
@@ -363,6 +365,12 @@ describe('the wording', () => {
         digest: '07b770c030f3a0a5bf45ba5eefcbcd911182d9095f57320aab04b6c085f82568',
         wording:
           'Pickup request {code} for {date} was counted short at the door ({reason}). The office is asked to follow it up.',
+      },
+      // D-D5, approved by the Product Owner on 16 November 2026 for exactly these words and this title (the digest is that of kind, version, title, wording and placeholders).
+      'COLLECTION_OVER_OPS_FEED@1': {
+        on: '2026-11-16',
+        digest: 'c1bfcb12d2a9112df7354269441253bd57b90b095c3ff7ba18087f18b3a86185',
+        wording: 'Pickup request {code} for {date} was counted {n} over the booking ({reason}).',
       },
     };
     const approved = TEMPLATES.filter(isApproved);
@@ -683,15 +691,17 @@ describe('the notice of a skipped stop (S1.23; MSC-DEC-412)', () => {
   });
 });
 
-describe('the messages of a failure (S1.28) and the office entry for a short count (OB-S1-51)', () => {
+describe('the messages of a failure (S1.28) and the office entries for a short count (OB-S1-51) and an over count (D-D5)', () => {
   const sender = messageOfKind('PICKUP_FAILED_SENDER');
   const vendorFeed = messageOfKind('PICKUP_FAILED_VENDOR_FEED');
   const opsFeed = messageOfKind('PICKUP_FAILED_OPS_FEED');
   const shortFeed = messageOfKind('COLLECTION_SHORT_OPS_FEED');
+  const overFeed = messageOfKind('COLLECTION_OVER_OPS_FEED');
   const vendorRequest = { vendorOrganizationId: 'v-1', adHocSenderId: null };
 
-  // Break caught: a message raised from the wrong event (the lane dead-letters an envelope no message answers), or a short count that raises the failure's messages.
-  it('are raised by the two events the database writes, in the order of the list', () => {
+  // Break caught: a message raised from the wrong event (the lane dead-letters an envelope no message answers), a short count that raises the failure's messages, or an over count
+  // that raises the short count's entry (the office would read "counted short" for a count above the booking).
+  it('are raised by the three events the database writes, in the order of the list', () => {
     expect(messagesFor('pickup.failure.reported').map((each) => each.kind)).toEqual([
       'PICKUP_FAILED_SENDER',
       'PICKUP_FAILED_VENDOR_FEED',
@@ -700,7 +710,10 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
     expect(messagesFor('pickup.collection.shortfall_flagged').map((each) => each.kind)).toEqual([
       'COLLECTION_SHORT_OPS_FEED',
     ]);
-    for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
+    expect(messagesFor('pickup.collection.over_count_flagged').map((each) => each.kind)).toEqual([
+      'COLLECTION_OVER_OPS_FEED',
+    ]);
+    for (const message of [sender, vendorFeed, opsFeed, shortFeed, overFeed]) {
       expect(message?.aggregateType, message?.kind).toBe('PICKUP_REQUEST');
     }
   });
@@ -715,7 +728,7 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
     expect(appliesToRequest(vendorFeed, {})).toBe(false);
     expect(appliesToRequest(vendorFeed, vendorRequest)).toBe(true);
 
-    for (const entry of [opsFeed, shortFeed]) {
+    for (const entry of [opsFeed, shortFeed, overFeed]) {
       expect(entry, entry?.kind).toMatchObject({ audience: 'OPS_FEED', channel: 'FEED' });
       expect(appliesToRequest(entry, {}), entry?.kind).toBe(true);
       expect(appliesToRequest(entry, vendorRequest), entry?.kind).toBe(true);
@@ -724,7 +737,7 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
 
   // Break caught: a failure withheld because the office decided first (cancelled, rescheduled), which would leave the sender and the vendor not told of what happened.
   it('stay true whatever became of the request: a failure and a count are facts of the day', () => {
-    for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
+    for (const message of [sender, vendorFeed, opsFeed, shortFeed, overFeed]) {
       for (const state of ['CONFIRMED', 'CANCELLED', 'DECLINED', 'PENDING']) {
         expect(stillTrueOfRequest(message, { state }), `${message?.kind ?? ''} ${state}`).toBe(
           true,
@@ -761,10 +774,41 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
     });
   });
 
-  // Break caught: wording whose approval is not the owner's for these very words (D-A5), a text that says why, or a word of the rider's note, a count, a number or an address in
-  // any of the four.
-  it('are approved as they stand, and none of the words carries a note, a count, a number or an address', () => {
-    for (const message of [sender, vendorFeed, opsFeed, shortFeed]) {
+  // Break caught (D-D5): the one member that is a number, `n`, copied as anything but a whole number above zero (a text, a zero, a leading zero, a number the table's check would
+  // refuse), and the rule for a number widened to every member (a reason that is a number is not a token and is left out, as before).
+  it('carry the reason as a token and the count over the booking as a whole number, and no other member as a number', () => {
+    const payload = {
+      stop: '8f1c8c1e-0000-4000-8000-000000000003',
+      reason: 'VENDOR_ADDED_PARCELS',
+      note: 'Two more boxes',
+    };
+    expect(overFeed?.carries).toEqual(['reason', 'n']);
+    expect(parametersOf(overFeed ?? {}, { ...payload, n: '2' })).toEqual({
+      reason: 'VENDOR_ADDED_PARCELS',
+      n: '2',
+    });
+    expect(parametersOf(overFeed ?? {}, { ...payload, n: '123456789' })).toEqual({
+      reason: 'VENDOR_ADDED_PARCELS',
+      n: '123456789',
+    });
+    // Refused, so left out: a count that is not a plain whole number above zero. The message is still raised (the lane then cannot render it and says so).
+    for (const refused of ['0', '02', '-1', '2.5', '1234567890', 'two', '2 ', ' 2', '', 'N2', 2]) {
+      expect(
+        parametersOf(overFeed ?? {}, { ...payload, n: refused }),
+        JSON.stringify(refused),
+      ).toEqual({ reason: 'VENDOR_ADDED_PARCELS' });
+    }
+    // The number belongs to `n` alone: a member that is not `n` is a token or nothing, and `n` is carried only by the message that declares it.
+    expect(parametersOf(overFeed ?? {}, { ...payload, reason: '12' })).toEqual({});
+    expect(parametersOf(shortFeed ?? {}, { ...payload, n: '2' })).toEqual({
+      reason: 'VENDOR_ADDED_PARCELS',
+    });
+  });
+
+  // Break caught: wording whose approval is not the owner's for these very words (D-A5, D-D5), a text that says why, or a word of the rider's note, a phone number or an address in
+  // any of the five. (The over entry's `{n}` is the one count a feed entry holds: the approved words of 16 November 2026 say how many parcels over the booking.)
+  it('are approved as they stand, and none of the words carries a note, a phone number or an address', () => {
+    for (const message of [sender, vendorFeed, opsFeed, shortFeed, overFeed]) {
       const template = templateOf(message?.kind ?? '', 1);
       expect(template, message?.kind).toBeDefined();
       expect(template === undefined ? false : isApproved(template), message?.kind).toBe(true);
@@ -789,6 +833,13 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
       'date',
       'reason',
     ]);
+    expect(templateOf('COLLECTION_OVER_OPS_FEED', 1)?.placeholders).toEqual([
+      'code',
+      'date',
+      'n',
+      'reason',
+    ]);
+    expect(templateOf('COLLECTION_OVER_OPS_FEED', 1)?.title).toBe('Pickup counted over');
   });
 
   it('say, in draft words, what happened to the request and the day it was for', () => {
@@ -809,6 +860,19 @@ describe('the messages of a failure (S1.28) and the office entry for a short cou
           }),
     ).toBe(
       'Pickup request ACC-PR-ABC123 for Tuesday 3 November was counted short at the door (SOME_PARCELS_NOT_READY). The office is asked to follow it up.',
+    );
+    const over = templateOf('COLLECTION_OVER_OPS_FEED', 1);
+    expect(
+      over === undefined
+        ? ''
+        : render(over, {
+            code: 'ACC-PR-ABC123',
+            date: 'Tuesday 3 November',
+            n: '2',
+            reason: 'VENDOR_ADDED_PARCELS',
+          }),
+    ).toBe(
+      'Pickup request ACC-PR-ABC123 for Tuesday 3 November was counted 2 over the booking (VENDOR_ADDED_PARCELS).',
     );
   });
 });

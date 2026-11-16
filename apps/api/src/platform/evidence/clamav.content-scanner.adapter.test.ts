@@ -2,6 +2,8 @@ import { createServer, type Server, type Socket } from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { SystemClock } from '../auth/clock/system.clock.adapter.js';
+import { ExecutionBudget, runWithBudget } from '../execution/execution-budget.js';
 import { ContentScannerError } from './content-scanner-error.js';
 import { ClamavContentScanner } from './clamav.content-scanner.adapter.js';
 
@@ -16,12 +18,17 @@ const VERSION = 'ClamAV 1.4.2/27836/Wed Nov 12 08:05:44 2026';
 const FRAME_LIMIT = 64 * 1024;
 
 type InstreamBehaviour =
-  | { readonly reply: string }
+  /** The reply once the zero frame has arrived, after `delayMs` and followed by `trailing` bytes of no meaning when a test wants more than a reply to arrive. */
+  | { readonly reply: string; readonly delayMs?: number; readonly trailing?: number }
+  /** The reply as soon as the command has arrived, before the object has been sent. */
+  | { readonly early: string }
   | { readonly hang: true }
   | { readonly close: true }
   | { readonly reset: true };
 
 interface Fake {
+  /** How many connections the daemon has seen end. */
+  closed: number;
   readonly port: number;
   /** The commands in the order they arrived, one per connection. */
   readonly commands: string[];
@@ -39,11 +46,16 @@ afterEach(async () => {
 });
 
 async function fakeClamd(options: {
-  readonly version?: string | { readonly hang: true } | { readonly close: true };
+  readonly version?:
+    | string
+    | { readonly hang: true }
+    | { readonly close: true }
+    | { readonly text: string; readonly delayMs: number };
   readonly instream?: InstreamBehaviour;
 }): Promise<Fake> {
   const sockets = new Set<Socket>();
   const fake: Fake = {
+    closed: 0,
     port: 0,
     commands: [],
     frames: [],
@@ -53,7 +65,10 @@ async function fakeClamd(options: {
   };
   const server: Server = createServer((socket) => {
     sockets.add(socket);
-    socket.on('close', () => sockets.delete(socket));
+    socket.on('close', () => {
+      sockets.delete(socket);
+      fake.closed += 1;
+    });
     socket.on('error', () => undefined);
     let pending = Buffer.alloc(0);
     let state: 'command' | 'frames' | 'done' = 'command';
@@ -75,10 +90,18 @@ async function fakeClamd(options: {
             const version = options.version ?? VERSION;
             if (typeof version === 'string') socket.write(`${version}\0`);
             else if ('close' in version) socket.end();
+            else if ('text' in version) {
+              setTimeout(() => {
+                if (!socket.destroyed) socket.write(`${version.text}\0`);
+              }, version.delayMs);
+            }
             return;
           }
           if (command === 'zINSTREAM') {
             state = 'frames';
+            if (options.instream !== undefined && 'early' in options.instream) {
+              socket.write(`${options.instream.early}\0`);
+            }
             continue;
           }
           socket.destroy();
@@ -90,8 +113,15 @@ async function fakeClamd(options: {
           pending = pending.subarray(4);
           state = 'done';
           const behaviour = options.instream ?? { reply: 'stream: OK' };
-          if ('reply' in behaviour) socket.write(`${behaviour.reply}\0`);
-          else if ('close' in behaviour) socket.end();
+          if ('reply' in behaviour) {
+            const send = (): void => {
+              if (!socket.destroyed) {
+                socket.write(`${behaviour.reply}\0${'x'.repeat(behaviour.trailing ?? 0)}`);
+              }
+            };
+            if (behaviour.delayMs === undefined) send();
+            else setTimeout(send, behaviour.delayMs);
+          } else if ('close' in behaviour) socket.end();
           else if ('reset' in behaviour) socket.destroy();
           continue;
         }
@@ -258,6 +288,84 @@ describe('the ClamAV scanner', () => {
     }
     await expect(scannerFor(fake).scan(failing())).rejects.toBe(broken);
   });
+
+  // Run B, Part 1, item 5 of the review of Run A2. Each of the next tests fails on the commit before it (809817b), for the reason named.
+
+  // Break caught: each connection had a timer of its own, so a slow version and a slow reply that each came within the time gave a verdict that took twice the time.
+  it('has one deadline for the whole call: a slow version and a slow reply that add up past it are unavailable', async () => {
+    const slow = {
+      version: { text: VERSION, delayMs: 200 },
+      instream: { reply: 'stream: OK', delayMs: 200 },
+    } as const;
+    const error = await failureOf(
+      scannerFor(await fakeClamd(slow), 300).scan(framesOf(Buffer.from('x'))),
+    );
+    expect(error.code).toBe('SCANNER_UNAVAILABLE');
+    // The same daemon, given the time, answers: the deadline is the one thing that changed.
+    const verdict = await scannerFor(await fakeClamd(slow), 3000).scan(framesOf(Buffer.from('x')));
+    expect(verdict.verdict).toBe('CLEAN');
+  });
+
+  // Break caught: a body that stops delivering is not bounded by a connection's timer, which destroyed the socket and left the read waiting for a store that does not answer.
+  it('is bounded when the body stalls, and lets go of the body', async () => {
+    const fake = await fakeClamd({});
+    let returned = false;
+    const stalled: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        let sent = false;
+        return {
+          next: () => {
+            if (sent) return new Promise<IteratorResult<Uint8Array>>(() => undefined);
+            sent = true;
+            return Promise.resolve({ value: Buffer.from('x'), done: false });
+          },
+          return: () => {
+            returned = true;
+            return Promise.resolve({ value: undefined, done: true });
+          },
+        };
+      },
+    };
+    const began = Date.now();
+    const error = await failureOf(scannerFor(fake, 300).scan(stalled));
+    expect(error.code).toBe('SCANNER_UNAVAILABLE');
+    expect(Date.now() - began).toBeLessThan(2500);
+    expect(returned).toBe(true);
+  }, 8000);
+
+  // Break caught: a reply that came before the object was sent read as the verdict of a stream that was not finished.
+  it('is unavailable when the daemon replies before the zero-length frame', async () => {
+    const fake = await fakeClamd({ instream: { early: 'stream: OK' } });
+    async function* slowly(): AsyncGenerator<Uint8Array> {
+      yield Buffer.from('first');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      yield Buffer.from('second');
+    }
+    const error = await failureOf(scannerFor(fake).scan(slowly()));
+    expect(error.code).toBe('SCANNER_UNAVAILABLE');
+  });
+
+  // Break caught: a failure that was recorded (the reply is longer than a reply is) read past because a reply was present beside it.
+  it('lets a recorded failure win over a reply that is present', async () => {
+    const fake = await fakeClamd({ instream: { reply: 'stream: OK', trailing: 2000 } });
+    const error = await failureOf(scannerFor(fake).scan(framesOf(Buffer.from('x'))));
+    expect(error.code).toBe('SCANNER_UNAVAILABLE');
+  });
+
+  // Break caught: the scan outliving the request's budget, holding the daemon's connection for the scanner's own, longer, deadline.
+  it('ends with the request’s budget when that is shorter than its own deadline', async () => {
+    const fake = await fakeClamd({ instream: { hang: true } });
+    const budget = new ExecutionBudget(new SystemClock(), 'request', 250);
+    await runWithBudget(budget, () =>
+      scannerFor(fake, 30_000).scan(framesOf(Buffer.from('x'))),
+    ).catch(() => undefined);
+    // The version's connection and the stream's are both let go of within a moment of the budget's end, and not thirty seconds later.
+    const limit = Date.now() + 2500;
+    while (fake.closed < 2 && Date.now() < limit) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(fake.closed).toBeGreaterThanOrEqual(2);
+  }, 8000);
 
   it('is not configured without a host, a port and a time', () => {
     for (const options of [

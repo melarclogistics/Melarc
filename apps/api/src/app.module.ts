@@ -51,6 +51,7 @@ import { DispatchModule } from './dispatch/dispatch.module.js';
 import { DomainPortsModule } from './domain-ports.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { FleetModule } from './fleet/fleet.module.js';
+import { HubModule } from './hub/hub.module.js';
 import { PickupModule } from './pickup/pickup.module.js';
 import { PermissionModule } from './permission/permission.module.js';
 import { PostgresRiderIdentityDirectory } from './staff/postgres.rider-identity-directory.adapter.js';
@@ -340,6 +341,7 @@ export class AppModule {
               DispatchModule,
               DomainPortsModule,
               FleetModule,
+              HubModule,
               NotificationsModule,
               PermissionModule,
               PickupModule,

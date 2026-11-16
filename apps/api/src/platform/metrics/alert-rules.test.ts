@@ -448,6 +448,9 @@ describe('the alert rules of the credential path and the trust data (S0.68)', ()
     expect(row('Evidence scanner')).toContain(
       'scans unavailable for **15 minutes** with **none clean** in that time',
     );
+    // Run B, D-B3: and the two the Product Owner added, any flagged scan and any flagged object that could not be removed.
+    expect(row('Evidence scanner')).toContain('**any** scan that flagged a file');
+    expect(row('Evidence scanner')).toContain('**any** flagged object that could not be removed');
     expect(document).toContain('| **Evidence scanner** *(12 November 2026)*|');
     expect(document).toContain(
       '### 4.3b The evidence scanner cannot be reached or is not configured',
@@ -495,9 +498,33 @@ describe('the alert rules of the evidence scanner (Run A2, D-A6)', () => {
     expect(firing([at(0, { CLEAN: 5 }), at(15, { CLEAN: 9 })])).toEqual([]);
   });
 
-  // Break caught: a flagged file paging as an outage, which it is not: the scanner worked.
-  it('does not fire for flagged files, which are the scanner doing its work', () => {
-    expect(firing([at(0, {}), at(15, { FLAGGED: 7, CLEAN: 3 })])).toEqual([]);
+  // Break caught: a flagged file paging as an OUTAGE, which it is not (the scanner worked): the two outage rules stay quiet. Run B, D-B3 (13 November 2026): a flagged file is a security
+  // fact all the same, so a rule of its own fires for it (this assertion was `[]` until then).
+  it('does not read flagged files as an outage, and fires the rule of their own for them', () => {
+    expect(firing([at(0, {}), at(15, { FLAGGED: 7, CLEAN: 3 })])).toEqual([
+      'evidence_scan_flagged',
+    ]);
+  });
+
+  // Break caught (D-B3; fails on 6547d90: there is no such rule): a flagged upload nobody is told of, a rule that needs more than one, or one that never stops.
+  it('fires for any one flagged scan, and stops when none arrives for the window', () => {
+    expect(firing([at(0, {}), at(5, { FLAGGED: 1 })])).toEqual(['evidence_scan_flagged']);
+    // The scan was at minute 5: by minute 40 it is outside the last fifteen minutes (a counter only grows, so a window that never closed would fire for ever).
+    expect(firing([at(0, {}), at(5, { FLAGGED: 1 }), at(40, { FLAGGED: 1 })])).toEqual([]);
+    expect(firing([at(0, { CLEAN: 4 }), at(15, { CLEAN: 9 })])).toEqual([]);
+  });
+
+  // Break caught (D-B3): an object the scanner flagged that the platform could not take away, which may still sit in the bucket, left unsaid; and the reverse, a removal that worked paging.
+  it('fires for any flagged object that could not be removed, and not for one that was', () => {
+    const removals = (outcome: string) => `evidence_object_removals_total{outcome="${outcome}"}`;
+    const afterwards = (minutes: number, failed: number, removed: number) =>
+      scrape(minutes, { [removals('FAILED')]: failed, [removals('REMOVED')]: removed });
+    expect(firing([afterwards(0, 0, 0), afterwards(10, 1, 0)])).toEqual([
+      'evidence_flagged_object_not_removed',
+    ]);
+    expect(firing([afterwards(0, 0, 0), afterwards(10, 0, 3)])).toEqual([]);
+    // The failure was at minute 5, and by minute 40 it is outside the last fifteen minutes.
+    expect(firing([afterwards(0, 0, 0), afterwards(5, 1, 0), afterwards(40, 1, 0)])).toEqual([]);
   });
 
   it('reads every instance of the API and fires when any one has the fault', () => {
@@ -514,6 +541,8 @@ describe('the alert rules of the evidence scanner (Run A2, D-A6)', () => {
   it('names the runbook of the document and a severity of the Product Owner’s table', () => {
     const rules = ALERT_RULES.filter((rule) => rule.alert === 'Evidence scanner');
     expect(rules.map((rule) => rule.id).toSorted()).toEqual([
+      'evidence_flagged_object_not_removed',
+      'evidence_scan_flagged',
       'evidence_scanner_not_configured',
       'evidence_scanner_unavailable',
     ]);

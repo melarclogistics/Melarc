@@ -460,6 +460,56 @@ describe('the Ops Portal reaches the API through the generated client only', () 
     }
   });
 
+  // The one exception to the ban on `fetch` (S1.35; the evidence upload): the module that sends the bytes of a file to the object store may name `fetch` by its
+  // bare name, and nothing else is let through for it or for anything beside it.
+  const UPLOAD_MODULE = 'apps/ops-web/src/platform/evidence/object-store-upload.ts';
+
+  // Break caught: the exception widened: another file beside the module (the orchestrator next to it, a page, a component, the API's own transport) allowed to
+  // send a request that skips the generated client, which is how a second door to the network opens without anyone deciding it.
+  it('lets only the upload module name fetch, by its bare name', () => {
+    const code = "const response = fetch(address, { method: 'PUT' });";
+    assert.deepEqual(
+      messagesFor(UPLOAD_MODULE, code),
+      [],
+      'fetch was refused in the upload module',
+    );
+    for (const path of [
+      'apps/ops-web/src/platform/evidence/upload-evidence.ts',
+      'apps/ops-web/src/platform/evidence/evidence-commands.ts',
+      'apps/ops-web/src/platform/hub-intake/hub-intake-commands.ts',
+      'apps/ops-web/src/components/ui/evidence-upload/EvidenceUpload.tsx',
+      'apps/ops-web/src/app/Probe.tsx',
+    ]) {
+      assert.notDeepEqual(messagesFor(path, code), [], `fetch was not refused in ${path}`);
+    }
+  });
+
+  // Break caught: the exception relaxing the rule for `window`, `globalThis` and `self` as well, or taking the other bans with it: every other way to reach the
+  // network, and the storage, stay refused in the one module that may send a file.
+  it('keeps every other ban in force inside the upload module', () => {
+    for (const [label, code] of [
+      ['window.fetch', "window.fetch('/x');"],
+      ['globalThis.fetch', "globalThis.fetch('/x');"],
+      ['self.fetch', "self.fetch('/x');"],
+      ['XMLHttpRequest', 'const request = new XMLHttpRequest();'],
+      ['WebSocket', "const socket = new WebSocket('wss://x.test');"],
+      ['EventSource', "const source = new EventSource('/x');"],
+      ['navigator.sendBeacon', "navigator.sendBeacon('/x', 'a');"],
+      ['localStorage', "localStorage.setItem('x', 'y');"],
+      ['sessionStorage', "sessionStorage.setItem('x', 'y');"],
+      ['indexedDB', "indexedDB.open('db');"],
+      ['document.cookie', "document.cookie = 'a=b';"],
+      ['an innerHTML assignment', 'element.innerHTML = html;'],
+      ['eval', "eval('1 + 1');"],
+    ] as const) {
+      assert.notDeepEqual(
+        messagesFor(UPLOAD_MODULE, code),
+        [],
+        `${label} was not refused in the upload module`,
+      );
+    }
+  });
+
   it('allows the ordinary code a page is made of', () => {
     const code = [
       "import { useApiClient } from '../platform/api/api-client';",

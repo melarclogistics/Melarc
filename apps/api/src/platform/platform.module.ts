@@ -69,7 +69,7 @@ import { NotFoundFallback } from './http/not-found-fallback.js';
 import { LifecycleService } from './lifecycle/lifecycle.service.js';
 import { ShutdownRegistry } from './lifecycle/shutdown.registry.js';
 import { APP_CONFIG, LOGGER } from './platform.tokens.js';
-import { EvidenceController } from './evidence/evidence.controller.js';
+import { EvidenceController, EvidenceLimitsController } from './evidence/evidence.controller.js';
 import { evidenceProviders } from './evidence/evidence-providers.js';
 import { RecordLookupController } from './lookup/record-lookup.controller.js';
 import { recordLookupProviders } from './lookup/record-lookup-providers.js';
@@ -142,6 +142,7 @@ export class PlatformModule {
               QueueSummaryController,
               RecordLookupController,
               EvidenceController,
+              EvidenceLimitsController,
             ],
       imports: [
         HealthModule,

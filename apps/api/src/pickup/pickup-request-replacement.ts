@@ -5,7 +5,7 @@ import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port
 import type { DatabaseTransaction } from '../platform/database/database.service.js';
 import { nextOperatingDay } from './booking-rules.js';
 import { hubLocal } from './cutoff.js';
-import { operationalCode } from './operational-code.js';
+import { operationalCode } from '../platform/records/operational-code.js';
 import { insertReplacement } from './pickup-request-clone.js';
 import type { PickupRequestRow } from './pickup-request-view.js';
 

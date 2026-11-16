@@ -156,7 +156,7 @@ export const EXPECTED = {
     'the access key id of an R2 API token restricted to the bucket (8 to 128 letters and digits); required with r2, absent with in-process',
   EVIDENCE_R2_SECRET_ACCESS_KEY:
     'the secret access key of that token (16 to 128 letters, digits and the characters + / = _ -); required with r2, absent with in-process; never printed',
-  EVIDENCE_SCANNER: `one of: ${EVIDENCE_SCANNERS.join(', ')}; in-process is refused when APP_ENV is production; absent, production has no scanner (it starts and stores no evidence) and any other environment gets in-process`,
+  EVIDENCE_SCANNER: `one of: ${EVIDENCE_SCANNERS.join(', ')}; in-process is refused when APP_ENV is production, and beside EVIDENCE_STORE=r2 in any environment but a local run; absent, production has no scanner (it starts and stores no evidence) and any other environment gets in-process`,
   EVIDENCE_CLAMAV_HOST:
     'the host name or IP address of the ClamAV daemon, without spaces; required with clamav, absent otherwise',
   EVIDENCE_CLAMAV_PORT:

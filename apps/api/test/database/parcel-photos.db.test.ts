@@ -176,8 +176,25 @@ describe('recordCollection: the photos make the count (AC-SLICE-001-86)', () => 
     const [record, ...more] = await recordsOf(stop.id);
     expect(more).toEqual([]);
     expect(record).toMatchObject({ collected_count: 3, variance: 'MATCH' });
-    // The answer is the record and not its photos: the members of the contract's CollectionRecord.
-    expect(Object.keys(response.json() as object).toSorted()).not.toContain('parcel_photo_ids');
+    // The answer states the photos it attached, in the order they were named, as the contract's CollectionRecord declares (Run B, Part 1, item 5: it left them out on 809817b, and this
+    // test held their absence). It states the members of that schema and no other.
+    expect(response.json()).toMatchObject({
+      id: record?.id,
+      pickup_stop_id: stop.id,
+      collected_count: 3,
+      parcel_photo_ids: photos,
+    });
+    expect(Object.keys(response.json() as object).toSorted()).toEqual(
+      [
+        'collected_count',
+        'declared_count',
+        'id',
+        'office_notified_at',
+        'parcel_photo_ids',
+        'pickup_stop_id',
+        'variance',
+      ].toSorted(),
+    );
 
     const links = await linksOf(stop.id);
     expect(links.map((link) => link.evidence_id).toSorted()).toEqual([...photos].toSorted());
@@ -207,6 +224,7 @@ describe('recordCollection: the photos make the count (AC-SLICE-001-86)', () => 
     const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, 2);
     const response = await collect(arranged.rider, stop.id, { ...SHORT, parcel_photo_ids: photos });
     expect(response.status, response.text).toBe(200);
+    expect((response.json() as { parcel_photo_ids?: string[] }).parcel_photo_ids).toEqual(photos);
     expect(await linksOf(stop.id)).toHaveLength(2);
     expect(await recordsOf(stop.id)).toMatchObject([{ collected_count: 2, variance: 'SHORT' }]);
   });
@@ -265,16 +283,21 @@ describe('recordCollection: the photos make the count (AC-SLICE-001-86)', () => 
     expect(await recordsOf(stop.id)).toEqual([]);
   });
 
-  // Break caught: the photos judged before the count's other rules, so that a count refused for another reason is told it lacks photos.
-  it('judges the count before its photos: a count above the declared one is told so, photos or none', async () => {
-    const arranged = await run();
-    const stop = stopAt(arranged);
-    const response = await collect(arranged.rider, stop.id, { collected_count: 5 });
-    expect(outcome(response)).toEqual([400, 'VALIDATION_FAILED']);
-    expect(violationsOf(response)).toEqual([
-      { in: 'body', pointer: '/collected_count', rule: 'above_declared' },
-    ]);
-  });
+  // Break caught: the photos judged before the count's other rules, so that a count refused for another reason is told it lacks photos. (A count above the declared one is an OVER count since
+  // D-D5 and has its own reason, which is judged first: the order this test held for `above_declared` is held for the reason of a count that is not equal.)
+  it.each([
+    ['a short count', 2],
+    ['a count above the booking', 5],
+  ] as const)(
+    'judges the reason of %s before its photos: the missing reason is told so, photos or none',
+    async (_what, collected) => {
+      const arranged = await run();
+      const stop = stopAt(arranged);
+      const response = await collect(arranged.rider, stop.id, { collected_count: collected });
+      expect(outcome(response)).toEqual([422, 'REASON_REQUIRED']);
+      expect(await recordsOf(stop.id)).toEqual([]);
+    },
+  );
 
   // The body that names two hundred photos is admitted by the transport, and the schema sets no cap: `collection-parcel-photos.test.ts` holds the reading.
 });
@@ -443,6 +466,8 @@ describe('authoriseParcelPhotoException: Ops lets a stop through without photos 
     expect(counted.status, counted.text).toBe(200);
     expect(await recordsOf(stop.id)).toHaveLength(1);
     expect(await linksOf(stop.id)).toEqual([]);
+    // The answer for such a stop states no photos: the member is absent, and is not an empty list.
+    expect(Object.keys(counted.json() as object)).not.toContain('parcel_photo_ids');
   });
 
   // Break caught: an exception that lets the count take photos as well (a count that names some accepted), which would hide a count whose photos were not the exception's business.

@@ -65,6 +65,74 @@ describe('the collection record as the contract states it (S1.26)', () => {
     expect(JSON.stringify(view)).not.toContain('CUSTOMER');
   });
 
+  // Break caught (Run B, Part 1, item 5): the photos a count attached left out of the answer that the contract declares them in (`CollectionRecord.parcel_photo_ids`), or named in
+  // another order than the one the rider named them in.
+  it('states the photos the count attached, in the order the rider named them', () => {
+    const named = [
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e12',
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e11',
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e13',
+    ];
+    expect(collectionRecordViewOf(ROW, named).parcel_photo_ids).toEqual(named);
+  });
+
+  // Break caught: an empty list stated for a stop that Ops let through without photos, which would say that a count was made with photos and none were counted.
+  it('leaves the photos out when the count attached none', () => {
+    expect(Object.keys(collectionRecordViewOf(ROW))).not.toContain('parcel_photo_ids');
+    expect(Object.keys(collectionRecordViewOf(ROW, []))).not.toContain('parcel_photo_ids');
+  });
+
+  // Break caught (Run D, Part 2, finding F2): the evidence a short count's reason asked for (`evidence_ids`, the photo of the parcel left behind) dropped from the answer, and so from the
+  // replay that returns it, although the contract declares it (`CollectionRecord.evidence_ids`); or named in another order than the one the rider named it in, or kept apart from the
+  // parcel photos it must never be confused with.
+  it('states the evidence the count attached beside its reason, in the order the rider named it, apart from the parcel photos', () => {
+    const photos = ['0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e21', '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e22'];
+    const evidence = [
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e32',
+      '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e31',
+    ];
+    const view = collectionRecordViewOf(
+      { ...ROW, collected_count: 2, variance: 'SHORT' },
+      photos,
+      evidence,
+    );
+    expect(view.evidence_ids).toEqual(evidence);
+    expect(view.parcel_photo_ids).toEqual(photos);
+  });
+
+  // Break caught: an empty list of evidence stated for a count that attached none (every clean count, and every short count whose reason asks for no photo).
+  it('leaves the evidence out when the count attached none', () => {
+    expect(Object.keys(collectionRecordViewOf(ROW))).not.toContain('evidence_ids');
+    expect(Object.keys(collectionRecordViewOf(ROW, ['x'], []))).not.toContain('evidence_ids');
+  });
+
+  // Break caught (D-D5): a count above the booking stated as anything but OVER, or its reason, its note and the flag lost (the office is told of it as of a short count).
+  it('states a count above the booking as OVER, with its reason code, its note and the office flag', () => {
+    const view = collectionRecordViewOf({
+      ...ROW,
+      collected_count: 5,
+      variance: 'OVER',
+      variance_reason_snapshot: {
+        reason_code: 'VENDOR_ADDED_PARCELS',
+        label: 'Vendor added parcels after booking',
+        attribution: 'CUSTOMER',
+        note: 'Two more boxes came out of the back room',
+      },
+      office_notified_at: new Date('2026-11-16T08:15:01.250Z'),
+    });
+    expect(view).toEqual({
+      id: ROW.id,
+      pickup_stop_id: ROW.pickup_stop_id,
+      declared_count: 3,
+      collected_count: 5,
+      variance: 'OVER',
+      variance_reason_code: 'VENDOR_ADDED_PARCELS',
+      variance_note: 'Two more boxes came out of the back room',
+      office_notified_at: '2026-11-16T08:15:01.250Z',
+    });
+    expect(JSON.stringify(view)).not.toContain('Vendor added parcels after booking');
+  });
+
   // Break caught: a note that is absent written as an empty one.
   it('leaves out a note that was not given', () => {
     const view = collectionRecordViewOf({

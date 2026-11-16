@@ -125,6 +125,41 @@ export const QUEUE_CHANGING_ACTS: readonly QueueChangingAct[] = [
   },
   {
     method: 'POST',
+    path: '/hub-intakes/{id}/check-in',
+    operation: 'finishCheckIn',
+    queues: ['HUB_RECEIVING_RUNS_WAITING', 'HUB_MISSING_PARCELS_SEARCHING'],
+    why: 'Finishing a vendor takes it out of the vendors waiting to be checked in, and a run out of the queue by run when it was the last, and opens the list of missing parcels for what was not found.',
+  },
+  {
+    method: 'PUT',
+    path: '/intake-parcels/{parcel_id}/arrival',
+    operation: 'recordParcelArrival',
+    queues: ['HUB_MISSING_PARCELS_SEARCHING'],
+    why: 'A parcel that is found leaves the list of missing parcels; a tap before the vendor is finished moves no queue.',
+  },
+  {
+    method: 'POST',
+    path: '/hub-intakes/{id}/correction',
+    operation: 'correctIntakeCount',
+    queues: ['HUB_MISSING_PARCELS_SEARCHING'],
+    why: 'A senior officer’s correction routes the vendor again, into or out of the case that needs a decision and the list of missing parcels.',
+  },
+  {
+    method: 'POST',
+    path: '/hub-intakes/{id}/count',
+    operation: 'submitBlindCount',
+    queues: ['HUB_RECEIVING_RUNS_WAITING'],
+    why: 'Counting a vendor that has no photos finishes it, and takes its run out of the queue by run when it was the last vendor waiting.',
+  },
+  {
+    method: 'POST',
+    path: '/hub-intakes/{id}/discrepancy',
+    operation: 'adjudicateDiscrepancy',
+    queues: ['HUB_MISSING_PARCELS_SEARCHING'],
+    why: 'Accepting what arrived or writing off what is missing closes the case, and its missing parcels leave the list of those being searched for; Still searching leaves them on it.',
+  },
+  {
+    method: 'POST',
     path: '/staff-identities',
     operation: 'createStaffIdentity',
     queues: ['STAFF_AWAITING_APPROVAL'],
@@ -166,6 +201,28 @@ export const QUEUE_NEUTRAL_CALLS: readonly QueueNeutralCall[] = [
     ['PUT', '/pickup-manifests/{id}/stops', 'setManifestStopOrder'],
     ['POST', '/pickup-manifests/{id}/custody-handover', 'initiateRunCustodyHandover'],
   ]),
+  ...neutral(
+    'Settles a handshake, or lets a stop’s count through without photos, and no queue counts either: a run that collected something is closed by the hub’s handover and never completed by the system (`pickup-run-completion.ts`), so none of the three turns a stop terminal that a run waits on.',
+    [
+      ['POST', '/pickup-stops/{id}/handshake/ops-override', 'authoriseHandshakeOverride'],
+      ['POST', '/pickup-stops/{id}/handshake/resolve', 'resolveHandshake'],
+      ['POST', '/pickup-stops/{id}/parcel-photo-exception', 'authoriseParcelPhotoException'],
+    ],
+  ),
+  ...neutral(
+    'A read that is a `POST` (the authorization to read one stored photo): the server changes nothing, and it is a query of the screen that opens the photo and not an act.',
+    [['POST', '/evidence/{id}/retrieval-authorization', 'createEvidenceRetrievalAuthorization']],
+  ),
+  ...neutral(
+    'Receiving at a hub (S1.35): the lock of a vendor, its condition, a parcel added that is not on the list and the evidence of a finding. Neither queue of the hub counts what these change: the queue by run counts the runs that wait, the list of missing parcels counts the parcels of a case that is open (the lock is also `background` activity: the page keeping its own lock).',
+    [
+      ['POST', '/hub-intakes/{id}/lock', 'acquireIntakeLock'],
+      ['POST', '/hub-intakes/{id}/condition', 'recordIntakeCondition'],
+      ['POST', '/hub-intakes/{id}/extra-parcels', 'addExtraParcel'],
+      ['POST', '/evidence', 'createEvidence'],
+      ['POST', '/evidence/{id}/complete', 'completeEvidenceUpload'],
+    ],
+  ),
   ...neutral('Acts on a rider’s device, which no queue counts.', [
     ['POST', '/ops/riders/{riderId}/device/register', 'registerRiderDevice'],
     ['POST', '/ops/riders/{riderId}/device/reregister', 'reregisterRiderDevice'],

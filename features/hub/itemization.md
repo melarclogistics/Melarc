@@ -1,8 +1,8 @@
 # Itemization and Pricing
 
 > **Status:** ACTIVE SPECIFICATION — implementation status is stated separately
-> **Version:** 0.10 (cleaned edition)
-> **Date:** 4 October 2026
+> **Version:** 0.11 (Run D revision: itemizing from the door photos, D-D6)
+> **Date:** 4 October 2026; revised 16 November 2026
 > **Domain:** `hub`
 > **Owns:** the behaviour and acceptance criteria for converting received parcels into priced Orders, and for closing the intake
 > **Governed by:** [PROJECT_MASTER_SPECIFICATION.md](../../PROJECT_MASTER_SPECIFICATION.md) §23, §35.6, §22.7, §36.11
@@ -13,6 +13,8 @@
 Itemization converts each **physically received parcel** into an operational `Order` carrying recipient, routing, handling, payer and commercial attributes (§23.1). It is where **price first becomes authoritative** — for a standard booking, the parcel's first price ever.
 
 One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
+
+**The order is made for a parcel, and the parcel's photo is the order's photo (D-D2, D-D6, the Product Owner's decisions of 15 and 16 November 2026).** Receiving checks a run in parcel by parcel against the rider's door photos ([hub-intake.md](hub-intake.md)), so each physical parcel has a record before it has an order: the **intake's parcel** ([domain-model.md §6.6a](../../contracts/domain-model.md#66a-intakeparcel)), one for each door photo and one for each extra recorded at the hub. An order refers to its parcel, **one order for a parcel and one parcel for an order, by the database**, and its photo is the parcel's. **Officers may therefore itemize from the photos while the parcels are still being checked in, which is how the hub works on a busy day**: an order made for a parcel that has not been checked in yet is *awaiting arrival*, and checking the parcel in confirms it ([§5.4](#54-early-itemizing-from-the-door-photos-d-d6)). This is **specified here and built by Stage 7** (S1.36 to S1.40); Run D builds no itemizing screen.
 
 **Version 1 boundary.** Itemization prices and allocates. It does not dispatch, does not confirm the recipient, and does not collect. It ends when the intake closes with every received parcel accounted for.
 
@@ -45,7 +47,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 
 ## 4. Preconditions
 
-- The intake is `READY_FOR_ITEMIZATION` — the blind count is committed and reconciliation has passed.
+- The intake is `READY_FOR_ITEMIZATION` — the check-in is finished (or the blind count committed) and reconciliation has passed. **Early itemizing is the one exception (D-D6, [§5.4](#54-early-itemizing-from-the-door-photos-d-d6)):** for a photo-mode intake an order may be made for a parcel that has not been checked in yet, and it waits for its parcel.
 - The responsible hub has an **active zone catalogue** and an approved **service-area base fee**. Where the parcel is outside-Accra, the hub's `outside_accra_margin` must also be set — §33.4 forbids borrowing another hub's value, and pricing at cost would ship the order at zero margin silently. **Set at GH₵30 for Accra**; a new hub starts with none.
 
 ---
@@ -54,7 +56,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 
 ### 5.1 Normal path
 
-1. **Ops itemizes a parcel into an Order**, capturing §23.2 in full: recipient name and phone; delivery address, GhanaPost GPS and resolved zone; size class; declared value, high-value flag and required evidence; electronics flag with serial or IMEI; payer arrangement; service level and requested date; lane; and source linkage.
+1. **Ops itemizes a parcel into an Order** (the parcel is the intake's parcel the order is made for, with its photo beside the form), capturing §23.2 in full: recipient name and phone; delivery address, GhanaPost GPS and resolved zone; size class; declared value, high-value flag and required evidence; electronics flag with serial or IMEI; payer arrangement; service level and requested date; lane; and source linkage.
 2. **The server resolves the destination zone.** §23.3: a free-text address is never authoritative, resolution is server-validated, and pricing is **blocked** until both origin and destination resolve to an active zone or corridor belonging to the responsible hub.
 3. **Ops selects the size class** — `SMALL`, `MEDIUM` or `LARGE`. This is a **judgement, not a calculation**: `MSC-DEC-209` establishes no weight or dimension thresholds, so no server rule can derive it. The selecting officer is recorded on the order and emitted as an enhanced audit event.
 4. **Where the parcel goes outside the service area**, Ops transcribes the third-party carrier's actual charge from their waybill into `carrier_cost`. This is the **only monetary figure a client submits** — an observation with a receipt behind it, not a price.
@@ -74,7 +76,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 8. **The price freezes at itemized-order confirmation** and the commercial gate runs: credit reservation where allowance permits, otherwise `PAYMENT_REQUIRED` (§36.11, `MSC-DEC-176`). **HIGH-10 audit remediation (13 September 2026):** the reservation this step creates is guarded twice against exactly the retry this feature's own §22.8 concurrency rule warns about — *"backend transition and idempotency controls are still required; a visual lock alone is not sufficient."* `itemizeOrder` requires both `Idempotency-Key` and `If-Match`, added because a receiving officer retrying over a flaky hub connection would otherwise have produced two priced `Order`s, and a duplicate credit reservation, for one physical parcel ([openapi.yaml](../../contracts/openapi.yaml)). Underneath that, `Order.commercial_state`'s own machine reserves exposure **exactly once, keyed by a uniqueness constraint on the order** — not by retry semantics — and releases it through a defined `→ REVERSED` transition on formal Return initiation ([state-machines.md](../../contracts/state-machines.md) §8). **What is not yet settled is narrower than "idempotency or rollback"**: the ledger mechanics behind *adjusting* a reservation when a correction changes the amount owed — `OQ-005`, §14 below.
 9. **The intake closes** when every hub-received parcel is accounted for. Closure emits `intake.completed` and generates the vendor-facing order summary (§23.10).
 
-**The order's photo (D-A10, 12 November 2026; Stage 7, `OB-S1-82`).** Where the collection has parcel photos ([pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel)), the officer who itemizes a parcel **chooses the photo of that order from the collection's photos**: **one photo per order**, and the photos no order has taken are shown as unmatched until each is matched or accounted for. The order holds **a reference to the evidence**; the evidence's owner stays the pickup stop and is never re-pointed (domain-model.md §3.6), and the database allows one photo for an order and one order for a photo, for every writer. **The photo follows the order**: the order list, the order page and the delivery rider's stop show it (`OB-S1-85`). The choice is made after the hub's count has committed, so the photos are never in front of the blind count ([hub-intake.md §5.3](hub-intake.md#53-what-this-feature-must-never-do)).
+**The order's photo (D-A10, 12 November 2026; restated on parcels by D-D2 and D-D6, 16 November 2026; Stage 7, `OB-S1-82`).** The photo of an order is **the photo of its parcel**: the rider's door photo ([pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel)) for a parcel that has one, the photo taken at the hub for an extra. The officer no longer chooses a photo from a pool: **the order is made for a parcel, and the parcels no order has taken are shown as unmatched** until each has an order or is accounted for (missing, or accepted by the senior officer). The order holds **a reference to the parcel**, and through it to the evidence; the evidence's owner stays the pickup stop (or the intake, for an extra) and is never re-pointed (domain-model.md §3.6), and the database allows one order for a parcel and one parcel for an order, for every writer. **The photo follows the order**: the order list, the order page and the delivery rider's stop show it (`OB-S1-85`). *The Stage 6 rule that kept the photos out of the receiving side before the count is reversed by D-D1 ([hub-intake.md §5.3](hub-intake.md#53-what-this-feature-must-never-do)); the photos are in front of the officer from the handover on.*
 
 ### 5.2 Exception paths
 
@@ -97,6 +99,8 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 | **`PAYMENT_REQUIRED` order at closure**| **Counts toward parity.** §23.10: it blocks dispatch readiness, it does not justify leaving the intake unclosed| —|
 | Closure without parity| Only by the approved exception, with a substantive reason and appropriate authority (§23.10)| `PARITY_NOT_MET`, `INSUFFICIENT_AUTHORITY`|
 | Unpriced order at closure| Refused| `ORDER_UNPRICED`|
+| **An order for a parcel that is void or already has an order** (D-D6)| Refused: one order for a parcel, held by the database; a `VOID` extra has none. *Provisional: Stage 7 names the rules of the refusal*| `STATE_CONFLICT`|
+| **An awaiting-arrival order frozen, cleared or dispatched before its parcel is checked in** (D-D6)| Refused until the parcel arrives ([§5.4](#54-early-itemizing-from-the-door-photos-d-d6))| `STATE_CONFLICT`|
 
 ### 5.3 What this feature must never do
 
@@ -110,8 +114,30 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 - **Never present the booking estimate as authoritative.** `MSC-DEC-211` reversed §23.6, `MSC-DEC-175` — every booking now shows an indicative estimate. But it assumes `SMALL` and in-area doorstep, and the class is selected *here*. The estimate and the frozen price must both be preserved and visibly distinct.
 - **Never let a locked price change silently.** Post-freeze correction is reasoned maker-checker with full history.
 - **Never let a retried `itemizeOrder` call mint a second reservation for one physical parcel.** `Idempotency-Key` and `If-Match` are both required on the operation, and the commercial machine additionally reserves exposure exactly once per order by uniqueness constraint — belt and braces, because a receiving officer on a flaky hub connection retries by instinct, not by malice (§22.8, HIGH-10 audit remediation).
-- **Never re-point a parcel photo to the order, give an order two photos, or give a photo two orders.** The order references the evidence; the evidence stays the stop's, and the one-to-one rule is the database's, not the screen's (D-A10).
+- **Never re-point a parcel photo to the order, give an order two parcels, or give a parcel two orders.** The order references the parcel; the photo stays the stop's (the intake's, for an extra), and the one-to-one rule is the database's, not the screen's (D-A10, D-D6).
+- **Never freeze, gate or dispatch an order whose parcel has not been checked in.** An early order waits for its parcel; a missing parcel's order stays visible as missing (D-D6).
 - **Never conflate the high-value surcharge with the liability cap.** They answer different questions: the **cap limits what Melarc pays out** on a loss and is company-wide; the **surcharge funds the handling** that makes a loss less likely and is hub-scoped. A parcel can carry the surcharge and still be capped at GH₵300 — that is the design, not a contradiction to be reconciled away.
+
+### 5.4 Early itemizing from the door photos (D-D6)
+
+*Specified by Run D (the Product Owner's decision of 15 and 16 November 2026); built by Stage 7 (S1.36 to S1.40). A reading of mine is marked provisional and listed in [the plan's §11](../../delivery/planning/SLICE-001-IMPLEMENTATION-PLAN.md#11-decisions-recorded).*
+
+- **A package may be made from a door photo before its parcel reaches the hub.** Officers see the rider's photos from the handover on (and on the stop's page before it), and may begin an order for a photographed parcel; for a parcel of a photo-mode intake that has **not been checked in** the order is **awaiting arrival**.
+- **What waits.** An awaiting order exists and can be filled in (§23.2), and its estimate may be shown; **it is not frozen, not cleared by the commercial gate and not dispatch-eligible** until its parcel is checked in. *Provisional:* the freeze that §5.1 step 8 places at itemized-order confirmation is placed, for an early order, at the check-in of its parcel: **checking the parcel in confirms the order** (the freeze, the gate and the order's entry to its commercial machine run then).
+- **Before the intake exists.** A parcel is identified by its id and by its door photo's evidence record. If Stage 7 lets an order begin before the handover has opened the intake, the order refers to the door photo's record, and the parcel rows the handover makes take that order over by it. *Provisional: Stage 7 decides whether this earlier start is built; the parcel table keeps the photo's record unique so that either is possible.*
+- **A parcel that is missing stays visible as such.** An order whose parcel is `MISSING` is shown as missing, with its photo, is never priced, frozen or dispatched, and stays in the list until the case is decided; **what becomes of such an order after a write-off or an accepted count is for Stage 7 to propose to the Product Owner** (`OB-S1-120`).
+- **An extra** recorded at the hub (a parcel with no door photo) is itemized like any other, with the photo taken at the hub; a `VOID` extra has no order.
+- **The intake's `ITEMIZING` begins with the first order for a parcel that has arrived**, not with an awaiting order, and **a senior officer's correction of a count or a check-in ([hub-intake.md §5.8](hub-intake.md#58-a-seniors-correction)) is allowed only before that**.
+- **Parity at close counts the parcels that arrived plus the accepted extras** (§22.7, §23.10): an intake closes when every `ARRIVED` parcel, door or extra, has its order (`PAYMENT_REQUIRED` orders count). Missing parcels are not in the count; an accepted extra is.
+
+### 5.5 What Stage 7 must build
+
+1. **`itemizeOrder` takes the parcel** the order is made for (S1.36), judges its state (an `ARRIVED` parcel, or an `EXPECTED` one of a photo intake as an awaiting order) and gives the order the parcel's photo; one order for a parcel, held by the database.
+2. **The confirmation at check-in** (S1.36 and S1.37): the freeze and the commercial gate run for an early order when its parcel arrives.
+3. **The close counts parcels** (S1.38): the parcels that arrived plus the accepted extras; the vendor's summary stays free of the check-in's internals (AC-46).
+4. **The screens** (S1.40) draw the parcel's photo beside the order form, tag an order *Awaiting arrival* or *Missing*, and show the unmatched parcels.
+
+**Run D builds none of this**, and no itemizing screen, route or placeholder.
 
 ---
 
@@ -121,6 +147,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 |---|---|
 | `Order`| [domain-model.md](../../contracts/domain-model.md) §6.7|
 | `PickupIntake`| [domain-model.md](../../contracts/domain-model.md) §6.6|
+| `IntakeParcel` *(designed, Run D: the parcel an order is made for)*| [domain-model.md](../../contracts/domain-model.md) §6.6a|
 | `ServiceZone`, `ZonePairRate`| [domain-model.md](../../contracts/domain-model.md) §6.8|
 
 Non-obvious: `origin_zone_snapshot` is **inherited from the request**, not resolved per order; `price_components_snapshot` carries each component with its setting key and effective version; `declared_value_minor` drives auto-flagging.
@@ -130,6 +157,7 @@ Non-obvious: `origin_zone_snapshot` is **inherited from the request**, not resol
 | Machine| Home| Transitions this feature drives|
 |---|---|---|
 | `PickupIntake.state`| [state-machines.md](../../contracts/state-machines.md) §7| `READY_FOR_ITEMIZATION → ITEMIZING → CLOSED`; the exception close|
+| `IntakeParcel.state` *(designed)*| [state-machines.md](../../contracts/state-machines.md) §7| Read only: `EXPECTED` ("awaiting arrival"), `ARRIVED`, `MISSING`, `VOID` decide what an order may do ([§5.4](#54-early-itemizing-from-the-door-photos-d-d6))|
 | `Order.commercial_state`| [state-machines.md](../../contracts/state-machines.md) §8| `→ PRICED`; `→ CREDIT_RESERVED` or `PAYMENT_REQUIRED`; reprice; correction|
 
 ## 8. Permissions — *pointer*
@@ -174,7 +202,7 @@ Non-obvious: `origin_zone_snapshot` is **inherited from the request**, not resol
 
 ## 12. API operations — *pointer*
 
-`itemizeOrder`, `closeHubIntake` (its optional body is the approved parity exception), `getOrder`, `requestPayerCorrection` and `approvePayerCorrection` — [openapi.yaml](../../contracts/openapi.yaml). The payer arrangement before the freeze is edited with `amendPickupRequest` ([pickup-request.md](../pickup/pickup-request.md)). `OrderItemize` is `additionalProperties: false`. It carries `carrier_cost` — an observed cost, not a price — and **no price and no destination zone**: a client that could send either could set its own price.
+`itemizeOrder`, `closeHubIntake` (its optional body is the approved parity exception), `getOrder`, `requestPayerCorrection` and `approvePayerCorrection` — [openapi.yaml](../../contracts/openapi.yaml). The payer arrangement before the freeze is edited with `amendPickupRequest` ([pickup-request.md](../pickup/pickup-request.md)). `OrderItemize` is `additionalProperties: false`. It carries `carrier_cost` — an observed cost, not a price — and **no price and no destination zone**: a client that could send either could set its own price. **Stage 7 adds the parcel the order is made for (D-D6)**, a field the build names; the parcel is an identifier and carries no price either.
 
 ---
 
@@ -378,18 +406,33 @@ And an enhanced audit event records the captured cost for reconciliation against
 
 **Governs:** `MSC-DEC-210`, §42.3 · **Surface:** Melarc Ops · **Test level:** API · **Code:** `CARRIER_COST_REQUIRED`
 
-### `AC-SLICE-001-90` — An order's photo is chosen from the collection's photos, one photo per order
+### `AC-SLICE-001-90` — An order's photo is its parcel's photo, one order for a parcel
+
+*Restated on parcels by D-D2 and D-D6 (16 November 2026); it read "chosen from the collection's photos, one photo per order".*
 
 ```text
-Given a collection with three parcel photos and an intake whose hub count has committed,
-When the officer itemizes the first parcel and chooses one of the three photos for the order,
-Then the order references that evidence and the evidence still belongs to the pickup stop,
-And the other two photos are shown as unmatched until they are matched,
-And a photo of another stop cannot be chosen, a second order cannot take the same photo, and the order cannot take a second photo, by any writer,
+Given an intake of three parcels, one for each door photo, whose vendor has been checked in,
+When the officer itemizes the first parcel,
+Then the order references that parcel and shows its door photo, and the evidence still belongs to the pickup stop,
+And the other two parcels are shown as unmatched until they have orders,
+And a parcel of another intake cannot be ordered, a second order cannot be made for the same parcel, and the order cannot take a second parcel, by any writer,
 And the photo is shown with the order in the order list, on the order page and on the delivery rider's stop.
 ```
 
-**Governs:** D-A10, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel) · **Surface:** Melarc Ops · **Test level:** API, database · **Status:** owed by Stage 7 (`OB-S1-82`) and the order screens (`OB-S1-85`); no `Order` table exists yet.
+**Governs:** D-A10, D-D2, D-D6, [pickup-collection.md §5.5](../pickup/pickup-collection.md#55-the-photo-of-every-parcel) · **Surface:** Melarc Ops · **Test level:** API, database · **Status:** owed by Stage 7 (`OB-S1-82`) and the order screens (`OB-S1-85`); no `Order` table exists yet.
+
+### `AC-SLICE-001-104` — A package can be made from a door photo before its parcel is checked in
+
+```text
+Given a photo-mode intake of 12 expected parcels, whose vendor is being checked in,
+When the officer itemizes one parcel from its door photo before it has been checked in,
+Then the order exists as awaiting arrival, with its photo, and is not frozen, not cleared by the commercial gate and not dispatch-eligible,
+And when the parcel is checked in the order is confirmed: its price freezes and the gate runs,
+And if the vendor is finished without that parcel the order stays visible as missing and is never priced or dispatched,
+And parity at close counts the parcels that arrived plus the accepted extras.
+```
+
+**Governs:** D-D6, §22.7, §23.10 · **Surface:** Melarc Ops · **Test level:** API, database · **Status:** specified (Run D); built by Stage 7 (S1.36 to S1.40), whose screens are S1.40's.
 
 ---
 
@@ -408,6 +451,7 @@ And the photo is shown with the order in the order list, on the order page and o
 | Owed| Blocks which DoR area| Owner|
 |---|---|---|
 | Credit-reservation ledger mechanics behind the commercial gate| C, E| `OQ-005`|
+| **Early itemizing from the door photos (D-D6)** — the order made for a parcel, awaiting arrival and confirmed by the check-in; the close counting parcels; what becomes of a missing parcel's order (`OB-S1-120`)| E| Stage 7 (S1.36 to S1.40)|
 
 **All six pricing settings now carry values**, so every criterion touching a figure is exercisable. That was the larger of this feature's two obstacles and it closed on 23 August.
 
@@ -419,13 +463,13 @@ And the photo is shown with the order in the order list, on the order page and o
 
 | Surface| Status| Gap|
 |---|---|---|
-| Melarc Ops| ⚪ not built| Everything|
+| Melarc Ops| ⚪ not built| Everything (Stage 7); the receiving that precedes it is [hub-intake.md](hub-intake.md)'s, and Run D builds no itemizing screen|
 | Melarc Vendor| ⚪ not built| Order summary, payer edit before freeze|
 | Melarc Rider| N/A| —|
 | Recipient channel| N/A| Recipient is captured here but not yet contacted|
 
 ## 17. Related
 
-- **Upstream:** [hub-intake.md](hub-intake.md) — supplies the authoritative received count
+- **Upstream:** [hub-intake.md](hub-intake.md) — supplies the authoritative received count and the parcels an order is made for
 - **Downstream:** dispatch and delivery features — Phase 4
 - **Slice:** `SLICE-001` — this feature closes the proving slice

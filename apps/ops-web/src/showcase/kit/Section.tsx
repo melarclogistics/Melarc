@@ -21,14 +21,20 @@ export function KitSection({
   );
 }
 
-/** One variant or one state, named, in a frame of its own. `width` narrows the frame, to show how the component behaves in a narrow room. */
+/**
+ * One variant or one state, named, in a frame of its own. `width` narrows the frame, to show how the component behaves in a narrow room. `edge` takes the padding from the frame's sides, for a component that is
+ * shown in the room a screen gives it and not in the room that a page framed twice and a frame of its own leave (a grid of photos: 324px at 390px, as in a receiving screen, and not 292px). What is drawn
+ * beside it in the frame keeps its own space (`showcase-kit-specimen__note`).
+ */
 export function Specimen({
   label,
   width,
+  edge = false,
   children,
 }: {
   readonly label: string;
   readonly width?: string;
+  readonly edge?: boolean;
   readonly children: ReactNode;
 }) {
   const captionId = useId();
@@ -41,7 +47,11 @@ export function Specimen({
       <figcaption id={captionId} className="showcase-kit-specimen__label">
         {label}
       </figcaption>
-      <div className="showcase-kit-specimen__body">{children}</div>
+      <div
+        className={`showcase-kit-specimen__body${edge ? ' showcase-kit-specimen__body--edge' : ''}`}
+      >
+        {children}
+      </div>
     </figure>
   );
 }

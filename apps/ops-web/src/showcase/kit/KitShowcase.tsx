@@ -12,6 +12,7 @@ import { ListsGroup } from './ListsGroup';
 import { MenusGroup } from './MenusGroup';
 import { OverlaysGroup } from './OverlaysGroup';
 import { PanelsGroup } from './PanelsGroup';
+import { PhotosGroup } from './PhotosGroup';
 import { StatesGroup } from './StatesGroup';
 import {
   BuilderExample,
@@ -45,7 +46,8 @@ export const KIT_GROUPS: readonly Group[] = [
   {
     id: 'panels',
     title: 'Panels and records',
-    summary: 'SidePanel, RecordHeader with StageTracker, DescriptionList, Panel and StatTile',
+    summary:
+      'SidePanel, RecordHeader with StageTracker, DescriptionList, Panel, StatTile and LockIndicator',
     page: () => <PanelsGroup />,
   },
   {
@@ -54,7 +56,12 @@ export const KIT_GROUPS: readonly Group[] = [
     summary: 'ActionMenu and Toast',
     page: () => <MenusGroup />,
   },
-  { id: 'forms', title: 'Forms', summary: 'DateField', page: () => <FormsGroup /> },
+  {
+    id: 'forms',
+    title: 'Forms',
+    summary: 'DateField and EvidenceUpload',
+    page: () => <FormsGroup />,
+  },
   { id: 'lists', title: 'Lists', summary: 'ReorderList', page: () => <ListsGroup /> },
   {
     id: 'badges',
@@ -73,6 +80,13 @@ export const KIT_GROUPS: readonly Group[] = [
     title: 'Tooltips, popovers and dialogs',
     summary: 'Tooltip, Popover and Dialog',
     page: () => <OverlaysGroup />,
+  },
+  {
+    id: 'photos',
+    title: 'Photos and the hub floor',
+    summary:
+      'PhotoGrid, PhotoViewer, the photo mode of EvidenceUpload, ConnectionBanner and the sizes of the hub floor',
+    page: () => <PhotosGroup />,
   },
   {
     id: 'example-queue',

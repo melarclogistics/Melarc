@@ -10,6 +10,9 @@ import {
   AGGREGATE_JOB,
   BROWSERS,
   DATABASE_SHARD_VARIABLE,
+  DISPLAY_INSTALL,
+  DISPLAY_WRAPPER,
+  HEADED_VARIABLE,
   PLAN_JOB,
   UNPLANNED_JOBS,
   stepLimitFor,
@@ -111,6 +114,19 @@ const MANIFEST_SCRIPT =
 const CLEAN_SCRIPT = 'node scripts/ci-revision.ts clean';
 const BROWSER_TESTS = 'pnpm run test:browser';
 const HTTPS_TESTS = 'pnpm run test:e2e:https';
+/** The test step of a job that holds WebKit's runs runs under the virtual display (D-B4): the one prefix a mandatory command may have. */
+const underDisplay = (command: string): string => `${DISPLAY_WRAPPER}${command}`;
+/** The command a step runs, less that prefix: the steps these tests look for and take away are found by the command, wrapped or not. */
+const commandOf = (step: Json): unknown =>
+  typeof step.run === 'string' && step.run.startsWith(DISPLAY_WRAPPER)
+    ? step.run.slice(DISPLAY_WRAPPER.length)
+    : step.run;
+/**
+ * What the step of a job's tests keeps beside the variables a test sets on it: the value that turns WebKit headed, in a job that holds WebKit's runs (the Firefox and WebKit shards, the
+ * HTTPS journeys; D-B4). A test that proves what the shard variables must be replaces the step's whole `env`, and the step must stay one the display rule accepts.
+ */
+const headedEnv = (jobId: string): Json =>
+  jobId === 'browser-firefox-webkit' || jobId === 'https' ? { [HEADED_VARIABLE]: '1' } : {};
 /** The commands that one step runs: the browser tests are run by two jobs (the Chromium shards, and the Firefox and WebKit shards). */
 const SINGLE_STEP_COMMANDS = REQUIRED_COMMANDS.filter((command) => command !== BROWSER_TESTS);
 /** A job of the HTTPS matrix installs the browsers its entry's runs need (e2e/harness/https-shards.ts), whatever they are. */
@@ -221,15 +237,25 @@ function planJob(): Json {
   };
 }
 
-/** A job of a browser matrix: its engine installed, its shard run, its own diagnostics. */
+/**
+ * A job of a browser matrix: its engine installed, its shard run, its own diagnostics. A job that holds WebKit's shards also has the display installed and runs the
+ * tests under it, with the one value that turns WebKit headed (D-B4).
+ */
 function browserJob(entries: Json[]): Json {
+  const webkit = entries.some((entry) => entry.engine === 'webkit');
   return {
     ...job([
       cacheOf(MATRIX_ENGINE),
       run(INSTALL_ENGINE),
+      ...(webkit ? [run(DISPLAY_INSTALL)] : []),
       {
         ...run(BROWSER_TESTS),
-        env: { MELARC_BROWSERS: MATRIX_ENGINE, MELARC_BROWSER_SHARD: MATRIX_SHARD },
+        ...(webkit ? { run: underDisplay(BROWSER_TESTS) } : {}),
+        env: {
+          MELARC_BROWSERS: MATRIX_ENGINE,
+          MELARC_BROWSER_SHARD: MATRIX_SHARD,
+          ...(webkit ? { [HEADED_VARIABLE]: '1' } : {}),
+        },
       },
       SHARD_DIAGNOSTICS,
     ]),
@@ -289,7 +315,12 @@ function goodShared(): Json {
           cacheOf(MATRIX_BROWSERS),
           run(INSTALL_BROWSERS),
           run('sudo apt-get install --no-install-recommends --yes libnss3-tools'),
-          { ...run(HTTPS_TESTS), env: { MELARC_HTTPS_SHARD: MATRIX_SHARD } },
+          run(DISPLAY_INSTALL),
+          {
+            ...run(HTTPS_TESTS),
+            run: underDisplay(HTTPS_TESTS),
+            env: { MELARC_HTTPS_SHARD: MATRIX_SHARD, [HEADED_VARIABLE]: '1' },
+          },
           HTTPS_DIAGNOSTICS,
         ]),
         strategy: { 'fail-fast': false, matrix: { include: HTTPS_ENTRIES } },
@@ -365,7 +396,7 @@ function stepNamed(target: Json, name: string): Json {
 }
 
 function stepRunning(target: Json, script: string): Json {
-  const step = stepsOf(target).find((candidate) => candidate.run === script);
+  const step = stepsOf(target).find((candidate) => commandOf(candidate) === script);
   assert.ok(step !== undefined, `the job has no step that runs ${script}`);
   return step;
 }
@@ -387,7 +418,7 @@ const allJobs = (jobs: Jobs): Json[] => [
 /** The one step, in whichever job, whose whole script is `script`. */
 function runningStep(jobs: Jobs, script: string): Json {
   const found = allJobs(jobs).flatMap((target) =>
-    stepsOf(target).filter((step) => step.run === script),
+    stepsOf(target).filter((step) => commandOf(step) === script),
   );
   assert.equal(
     found.length,
@@ -401,7 +432,7 @@ function runningStep(jobs: Jobs, script: string): Json {
 
 /** The steps of a job without those that run `script`. */
 function withoutScript(target: Json, script: string): Json[] {
-  return stepsOf(target).filter((step) => step.run !== script);
+  return stepsOf(target).filter((step) => commandOf(step) !== script);
 }
 
 describe('a consistent workflow', () => {
@@ -1141,6 +1172,141 @@ describe('the browser tests, which two jobs run', () => {
   }
 });
 
+// WebKit is launched headed under a virtual display in CI (the Product Owner's decision D-B4, 13 November 2026): the test steps of the jobs that hold WebKit's runs (the Firefox and WebKit shards
+// of the browser tests, and the HTTPS journeys) are `xvfb-run ... <command>`, with the display installed before them and the one value that both Playwright configurations read set on them.
+// A pipeline that dropped the wrapper, the value or the install would stay green while WebKit ran headless again (the stall the decision meets) or failed to open a window for want of a
+// display; the same wrapper on a job that holds no WebKit would only hide where the display is wanted. The wrapper is the one prefix a mandatory command may have: `xvfb-run` returns the
+// status of what it runs, so it hides no failure.
+describe('WebKit under a virtual display', () => {
+  const codesOf = (change: (jobs: Jobs) => void): string[] =>
+    codesWith((_, jobs) => {
+      change(jobs);
+    });
+  /** The jobs that hold WebKit's runs, and the command each runs. */
+  const WEBKIT_JOBS = [
+    [OTHER_ENGINES, BROWSER_TESTS],
+    ['https', HTTPS_TESTS],
+  ] as const;
+  const jobOf = (jobs: Jobs, id: (typeof WEBKIT_JOBS)[number][0]): Json =>
+    id === 'https' ? jobs.https : jobs[OTHER_ENGINES];
+
+  it('is accepted as the fixture has it: the two jobs that hold WebKit run under the display, and the Chromium shards do not', () => {
+    const jobs = good().jobs as Jobs;
+    for (const [id, command] of WEBKIT_JOBS) {
+      const step = stepRunning(jobOf(jobs, id), command);
+      assert.equal(step.run, underDisplay(command), id);
+      assert.equal((step.env as Json)[HEADED_VARIABLE], '1', id);
+    }
+    const chromium = stepRunning(jobs['browser-chromium'], BROWSER_TESTS);
+    assert.equal(chromium.run, BROWSER_TESTS);
+    assert.equal(HEADED_VARIABLE in (chromium.env as Json), false);
+    assert.deepEqual(findWorkflowProblems(stringify(good())), []);
+  });
+
+  for (const [id, command] of WEBKIT_JOBS) {
+    // Break caught: WebKit's tests run without the display: headless again (the stall of the hosted runs), or headed with no display to open a window on.
+    it(`rejects the test step of ${id} without the wrapper`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          stepRunning(jobOf(jobs, id), command).run = command;
+        }),
+        ['DISPLAY_DRIFT'],
+      );
+    });
+
+    // Break caught: the value that turns WebKit headed not set, empty or set to another value: both configurations launch WebKit headless, under a display that nobody uses.
+    for (const value of [undefined, '', '0', 'true']) {
+      it(`rejects the step of ${id} when ${HEADED_VARIABLE} is ${JSON.stringify(value)}`, () => {
+        assert.deepEqual(
+          codesOf((jobs) => {
+            const env = stepRunning(jobOf(jobs, id), command).env as Json;
+            if (value === undefined) Reflect.deleteProperty(env, HEADED_VARIABLE);
+            else env[HEADED_VARIABLE] = value;
+          }),
+          ['DISPLAY_DRIFT'],
+        );
+      });
+    }
+
+    // Break caught: no install of the display (the runner image carries Xvfb today and another image may not; `xvfb-run` also needs `xauth`, which `--no-install-recommends` leaves out),
+    // or one that comes after the tests.
+    it(`rejects ${id} without the install of the display before the tests`, () => {
+      assert.deepEqual(
+        codesOf((jobs) => {
+          jobOf(jobs, id).steps = withoutScript(jobOf(jobs, id), DISPLAY_INSTALL);
+        }),
+        ['DISPLAY_DRIFT'],
+      );
+      assert.deepEqual(
+        codesOf((jobs) => {
+          const steps = stepsOf(jobOf(jobs, id));
+          const [install] = steps.splice(
+            steps.findIndex((step) => step.run === DISPLAY_INSTALL),
+            1,
+          );
+          assert.ok(install !== undefined);
+          steps.splice(steps.findIndex((step) => commandOf(step) === command) + 1, 0, install);
+        }),
+        ['DISPLAY_DRIFT'],
+      );
+    });
+
+    // Break caught: another wrapper (another way to start the display, a screen of 640 by 480 and 8 bits that the viewports do not fit, no automatic server number, a space more), which the
+    // guard no longer reads as the command it wraps: the step would then be held to none of the rules of the browser tests.
+    for (const wrapper of [
+      'xvfb-run -a ',
+      'xvfb-run --auto-servernum ',
+      'xvfb-run --auto-servernum --server-args="-screen 0 640x480x8" ',
+      DISPLAY_WRAPPER.replace('xvfb-run ', 'xvfb-run  '),
+    ]) {
+      it(`rejects ${JSON.stringify(wrapper)} on the test step of ${id}`, () => {
+        const found = codesOf((jobs) => {
+          stepRunning(jobOf(jobs, id), command).run = `${wrapper}${command}`;
+        });
+        assert.ok(found.includes('DISPLAY_DRIFT'), found.join(', '));
+        // And the step is not read as the command it wraps: the job no longer runs the tests, which the rules about the command and about the engines of the run report.
+        assert.ok(
+          found.includes(id === 'https' ? 'COMMAND_MISSING' : 'BROWSER_ENGINES_DRIFT'),
+          found.join(', '),
+        );
+      });
+    }
+  }
+
+  // Break caught: the display on the Chromium shards, or the value on them, which would hide where the display is wanted: only a job that holds WebKit's runs has either.
+  it('rejects the wrapper and the value on the Chromium shards', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        stepRunning(jobs['browser-chromium'], BROWSER_TESTS).run = underDisplay(BROWSER_TESTS);
+      }),
+      ['DISPLAY_DRIFT'],
+    );
+    assert.deepEqual(
+      codesOf((jobs) => {
+        (stepRunning(jobs['browser-chromium'], BROWSER_TESTS).env as Json)[HEADED_VARIABLE] = '1';
+      }),
+      ['DISPLAY_DRIFT'],
+    );
+  });
+
+  // Break caught: the wrapper spread to a command that is no test of the browsers, or `xvfb-run` written in a script of its own, where it would change what a mandatory command runs under.
+  it('rejects the wrapper on any other command, and xvfb-run anywhere else', () => {
+    assert.deepEqual(
+      codesOf((jobs) => {
+        stepRunning(jobs.static, 'pnpm run format:check').run =
+          underDisplay('pnpm run format:check');
+      }),
+      ['DISPLAY_DRIFT'],
+    );
+    assert.deepEqual(
+      codesOf((jobs) => {
+        stepsOf(jobs.unit).push({ name: 'A display', run: 'xvfb-run --auto-servernum true' });
+      }),
+      ['DISPLAY_DRIFT'],
+    );
+  });
+});
+
 describe('the browser matrix', () => {
   const codesOf = (change: (jobs: Jobs) => void): string[] =>
     codesWith((_, jobs) => {
@@ -1188,6 +1354,7 @@ describe('the browser matrix', () => {
           codesOf((jobs) => {
             browserStep(jobs, id).env = {
               MELARC_BROWSER_SHARD: MATRIX_SHARD,
+              ...headedEnv(id),
               ...(value === undefined ? {} : { MELARC_BROWSERS: value }),
             };
           }),
@@ -1213,6 +1380,7 @@ describe('the browser matrix', () => {
           codesOf((jobs) => {
             browserStep(jobs, id).env = {
               MELARC_BROWSERS: MATRIX_ENGINE,
+              ...headedEnv(id),
               ...(value === undefined ? {} : { MELARC_BROWSER_SHARD: value }),
             };
           }),
@@ -1224,7 +1392,7 @@ describe('the browser matrix', () => {
     it(`requires both variables on the step of ${id} itself, not only on the job`, () => {
       assert.deepEqual(
         codesOf((jobs) => {
-          Reflect.deleteProperty(browserStep(jobs, id), 'env');
+          browserStep(jobs, id).env = { ...headedEnv(id) };
           jobs[id].env = { MELARC_BROWSERS: MATRIX_ENGINE, MELARC_BROWSER_SHARD: MATRIX_SHARD };
         }).toSorted(),
         ['BROWSER_MATRIX_ENV', 'BROWSER_SHARD_ENV'],
@@ -1238,6 +1406,7 @@ describe('the browser matrix', () => {
             CI: 'true',
             MELARC_BROWSERS: MATRIX_ENGINE,
             MELARC_BROWSER_SHARD: MATRIX_SHARD,
+            ...headedEnv(id),
           };
         }),
         [],
@@ -1312,7 +1481,11 @@ describe('the browser matrix', () => {
             1,
           );
           assert.ok(install !== undefined);
-          steps.splice(steps.findIndex((step) => step.run === BROWSER_TESTS) + 1, 0, install);
+          steps.splice(
+            steps.findIndex((step) => commandOf(step) === BROWSER_TESTS) + 1,
+            0,
+            install,
+          );
         }),
         ['BROWSER_INSTALL_DRIFT'],
       );
@@ -1697,6 +1870,12 @@ describe('what each kind of run runs of the browser tests', () => {
         matrixOf(jobs, OTHER_ENGINES).include = entriesOf(jobs, OTHER_ENGINES).filter(
           (entry) => entry.engine !== engine,
         );
+        // A job with no WebKit shard has no virtual display either (D-B4, the display rule): taking WebKit out takes the display with it, so that the engines are all this reports.
+        if (engine === 'webkit') {
+          const step = stepRunning(jobs[OTHER_ENGINES], BROWSER_TESTS);
+          step.run = BROWSER_TESTS;
+          Reflect.deleteProperty(step.env as Json, HEADED_VARIABLE);
+        }
       });
       assert.deepEqual(
         problems.map((problem) => problem.code),
@@ -1770,8 +1949,10 @@ describe('the HTTPS journeys', () => {
     it(`requires MELARC_HTTPS_SHARD to be ${MATRIX_SHARD}, not ${JSON.stringify(value)}`, () => {
       assert.deepEqual(
         codesOf((jobs) => {
-          if (value === undefined) Reflect.deleteProperty(httpsStep(jobs), 'env');
-          else httpsStep(jobs).env = { MELARC_HTTPS_SHARD: value };
+          httpsStep(jobs).env = {
+            ...headedEnv('https'),
+            ...(value === undefined ? {} : { MELARC_HTTPS_SHARD: value }),
+          };
         }),
         ['HTTPS_SHARD_ENV'],
       );
@@ -1781,13 +1962,17 @@ describe('the HTTPS journeys', () => {
   it('accepts other variables beside the shard, and requires it on the step itself', () => {
     assert.deepEqual(
       codesOf((jobs) => {
-        httpsStep(jobs).env = { CI: 'true', MELARC_HTTPS_SHARD: MATRIX_SHARD };
+        httpsStep(jobs).env = {
+          CI: 'true',
+          MELARC_HTTPS_SHARD: MATRIX_SHARD,
+          ...headedEnv('https'),
+        };
       }),
       [],
     );
     assert.deepEqual(
       codesOf((jobs) => {
-        Reflect.deleteProperty(httpsStep(jobs), 'env');
+        httpsStep(jobs).env = { ...headedEnv('https') };
         jobs.https.env = { MELARC_HTTPS_SHARD: MATRIX_SHARD };
       }),
       ['HTTPS_SHARD_ENV'],
@@ -1853,7 +2038,7 @@ describe('the HTTPS journeys', () => {
           1,
         );
         assert.ok(install !== undefined);
-        steps.splice(steps.findIndex((step) => step.run === HTTPS_TESTS) + 1, 0, install);
+        steps.splice(steps.findIndex((step) => commandOf(step) === HTTPS_TESTS) + 1, 0, install);
       }),
       ['BROWSER_INSTALL_DRIFT'],
     );
@@ -2873,13 +3058,16 @@ describe('the timeout of a test step', () => {
   const timed = (jobs: Jobs): { id: string; step: Json; limit: number }[] =>
     Object.entries(jobs as unknown as Record<string, Json>).flatMap(([id, target]) =>
       stepsOf(target)
-        .filter((step) => typeof step.run === 'string' && TIMED_COMMANDS.includes(step.run))
+        .filter((step) => {
+          const command = commandOf(step);
+          return typeof command === 'string' && TIMED_COMMANDS.includes(command);
+        })
         .map((step) => ({ id, step, limit: Number(target['timeout-minutes']) })),
     );
 
   it('is held by every command that runs tests, and by the ones the fixture has', () => {
     const jobs = good().jobs as Jobs;
-    const commands = new Set(timed(jobs).map(({ step }) => step.run));
+    const commands = new Set(timed(jobs).map(({ step }) => commandOf(step)));
     assert.deepEqual([...commands].toSorted(), [...TIMED_COMMANDS].toSorted());
     assert.ok(
       timed(jobs).every(({ step, limit }) => step['timeout-minutes'] === stepLimitFor(limit)),
@@ -2903,7 +3091,7 @@ describe('the timeout of a test step', () => {
     ] as const) {
       it(`rejects ${label} on the step that runs ${command}`, () => {
         const found = codesWith((_, jobs) => {
-          const holders = timed(jobs).filter(({ step }) => step.run === command);
+          const holders = timed(jobs).filter(({ step }) => commandOf(step) === command);
           assert.ok(holders.length > 0, command);
           for (const { step } of holders) {
             if (value === undefined) Reflect.deleteProperty(step, 'timeout-minutes');
@@ -2921,7 +3109,9 @@ describe('the timeout of a test step', () => {
       for (const value of [1, stepLimitFor(10)]) {
         assert.deepEqual(
           codesWith((_, jobs) => {
-            for (const { step } of timed(jobs).filter((holder) => holder.step.run === command)) {
+            for (const { step } of timed(jobs).filter(
+              (holder) => commandOf(holder.step) === command,
+            )) {
               step['timeout-minutes'] = value;
             }
           }),
@@ -2936,7 +3126,7 @@ describe('the timeout of a test step', () => {
     assert.deepEqual(
       codesWith((_, jobs) => {
         for (const { step } of timed(jobs).filter(
-          (holder) => holder.step.run === 'pnpm run test',
+          (holder) => commandOf(holder.step) === 'pnpm run test',
         )) {
           step['timeout-minutes'] = stepLimitFor(20);
         }

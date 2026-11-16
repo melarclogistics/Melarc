@@ -13,7 +13,7 @@ import { normalisePhone } from './normalise-phone.js';
 export const LOOKUP_MIN_LENGTH = 2;
 export const LOOKUP_MAX_LENGTH = 64;
 
-/** `HUB-TT-XXXXXX`: three letters, two letters (the record type) and six letters or digits (operational-code.ts); case does not matter. */
+/** `HUB-TT-XXXXXX`: three letters, two letters (the record type) and six letters or digits (platform/records/operational-code.ts); case does not matter. */
 const OPERATIONAL_CODE = /^([A-Za-z]{3})-([A-Za-z]{2})-([A-Za-z0-9]{6})$/;
 
 /** The query the text is, or `undefined` when it is not a text of 2 to 64 characters once trimmed, or holds a NUL (`VALIDATION_FAILED` naming `q`). */

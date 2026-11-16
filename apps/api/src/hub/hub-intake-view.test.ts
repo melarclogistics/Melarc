@@ -1,0 +1,162 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  hubIntakePreCountOf,
+  hubIntakeViewOf,
+  intakeFindingOf,
+  type AfterCount,
+  type HubIntakeRow,
+} from './hub-intake-view.js';
+
+const ROW: HubIntakeRow = {
+  id: '5eed0900-0000-4000-8000-000000000001',
+  code: 'ACC-IN-7K3M9Q',
+  responsible_hub_id: '5eed0100-0000-4000-8000-000000000001',
+  pickup_request_id: '5eed0200-0000-4000-8000-000000000001',
+  pickup_manifest_id: '5eed0700-0000-4000-8000-000000000001',
+  handed_over_by: '5eed0a00-0000-4000-8000-000000000001',
+  handed_over_at: new Date('2026-11-14T10:00:00.000Z'),
+  declaration_captured_at: new Date('2026-11-14T09:58:00.000Z'),
+  state: 'AWAITING_COUNT',
+  active_receiver_id: null,
+  lock_acquired_at: null,
+  physical_count: null,
+  count_variance: null,
+  count_difference: null,
+  condition: 'OK',
+  version: 1,
+};
+
+/** What the database answers for an intake that has been counted: the declaration, and no photo. */
+const AFTER: AfterCount = { declared: 5, photoIds: [] };
+
+const COUNTED: HubIntakeRow = {
+  ...ROW,
+  state: 'COUNTED',
+  physical_count: 3,
+  count_variance: 'SHORT',
+  count_difference: -2,
+};
+
+describe('the representation of an intake before its count (AC-SLICE-001-37)', () => {
+  // Break caught: a view built by spreading the row, so that a column the row happens to carry (the declaration, what the form was pre-filled with: a `select *`, a join, a column added to a list)
+  // is in the answer. Whatever else the row carries, the pre-count view has the members of the contract's shape and no other.
+  it('has the members of HubIntakePreCount and no other, whatever else the row carries', () => {
+    const leaky = { ...ROW, rider_declared_count: 9, prefilled_count: 9, storage_ref: 'x' };
+    const view = hubIntakeViewOf(leaky, undefined);
+    expect(Object.keys(view).toSorted()).toEqual([
+      'active_receiver_id',
+      'code',
+      'count_phase',
+      'declaration_captured_at',
+      'handed_over_at',
+      'handed_over_by',
+      'hub_id',
+      'id',
+      'lock_acquired_at',
+      'pickup_manifest_id',
+      'pickup_request_id',
+      'state',
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(/declared|prefilled|storage_ref/);
+    expect(view.count_phase).toBe('PRE_COUNT');
+  });
+
+  // Break caught: a declaration handed to the builder for an intake that has not been counted (a caller that looked it up anyway) reaching the answer.
+  it('ignores a declaration it is given for an intake that has not been counted', () => {
+    const view = hubIntakeViewOf(ROW, AFTER);
+    expect(JSON.stringify(view)).not.toMatch(/declared/);
+    expect(view.count_phase).toBe('PRE_COUNT');
+  });
+
+  // Break caught: the two moments told wrong (the receipt for the device's moment), the hub under the table's column name, or the lock shown as a string that is not a moment.
+  it('names the hub as the contract does and gives every moment as an instant', () => {
+    const view = hubIntakePreCountOf({
+      ...ROW,
+      active_receiver_id: '5eed0b00-0000-4000-8000-000000000001',
+      lock_acquired_at: new Date('2026-11-14T10:05:00.000Z'),
+    });
+    expect(view).toMatchObject({
+      hub_id: ROW.responsible_hub_id,
+      handed_over_at: '2026-11-14T10:00:00.000Z',
+      declaration_captured_at: '2026-11-14T09:58:00.000Z',
+      active_receiver_id: '5eed0b00-0000-4000-8000-000000000001',
+      lock_acquired_at: '2026-11-14T10:05:00.000Z',
+    });
+  });
+});
+
+describe('the representation of an intake once its count is committed', () => {
+  // Break caught: a counted intake still answered as the pre-count shape (the comparison could never be shown), the declaration left out, or a number other than the one the database answered.
+  it('is HubIntakePostCount: the declaration beside the count, the comparison and the condition', () => {
+    const view = hubIntakeViewOf(COUNTED, AFTER);
+    expect(view).toMatchObject({
+      count_phase: 'POST_COUNT',
+      state: 'COUNTED',
+      rider_declared_count: 5,
+      physical_count: 3,
+      count_variance: 'SHORT',
+      count_difference: -2,
+      condition: 'OK',
+    });
+    expect(Object.keys(view)).not.toContain('prefilled_count');
+  });
+
+  // Break caught: a counted intake answered without the declaration or without its comparison as if that were a view (a silent pre-count shape, or a post-count one with holes): it is a fault.
+  it('is a fault, and no answer, when the declaration or the comparison is missing', () => {
+    expect(() => hubIntakeViewOf(COUNTED, undefined)).toThrow(/declaration/);
+    expect(() => hubIntakeViewOf({ ...COUNTED, count_difference: null }, AFTER)).toThrow();
+    expect(() => hubIntakeViewOf({ ...COUNTED, count_variance: null }, AFTER)).toThrow();
+    expect(() => hubIntakeViewOf({ ...COUNTED, count_variance: 'MORE' }, AFTER)).toThrow();
+  });
+
+  // Break caught: the photos of the parcels counted at the door left out of a counted intake that has them (the receiver could not compare them), or an empty list given for a stop that was let
+  // through without photos (a member that says none where the contract says nothing), or the list reordered (the order they were attached in is the order the receiver is shown).
+  it('carries the photos of the parcels, in their order, when there are any, and no member when there are none', () => {
+    const photos = ['5eed0b00-0000-4000-8000-000000000002', '5eed0b00-0000-4000-8000-000000000001'];
+    const withPhotos = hubIntakeViewOf(COUNTED, { declared: 5, photoIds: photos });
+    expect(withPhotos).toMatchObject({ parcel_photo_ids: photos });
+    expect(Object.keys(hubIntakeViewOf(COUNTED, AFTER))).not.toContain('parcel_photo_ids');
+  });
+
+  // Break caught: the findings made after the count left out of a counted intake that has them (the receiver and Senior Ops could not see what was found), a member that says none where the contract says
+  // nothing, the findings reordered (the order they were made in is the order they are read in), or a finding that carries more than the contract's members.
+  it('carries the findings, in the order they were made, when there are any, and no member when there are none', () => {
+    const findings = [
+      {
+        id: '5eed0c00-0000-4000-8000-000000000001',
+        kind: 'CONDITION',
+        condition: 'DAMAGED',
+        outcome: null,
+        note: 'Crushed',
+        evidence_ids: ['5eed0b00-0000-4000-8000-000000000001'],
+        recorded_by: '5eed0d00-0000-4000-8000-000000000001',
+        recorded_at: '2026-11-14T11:00:00.000Z',
+      },
+      {
+        id: '5eed0c00-0000-4000-8000-000000000002',
+        kind: 'ADJUDICATION',
+        condition: null,
+        outcome: 'ACCEPTED',
+        note: 'Accepted',
+        evidence_ids: [],
+        recorded_by: '5eed0d00-0000-4000-8000-000000000002',
+        recorded_at: '2026-11-14T11:30:00.000Z',
+      },
+    ];
+    const view = hubIntakeViewOf(COUNTED, { declared: 5, photoIds: [], findings });
+    expect(view).toMatchObject({ condition_findings: findings });
+    expect(Object.keys(hubIntakeViewOf(COUNTED, AFTER))).not.toContain('condition_findings');
+    expect(Object.keys(hubIntakeViewOf(COUNTED, { ...AFTER, findings: [] }))).not.toContain(
+      'condition_findings',
+    );
+    // A finding as the database holds it becomes the contract's member, and no more of the row.
+    expect(
+      intakeFindingOf({
+        ...findings[0],
+        pickup_intake_id: COUNTED.id,
+        recorded_at: new Date('2026-11-14T11:00:00.000Z'),
+      } as never),
+    ).toEqual(findings[0]);
+  });
+});

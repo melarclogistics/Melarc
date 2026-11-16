@@ -1,12 +1,21 @@
 import type { ReactElement } from 'react';
-import type { RouteObject } from 'react-router';
+import { Navigate, type RouteObject } from 'react-router';
 
 import { RequirePermission } from '../../platform/session/RequirePermission';
+import { BlindCountPage } from '../pages/receiving/BlindCountPage';
+import { ConditionRedirect } from '../pages/receiving/ConditionRedirect';
+import { DecisionPage } from '../pages/receiving/DecisionPage';
+import { IntakeRecordPage } from '../pages/receiving/IntakeRecordPage';
+import { MissingParcelsPage } from '../pages/receiving/MissingParcelsPage';
+import { ReceivingQueuePage } from '../pages/receiving/ReceivingQueuePage';
+import { ReceivingRunPage } from '../pages/receiving/ReceivingRunPage';
 import { MyWorkPage } from '../pages/my-work/MyWorkPage';
 import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
 import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
 import { ManifestDetailPage } from '../pages/manifests/ManifestDetailPage';
 import { ManifestListPage } from '../pages/manifests/ManifestListPage';
+import { StopExceptionPage } from '../pages/manifests/StopExceptionPage';
+import { StopPage } from '../pages/manifests/StopPage';
 import { StopSkipPage } from '../pages/manifests/StopSkipPage';
 import { MessageLogPage } from '../pages/messages/MessageLogPage';
 import { ApprovalsPage } from '../pages/pickup/ApprovalsPage';
@@ -14,6 +23,10 @@ import { PickupExceptionPage } from '../pages/pickup/PickupExceptionPage';
 import { PickupRequestCreatePage } from '../pages/pickup/PickupRequestCreatePage';
 import { PickupRequestDetailPage } from '../pages/pickup/PickupRequestDetailPage';
 import { PickupRequestListPage } from '../pages/pickup/PickupRequestListPage';
+import { DisputesPage } from '../pages/pickup-work/DisputesPage';
+import { FailedPickupsPage } from '../pages/pickup-work/FailedPickupsPage';
+import { HandshakesPage } from '../pages/pickup-work/HandshakesPage';
+import { ShortfallsPage } from '../pages/pickup-work/ShortfallsPage';
 import { SessionsPage } from '../pages/staff/SessionsPage';
 import { StaffCreatePage } from '../pages/staff/StaffCreatePage';
 import { StaffDetailPage } from '../pages/staff/StaffDetailPage';
@@ -113,6 +126,96 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       description: 'Approve the single-package pickups waiting for a one-package exception.',
     },
   },
+  // The handshakes that need Ops (S1.30), in the Today group beside Decisions: what waits on a decision the session may give. Behind the key of the list's own operation, `pickup.handshake.override`, and
+  // never a role; resolving by hand is the act of a second key, offered inside. It draws no count: `getQueueSummary` states none for it.
+  {
+    path: '/handshakes',
+    element: <HandshakesPage />,
+    access: { permission: 'pickup.handshake.override' },
+    menu: {
+      place: 'sidebar',
+      group: 'today',
+      label: 'Handshakes',
+      icon: 'handshakes',
+      order: 2,
+      description:
+        'Settle the handshakes whose code could not be entered, by an override or by hand.',
+    },
+  },
+  // Receiving at a hub (S1.35c; D-D2): the queue BY RUN, and, from the intakes' side, one vendor's record, the blind count, the condition and the decision. Each is behind the key of the operation that is its
+  // point, and never a role: the queue and the records open for the read, the count for the key of the count, the decision for the read (its page tells an officer without the key Ops Staff do not hold that a senior officer decides). The queue is the first entry, in the
+  // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING` (the runs that wait, never vendors). `/intakes` was the queue of S1.35 and is a
+  // redirect now, so that a link made before it goes to the queue by run. Itemising and closing are later work and have no route.
+  {
+    path: '/receiving',
+    element: <ReceivingQueuePage />,
+    access: { permission: 'hub.read' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Receiving',
+      icon: 'receiving',
+      order: 0,
+      queue: 'HUB_RECEIVING_RUNS_WAITING',
+      description:
+        'Check in the parcels a rider handed over at your hub, run by run, and decide what is found.',
+    },
+  },
+  {
+    path: '/receiving/:manifestId',
+    element: <ReceivingRunPage />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  // The parcels that were not on the table when a vendor was checked in, and are being looked for: the list *Missing — being searched for* (D-D4), read with the same key as the queue. Its count is the queue
+  // summary's `HUB_MISSING_PARCELS_SEARCHING` (the parcels of a case that is open, never vendors).
+  {
+    path: '/missing-parcels',
+    element: <MissingParcelsPage />,
+    access: { permission: 'hub.read' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Missing parcels',
+      icon: 'missing-parcels',
+      order: 1,
+      queue: 'HUB_MISSING_PARCELS_SEARCHING',
+      description:
+        'Look for the parcels that were not on the table when a vendor was checked in, and check one in when it turns up.',
+    },
+  },
+  {
+    path: '/intakes',
+    element: <Navigate to="/receiving" replace />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id',
+    element: <IntakeRecordPage />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/count',
+    element: <BlindCountPage />,
+    access: { permission: 'hub.intake.count' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/condition',
+    element: <ConditionRedirect />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/discrepancy',
+    element: <DecisionPage />,
+    // The route admits the read: an officer without the decision is told by the page that a senior officer decides (the generic refusal would send them to an administrator for what an administrator does not
+    // decide), and the API checks the key again on the act.
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
   // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
   // `notification.read`, and never a role. It is reached from the menu and, for one request, from that request's page.
   {
@@ -164,6 +267,60 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     path: '/manifests/:id',
     element: <ManifestDetailPage />,
     access: { permission: 'pickup.read', capability: 'see pickup runs' },
+    menu: null,
+  },
+  // The failed pickups and the collections that came to a short count or a dispute (S1.30): three work lists of the Pickups group, each behind the key of its own operation. None draws a count:
+  // `getQueueSummary` states none for them.
+  {
+    path: '/pickup-failures',
+    element: <FailedPickupsPage />,
+    access: { permission: 'pickup.failure.resolve' },
+    menu: {
+      place: 'sidebar',
+      group: 'pickups',
+      label: 'Failed pickups',
+      icon: 'failed-pickups',
+      order: 2,
+      description: 'Decide what becomes of the pickups a rider could not collect.',
+    },
+  },
+  {
+    path: '/collection-shortfalls',
+    element: <ShortfallsPage />,
+    access: { permission: 'pickup.handshake.override' },
+    menu: {
+      place: 'sidebar',
+      group: 'pickups',
+      label: 'Count differences',
+      icon: 'short-counts',
+      order: 3,
+      description:
+        'See the counts where a rider collected fewer or more parcels than were booked, and what each came to.',
+    },
+  },
+  {
+    path: '/collection-disputes',
+    element: <DisputesPage />,
+    access: { permission: 'pickup.read', capability: 'see collection disputes' },
+    menu: {
+      place: 'sidebar',
+      group: 'pickups',
+      label: 'Disputes',
+      icon: 'collection-disputes',
+      order: 4,
+      description: 'See the collections a vendor disputes, beside what the rider counted.',
+    },
+  },
+  {
+    path: '/manifests/:id/stops/:stopId',
+    element: <StopPage />,
+    access: { permission: 'pickup.read', capability: 'see pickup runs' },
+    menu: null,
+  },
+  {
+    path: '/manifests/:id/stops/:stopId/photo-exception',
+    element: <StopExceptionPage />,
+    access: { permission: 'pickup.handshake.override' },
     menu: null,
   },
   {

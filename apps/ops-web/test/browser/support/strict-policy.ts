@@ -1,25 +1,18 @@
 import { test, type Page } from '@playwright/test';
 
+import { contentSecurityPolicy, type PolicyOptions } from '../../../config/content-security-policy';
+
 /**
  * A strict policy used as a compatibility baseline: no inline script, no eval, nothing from another origin. It is the policy the edge of the
  * HTTPS run really sends (e2e/harness/https-front.ts, CONTENT_SECURITY_POLICY). A page that works under this one does not force the policy
- * to weaken script-src.
+ * to weaken script-src. **Both are built by the one builder** (`config/content-security-policy.ts`, Run D, OB-S1-107), so the baseline cannot
+ * drift from the policy the edge sends; this is the form with no evidence store configured.
  *
  * style-src allows inline style, and only style-src does (Product Owner, 5 November 2026; architecture/SECURITY_DESIGN.md): the UI library
  * under the shadcn primitives (Radix) inserts <style> elements at run time, which `style-src 'self'` refuses. script-src is the protection
  * against injected code acting as the officer, and inline style cannot run code. The refusals are proved, in a browser, by test/browser/shell.spec.ts.
  */
-export const STRICT_POLICY = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self'",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join('; ');
+export const STRICT_POLICY = contentSecurityPolicy();
 
 /**
  * Whether a failure of the route handler is only the end of the test. A request still being answered when the test ends fails with
@@ -41,7 +34,12 @@ function endedWithTheTest(page: Page, error: unknown): boolean {
  * against the development server): that server puts an inline script in the page (the React refresh preamble), which `script-src 'self'` refuses by
  * design, and what the test would report is the server's and not the application's.
  */
-export async function enforceStrictPolicy(page: Page): Promise<string[]> {
+export async function enforceStrictPolicy(
+  page: Page,
+  options: PolicyOptions = {},
+): Promise<string[]> {
+  // The form with an evidence store is for a spec that draws or sends a photo, and gives the origin of the stand-in it uses.
+  const policy = contentSecurityPolicy(options);
   test.skip(
     test.info().project.name.includes('-dev-'),
     'The strict policy is proved against the production build: the development server puts an inline script in the page.',
@@ -51,7 +49,7 @@ export async function enforceStrictPolicy(page: Page): Promise<string[]> {
       const response = await route.fetch();
       await route.fulfill({
         response,
-        headers: { ...response.headers(), 'content-security-policy': STRICT_POLICY },
+        headers: { ...response.headers(), 'content-security-policy': policy },
       });
     } catch (error) {
       if (endedWithTheTest(page, error)) return;

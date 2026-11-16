@@ -18,6 +18,78 @@ export class StreamMismatchError extends Error {
   }
 }
 
+/** The store had nothing at the key when the scanner came to read it (it had something when the platform looked): the object is missing. */
+export class MissingObjectError extends Error {
+  constructor() {
+    super('The object is not in the store');
+    this.name = 'MissingObjectError';
+  }
+}
+
+export interface LazyObject {
+  /** The bytes of the object. The store is asked for them when the first byte is read, and not before. */
+  readonly bytes: ObjectBytes;
+  /**
+   * Lets go of the store's body when it was opened and has not been read to its end, so that a body nobody reads does not hold a connection until the store gives up. It is **not waited for**
+   * (a body that is stalled does not answer a request to let go of it, and the caller must not wait for one), it never raises, and it may be called twice.
+   */
+  release(): void;
+}
+
+/**
+ * The object of a record, opened **only when the scanner reads it** (Run B, Part 1, item 5 of the review of Run A2). The store's read was opened before the scanner was asked anything, so a scanner
+ * that was not configured, or whose version was not answered, never read the body and never let go of it: the store's connection was held for its own time on every retry. Here the scanner is
+ * asked first, and a body is opened only once the scanner has said it can decide and reads its first byte; `release` lets go of whatever was opened and not finished, whatever the scan did.
+ */
+export function lazyObject(open: () => Promise<ObjectBytes | undefined>): LazyObject {
+  let iterator: AsyncIterator<Uint8Array> | undefined;
+  // Held in an object because the flags change while an await is pending, which a plain variable would not show to the compiler.
+  const state = { finished: false, released: false };
+  const wasReleased = (): boolean => state.released;
+  const letGo = (body: AsyncIterator<Uint8Array>): void => {
+    try {
+      void Promise.resolve(body.return?.()).catch(() => undefined);
+    } catch {
+      // A body that cannot be let go of has nothing more to be done with.
+    }
+  };
+  const release = (): void => {
+    state.released = true;
+    if (iterator === undefined || state.finished) return;
+    state.finished = true;
+    letGo(iterator);
+  };
+  const bytes: ObjectBytes = {
+    [Symbol.asyncIterator]: () => ({
+      next: async (): Promise<IteratorResult<Uint8Array>> => {
+        if (state.released || state.finished) return { value: undefined, done: true };
+        if (iterator === undefined) {
+          const object = await open();
+          if (object === undefined) {
+            state.finished = true;
+            throw new MissingObjectError();
+          }
+          const opened = object[Symbol.asyncIterator]();
+          // The scan may have ended while the store was being asked: what it opened is let go of at once and not read.
+          if (wasReleased()) {
+            letGo(opened);
+            return { value: undefined, done: true };
+          }
+          iterator = opened;
+        }
+        const step = await iterator.next();
+        if (step.done === true) state.finished = true;
+        return step;
+      },
+      return: (): Promise<IteratorResult<Uint8Array>> => {
+        release();
+        return Promise.resolve({ value: undefined, done: true });
+      },
+    }),
+  };
+  return { bytes, release };
+}
+
 export interface DeclaredBytes {
   /** The declared size, in bytes. */
   readonly byteSize: number;

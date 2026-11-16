@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { StreamMismatchError, verifiedBytes } from './object-bytes.js';
+import {
+  lazyObject,
+  MissingObjectError,
+  StreamMismatchError,
+  verifiedBytes,
+} from './object-bytes.js';
 
 /**
  * The bytes a scanner reads are the bytes the record declared (Run A2; SECURITY_DESIGN.md section 14.18b): the stream is counted and hashed as it passes, and the verdict is only
@@ -100,5 +105,110 @@ describe('verifiedBytes', () => {
     await expect(drain(verifiedBytes(framesOf(), DECLARED))).rejects.toMatchObject({
       rule: 'byte_size',
     });
+  });
+});
+
+describe('lazyObject (Run B, Part 1, item 5 of the review of Run A2: the scanner is asked first, and the body is let go of)', () => {
+  /** A body that counts how often it was opened and how often it was let go of. */
+  function counting(parts: readonly Uint8Array[]) {
+    const seen = { opened: 0, returned: 0 };
+    const open = () => {
+      seen.opened += 1;
+      const body: AsyncIterable<Uint8Array> = {
+        [Symbol.asyncIterator]() {
+          let at = 0;
+          return {
+            next: () => {
+              const part = parts[at];
+              at += 1;
+              return Promise.resolve(
+                part === undefined
+                  ? { value: undefined, done: true }
+                  : { value: part, done: false },
+              );
+            },
+            return: () => {
+              seen.returned += 1;
+              return Promise.resolve({ value: undefined, done: true });
+            },
+          };
+        },
+      };
+      return Promise.resolve(body);
+    };
+    return { seen, open };
+  }
+
+  // Break caught: the store asked for the body when the object is made and not when the first byte is read, which is what left a read open for a scanner that never came to read.
+  it('asks the store for the body when the first byte is read, and not before', async () => {
+    const { seen, open } = counting(PARTS);
+    const lazy = lazyObject(open);
+    expect(seen.opened).toBe(0);
+    await lazy.bytes[Symbol.asyncIterator]().next();
+    expect(seen.opened).toBe(1);
+  });
+
+  // Break caught: a body asked for after the scan had been let go of (a scanner that read late, or twice).
+  it('never asks the store for a body once it has been let go of', async () => {
+    const { seen, open } = counting(PARTS);
+    const lazy = lazyObject(open);
+    lazy.release();
+    expect(await lazy.bytes[Symbol.asyncIterator]().next()).toEqual({
+      value: undefined,
+      done: true,
+    });
+    expect(seen).toEqual({ opened: 0, returned: 0 });
+  });
+
+  // Break caught: a body read to its end let go of as well (a second close of a finished body), or a body not read to its end never let go of.
+  it('lets go of a body that was not read to its end, once however often it is asked, and of none that was', async () => {
+    const unfinished = counting(PARTS);
+    const early = lazyObject(unfinished.open);
+    await early.bytes[Symbol.asyncIterator]().next();
+    early.release();
+    early.release();
+    expect(unfinished.seen.returned).toBe(1);
+
+    const finished = counting(PARTS);
+    const whole = lazyObject(finished.open);
+    expect((await drain(whole.bytes)).equals(WHOLE)).toBe(true);
+    whole.release();
+    expect(finished.seen.returned).toBe(0);
+  });
+
+  // Break caught: a body the scan did not read, and ended without, left open because the store answered after the scan had gone.
+  it('lets go at once of a body the store opened after the scan had ended, and reads none of it', async () => {
+    let answer: ((body: AsyncIterable<Uint8Array>) => void) | undefined;
+    const seen = { returned: 0, read: 0 };
+    const lazy = lazyObject(
+      () =>
+        new Promise<AsyncIterable<Uint8Array>>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const pending = lazy.bytes[Symbol.asyncIterator]().next();
+    lazy.release();
+    answer?.({
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          seen.read += 1;
+          return Promise.resolve({ value: Buffer.from('x'), done: false });
+        },
+        return: () => {
+          seen.returned += 1;
+          return Promise.resolve({ value: undefined, done: true });
+        },
+      }),
+    });
+    expect(await pending).toEqual({ value: undefined, done: true });
+    expect(seen).toEqual({ returned: 1, read: 0 });
+  });
+
+  // Break caught: an object the store no longer has handed to the scanner as no bytes at all, which a scanner would call clean.
+  it('raises that the object is missing when the store has nothing at the key', async () => {
+    const lazy = lazyObject(() => Promise.resolve(undefined));
+    await expect(lazy.bytes[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(
+      MissingObjectError,
+    );
   });
 });

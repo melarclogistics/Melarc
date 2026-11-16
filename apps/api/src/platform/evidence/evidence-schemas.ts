@@ -102,3 +102,14 @@ export const NO_STORE_HEADERS = {
     schema: { type: 'string', const: 'no-store' },
   },
 } as unknown as Record<string, never>;
+
+/** The platform's limits on a file of evidence (`getEvidenceLimits`, OB-S1-110): the types and the size a screen may judge a file by before it reads it. */
+export const EVIDENCE_LIMITS_SCHEMA = described({
+  type: 'object',
+  required: ['allowed_content_types', 'max_byte_size'],
+  additionalProperties: false,
+  properties: {
+    allowed_content_types: { type: 'array', items: { type: 'string' }, minItems: 1 },
+    max_byte_size: { type: 'integer', minimum: 1 },
+  },
+});

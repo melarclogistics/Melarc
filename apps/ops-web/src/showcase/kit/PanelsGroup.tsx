@@ -4,6 +4,7 @@ import { PICKUP_STATE_MAP, serviceDateText } from '../../app/pages/pickup/pickup
 import { ActionMenu, type ActionMenuItem } from '../../components/ui/action-menu/ActionMenu';
 import { Button } from '../../components/ui/button/Button';
 import { DescriptionList } from '../../components/ui/description-list/DescriptionList';
+import { LockIndicator } from '../../components/ui/lock-indicator/LockIndicator';
 import { Panel } from '../../components/ui/panel/Panel';
 import { RecordHeader } from '../../components/ui/record-header/RecordHeader';
 import { SidePanel } from '../../components/ui/side-panel/SidePanel';
@@ -388,6 +389,41 @@ function StatTileSpecimens() {
   );
 }
 
+function LockIndicatorSpecimens() {
+  return (
+    <KitSection
+      title="LockIndicator"
+      note="Who holds an advisory lock on a record, told in words, with the icon and the tone to support them. The lock is advisory and the indicator never draws it as a gate: the page gives it one line that says what a lock does and does not do. The moment of the holder's last refresh sits outside the live region, so that it is not read out each time it moves."
+    >
+      <div className="showcase-kit-grid">
+        <Specimen label="Held by someone else, with the page's note and its action">
+          <LockIndicator
+            holder="other"
+            subject="this intake"
+            who="Another receiver"
+            since="09:12"
+            note="A lock only shows who is working on an intake. It never stops a second count."
+            action={
+              <Button type="button" variant="secondary">
+                Ask again
+              </Button>
+            }
+          />
+        </Specimen>
+        <Specimen label="Held by you">
+          <LockIndicator holder="yours" subject="this intake" since="09:13" />
+        </Specimen>
+        <Specimen label="Not held">
+          <LockIndicator holder="free" subject="this intake" />
+        </Specimen>
+        <Specimen label="Not known (the page could not find out)">
+          <LockIndicator holder="unknown" subject="this intake" />
+        </Specimen>
+      </div>
+    </KitSection>
+  );
+}
+
 export function PanelsGroup() {
   return (
     <>
@@ -396,6 +432,7 @@ export function PanelsGroup() {
       <DescriptionListSpecimens />
       <PanelSpecimens />
       <StatTileSpecimens />
+      <LockIndicatorSpecimens />
     </>
   );
 }

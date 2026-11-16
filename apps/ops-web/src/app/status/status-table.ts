@@ -8,8 +8,20 @@ import {
   MANIFEST_STATE_MAP,
   STOP_STATUS_MAP,
 } from '../pages/manifests/manifest-presentation';
+import {
+  CONDITION_MAP,
+  INTAKE_STATE_MAP,
+  VARIANCE_MAP,
+} from '../pages/intakes/intake-presentation';
 import { FEED_STATE_MAP, NOTIFICATION_STATE_MAP } from '../pages/messages/message-presentation';
 import { PICKUP_STATE_MAP } from '../pages/pickup/pickup-presentation';
+import {
+  DECISION_MAP,
+  DISPUTE_STATE_MAP,
+  EVIDENCE_STATE_MAP,
+  HANDSHAKE_STATE_MAP,
+} from '../pages/pickup-work/pickup-work-presentation';
+import { PARCEL_STATE_MAP, VENDOR_STATE_MAP } from '../pages/receiving/receiving-presentation';
 import { RIDER_DEVICE_STATUS_MAP, RIDER_STATUS_MAP } from '../pages/riders/rider-presentation';
 import { STAFF_STATUS_MAP } from '../pages/staff/staff-presentation';
 import { DEVICE_STATUS_MAP, VENDOR_STATUS_MAP } from '../pages/vendors/vendor-presentation';
@@ -33,6 +45,18 @@ export const STATUS_TABLE = {
   STAFF_IDENTITY: STAFF_STATUS_MAP,
   VENDOR_ACCOUNT: VENDOR_STATUS_MAP,
   VENDOR_DEVICE: DEVICE_STATUS_MAP,
+  // The work of the door and the failure (S1.30).
+  PICKUP_FAILURE: DECISION_MAP,
+  HANDSHAKE: HANDSHAKE_STATE_MAP,
+  COLLECTION_DISPUTE: DISPUTE_STATE_MAP,
+  STOP_EVIDENCE: EVIDENCE_STATE_MAP,
+  // Receiving at a hub (S1.35): where an intake stands, how its count compares with the declaration, and what the receiver found.
+  HUB_INTAKE: INTAKE_STATE_MAP,
+  INTAKE_COUNT: VARIANCE_MAP,
+  INTAKE_CONDITION: CONDITION_MAP,
+  // Receiving by run (S1.35c; Run D): where a vendor stands and where a parcel stands, in the words of the floor (the same states as above, told as the floor tells them).
+  RECEIVING_VENDOR: VENDOR_STATE_MAP,
+  RECEIVING_PARCEL: PARCEL_STATE_MAP,
 } as const satisfies Readonly<Record<string, StatusMap<string>>>;
 
 export type StatusDomain = keyof typeof STATUS_TABLE;

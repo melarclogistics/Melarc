@@ -16,6 +16,13 @@ import type { TransactionHandle } from '../auth/ports/unit-of-work.port.js';
 export interface RunCustody {
   /** Whether a custody handover of the run is pending: opened, and neither accepted nor failed. */
   hasPendingHandover(handle: TransactionHandle, runId: string): Promise<boolean>;
+
+  /**
+   * The rider who holds the custody of the run's parcels now (S1.31, the hub handover; `melarc.run_custody_holder`): the receiver of its latest completed handover, or its
+   * assigned rider where none was completed. `null` where **the hub holds the custody** (the latest completed handover was to the hub) and where the caller's context shows
+   * no such run: no rider holds it. Read through the caller's own row-level security, after the run's lock is held (the acts that move custody take it first).
+   */
+  holderOf(handle: TransactionHandle, runId: string): Promise<string | null>;
 }
 
 /** The injection token of the port; bound once, by the composition root. */

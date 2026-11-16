@@ -5,6 +5,7 @@ import { serverError } from '../../test-support/fake-pg.js';
 import {
   CommitOutcomeUnknownError,
   guardReasonIn,
+  guardRuleIn,
   TransactionRolledBackError,
 } from './database-failures.js';
 
@@ -64,5 +65,54 @@ describe('guardReasonIn', () => {
     expect(guardReasonIn('reason=GRANT_EXPIRED')).toBeUndefined();
     expect(guardReasonIn(undefined)).toBeUndefined();
     expect(guardReasonIn(null)).toBeUndefined();
+  });
+});
+
+/** Run D (migrations 0103 to 0106): the receiving operations name the rule of a refusal in the HINT, beside the reason of the DETAIL. */
+describe('guardRuleIn', () => {
+  function ruled(hint: string | undefined, code = '23514'): pg.DatabaseError {
+    const error = serverError(code, 'the vendor is finished');
+    error.detail = 'reason=STATE_CONFLICT';
+    if (hint !== undefined) error.hint = hint;
+    return error;
+  }
+
+  // Break caught: a rule lost, or read from the reason (the DETAIL), or a refusal with no rule answered as one the contract names.
+  it('names the rule of a check violation that states one, and only that', () => {
+    expect(guardRuleIn(ruled('rule=check_in_finished'))).toBe('check_in_finished');
+    expect(guardRuleIn(ruled('rule=count_changed'))).toBe('count_changed');
+    expect(guardRuleIn(ruled(undefined))).toBeUndefined();
+    expect(guardRuleIn(ruled(''))).toBeUndefined();
+    expect(guardReasonIn(ruled('rule=check_in_finished'))).toBe('STATE_CONFLICT');
+  });
+
+  it('finds the rule through the wrappers a driver puts around the server’s error', () => {
+    const wrapped = new Error('Failed query', { cause: ruled('rule=has_extra_parcels') });
+    expect(guardRuleIn(new Error('transaction failed', { cause: wrapped }))).toBe(
+      'has_extra_parcels',
+    );
+  });
+
+  // Break caught: a rule read from another SQLSTATE or from loose text, or from a hint that is a suggestion of the server's own.
+  it.each([
+    ['another SQLSTATE', ruled('rule=check_in_finished', '23505')],
+    ['text that is not a bare rule', ruled('Perhaps rule=check_in_finished')],
+    ['a rule in upper case', ruled('rule=CHECK_IN_FINISHED')],
+    ['a rule with a trailing word', ruled('rule=check_in_finished now')],
+    ['an empty rule', ruled('rule=')],
+  ])('names nothing for %s', (_name, error) => {
+    expect(guardRuleIn(error)).toBeUndefined();
+  });
+
+  // Break caught: a lost or a rolled-back commit taken for a statement's refusal.
+  it('names nothing for an error that is not the server’s: a lost commit, a rolled-back one, anything else', () => {
+    const cause = ruled('rule=check_in_finished');
+    expect(
+      guardRuleIn(new CommitOutcomeUnknownError('connection-lost', { cause })),
+    ).toBeUndefined();
+    expect(guardRuleIn(new TransactionRolledBackError({ cause }))).toBeUndefined();
+    expect(guardRuleIn(new Error('rule=check_in_finished'))).toBeUndefined();
+    expect(guardRuleIn(undefined)).toBeUndefined();
+    expect(guardRuleIn(null)).toBeUndefined();
   });
 });

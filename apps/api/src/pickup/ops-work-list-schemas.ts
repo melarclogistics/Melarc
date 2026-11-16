@@ -5,7 +5,11 @@ import {
   HANDSHAKE_CHANNELS,
   HANDSHAKE_TYPES,
 } from './collection-record.schema.js';
-import { FAILURE_DECISIONS, HANDSHAKE_ROUTED_BECAUSE } from './ops-work-list-views.js';
+import {
+  ESCALATION_ACTORS,
+  FAILURE_DECISIONS,
+  HANDSHAKE_ROUTED_BECAUSE,
+} from './ops-work-list-views.js';
 import { PICKUP_MANIFEST_STATES } from './pickup-manifest.schema.js';
 import { PICKUP_REQUEST_STATES } from './pickup-request.schema.js';
 import { PICKUP_STOP_STATES } from './pickup-stop.schema.js';
@@ -127,6 +131,10 @@ export const OPS_HANDSHAKE_SCHEMA = described({
   },
 });
 
+/**
+ * A count the office was flagged on (D-D5: the office's list of count differences, a short count and an over count together; the schema keeps its name and the operation its id).
+ * `variance` says which way the count differs from the booking and `difference_count` by how many parcels, whichever way.
+ */
 export const COLLECTION_SHORTFALL_SCHEMA = described({
   type: 'object',
   required: [
@@ -134,7 +142,8 @@ export const COLLECTION_SHORTFALL_SCHEMA = described({
     ...CONTEXT_REQUIRED,
     'declared_count',
     'collected_count',
-    'shortfall_count',
+    'variance',
+    'difference_count',
     'reason',
     'note',
     'office_notified_at',
@@ -149,7 +158,8 @@ export const COLLECTION_SHORTFALL_SCHEMA = described({
     ...CONTEXT_PROPERTIES,
     declared_count: { type: 'integer', minimum: 1 },
     collected_count: { type: 'integer', minimum: 1 },
-    shortfall_count: { type: 'integer', minimum: 1 },
+    variance: { type: 'string', enum: ['SHORT', 'OVER'] },
+    difference_count: { type: 'integer', minimum: 1 },
     reason: REASON,
     note: { type: ['string', 'null'] },
     office_notified_at: moment,
@@ -175,6 +185,7 @@ export const PICKUP_FAILURE_QUEUE_ITEM_SCHEMA = described({
     'attempt_number',
     'attempt_extended',
     'escalated_at',
+    'escalation',
     'decided_at',
     'replacement_request_id',
     'rider_id',
@@ -207,6 +218,16 @@ export const PICKUP_FAILURE_QUEUE_ITEM_SCHEMA = described({
     attempt_number: { type: 'integer', minimum: 1 },
     attempt_extended: { type: 'boolean' },
     escalated_at: nullableMoment,
+    escalation: {
+      type: ['object', 'null'],
+      required: ['by', 'threshold_hours', 'waited_seconds'],
+      additionalProperties: false,
+      properties: {
+        by: { type: 'string', enum: [...ESCALATION_ACTORS] },
+        threshold_hours: { type: ['integer', 'null'], minimum: 1 },
+        waited_seconds: { type: ['integer', 'null'], minimum: 0 },
+      },
+    },
     decided_at: nullableMoment,
     replacement_request_id: { type: ['string', 'null'], format: 'uuid' },
     rider_id: { type: ['string', 'null'], format: 'uuid' },

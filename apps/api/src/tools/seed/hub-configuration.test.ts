@@ -52,6 +52,15 @@ const NOT_SEEDED: Readonly<Record<string, string>> = {
   heads_up_sms_enabled: 'seeded by the notification task that reads it (S1.12)',
 };
 
+/**
+ * The hub keys that are seeded although the document marks them `PROVISIONAL`: development values the Product Owner decided (D-13, 29 October 2026), which the document says are not
+ * citable as product policy and which the launch values replace. Each is an entry that says why; no other status than `CONFIRMED` may be seeded.
+ */
+const DEVELOPMENT_KEYS: Readonly<Record<string, string>> = {
+  intake_lock_idle_ttl_minutes:
+    'fifteen minutes, the Product Owner’s development value for the idle time of the receive lock (S1.32); the launch value stays the owner’s',
+};
+
 const seedKeys = new Set(HUB_SETTINGS.map((seed) => seed.key));
 const find = (key: string, scopeRef = ''): HubSettingSeed | undefined =>
   HUB_SETTINGS.find((seed) => seed.key === key && seed.scopeRef === scopeRef);
@@ -99,12 +108,15 @@ describe('the launch hub’s zones (settings.md section 7.2)', () => {
 });
 
 describe('the launch hub’s settings (settings.md sections 7.2 and 7.3)', () => {
-  // Break caught: a seeded key the document does not confirm (an invented value) or one the document marks OPEN.
-  it('seeds only keys that the document confirms', () => {
+  // Break caught: a seeded key the document does not confirm (an invented value) or one the document marks OPEN. A development value is `PROVISIONAL` in the document and is named above.
+  it('seeds only keys that the document confirms, and the development values it names', () => {
     for (const key of seedKeys) {
       expect(HUB_SECTION_KEYS.has(key), `${key} is a key of section 7.2 or 7.3`).toBe(true);
       const status = HUB_ROWS.find((row) => row.key === key)?.status ?? '';
-      expect(status, key).toBe('CONFIRMED');
+      expect(status, key).toBe(key in DEVELOPMENT_KEYS ? 'PROVISIONAL' : 'CONFIRMED');
+    }
+    for (const key of Object.keys(DEVELOPMENT_KEYS)) {
+      expect(seedKeys.has(key), `${key} is a development value that is seeded`).toBe(true);
     }
   });
 
@@ -191,13 +203,19 @@ describe('the launch hub’s settings (settings.md sections 7.2 and 7.3)', () =>
     ['booking_cutoff_time', '10:00'],
     ['MELARC_MAX_PICKUP_ATTEMPTS', 3],
     ['stale_failure_backstop_hours', 24],
-    ['intake_parcel_cap', 100],
+    ['intake_lock_idle_ttl_minutes', 15],
     ['pickup_service_window_start', '11:00'],
     ['pickup_service_window_end', '16:00'],
     ['rider_door_wait_minutes', 10],
   ])('seeds %s at the value the document states', (key, expected) => {
     expect(find(key)?.value).toBe(expected);
     expect(valueCell(key)).toContain(String(expected));
+  });
+
+  // Break caught: a limit on the parcels of an intake that is seeded or documented again (the Product Owner removed intake_parcel_cap on 15 November 2026, OB-S1-97).
+  it('has no limit on the parcels of an intake, in the seed or in the document', () => {
+    expect(HUB_SETTINGS.map((seed) => seed.key)).not.toContain('intake_parcel_cap');
+    expect(HUB_ROWS.map((row) => row.key)).not.toContain('intake_parcel_cap');
   });
 
   it('seeds auto_reschedule as off, as the document states', () => {

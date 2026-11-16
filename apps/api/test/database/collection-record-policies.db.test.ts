@@ -223,19 +223,25 @@ interface RecordOver {
   readonly capturedAt?: string;
 }
 /** The statement that makes a record, as the service makes it, with whatever a test changes. */
+/** The reason a short count gives, and the reason a count above the booking gives (D-D5), as the catalogue of each domain holds them. */
+const SHORT_REASON = `{"reason_code":"SOME_PARCELS_NOT_READY","label":"Some parcels not ready","attribution":"CUSTOMER"}`;
+const OVER_REASON = `{"reason_code":"VENDOR_ADDED_PARCELS","label":"Vendor added parcels after booking","attribution":"CUSTOMER"}`;
 function insertRecordSql(arranged: ArrangedRun, over: RecordOver = {}): string {
   const collected = over.collected ?? 3;
   const declared = over.declared ?? 3;
-  const variance = over.variance ?? (collected < declared ? 'SHORT' : 'MATCH');
+  const variance =
+    over.variance ?? (collected < declared ? 'SHORT' : collected > declared ? 'OVER' : 'MATCH');
   const reason =
     over.reason === undefined
       ? variance === 'SHORT'
-        ? `'{"reason_code":"SOME_PARCELS_NOT_READY","label":"Some parcels not ready","attribution":"CUSTOMER"}'::jsonb`
-        : 'null'
+        ? `'${SHORT_REASON}'::jsonb`
+        : variance === 'OVER'
+          ? `'${OVER_REASON}'::jsonb`
+          : 'null'
       : over.reason === null
         ? 'null'
         : `'${over.reason}'::jsonb`;
-  const flagged = over.flagged ?? variance === 'SHORT';
+  const flagged = over.flagged ?? (variance === 'SHORT' || variance === 'OVER');
   return `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot,
                                        office_notified_at, handshake_type, handshake_channel, recorded_by, version${over.recordedAt === undefined ? '' : ', recorded_at'}${over.capturedAt === undefined ? '' : ', captured_at'})
           values ('${randomUUID()}'::uuid, '${over.stopId ?? first(arranged).id}'::uuid, '${over.hub ?? HUB_A}'::uuid, ${String(declared)}, ${String(collected)},
@@ -311,6 +317,9 @@ describe('who may write a collection record, and what it must be', () => {
     ['more than was declared', { collected: 4, variance: 'MATCH' }, '23514'],
     ['a short variance for equal counts', { collected: 3, variance: 'SHORT' }, '23514'],
     ['a short variance for more than was declared', { collected: 4, variance: 'SHORT' }, '23514'],
+    // (D-D5: more than was declared is an OVER count now, and an OVER variance is the comparison of the counts like the others.)
+    ['an over variance for equal counts', { collected: 3, variance: 'OVER' }, '23514'],
+    ['an over variance for fewer parcels than booked', { collected: 2, variance: 'OVER' }, '23514'],
     [
       'a variance that is not the comparison',
       { collected: 2, variance: 'MATCH', reason: null, flagged: false },
@@ -330,6 +339,141 @@ describe('who may write a collection record, and what it must be', () => {
         await attempt(rider(arranged.rider.id, CONFIRM), insertRecordSql(arranged, { ...over })),
       ),
     ).toBe(code);
+  });
+
+  // Break caught (D-D5): a count above the booking that the guard of the table cannot hold to the catalogue it belongs to (`PICKUP_OVER_COUNT`): kept with no reason, with the short count's reason,
+  // with a reason that is not as the catalogue holds it (its label), with a reason that asks for a note and has none, or kept as something that is not a reason; and the short count
+  // taking the over count's reason. Each is refused for the reason the application answers as itself (`REASON_REQUIRED`, `REASON_NOT_ACTIVE`), so no unrelated refusal can stand in.
+  it.each([
+    ['an over count with no reason', { collected: 5, reason: null }, 'REASON_REQUIRED'],
+    [
+      'an over count with a reason of the short-count catalogue',
+      { collected: 5, reason: SHORT_REASON },
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'a short count with a reason of the over-count catalogue',
+      { collected: 2, reason: OVER_REASON },
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'an over count with a label that is not the catalogue’s',
+      {
+        collected: 5,
+        reason: OVER_REASON.replace('Vendor added parcels after booking', 'Anything'),
+      },
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'an over count with a reason that asks for a note and gives none',
+      {
+        collected: 5,
+        reason: '{"reason_code":"OVER_OTHER","label":"Other","attribution":"CUSTOMER"}',
+      },
+      'REASON_REQUIRED',
+    ],
+    [
+      'an over count with a reason that is not an object',
+      { collected: 5, reason: '"VENDOR_ADDED_PARCELS"' },
+      'REASON_NOT_ACTIVE',
+    ],
+  ] as const)('refuses %s, as the reason the application answers', async (_what, over, word) => {
+    const arranged = await run();
+    expect(
+      await attemptWithReason(
+        rider(arranged.rider.id, CONFIRM),
+        insertRecordSql(arranged, { ...over }),
+      ),
+    ).toMatchObject({ code: '23514', reason: word });
+    expect(
+      await routes.rows(`select id from collection_record where pickup_stop_id = $1`, [
+        first(arranged).id,
+      ]),
+    ).toEqual([]);
+  });
+
+  // Break caught (D-D5): an over count the table cannot keep (the variance closed to a clean count and a short one), or kept with the office flag the writer chose and not the database's own, at
+  // the recording; or kept with another reason than the one it gave.
+  it('keeps an over count with its reason, and raises the office flag at the recording, whatever the writer gives', async () => {
+    const arranged = await run();
+    const stopId = first(arranged).id;
+    expect(
+      codeOf(
+        await attempt(
+          rider(arranged.rider.id, CONFIRM),
+          insertRecordSql(arranged, { collected: 5, flagged: false }),
+        ),
+      ),
+    ).toBeUndefined();
+    const kept = await routes.rows<{
+      variance: string;
+      collected_count: number;
+      declared_count: number;
+      flagged_at_recording: boolean;
+      reason: string;
+    }>(
+      `select variance, collected_count, declared_count, (office_notified_at = recorded_at) as flagged_at_recording,
+              variance_reason_snapshot ->> 'reason_code' as reason
+         from collection_record where pickup_stop_id = $1`,
+      [stopId],
+    );
+    expect(kept).toEqual([
+      {
+        variance: 'OVER',
+        collected_count: 5,
+        declared_count: 3,
+        flagged_at_recording: true,
+        reason: 'VENDOR_ADDED_PARCELS',
+      },
+    ]);
+    // A flag the writer gives is not the one kept: a past instant is replaced by the recording's.
+    const other = await run();
+    await attempt(
+      rider(other.rider.id, CONFIRM),
+      insertRecordSql(other, { collected: 4, notifiedAt: `'2000-01-01T00:00:00Z'::timestamptz` }),
+    );
+    expect(
+      await routes.rows(
+        `select (office_notified_at = recorded_at) as same from collection_record where pickup_stop_id = $1`,
+        [first(other).id],
+      ),
+    ).toEqual([{ same: true }]);
+  });
+
+  // Break caught (D-D5): the table's own checks, which hold when no trigger does (a writer that is not the application's, a trigger that is changed): an over count that does not follow the counts,
+  // has no reason or has no flag, or a variance nobody defined. The rows go in with the triggers off (the replica role), so the checks alone answer, and the transaction is undone.
+  it.each([
+    [
+      'an over variance for equal counts',
+      { collected: 3, variance: 'OVER' },
+      'collection_record_variance_follows_counts',
+    ],
+    [
+      'an over count with no reason',
+      { collected: 5, reason: null, flagged: true },
+      'collection_record_shortfall_facts',
+    ],
+    [
+      'an over count with no office flag',
+      { collected: 5, notifiedAt: 'null' },
+      'collection_record_shortfall_facts',
+    ],
+    // (The closed list of variances is a layered pair with the facts check, which names the same three: a variance nobody defined is refused by both, and the facts check answers first.)
+  ] as const)('holds, in the table alone, that %s is not kept', async (_what, over, constraint) => {
+    const arranged = await run();
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query('set local session_replication_role = replica');
+      let named: string | undefined;
+      try {
+        await routes.admin.query(insertRecordSql(arranged, { ...over }));
+      } catch (error) {
+        named = (error as { constraint?: string }).constraint;
+      }
+      expect(named).toBe(constraint);
+    } finally {
+      await routes.admin.query('rollback');
+    }
   });
 
   // Break caught: a second record for a stop (a double submission under another key).
@@ -474,7 +618,7 @@ describe('the facts of a collection record that are the catalogue’s and the cl
       readonly code?: string;
       readonly make: (genuine: Reason) => string | Promise<string>;
       readonly reason: 'REASON_NOT_ACTIVE' | 'REASON_REQUIRED';
-      /** The snapshot the same writer is then accepted with; left out, the genuine reason's own, and for a reason that asks for a photo a plain reason's. */
+      /** The snapshot the same writer is then accepted with; left out, a plain reason's (SOME_PARCELS_NOT_READY). */
       readonly control?: (genuine: Reason) => string;
     }
     const REFUSED: readonly (readonly [string, Case])[] = [
@@ -581,14 +725,6 @@ describe('the facts of a collection record that are the catalogue’s and the cl
           control: (g: Reason) => snapshotOf(g, { note: 'Vendor says it packed five' }),
         },
       ],
-      [
-        'a reason that asks for a photo, which cannot be given yet',
-        {
-          code: 'PARCEL_DAMAGED_OR_UNSAFE',
-          make: (g: Reason) => snapshotOf(g),
-          reason: 'REASON_REQUIRED',
-        },
-      ],
     ];
 
     // Break caught: the guard not judging the snapshot (the probe of 4 November 2026 stored every one of these), or judging only some of what it says (the
@@ -611,8 +747,8 @@ describe('the facts of a collection record that are the catalogue’s and the cl
         ).toEqual({ code: '23514', reason: spec.reason });
         expect(await recordsOf(stop.id)).toEqual([]);
 
-        // The same writer, the same stop, the facts the application would have written: made. A reason that asks for a photo has no genuine form yet, so
-        // the control is another, plain reason.
+        // The same writer, the same stop, the facts the application would have written: made. The control is a plain reason, or the case's own. (A reason that asks for a photo
+        // is not refused here: it is the rule of the end of the transaction, and has its own file, collection-reason-photo.db.test.ts.)
         const control =
           spec.control !== undefined
             ? spec.control(genuine)
@@ -984,17 +1120,21 @@ describe('what the counting key reaches besides its own table', () => {
     ).toBe('42501');
   });
 
-  // Break caught: the short-count reasons visible to the wrong key, or the other domains' reasons visible to the rider.
-  it('reads the short-count reasons and no other, under its key alone', async () => {
+  // Break caught: the reasons of a count that is not the booking (the short count's and, since D-D5, the over count's) visible to the wrong key, or the other domains' reasons visible to the
+  // rider; or the over count's reasons left out of what the counting key reads, which would make every over count refused as a reason that is not active.
+  it('reads the short-count and the over-count reasons and no other, under its key alone', async () => {
     const arranged = await run();
     const reasons = `select code from reason_code where active`;
     const count = async (context: SecurityContext): Promise<string[]> => {
       const result = await attempt(context, `select domain from reason_code`);
       return 'rows' in result
-        ? [...new Set(result.rows.map((row) => (row as { domain: string }).domain))]
+        ? [...new Set(result.rows.map((row) => (row as { domain: string }).domain))].toSorted()
         : [];
     };
-    expect(await count(rider(arranged.rider.id, CONFIRM))).toEqual(['PICKUP_SHORT_COUNT']);
+    expect(await count(rider(arranged.rider.id, CONFIRM))).toEqual([
+      'PICKUP_OVER_COUNT',
+      'PICKUP_SHORT_COUNT',
+    ]);
     expect(await count(rider(arranged.rider.id, RUN))).toEqual([]);
     expect(await count(vendor())).toEqual([]);
     expect(codeOf(await attempt(rider(arranged.rider.id, CONFIRM), reasons))).toBeUndefined();

@@ -39,6 +39,21 @@ describe('ButtonLink', () => {
     expect(screen.getByRole('link', { name: 'Back' })).toHaveClass('ui-button--secondary');
   });
 
+  // Break caught: a link drawn as a button that has no way to be the hub floor's 56 px (a tablet's thumb), or that is 56 px without being asked.
+  it('is medium unless the floor size is asked for, and the floor size is a class of its own', () => {
+    setup(
+      <>
+        <ButtonLink to="/admin/staff/new">Medium</ButtonLink>
+        <ButtonLink to="/admin/staff/new" size="lg">
+          Floor
+        </ButtonLink>
+      </>,
+    );
+
+    expect(screen.getByRole('link', { name: 'Medium' })).not.toHaveClass('ui-button--lg');
+    expect(screen.getByRole('link', { name: 'Floor' })).toHaveClass('ui-button', 'ui-button--lg');
+  });
+
   // Break caught: a link that cannot be followed from the keyboard, or that reloads the page.
   it('is followed from the keyboard without reloading the page', async () => {
     const { user, router } = setup(

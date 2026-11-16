@@ -89,7 +89,7 @@ None here. A measure is read by the surface and the permission that [the Ops sur
 
 ### 5.5 The queue counts (`queue.*`): what they have in common
 
-The six entries that follow (§5.5.1 to §5.5.6) are **the work waiting in a queue of the Ops Portal, counted by the server** (master specification §17.4: "queue counts and filters that make pending work visible"). They exist so that the navigation, the landing (*My work*) and the Decisions inbox can say how much is waiting without reading a page of each queue. Their entry is decided here, once, and every one of them is served by the one read `getQueueSummary`; a queue's own list operation stays the owner of what is in the queue and of who may see it.
+The entries that follow (§5.5.1 to §5.5.8; **the last two are designed by Run D and served with the code of S1.35b**, their queue identifiers join `QueueId` in the contract with the application's own description) are **the work waiting in a queue of the Ops Portal, counted by the server** (master specification §17.4: "queue counts and filters that make pending work visible"). They exist so that the navigation, the landing (*My work*) and the Decisions inbox can say how much is waiting without reading a page of each queue. Their entry is decided here, once, and every one of them is served by the one read `getQueueSummary`; a queue's own list operation stays the owner of what is in the queue and of who may see it.
 
 - **A count is of the queue now.** It has no date basis and no `D`: it is what the queue holds at the moment of the read, in one snapshot per key (the read runs at `REPEATABLE READ`), so that the counts of one key agree with each other. It is exact: never capped, never an estimate, never rounded.
 - **Identical to its list, by construction.** A count is the number of records that the queue's own list operation returns for the same session and the same filter: the same predicate (one function that the list and the count both call), read under the security context of the key that list requires (the grant's scope, the hubs the session reaches, row-level security). A count therefore never reaches a record the same grant's list would not, and the portal's link to a queue shows what the count counted. **With the hub filter too** (`hub_id`, task C3): the list is given the hub as its own filter and the count is given the same, by the one function ([hub filters](../operations/hub-filters.md)), so a hub's count is the number of records the list returns with that `hub_id`.
@@ -106,6 +106,13 @@ The six entries that follow (§5.5.1 to §5.5.6) are **the work waiting in a que
 4. *Workflow restrictions.* The two approver's queues (§5.5.3, §5.5.6) are the work of the holders of their decision key, and appear for no one else. Every other queue is the work of anyone who may read the list. A Vendor or a Rider session reads nothing here.
 
 `staff.read` is not one of the domains the P-1 text lists, and the staffing aggregates of the Overview are still unresolved ([the matrix](../../surfaces/ops-portal.md#the-overview-section-authorization-and-destinations)); this assessment covers only the one count of §5.5.6, for the one audience that already reads the staff list (Senior Ops and Platform Admin).
+
+**The P-1 assessment of `hub.read`** (Run D, OB-S1-105; for the two counts of §5.5.7 and §5.5.8, before any figure of the receiving side is served; the blind-count restriction of the Ops surface matrix's "Hub receiving and itemization" row is the reason it is made):
+
+1. *What is covered.* Exactly the two counts of §5.5.7 and §5.5.8 and their two moments, named one by one. **No count, age, state or total of a declaration, a variance, a condition or a photo is served**, no count of parcels expected or received, no figure for one vendor, one run or one rider, and none is summed with another.
+2. *Scope and visibility.* `hub.read` keeps the hub scope it has for `listReceivingRuns` and `listMissingParcels`: each count runs under the context that list's key gives (the effective scope of that grant), and a test holds each count equal to its list for an Ops Staff, a Senior Ops and a Platform Admin. No new key is added.
+3. *Protected information.* **The rider's declared count of a blind-count intake never reaches a count**: a count here is of runs and of parcels, and a parcel exists only for a photo intake, whose declaration is shown by the screens anyway (D-D1). A figure of `1` names one run or parcel only to a reader who could already list it. Money: none.
+4. *Workflow restrictions.* None beyond the key: it is the work of anyone who may read the lists, an Ops Staff officer included. The senior officer's decisions are not counted here (the decision view of the queue is a list filter, `view=needs_decision`, not a count).
 
 #### 5.5.1 `queue.pickup.awaiting_confirmation` — Pickup requests waiting for confirmation
 
@@ -203,13 +210,49 @@ The six entries that follow (§5.5.1 to §5.5.6) are **the work waiting in a que
 | 10. Drill-down| `/admin/staff` with the approver's view (`listStaffIdentities` with `status=PENDING_APPROVAL`)|
 | 11. Acceptance examples| Two profiles are pending at the Senior Ops user's hub: 2, and a third pending at another hub is not counted for them. A profile approved or rejected leaves. An Ops Staff session has no entry (it holds neither key). A profile with no primary hub is in a Platform Admin's count when no hub is chosen and in no single hub's count|
 
+#### 5.5.7 `queue.hub.receiving_runs_waiting` — Runs waiting to be checked in
+
+*Designed by Run D (D-D2, OB-S1-105); served by S1.35b. The counter and its test are that task's; the entry is decided here.*
+
+| Point| Entry|
+|---|---|
+| 1. Name, purpose, unit, owner| *Runs waiting to be checked in* (queue `HUB_RECEIVING_RUNS_WAITING`). The runs the hub handover opened intakes for, at least one of which has yet to be checked in: the work of the receiving queue (`/receiving`). Unit: runs (distinct, never vendors and never intakes). Owning domain: hub|
+| 2. Source and inclusion| `PickupManifest` rows that have at least one `PickupIntake` in state `AWAITING_COUNT` ([state-machines.md](../../contracts/state-machines.md) §7; `listReceivingRuns` with `view=waiting`). A run whose vendors have all been checked in is not in it, **however much a senior officer has still to decide** (the decision view is a filter of the list, `view=needs_decision`, and has no count of its own)|
+| 3. Formula| The count of those runs within the caller's scope. `oldest_at` is the least `handed_over_at` of their intakes that are still `AWAITING_COUNT`|
+| 4. Date basis| None: the queue as it stands at the read|
+| 5. Age origin, buckets, targets| The moment the hub handover completed the run (`handed_over_at`): it waits from the handover. None defined (§14)|
+| 6. Money| None|
+| 7. Permission, scope, masking| `hub.read`, the scope of `listReceivingRuns` (the P-1 assessment above). **No declared count, name, parcel number or photo is returned or counted**, so a blind-count vendor's number is never reached|
+| 8. As-of and latency| As of the read; one statement, bounded at 3 seconds like the others (`AC-QSUM-13`)|
+| 9. Contract| `getQueueSummary`, `queue` = `HUB_RECEIVING_RUNS_WAITING` (added to `QueueId` with the code of S1.35b: the schemas of an implemented operation are held to the application, so the contract names the queue when the application does)|
+| 10. Drill-down| `/receiving`, which lists `listReceivingRuns` with `view=waiting`|
+| 11. Acceptance examples| A run handed over with three vendors, none checked in: 1 (one run, not three). Two vendors finished and one still waiting: 1. All three finished: 0, even when one of them needs a decision. A run of another hub is not counted for an officer of this hub. A vendor whose declaration is zero, awaiting its count: its run is counted, and no answer carries the zero. A session without `hub.read` has no entry|
+
+#### 5.5.8 `queue.hub.missing_parcels_searching` — Parcels being searched for
+
+*Designed by Run D (D-D4, OB-S1-105); served by S1.35b.*
+
+| Point| Entry|
+|---|---|
+| 1. Name, purpose, unit, owner| *Parcels being searched for* (queue `HUB_MISSING_PARCELS_SEARCHING`). The parcels missing from a vendor whose case a senior officer has yet to close: the list *Missing — being searched for* (`/missing-parcels`). Unit: parcels (distinct). Owning domain: hub|
+| 2. Source and inclusion| `IntakeParcel` rows in state `MISSING` of an intake in `RECONCILIATION_REQUIRED` ([domain-model.md](../../contracts/domain-model.md) §6.6a; `listMissingParcels` with `view=searching`). A parcel that is found (checked in), and the parcels of a case a senior officer accepted or wrote off, are not in it; **the write-offs that still wait for the record "Vendor told" are the list's second view and are not counted here**|
+| 3. Formula| The count of those parcels within the caller's scope. `oldest_at` is the least `missing_marked_at` of them|
+| 4. Date basis| None: the queue as it stands at the read|
+| 5. Age origin, buckets, targets| The moment the vendor was finished without the parcel (`missing_marked_at`): it is missing from then. None defined (§14)|
+| 6. Money| None|
+| 7. Permission, scope, masking| `hub.read`, the scope of `listMissingParcels` (the P-1 assessment above). No vendor, run, name or photo is returned or counted|
+| 8. As-of and latency| As of the read; one statement|
+| 9. Contract| `getQueueSummary`, `queue` = `HUB_MISSING_PARCELS_SEARCHING` (added to `QueueId` with the code of S1.35b)|
+| 10. Drill-down| `/missing-parcels`, which lists `listMissingParcels` with `view=searching`|
+| 11. Acceptance examples| Two parcels missing from one vendor and one from another: 3 (parcels, not vendors). One of the three found: 2, and the intake's case stays open until a senior officer decides. The case written off: 0 here, and the parcels are in the list's second view. A parcel of another hub is not counted for an officer of this hub. A session without `hub.read` has no entry|
+
 ## 6. Entities
 
-[domain-model.md](../../contracts/domain-model.md) §6.2 (`PickupRequest`: `scheduled_service_date`, `state`, `cutoff_exception_state`, `created_at`, `confirmed_at`; `OnePackageException`: `state`, `requested_at`), §6.3 (`PickupManifest`: `service_date`, `state`, `started_at`), §6.4 (`PickupStop`: `state`, `resolved_at`, `carryover_snapshot`, `released_at`) and §6.8 (`StaffIdentity`: `status`, `created_at`). Nothing is stored for a measure: each is derived from these.
+[domain-model.md](../../contracts/domain-model.md) §6.6 (`PickupIntake`: `state`, `handed_over_at`) and §6.6a (`IntakeParcel`: `state`, `missing_marked_at`; read by §5.5.7 and §5.5.8), §6.2 (`PickupRequest`: `scheduled_service_date`, `state`, `cutoff_exception_state`, `created_at`, `confirmed_at`; `OnePackageException`: `state`, `requested_at`), §6.3 (`PickupManifest`: `service_date`, `state`, `started_at`), §6.4 (`PickupStop`: `state`, `resolved_at`, `carryover_snapshot`, `released_at`) and §6.8 (`StaffIdentity`: `status`, `created_at`). Nothing is stored for a measure: each is derived from these.
 
 ## 7. States
 
-[state-machines.md](../../contracts/state-machines.md) §3 to §5 and §13.3. The measures read the states `PENDING`, `CONFIRMED`, `CANCELLED`, `DECLINED` of a request, the exception states `REQUESTED`, `APPROVED`, `REJECTED`, the cutoff review state `PENDING_OPS_REVIEW`, the states of a manifest, the stop states `PENDING`, `ARRIVED`, `COLLECTED`, `PARTIALLY_COLLECTED`, and the staff status `PENDING_APPROVAL`.
+[state-machines.md](../../contracts/state-machines.md) §3 to §5 and §13.3. The measures read the states `PENDING`, `CONFIRMED`, `CANCELLED`, `DECLINED` of a request, the exception states `REQUESTED`, `APPROVED`, `REJECTED`, the cutoff review state `PENDING_OPS_REVIEW`, the states of a manifest, the stop states `PENDING`, `ARRIVED`, `COLLECTED`, `PARTIALLY_COLLECTED`, the staff status `PENDING_APPROVAL`, and, for §5.5.7 and §5.5.8 (Run D), the intake states `AWAITING_COUNT` and `RECONCILIATION_REQUIRED` and the parcel state `MISSING` ([state-machines.md](../../contracts/state-machines.md) §7).
 
 ## 8. Permissions and scope
 
@@ -262,7 +305,7 @@ The measures of §5.1 to §5.4 have none numbered: their acceptance examples (§
 | **A promised window.** Without an authoritative promised window there is no lateness by the hour or the minute| All three| If the business promises a window|
 | **How a report presents a run that straddles midnight.** The lifecycle is decided (2 November 2026, §4): the run keeps its `service_date` and its actual moments, and each pickup is dated by its own event. What is open is only the presentation: the run under its planned date with its pickups under their own| *Completed late*, *Carryover planned*| With the report that shows it|
 | **The meaning of "fulfilled" for custody.** A pickup is fulfilled when a stop is collected or partly collected. If fulfilment must wait for the hub's count, the date basis moves| *Completed late*| Before the measure is contracted|
-| **The permission, hub scope and masking** of each figure, and the contract operation that serves it| The four of §5.1 to §5.4 (the six of §5.5 have theirs)| The task that contracts the measure|
+| **The permission, hub scope and masking** of each figure, and the contract operation that serves it| The four of §5.1 to §5.4 (those of §5.5 have theirs)| The task that contracts the measure|
 | **The cost of the pool at scale.** The count of §5.5.4 (and the list filter it follows, `manifested=false`) reads every confirmed request, because a collected request stays `CONFIRMED` with an unreleased stop: 0.7 seconds at 380,000 confirmed requests with a hub that reads none, 1.7 seconds at all hubs and 2.3 at one hub of 190,000. There were three options: a marker kept on the request that says it is on a run (set and cleared with the stop, by the database), ending the claim of a request whose pickup is closed, or bounding the pool by a date. **The Product Owner chose the marker on 5 November 2026.** It is not built: [the implementation plan](../../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign) holds it as a performance task for before production volumes. Until then a read of the summary pays this cost whenever the session may read the pool, and a hub that grows into the hundreds of thousands of confirmed requests will feel it, and since task P1.1 a pool count that passes 3 seconds ends the whole summary as a failed read (`AC-QSUM-13`; [the plan's performance task](../../delivery/IMPLEMENTATION_PLAN.md#3a-the-ops-portal-redesign) says at what size)| *Confirmed pickups not yet on a run*, `getQueueSummary` and `listPickupRequests`| Before a hub's history passes about 100,000 confirmed requests|
 
 **Decided on 5 November 2026 (tasks C1 and C1.1), so no longer open:** a queue's age is the moment the record entered the queue (the fifth point of each entry of §5.5, a returned request being old from its confirmation); the summary writes no audit event and, as background activity, never extends the idle session (§11); the late bookings have a filter of their own (`AC-QSUM-10`); a cancelled request leaves the approver's queue because its exception can no longer be decided (`AC-QSUM-12`; task P1.1 made it every request that is not pending, on 6 November 2026); and every Ops Staff member holds `pickup.exception.approve`, as [permissions.md](../../contracts/permissions.md) and [pickup-request.md](../pickup/pickup-request.md) say. **The Platform Admin holds every key it holds at all hubs** (Product Owner, 5 November 2026; task P1, `AC-SLICE-001-83`), so a Platform Admin with no primary hub counts every hub's pickup work, exactly as its lists show it, and the five pickup queues are no longer `0` for it.

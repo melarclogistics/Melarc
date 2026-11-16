@@ -26,6 +26,29 @@
   line-height: var(--text-body-md-line-height);
 }
 
+/* The wide window (size="wide", Run D, S1.35c-0): for what is shown whole, a photo; never wider than the screen. Everything else of the dialog is the same. */
+.ui-dialog--wide {
+  width: min(56rem, calc(100vw - 2 * var(--space-4)));
+}
+
+/*
+ * A window that fills (fill, the pictures of the receiving screens, 16 November 2026): as tall as the screen lets it be (the margin of every dialog's, and never taller than 56rem), with a column inside that its content fills,
+ * for what is shown whole and has controls (a photo and its buttons). The content is the part that gives way, so that the controls never leave the screen; a window as tall as its content is as tall as the photo, with the
+ * controls below the fold and a scroll that goes back to the top at every change of photo. The width is not its business (`wide` is).
+ */
+.ui-dialog--fill[open] {
+  display: flex;
+  flex-direction: column;
+  height: min(calc(100dvh - 2 * var(--space-4)), 56rem);
+}
+
+.ui-dialog--fill .ui-dialog__panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /*
  * Inside a modal dialog the overlays the kit draws (the date field's calendar, an action menu, a popover such as the filter bar's, a tooltip) are drawn into the dialog: the page
  * behind it is inert and its top layer is above the body, so one drawn there would be unseen and out of reach (task R5.2, M8; before it, only the calendar was). The dialog scrolls,

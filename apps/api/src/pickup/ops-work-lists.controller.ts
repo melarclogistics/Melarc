@@ -44,11 +44,13 @@ function filterOf(query: Record<string, unknown>): WorkListFilter {
     return value;
   };
   const open = take('open');
+  const variance = take('variance');
   const hubId = take('hub_id');
   const size = take('page_size');
   const pageToken = take('page_token');
   return {
     ...(open === undefined ? {} : { open }),
+    ...(variance === undefined ? {} : { variance }),
     ...(hubId === undefined ? {} : { hubId }),
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
@@ -124,6 +126,11 @@ export class OpsWorkListsController {
   @Get('collection-shortfalls')
   @ContractOperation('listCollectionShortfalls')
   @ApiQuery({ name: 'open', required: false, schema: { type: 'boolean' } })
+  @ApiQuery({
+    name: 'variance',
+    required: false,
+    schema: { type: 'string', enum: ['SHORT', 'OVER'] },
+  })
   @ApiQuery({ name: 'hub_id', required: false, schema: { type: 'string', format: 'uuid' } })
   @ApiQuery({
     name: 'page_size',

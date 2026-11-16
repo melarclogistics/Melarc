@@ -8,8 +8,9 @@ import { HUBS } from './hubs.js';
  * confirmed hub-scoped values of sections 7.2 and 7.3, for the Accra hub. `seed-data.test.ts` reads settings.md and fails when this
  * list and the document's confirmed values differ, so a value changes in the document and here in one change.
  *
- * **Only what the document confirms, with the value it gives.** An `OPEN` key is absent (`intake_lock_idle_ttl_minutes`, the
- * fuel-record thresholds) and so is `MELARC_HIGH_VALUE_TIERS`, which is `CONFIRMED` but whose bands have no stated boundary
+ * **Only what the document confirms, with the value it gives, and the one development value the Product Owner decided** (`intake_lock_idle_ttl_minutes`, fifteen minutes, decision D-13 of
+ * 29 October 2026: `PROVISIONAL` in the document, not citable as product policy, seeded so that a development and a test database have an idle time to judge a takeover by; the launch value
+ * stays the owner's). An `OPEN` key is absent (the fuel-record thresholds) and so is `MELARC_HIGH_VALUE_TIERS`, which is `CONFIRMED` but whose bands have no stated boundary
  * (the first is "GH₵500–2,000" and the second "above GH₵2,000") and whose place in the price is the owner's decision D-06; it is
  * seeded when that decision is recorded. A missing value fails visibly where it is needed (`SETTING_MISSING`); none is invented.
  * **No zone alias is seeded**: the data that places an address in a zone is the Product Owner's to supply (OB-S1-02).
@@ -121,7 +122,8 @@ export const HUB_SETTINGS: readonly HubSettingSeed[] = [
   wide('MELARC_MAX_PICKUP_ATTEMPTS', 3, 'attempts'),
   wide('auto_reschedule', false, 'switch'),
   wide('stale_failure_backstop_hours', 24, 'hours'),
-  wide('intake_parcel_cap', 100, 'parcels'),
+  // A development value (D-13, 29 October 2026; S1.32): the idle minutes after which another receiver may take over an intake's advisory lock. The launch value stays the owner's.
+  wide('intake_lock_idle_ttl_minutes', 15, 'minutes'),
   wide('pickup_service_window_start', '11:00', 'time of day, Africa/Accra'),
   wide('pickup_service_window_end', '16:00', 'time of day, Africa/Accra'),
   wide('rider_door_wait_minutes', 10, 'minutes'),

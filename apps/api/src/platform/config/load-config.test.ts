@@ -46,6 +46,12 @@ const REAL_ADAPTERS = {
   EVIDENCE_R2_BUCKET: 'test-evidence',
   EVIDENCE_R2_ACCESS_KEY_ID: 'TESTONLYACCESSKEY',
   EVIDENCE_R2_SECRET_ACCESS_KEY: 'TEST-ONLY-NOT-A-CREDENTIAL-0000000000',
+  // The content scanner beside it: a real one. The stand-in never stands beside a real bucket outside a local run (Run B, Part 1, item 5 of the review of Run A2), so a deployment that
+  // names the real store names the real scanner too.
+  EVIDENCE_SCANNER: 'clamav',
+  EVIDENCE_CLAMAV_HOST: 'clamav.internal.example',
+  EVIDENCE_CLAMAV_PORT: '3310',
+  EVIDENCE_CLAMAV_TIMEOUT_MS: '8000',
 };
 
 describe('loadConfig: accepted environments', () => {

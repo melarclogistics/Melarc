@@ -1,0 +1,180 @@
+import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
+import {
+  CellLines,
+  NoWrap,
+  RowTitle,
+  type DataColumn,
+} from '../../../components/ui/data-table/DataTable';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
+import { Link } from '../../../components/ui/link/Link';
+import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
+import type { ShortfallView } from '../../../platform/pickup-work/pickup-work-shape';
+import { useCollectionShortfalls } from '../../../platform/pickup-work/use-pickup-work-queries';
+import { refusalText } from '../../../platform/problem/capability-words';
+import type { Problem } from '../../../platform/problem/problem-copy';
+import { useSignedInSession } from '../../../platform/session/use-permissions';
+import { formatInstant } from '../../../platform/time/format-time';
+import { MANIFEST_STATE_MAP } from '../manifests/manifest-presentation';
+import { hubNameOf } from '../staff/staff-presentation';
+import {
+  countDifferenceLabel,
+  countDifferenceText,
+  countedOfBookedText,
+  stopPathOf,
+} from './pickup-work-presentation';
+import { WorkList, type WorkView } from './WorkList';
+
+const VIEWS: readonly [WorkView, ...WorkView[]] = [
+  {
+    id: 'in-progress',
+    label: 'In progress',
+    open: true,
+    none: 'No rider is out with a count that differs from the booking. A count difference appears here when a rider counts fewer or more parcels than were booked.',
+  },
+  {
+    id: 'ended',
+    label: 'Ended runs',
+    open: false,
+    none: 'A count difference whose run has ended appears here.',
+  },
+  {
+    id: 'all',
+    label: 'All',
+    open: undefined,
+    none: 'A count difference appears here when a rider counts fewer or more parcels than were booked at your hubs.',
+  },
+];
+
+/** The kind of difference, a filter of the list in the address (`variance`): the contract's two, and the way to take it off. */
+const KINDS = {
+  param: 'variance',
+  label: 'Kind of difference',
+  allLabel: 'Short and over',
+  options: [
+    { id: 'SHORT', label: 'Short' },
+    { id: 'OVER', label: 'Over' },
+  ],
+} as const;
+
+const refusalWords = (problem: Problem): string =>
+  refusalText(problem.forbidden, 'pickup.handshake.override', { of: 'count differences' });
+
+type Hubs = readonly { readonly id: string; readonly display_name: string }[];
+
+const stopOf = (item: ShortfallView): string =>
+  stopPathOf(item.pickup_manifest_id, item.pickup_stop_id);
+
+function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly hubs: Hubs }) {
+  return (
+    <CardFacts
+      head={<StatusBadge status={item.run_state} map={MANIFEST_STATE_MAP} />}
+      lead={item.sender_name}
+      facts={[
+        { label: 'Counted', value: countedOfBookedText(item.declared_count, item.collected_count) },
+        { label: countDifferenceLabel(item.variance), value: String(item.difference_count) },
+        { label: 'Reason', value: item.reason.label },
+        ...(item.note === null ? [] : [{ label: 'Rider’s note', value: item.note }]),
+        { label: 'Office told', value: formatInstant(item.office_notified_at) ?? '' },
+        { label: 'Hub', value: hubNameOf(item.responsible_hub_id, hubs) },
+      ]}
+    />
+  );
+}
+
+/**
+ * Count differences (surfaces/ops-portal.md section 7, `/collection-shortfalls`; S1.30; D-D5: *Short counts* until Run D, and now the over counts too): the counts the office was flagged on, short and over, from `listCollectionShortfalls`, **oldest first**: what was declared and
+ * counted, the reason the rider gave and its note (staff's own), when the flag was raised and the pickup. Views: *In progress* (the rider is still out with the parcels the office was told are
+ * missing), *Ended runs* and *All*. A row opens the stop. It supplements the rider's phone call and replaces nothing; **nothing marks a shortfall as read or worked yet, so the page offers no such
+ * act.** It says nothing of what it does not do: a sentence about the list is not a word of the floor. No price, total or fee is drawn.
+ */
+export function ShortfallsPage() {
+  const me = useSignedInSession();
+  if (me === undefined) return null;
+  const hubs = me.session.authorized_hubs;
+
+  const columns: readonly DataColumn<ShortfallView>[] = [
+    {
+      id: 'pickup',
+      header: 'Pickup / sender',
+      rowHeader: true,
+      cell: (item) => (
+        <RowTitle code={item.request_code} name={item.sender_name} to={stopOf(item)} />
+      ),
+    },
+    {
+      id: 'counts',
+      header: 'Counted',
+      kind: 'prose',
+      cell: (item) => (
+        <CellLines
+          first={countedOfBookedText(item.declared_count, item.collected_count)}
+          second={countDifferenceText(item.variance, item.difference_count)}
+        />
+      ),
+    },
+    {
+      id: 'reason',
+      header: 'Reason',
+      kind: 'prose',
+      priority: 2,
+      cell: (item) => (
+        <CellLines first={item.reason.label} second={item.note ?? 'The rider left no note.'} />
+      ),
+    },
+    {
+      id: 'told',
+      header: 'Office told',
+      kind: 'date',
+      priority: 2,
+      cell: (item) => <NoWrap>{formatInstant(item.office_notified_at) ?? ''}</NoWrap>,
+    },
+    {
+      id: 'run',
+      header: 'Run',
+      kind: 'badge',
+      priority: 3,
+      cell: (item) => <StatusBadge status={item.run_state} map={MANIFEST_STATE_MAP} />,
+    },
+    {
+      id: 'hub',
+      header: 'Hub',
+      priority: 3,
+      cell: (item) => hubNameOf(item.responsible_hub_id, hubs),
+    },
+  ];
+
+  return (
+    <HubFloor>
+      <WorkList<ShortfallView>
+        name="shortfalls"
+        operation="listCollectionShortfalls"
+        title="Count differences"
+        description="Counts where a rider collected fewer or more parcels than were booked at your hubs, oldest first."
+        viewsLabel="Views of the count differences"
+        views={VIEWS}
+        noun={{
+          plural: 'count differences',
+          one: 'count difference',
+          other: 'count differences',
+        }}
+        tableLabel="Count differences"
+        refusal={refusalWords}
+        choice={KINDS}
+        useList={useCollectionShortfalls}
+        rowId={(item) => item.id}
+        table={{
+          columns,
+          density: 'touch',
+          opens: 'record',
+          card: (item) => <ShortfallCard item={item} hubs={hubs} />,
+          cardTitle: (item) => (
+            <Link to={stopOf(item)}>
+              <OperationalCode>{item.request_code}</OperationalCode>
+            </Link>
+          ),
+        }}
+      />
+    </HubFloor>
+  );
+}

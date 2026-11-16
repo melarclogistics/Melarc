@@ -1,0 +1,231 @@
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { after, ruleOf, rulesOf } from './support/css-rule';
+
+const ROOT = resolve(import.meta.dirname, '..');
+const GRID = readFileSync(
+  join(ROOT, 'src', 'components', 'ui', 'photo-grid', 'photo-grid.css'),
+  'utf8',
+);
+const PICTURE = readFileSync(
+  join(ROOT, 'src', 'app', 'pages', 'evidence', 'photo-picture.css'),
+  'utf8',
+);
+const TOKENS = readFileSync(join(ROOT, 'src', 'styles', 'tokens.css'), 'utf8');
+
+/** A length of tokens.css written in rem (a spacing or a control height), as a number of rem. */
+function rem(token: string): number {
+  const match = new RegExp(`${token}:\\s*([\\d.]+)rem;`).exec(TOKENS);
+  if (match?.[1] === undefined) throw new Error(`${token} is not a rem length in tokens.css`);
+  return Number(match[1]);
+}
+
+/**
+ * The look of the photo grid (COMPONENT_PATTERNS, *PhotoGrid*; the Product Owner's decisions of 15 November 2026): tiles of one shape whatever the picture is, three to a row on a 390 px phone, a
+ * target of the hub floor's 56 px, a state told in a strip of words that is readable on any picture, and a look that survives forced colours and reduced motion. jsdom sees the class and not the pixels,
+ * so the sheet is read here and the pixels are measured in the showcase's browser spec.
+ */
+describe('the photo grid’s stylesheet', () => {
+  const tile = ruleOf(GRID, '.ui-photo-tile');
+  const grid = ruleOf(GRID, '.ui-photo-grid');
+
+  // Break caught: a tile written as a literal height, or one whose minimum is the medium control's.
+  it('makes every tile a target at least the hub floor’s 56 px on a side, by the token', () => {
+    expect(tile).toBeDefined();
+    expect(tile).toMatch(/min-height:\s*var\(--control-height-lg\)\s*;/);
+    expect(tile).toMatch(/min-width:\s*var\(--control-height-lg\)\s*;/);
+    expect(tile).not.toMatch(/min-(?:height|width):[^;]*\d+px/);
+  });
+
+  // Break caught: a tile whose box follows its picture, so that the grid jumps while pictures arrive, fail or differ in shape.
+  it('gives every tile one shape, whatever the picture is', () => {
+    const picture = ruleOf(GRID, '.ui-photo-tile__picture');
+
+    expect(tile).toMatch(/aspect-ratio:\s*1\s*\/\s*1\s*;/);
+    expect(tile).toMatch(/overflow:\s*hidden\s*;/);
+    expect(picture).toMatch(/position:\s*absolute\s*;/);
+    expect(picture).toMatch(/inset:\s*0\s*;/);
+  });
+
+  // Break caught: a column minimum so wide that a 390 px phone gets two tiles to a row, one so narrow that the words of a state do not fit the tile (the second look at the pictures: at 5.5rem "Checked in" took two lines in every
+  // checked tile and "Damaged" was broken in two), a tile under the floor, or a grid that is not filled by as many columns as fit.
+  it('puts three tiles to a row on a 390 px phone, none narrower than its state’s words need, never a tile under the floor, and as many as fit on a desk', () => {
+    expect(grid).toMatch(/display:\s*grid\s*;/);
+    expect(grid).toMatch(/grid-template-columns:\s*repeat\(auto-fill,/);
+    expect(grid).toMatch(/gap:\s*var\(--space-3\)\s*;/);
+    const minimum = /minmax\(min\(100%,\s*([\d.]+)rem\),\s*1fr\)/.exec(grid ?? '');
+    expect(minimum?.[1]).toBeDefined();
+    const column = Number(minimum?.[1]);
+    const gap = rem('--space-3');
+
+    // The room a grid really has on a phone is the receiving screen's: the page keeps 16 px on each side and a vendor's section 17 (its padding and its border), 66 px in all. (The kit's showcase is framed more, and
+    // its specimens of the grid are given the same room: the spec measures it.)
+    const RECEIVING = 66;
+    // Three tiles fit in the room a 390 px phone has in a receiving screen (324 px)...
+    expect(3 * column + 2 * gap).toBeLessThanOrEqual((390 - RECEIVING) / 16);
+    // ...and four do not fit in the widest phone's (430 px, 364 px), so that a phone has three to a row and not four.
+    expect(4 * column + 3 * gap).toBeGreaterThan((430 - RECEIVING) / 16);
+    // A tile is 6rem at least, which is what a state's icon and "Checked in" need (84.3 px of the 92 px inside a tile of 96 px): the page's own grid is measured in a browser.
+    expect(column).toBeGreaterThanOrEqual(6);
+    expect(column).toBeGreaterThanOrEqual(rem('--control-height-lg'));
+  });
+
+  // Break caught (the second look at the pictures, new defects 1 and 2): a strip with padding at its sides, which leaves the icon and "Checked in" less than the 84.3 px they need in a tile of 96 px, so that the words
+  // take two lines in every checked tile and a word such as "Damaged" is broken in two.
+  it('gives the strip of a state no padding at its sides, so that the icon and the words are one line in a tile of 96 px', () => {
+    const mark = ruleOf(GRID, '.ui-photo-tile__mark');
+
+    expect(mark).toMatch(/padding:\s*var\(--space-1\) var\(--space-0\)\s*;/);
+    expect(mark).toMatch(/display:\s*flex\s*;/);
+    expect(mark).toMatch(/gap:\s*var\(--space-1\)\s*;/);
+    // The words are the label size, in the face of the portal: the one line that is measured in the browser.
+    expect(mark).toMatch(/font-size:\s*var\(--text-label-sm-size\)\s*;/);
+  });
+
+  // Break caught: a state told in a colour that the status tokens do not own, or drawn without a background of its own, so that its words cannot be read on a picture.
+  it.each([
+    ['.ui-photo-tile--selected .ui-photo-tile__mark', 'success'],
+    ['.ui-photo-tile--marked .ui-photo-tile__mark', 'warning'],
+    ['.ui-photo-tile--dimmed .ui-photo-tile__mark', 'neutral'],
+  ])(
+    'draws the strip of `%s` in the %s status tokens, on a background of its own',
+    (selector, status) => {
+      const strip = ruleOf(GRID, selector);
+
+      expect(strip).toMatch(
+        new RegExp(`background:\\s*var\\(--color-status-${status}-background\\)\\s*;`),
+      );
+      expect(strip).toMatch(
+        new RegExp(`color:\\s*var\\(--color-status-${status}-foreground\\)\\s*;`),
+      );
+    },
+  );
+
+  // Break caught: a selected or a marked tile that is told by its strip alone (the border is the second sign, in the same tokens), or by a border in another colour.
+  it('draws a selected and a marked tile’s border in the colour of its strip', () => {
+    expect(ruleOf(GRID, '.ui-photo-tile--selected')).toMatch(
+      /border-color:\s*var\(--color-status-success-foreground\)\s*;/,
+    );
+    expect(ruleOf(GRID, '.ui-photo-tile--marked')).toMatch(
+      /border-color:\s*var\(--color-status-warning-foreground\)\s*;/,
+    );
+  });
+
+  // Break caught: the whole tile faded for a dimmed photo, which fades the words that say why and fails their contrast; only the picture is dimmed.
+  it('never fades the strip of a tile or the tile itself', () => {
+    expect(ruleOf(GRID, '.ui-photo-tile--dimmed') ?? '').not.toMatch(/opacity/);
+    expect(ruleOf(GRID, '.ui-photo-tile__mark') ?? '').not.toMatch(/opacity/);
+  });
+
+  // Break caught (CI run 43884891843, axe `color-contrast` on the dimmed tile of the showcase): the picture's box faded as a whole for a photo that is set apart (dimmed) or cannot be pressed (disabled). A box can
+  // hold words as well as a photo (the placeholder's, "Photo not available", the sample's label), and half the opacity takes them below the contrast they need, in both themes. The box is greyed and only
+  // what is a picture in it is faded.
+  it.each(['.ui-photo-tile--dimmed', '.ui-photo-tile:disabled'])(
+    'greys the picture box of %s and fades the pictures in it, never the words',
+    (tile) => {
+      const box = ruleOf(GRID, `${tile} .ui-photo-tile__picture`);
+
+      expect(box).toMatch(/filter:\s*grayscale\(1\)\s*;/);
+      expect(box).not.toMatch(/opacity/);
+      for (const picture of ['img', 'canvas', 'video', 'svg']) {
+        expect(ruleOf(GRID, `${tile} .ui-photo-tile__picture ${picture}`), picture).toMatch(
+          /opacity:\s*0?\.\d+\s*;/,
+        );
+      }
+    },
+  );
+
+  // Break caught: a badge with no surface of its own, which cannot be read on a bright picture.
+  it('puts the badge on a surface of its own', () => {
+    const badge = ruleOf(GRID, '.ui-photo-tile__badge');
+
+    expect(badge).toMatch(/background:\s*var\(--color-surface-default\)\s*;/);
+    expect(badge).toMatch(/color:\s*var\(--color-text-primary\)\s*;/);
+  });
+
+  // Break caught: a tile that forced colours leave without a border (the system drops the fills) or a selected tile that looks like the others.
+  it('draws a border on every tile when colours are forced, the selected one in the system’s highlight', () => {
+    const forced = after(GRID, '@media (forced-colors: active)');
+
+    expect(forced).toBeDefined();
+    expect(ruleOf(forced ?? '', '.ui-photo-tile')).toMatch(/border-color:\s*ButtonText\s*;/);
+    expect(ruleOf(forced ?? '', '.ui-photo-tile--selected')).toMatch(
+      /border-color:\s*Highlight\s*;/,
+    );
+    expect(ruleOf(forced ?? '', '.ui-photo-tile:disabled')).toMatch(/border-color:\s*GrayText\s*;/);
+    expect(ruleOf(forced ?? '', '.ui-photo-tile__mark')).toMatch(
+      /border-top:\s*1px solid CanvasText\s*;/,
+    );
+  });
+
+  // Break caught: a border that still fades when the person asked for less motion.
+  it('stops the tile’s transition for a person who asks for less motion', () => {
+    const reduced = after(GRID, '@media (prefers-reduced-motion: reduce)');
+
+    expect(reduced).toBeDefined();
+    expect(ruleOf(reduced ?? '', '.ui-photo-tile')).toMatch(/transition:\s*none\s*;/);
+  });
+});
+
+/**
+ * The look of the picture of a stored photo (`PhotoPicture`): in a tile it fills the box the tile makes and is cropped to it, never stretched; in the viewer it is drawn whole within its window, never wider
+ * than the box or taller than the screen; a picture that is not drawn yet, or cannot be, is an icon (and short words) centred in the box.
+ */
+describe('the stylesheet of the picture of a stored photo', () => {
+  // Break caught: a tile picture that is stretched out of its shape (a photo of a parcel made to look wide), or one that does not fill its box.
+  it('fills the box of a tile and crops the photo to it, never stretching it', () => {
+    const tile = ruleOf(PICTURE, '.photo-picture--tile');
+
+    expect(tile).toMatch(/width:\s*100%\s*;/);
+    expect(tile).toMatch(/height:\s*100%\s*;/);
+    expect(tile).toMatch(/object-fit:\s*cover\s*;/);
+  });
+
+  // Break caught: a photo in the viewer cropped to its window (a part of the evidence cut off), one taller than the room it is given (the viewer's controls pushed off the screen: the pictures of the receiving
+  // screens, defect 1: its own 70vh was a height of its own and not the room that was left), or one that has no height at all where there is no viewer round it. The viewer tells it the room it has
+  // (`--ui-photo-room`: the whole of its box, as a percentage), and outside a viewer the room is 70vh, as it was.
+  it('draws the photo of the viewer whole, within the room the viewer gives it, and 70vh high where there is none', () => {
+    const full = ruleOf(PICTURE, '.photo-picture--full');
+
+    expect(full).toMatch(/object-fit:\s*contain\s*;/);
+    expect(full).toMatch(/max-inline-size:\s*100%\s*;/);
+    expect(full).toMatch(/max-block-size:\s*var\(--ui-photo-room,\s*70vh\)\s*;/);
+  });
+
+  // Break caught: a placeholder or a line of words that sits at a corner of the tile, or in a colour the tokens do not own.
+  it('centres what stands for a photo that is not drawn, in the tokens’ colours', () => {
+    const placeholder = ruleOf(PICTURE, '.photo-picture__wait');
+    const unavailable = rulesOf(PICTURE, '.photo-picture__unavailable').join(' ');
+
+    expect(placeholder).toMatch(/justify-content:\s*center\s*;/);
+    expect(placeholder).toMatch(/align-items:\s*center\s*;/);
+    expect(unavailable).toMatch(/justify-content:\s*center\s*;/);
+    expect(unavailable).toMatch(/align-items:\s*center\s*;/);
+    expect(placeholder).toMatch(/color:\s*var\(--color-text-muted\)\s*;/);
+    expect(unavailable).toMatch(/color:\s*var\(--color-text-secondary\)\s*;/);
+    expect(unavailable).toMatch(/font-size:\s*var\(--text-label-sm-size\)\s*;/);
+  });
+});
+
+describe('the reader of a stylesheet’s blocks', () => {
+  // The reader proved on text it must find and text it must leave alone.
+  it('finds the rules after a marker, and not a marker that is in a comment or is not there', () => {
+    const text =
+      '.a { x: 1; } /* @media (forced-colors: active) { .a { z: 3; } } */ @media (forced-colors: active) { .a { y: 2; } }';
+
+    expect(ruleOf(after(text, '@media (forced-colors: active)') ?? '', '.a')).toContain('y: 2');
+    expect(ruleOf(text, '.a')).toContain('x: 1');
+    expect(after('.a { x: 1; }', '@media (forced-colors: active)')).toBeUndefined();
+  });
+
+  it('finds every rule of a selector, the shared one and its own, in the order written', () => {
+    const text = '.a, .b { x: 1; } .b { y: 2; } /* .b { z: 3; } */ .c { w: 4; }';
+
+    expect(rulesOf(text, '.b')).toEqual([' x: 1; ', ' y: 2; ']);
+    expect(rulesOf(text, '.c')).toEqual([' w: 4; ']);
+    expect(rulesOf(text, '.d')).toEqual([]);
+  });
+});

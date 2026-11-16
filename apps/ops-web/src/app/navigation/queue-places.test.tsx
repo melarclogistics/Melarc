@@ -34,6 +34,8 @@ const KEYS_OF: Readonly<Record<QueueName, readonly string[]>> = {
   PICKUP_UNMANIFESTED_POOL: ['pickup.read'],
   PICKUP_RUNS_IN_PROGRESS: ['pickup.read'],
   STAFF_AWAITING_APPROVAL: ['staff.read', 'staff.identity.approve'],
+  HUB_RECEIVING_RUNS_WAITING: ['hub.read'],
+  HUB_MISSING_PARCELS_SEARCHING: ['hub.read'],
 };
 
 const pathOf = (link: string): string => link.split('?')[0] ?? link;
@@ -125,6 +127,8 @@ describe('the registry and the queues', () => {
       '/approvals': 'PICKUP_EXCEPTION_APPROVAL',
       '/manifests': 'PICKUP_RUNS_IN_PROGRESS',
       '/admin/staff': 'STAFF_AWAITING_APPROVAL',
+      '/receiving': 'HUB_RECEIVING_RUNS_WAITING',
+      '/missing-parcels': 'HUB_MISSING_PARCELS_SEARCHING',
     });
     // The late bookings have no entry, and the pool's entry (the run builder) is an action of the New menu, which draws no count: both show on My work.
     expect([...queues.values()]).not.toContain('PICKUP_CUTOFF_REVIEW');

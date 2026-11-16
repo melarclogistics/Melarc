@@ -78,6 +78,23 @@
   grid-row: 2;
 }
 
+/*
+ * The hub floor's choices (DESIGN_SYSTEM sections 11 and 12): the label is the target and fills the row, at least the touch row high, and the circle is larger and centred on it, so a thumb that
+ * lands anywhere on the row chooses it. The height is a minimum, so enlarged text grows the row.
+ */
+.ui-radio-group--lg .ui-radio__label {
+  display: flex;
+  align-items: center;
+  min-height: var(--density-row-touch);
+}
+
+.ui-radio-group--lg .ui-radio__input {
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  align-self: center;
+  margin: 0;
+}
+
 .ui-radio__input:disabled {
   cursor: not-allowed;
 }

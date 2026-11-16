@@ -8,6 +8,7 @@ import { AccessFixtureModule, FixtureModule } from '../../test-support/fixtures.
 import { appWith, startTestApp, type TestApp } from '../../test-support/test-app.js';
 import { RequiresPermission } from './access-declaration.js';
 import { assertRoutesAreSound, inspectRoutes } from './route-inventory.js';
+import { ownerKeysOf } from '../evidence/evidence-owners.js';
 
 // The router class of the Express that the platform adapter runs on: the application does not depend on it directly.
 const { Router } = createRequire(
@@ -50,7 +51,11 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/auth/vendor/devices' },
       { method: 'GET', path: '/api/v1/collection-disputes' },
       { method: 'GET', path: '/api/v1/collection-shortfalls' },
+      { method: 'GET', path: '/api/v1/evidence-limits' },
       { method: 'GET', path: '/api/v1/handshakes-for-ops' },
+      { method: 'GET', path: '/api/v1/hub-intakes' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id' },
+      { method: 'GET', path: '/api/v1/missing-parcels' },
       { method: 'GET', path: '/api/v1/notifications' },
       { method: 'GET', path: '/api/v1/ops/queue-summary' },
       { method: 'GET', path: '/api/v1/ops/riders' },
@@ -64,7 +69,10 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/pickup-requests' },
       { method: 'GET', path: '/api/v1/pickup-requests/:id' },
       { method: 'GET', path: '/api/v1/pickup-stops/:id' },
+      { method: 'GET', path: '/api/v1/pickup-stops/:id/evidence' },
       { method: 'GET', path: '/api/v1/reason-definitions' },
+      { method: 'GET', path: '/api/v1/receiving-runs' },
+      { method: 'GET', path: '/api/v1/receiving-runs/:manifest_id' },
       { method: 'GET', path: '/api/v1/run-custody-handovers' },
       { method: 'GET', path: '/api/v1/run-custody-handovers/:id' },
       { method: 'GET', path: '/api/v1/staff-identities' },
@@ -92,6 +100,13 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/evidence' },
       { method: 'POST', path: '/api/v1/evidence/:id/complete' },
       { method: 'POST', path: '/api/v1/evidence/:id/retrieval-authorization' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/check-in' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/condition' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/correction' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/count' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/discrepancy' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/extra-parcels' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/lock' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
@@ -109,6 +124,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/custody-handover/accept' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/custody-handover/fail' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/dispatch' },
+      { method: 'POST', path: '/api/v1/pickup-manifests/:id/hub-handover' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/start' },
       { method: 'POST', path: '/api/v1/pickup-requests' },
       { method: 'POST', path: '/api/v1/pickup-requests/:id/attempt-extension' },
@@ -132,6 +148,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-stops/:id/skip' },
       { method: 'POST', path: '/api/v1/staff-identities' },
       { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
+      { method: 'PUT', path: '/api/v1/intake-parcels/:parcel_id/arrival' },
       { method: 'PUT', path: '/api/v1/pickup-manifests/:id/stops' },
     ]);
     expect(inspection.declared).toEqual([
@@ -220,6 +237,14 @@ describe('the real application', () => {
         authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE']),
       },
+      // S1.35b: the limits the evidence store holds a photo to, read by the page before it offers one (`background`: the page asks on its own).
+      {
+        method: 'GET',
+        path: '/api/v1/evidence-limits',
+        access: 'self',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'background' },
+        credentialModes: new Set(['COOKIE']),
+      },
       {
         method: 'GET',
         path: '/api/v1/handshakes-for-ops',
@@ -229,6 +254,39 @@ describe('the real application', () => {
         credentialModes: new Set(['COOKIE']),
       },
       // S1.12e: the Ops message log, `notification.read` at the hubs of the grant, on the browser surface alone.
+      // S1.32: the receiving side's reads and lock, for the staff of the Ops Portal alone (the contract names the rider's session beside the browser's for the two reads; the surface gate refuses it, OB-S1-96).
+      // The intake is the record the scope probe is asked about, so another hub's intake is HUB_SCOPE_VIOLATION and one that does not exist NOT_FOUND. The lock's request is `background` activity: the page keeping
+      // its own lock is not the person acting.
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.35b: receiving by run. The reads are `hub.read` at the hubs of the grant, on the browser surface alone; the acts are the keys of the counting and of the adjudication, on the intake
+      // (or on the parcel, whose hub is its intake's): another hub's is HUB_SCOPE_VIOLATION and one that does not exist NOT_FOUND.
+      {
+        method: 'GET',
+        path: '/api/v1/missing-parcels',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
       {
         method: 'GET',
         path: '/api/v1/notifications',
@@ -374,6 +432,19 @@ describe('the real application', () => {
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
+      // S1.30: the evidence of a stop with the progress of its parcel photos, for Ops staff alone (a browser session; the stop is the record the scope probe is asked about).
+      {
+        method: 'GET',
+        path: '/api/v1/pickup-stops/:id/evidence',
+        access: 'permission',
+        permission: 'pickup.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_stop', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
       {
         method: 'GET',
         path: '/api/v1/reason-definitions',
@@ -381,6 +452,26 @@ describe('the real application', () => {
         permission: 'settings.reason.read',
         authenticated: { surfaces: ['OPS_PORTAL', 'RIDER_ANDROID'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/receiving-runs',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/receiving-runs/:manifest_id',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_manifest', param: 'manifest_id' },
+        },
+        credentialModes: new Set(['COOKIE']),
       },
       // S1.24: the custody handovers an actor is a party to, and one of them with its ETag. Staff by the hubs of the grant, a rider as a party.
       {
@@ -583,26 +674,127 @@ describe('the real application', () => {
         method: 'POST',
         path: '/api/v1/evidence',
         access: 'self',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        authenticated: {
+          surfaces: ['RIDER_ANDROID', 'OPS_PORTAL'],
+          activity: 'qualifying',
+          owner: true,
+          ownerKeys: ownerKeysOf('write'),
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       {
         method: 'POST',
         path: '/api/v1/evidence/:id/complete',
         access: 'self',
-        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying', owner: true },
+        authenticated: {
+          surfaces: ['RIDER_ANDROID', 'OPS_PORTAL'],
+          activity: 'qualifying',
+          owner: true,
+          ownerKeys: ownerKeysOf('write'),
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       {
         method: 'POST',
         path: '/api/v1/evidence/:id/retrieval-authorization',
         access: 'self',
-        authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying', owner: true },
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          owner: true,
+          ownerKeys: ownerKeysOf('read'),
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/check-in',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
       // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
       // changes nothing (the Product Owner, 6 November 2026), so that a number typed in full is in no URL: the CSRF guard judges it like any POST.
+      // S1.34: what is found at an intake after its count: the receiver's condition, and Senior Ops's adjudication (a key Ops Staff do not hold: the guard refuses them before the body is read).
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/condition',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/correction',
+        access: 'permission',
+        permission: 'hub.osd.adjudicate',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.33: the receiver's blind count.
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/count',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/discrepancy',
+        access: 'permission',
+        permission: 'hub.osd.adjudicate',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/extra-parcels',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/lock',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'background',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       {
         method: 'POST',
         path: '/api/v1/ops/lookup',
@@ -811,6 +1003,16 @@ describe('the real application', () => {
           // R76: the dispatch texts the rider and the vendors, so the sub-ceiling of the provider-initiating operations applies.
           providerInitiating: true,
         },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.31: the custody holder hands the run's collected parcels to the hub, which completes the run. The Rider app alone, and **no record scope**, for the reason given at `startRun`: a
+      // rider who is not the run's, and an id that matches nothing, are told `NOT_ASSIGNED_RIDER` by the use case, and one that does not hold the parcels `NOT_CUSTODY_HOLDER`.
+      {
+        method: 'POST',
+        path: '/api/v1/pickup-manifests/:id/hub-handover',
+        access: 'permission',
+        permission: 'hub.handover.submit',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.22: the rider starts the run it was given. It declares **no record scope**: a rider who is not the run's rider is told
@@ -1081,6 +1283,18 @@ describe('the real application', () => {
           activity: 'qualifying',
           record: { entity: 'staff_identity', param: 'id' },
           tier: { rule: 'staff_identity_bundle' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'PUT',
+        path: '/api/v1/intake-parcels/:parcel_id/arrival',
+        access: 'permission',
+        permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'intake_parcel', param: 'parcel_id' },
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },

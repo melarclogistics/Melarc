@@ -42,6 +42,15 @@ export function uploadHeadersOf(request: UploadCapabilityRequest): UploadHeaders
   };
 }
 
+/**
+ * What both adapters add to an address that **reads** an object (Run D, finding F8 of the review of Run B): the bucket is asked to answer with `Cache-Control: no-store`
+ * (`response-cache-control`, a query term S3 and R2 honour), so that a browser or a proxy keeps no copy of a photo after the capability that was good for five minutes is dead. The term is
+ * signed with the rest of the address; it adds no header the reader has to send.
+ */
+export const RETRIEVAL_QUERY: Readonly<Record<string, string>> = {
+  'response-cache-control': 'no-store',
+};
+
 /** The moment a capability stops working. */
 export const expiryOf = (issuedAt: Date, ttlSeconds: number): Date =>
   new Date(Math.floor(issuedAt.getTime() / 1000) * 1000 + ttlSeconds * 1000);

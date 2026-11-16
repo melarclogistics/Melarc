@@ -1,0 +1,79 @@
+/*
+ * The record beside a work list of the door and the failure (S1.30): a failure and a handshake open in the side panel, with their facts, what the rider did and the acts of the office. Layout only:
+ * every colour, size and space comes from tokens.css, and the components do the rest.
+ */
+.work-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.work-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.work-panel__section > p {
+  margin: 0;
+}
+
+/* The small-capitals label of a section, as the description list's own. */
+.work-panel__heading {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-section-label-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-caption-line-height);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.work-panel__support {
+  display: block;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line-height);
+}
+
+/* The contact attempts: one entry each, set apart by a rule, with the note under what came of it. */
+.work-panel__attempts {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-panel__attempts > li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.work-panel__attempts > li:first-child {
+  padding-block-start: 0;
+  border-top: 0;
+}
+
+/* The acts of the office: the first is the one to do next, and the others wrap beside it where the panel is narrow. */
+.work-panel__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/*
+ * The acts are the last section of a record that can be taller than the window (a failure has its facts, what the rider did and what was decided): they stay at the foot of the panel as it
+ * scrolls, on the panel's own surface and set off by a rule, so that the officer never has to scroll to the end of a record to act on it.
+ */
+.work-panel__section--acts {
+  position: sticky;
+  bottom: 0;
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--color-border-default);
+  background: var(--color-surface-default);
+}

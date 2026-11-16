@@ -13,7 +13,7 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import type { ReasonValidator } from '../platform/settings/reason-validator.js';
 import { SettingMissingError } from '../platform/settings/settings-reader.js';
-import { momentOf } from './device-moment.js';
+import { momentOf } from '../platform/time/device-moment.js';
 import { attachEvidence, requireStoredEvidence } from './pickup-failure-evidence.js';
 import { MAX_CONTACT_ATTEMPTS } from './pickup-failure-schemas.js';
 import {

@@ -267,7 +267,7 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
   // Break caught: a record no answer can satisfy. The schema was the closed creation schema plus the fields
   // the server adds, so the creation branch refused `id` and every other server field, and the operation could
   // never answer 200 without its own response validation failing.
-  it('accepts the record the server answers with, a short one and a clean one', () => {
+  it('accepts the record the server answers with, a short one, an over one (D-D5) and a clean one', () => {
     expect(answer(record)).toEqual([]);
     expect(
       answer({
@@ -277,6 +277,15 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
         variance_reason_code: 'NOT_READY',
         variance_note: 'Two parcels were not ready.',
         office_notified_at: '2026-10-05T09:31:00Z',
+      }),
+    ).toEqual([]);
+    expect(
+      answer({
+        ...record,
+        collected_count: 5,
+        variance: 'OVER',
+        variance_reason_code: 'VENDOR_ADDED_PARCELS',
+        office_notified_at: '2026-11-16T09:31:00Z',
       }),
     ).toEqual([]);
   });
@@ -292,7 +301,7 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
   });
 
   it('keeps every value to the type and enum it had in the request', () => {
-    expect(answer({ ...record, variance: 'OVER' })).toEqual([
+    expect(answer({ ...record, variance: 'LESS' })).toEqual([
       { in: 'response-body', pointer: '/variance', rule: 'enum' },
     ]);
     // The handshake's direction and channel left this record (count, then confirm, 29 October 2026): they

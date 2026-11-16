@@ -1,0 +1,177 @@
+/*
+ * The photo grid (design/COMPONENT_PATTERNS.md, PhotoGrid). Tiles of one shape whatever the picture is: a square whose box is made by the grid and the ratio and by nothing inside it, so that the grid never
+ * jumps while pictures arrive, fail or differ in shape. **Three tiles to a row on a 390px phone**: the column minimum is 6rem (96px), which is three from a room of 312px, and a receiving screen leaves a 390px
+ * phone 324px (the page's 16px on each side and a vendor's section's 17px); a 360px phone has 294px and gets two. **It is not narrower, because the words of a state need the tile**: a state is an icon and
+ * one line of words in a strip along the tile's foot, and the icon, its gap and "Checked in" are 84px of the 92px a tile of 96px has inside its border. At 5.5rem (88px, commit 7d59331, made so that the kit's
+ * showcase, which is framed twice and had 292px, showed three to a row) "Checked in" took two lines in every checked tile and "Damaged" was broken in two (the second look at the pictures, 16 November 2026).
+ * Held by test/photo-grid-style.test.ts and measured on the receiving page's own grid by test/browser/receiving.spec.ts. As many as fit on a desk; the tile is a button of at least the hub floor's 56px
+ * on a side. Every colour, size and space comes from tokens.css.
+ */
+.ui-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 6rem), 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-photo-tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: var(--control-height-lg);
+  min-height: var(--control-height-lg);
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  cursor: pointer;
+  transition: border-color var(--motion-fast);
+}
+
+.ui-photo-tile--normal:hover {
+  border-color: var(--color-border-strong);
+}
+
+/*
+ * The picture is the page's, drawn into a box that the tile makes: it fills the box and takes no part in making it (an absolute box), so what is drawn in it, a picture, a line of words or nothing, never
+ * changes the tile.
+ */
+.ui-photo-tile__picture {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+  text-align: center;
+}
+
+/*
+ * A state, told in an icon and words in a strip along the foot of the tile, on a background of its own that is never a picture's, so that it reads on any picture; the tile's border takes the same colour
+ * as a second sign. The state is never the colour alone. **The words are one line**: the strip has no padding at its sides, because the tile it must hold them in is 96px and 92px inside its border, and the
+ * icon (16px), its gap (4px) and "Checked in" (64.3px in the face of the portal) are 84.3px, where a padding of 4px at each side leaves 84px. A state wraps at its spaces where it is longer (the tapped
+ * "Checked in, damaged"); a word is broken only where a line of large text cannot hold it, by the frame's `overflow-wrap`, which is better than a word cut off.
+ */
+.ui-photo-tile__mark {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-0);
+  border-top: 1px solid transparent;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+  text-align: center;
+}
+
+.ui-photo-tile--selected {
+  border-color: var(--color-status-success-foreground);
+}
+
+.ui-photo-tile--selected .ui-photo-tile__mark {
+  border-top-color: var(--color-status-success-border);
+  background: var(--color-status-success-background);
+  color: var(--color-status-success-foreground);
+}
+
+.ui-photo-tile--marked {
+  border-color: var(--color-status-warning-foreground);
+}
+
+.ui-photo-tile--marked .ui-photo-tile__mark {
+  border-top-color: var(--color-status-warning-border);
+  background: var(--color-status-warning-background);
+  color: var(--color-status-warning-foreground);
+}
+
+/*
+ * A dimmed photo is set apart, and so is one that cannot be pressed: **the box is greyed and only the pictures in it are faded**, never the box as a whole. A box holds words as well as a photo (the placeholder's, "Photo not
+ * available", a label), and half the opacity of the box takes those words below the contrast they need in both themes (CI run 43884891843, axe `color-contrast`); a grey keeps the contrast of a grey. The words that say
+ * why a tile is set apart are in its strip, which is never faded either.
+ */
+.ui-photo-tile--dimmed .ui-photo-tile__picture,
+.ui-photo-tile:disabled .ui-photo-tile__picture {
+  filter: grayscale(1);
+}
+
+.ui-photo-tile--dimmed .ui-photo-tile__picture img,
+.ui-photo-tile--dimmed .ui-photo-tile__picture canvas,
+.ui-photo-tile--dimmed .ui-photo-tile__picture video,
+.ui-photo-tile--dimmed .ui-photo-tile__picture svg,
+.ui-photo-tile:disabled .ui-photo-tile__picture img,
+.ui-photo-tile:disabled .ui-photo-tile__picture canvas,
+.ui-photo-tile:disabled .ui-photo-tile__picture video,
+.ui-photo-tile:disabled .ui-photo-tile__picture svg {
+  opacity: 0.5;
+}
+
+.ui-photo-tile--dimmed .ui-photo-tile__mark {
+  border-top-color: var(--color-status-neutral-border);
+  background: var(--color-status-neutral-background);
+  color: var(--color-status-neutral-foreground);
+}
+
+/* A small text on the tile ("3": the photo's place, or a count), on a surface of its own for the same reason as the strip. */
+.ui-photo-tile__badge {
+  position: absolute;
+  inset-block-start: var(--space-1);
+  inset-inline-start: var(--space-1);
+  min-width: var(--space-6);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-default);
+  color: var(--color-text-primary);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+  text-align: center;
+}
+
+/* Disabled is the native attribute, so the style never appears without the behaviour. */
+.ui-photo-tile:disabled {
+  border-color: var(--color-border-disabled);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-photo-tile {
+    transition: none;
+  }
+}
+
+/* Forced colours: the system drops the fills, so every tile has a border, the selected one in the system's highlight, and the strip and the badge are set off by one. */
+@media (forced-colors: active) {
+  .ui-photo-tile {
+    border-color: ButtonText;
+  }
+
+  .ui-photo-tile--selected {
+    border-color: Highlight;
+  }
+
+  .ui-photo-tile:disabled {
+    border-color: GrayText;
+  }
+
+  .ui-photo-tile__mark {
+    border-top: 1px solid CanvasText;
+  }
+
+  .ui-photo-tile__badge {
+    border-color: CanvasText;
+  }
+}

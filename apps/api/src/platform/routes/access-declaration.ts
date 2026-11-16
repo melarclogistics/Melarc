@@ -179,7 +179,18 @@ export interface AuthenticatedRouteOptions {
    * it opens a transaction. Only a `self` route may state it, and the description then says `owner` and not `self`.
    */
   readonly owner?: true;
+  /**
+   * Of an `owner` operation (S1.34): **for each kind of principal it serves, the keys of the acts it could be for, of which the session must hold at least one**. The guard asks it at the surface
+   * gate, before the body is read: a session that holds none of them is refused `PERMISSION_DENIED` and learns nothing of the request's schema (`AC-SLICE-000-130`), as a session of a kind
+   * the operation lists no key for is. Which key decides the act, and whether the act is one the session may do on the record, is still the use case's. The list is the use case's own
+   * registry of acts (the evidence operations build it from `OWNER_ACTS`), so the platform names no act.
+   */
+  readonly ownerKeys?: Readonly<Partial<Record<OwnerPrincipal, readonly string[]>>>;
 }
+
+/** The kinds of principal an `owner` operation lists keys for. */
+export type OwnerPrincipal = 'STAFF' | 'VENDOR' | 'RIDER';
+const OWNER_PRINCIPALS: readonly OwnerPrincipal[] = ['STAFF', 'VENDOR', 'RIDER'];
 
 export interface AccessDetail {
   /** The permission key of a `permission` declaration. */
@@ -310,6 +321,27 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
       'An operation whose permission is the act’s that it evidences states it with owner: true, or states nothing',
     );
   }
+  const ownerKeys: unknown = given.ownerKeys;
+  if (ownerKeys !== undefined) {
+    const refused = new TypeError(
+      'The keys of the acts an owner operation could be for are stated for the kinds of principal it serves, each with at least one key of the catalogue',
+    );
+    if (owner !== true) throw refused;
+    if (typeof ownerKeys !== 'object' || ownerKeys === null || Array.isArray(ownerKeys))
+      throw refused;
+    const entries = Object.entries(ownerKeys);
+    if (entries.length === 0) throw refused;
+    for (const [kind, keys] of entries) {
+      if (
+        !OWNER_PRINCIPALS.includes(kind as OwnerPrincipal) ||
+        !Array.isArray(keys) ||
+        keys.length === 0 ||
+        !keys.every((key) => typeof key === 'string' && isPermissionKey(key))
+      ) {
+        throw refused;
+      }
+    }
+  }
   const record: unknown = given.record;
   if (record !== undefined) {
     const named = record as Record<string, unknown>;
@@ -319,7 +351,8 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
       typeof named.entity !== 'string' ||
       !/^[a-z][a-z0-9_]*$/.test(named.entity) ||
       typeof named.param !== 'string' ||
-      !/^[A-Za-z][A-Za-z0-9]*$/.test(named.param)
+      // A path parameter is a word of letters and digits, with underscores where the contract names it so (`parcel_id`, `manifest_id`: Run D); never a place for anything else.
+      !/^[A-Za-z][A-Za-z0-9_]*$/.test(named.param)
     ) {
       throw new TypeError(
         'A record scope names an entity and the path parameter that carries its id',
@@ -355,6 +388,18 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
     ...(tier === undefined ? {} : { tier: Object.freeze({ ...(tier as TierDeclaration) }) }),
     ...(providerInitiating === true ? { providerInitiating: true as const } : {}),
     ...(owner === true ? { owner: true as const } : {}),
+    ...(ownerKeys === undefined
+      ? {}
+      : {
+          ownerKeys: Object.freeze(
+            Object.fromEntries(
+              Object.entries(ownerKeys as Record<string, readonly string[]>).map(([kind, keys]) => [
+                kind,
+                Object.freeze([...keys]),
+              ]),
+            ),
+          ),
+        }),
   });
 }
 

@@ -46,7 +46,7 @@ function Doer() {
       const verb = client[method];
       if (verb === undefined) return Promise.reject(new Error(`The client has no ${method}.`));
       return verb(path, {
-        params: { path: { id: ID, riderId: ID, stopId: ID } },
+        params: { path: { id: ID, riderId: ID, stopId: ID, parcel_id: ID } },
         body: {},
       });
     };
@@ -55,7 +55,11 @@ function Doer() {
 }
 
 const concrete = (path: string): string =>
-  path.replaceAll('{id}', ID).replaceAll('{riderId}', ID).replaceAll('{stopId}', ID);
+  path
+    .replaceAll('{id}', ID)
+    .replaceAll('{riderId}', ID)
+    .replaceAll('{stopId}', ID)
+    .replaceAll('{parcel_id}', ID);
 
 const summaryReads = () => api.requests.filter((request) => request.url.endsWith(SUMMARY)).length;
 

@@ -9,6 +9,7 @@ import {
 } from './ops-work-list-schemas.js';
 import {
   disputeViewOf,
+  escalationViewOf,
   failureViewOf,
   opsHandshakeViewOf,
   shortfallViewOf,
@@ -178,14 +179,16 @@ describe('the items hold the contract’s members and no other', () => {
     expect(item.expires_at).toBe('2026-11-03T09:45:00.000Z');
   });
 
-  // Break caught: the shortfall computed the wrong way round, a note that is absent shown as an empty string, or a member of the rider’s count left on the wire.
-  it('a shortfall carries the contract’s members, the shortfall as declared less counted, and a missing note as null', () => {
+  // Break caught: the difference computed the wrong way round (a negative number for an over count, or the declared count less the counted one for both), the variance not stated, a note that is
+  // absent shown as an empty string, or a member of the rider’s count left on the wire. (D-D5: the list is the office's list of count differences, short and over together.)
+  it('a count difference carries the contract’s members, the variance and the size of the difference whichever way it goes, and a missing note as null', () => {
     const row = {
       ...CONTEXT,
       ...LEAK,
       id: ID(12),
       declared_count: 5,
       collected_count: 3,
+      variance: 'SHORT',
       variance_reason_snapshot: {
         reason_code: 'SOME_PARCELS_NOT_READY',
         label: 'Some parcels not ready',
@@ -208,7 +211,9 @@ describe('the items hold the contract’s members and no other', () => {
     });
 
     expect(names(plain)).toEqual(names(schemaOf('CollectionShortfall').properties));
-    expect(plain.shortfall_count).toBe(2);
+    expect(plain.variance).toBe('SHORT');
+    expect(plain.difference_count).toBe(2);
+    expect(Object.keys(plain)).not.toContain('shortfall_count');
     expect(plain.note).toBeNull();
     expect(plain.reason).toEqual({
       code: 'SOME_PARCELS_NOT_READY',
@@ -216,6 +221,21 @@ describe('the items hold the contract’s members and no other', () => {
       attribution: 'CUSTOMER',
     });
     expect(noted.note).toBe('Two cartons were still open');
+
+    const over = shortfallViewOf({
+      ...row,
+      declared_count: 3,
+      collected_count: 8,
+      variance: 'OVER',
+      variance_reason_snapshot: {
+        reason_code: 'VENDOR_ADDED_PARCELS',
+        label: 'Vendor added parcels after booking',
+        attribution: 'CUSTOMER',
+      },
+    } as unknown as CollectionShortfallRow);
+    expect(over.variance).toBe('OVER');
+    expect(over.difference_count).toBe(5);
+    expect(over.reason.code).toBe('VENDOR_ADDED_PARCELS');
   });
 
   // Break caught: the members of a contact attempt copied wholesale (so that what the snapshot holds beside them reaches the wire), a note that is absent shown
@@ -254,6 +274,7 @@ describe('the items hold the contract’s members and no other', () => {
       attempt_number: 2,
       attempt_extended: false,
       escalated_at: null,
+      escalation_event: null,
       decided_at: null,
       replacement_request_id: null,
       rider_id: ID(6),
@@ -288,5 +309,69 @@ describe('the items hold the contract’s members and no other', () => {
     expect(failureViewOf({ ...row, photo_count: 0 }).photo_count).toBe(0);
     expect(bare.note).toBeNull();
     expect(bare.contact_attempts).toEqual([]);
+    // Not escalated: the request has no moment of an escalation, so the item says none, whatever the ledger holds.
+    expect(item.escalation).toBeNull();
+  });
+
+  // Break caught (S1.30, section 17.3): the queue saying a person escalated what the backstop did (or the reverse), the backstop's threshold and wait dropped, a threshold or a wait that is
+  // not a whole number passed on as one, a threshold below one hour passed on, an escalation with no event read as an officer's act, and an escalation shown for a request that was not escalated.
+  describe('the escalation of a failure', () => {
+    const AT = '2026-11-03T12:00:00.000Z';
+
+    it('says the backstop escalated, with the threshold and the wait its event recorded', () => {
+      expect(
+        escalationViewOf(AT, { trigger: 'BACKSTOP', threshold_hours: 24, waited_seconds: 90061 }),
+      ).toEqual({ by: 'BACKSTOP', threshold_hours: 24, waited_seconds: 90061 });
+      // A figure of a ledger event that arrives as text is read as the whole number it is.
+      expect(
+        escalationViewOf(new Date(AT), {
+          trigger: 'BACKSTOP',
+          threshold_hours: '24',
+          waited_seconds: '90061',
+        }),
+      ).toEqual({ by: 'BACKSTOP', threshold_hours: 24, waited_seconds: 90061 });
+    });
+
+    it('says a person escalated what an officer escalated, and states neither a threshold nor a wait for it', () => {
+      expect(
+        escalationViewOf(AT, { trigger: 'OPS', threshold_hours: 24, waited_seconds: 60 }),
+      ).toEqual({ by: 'PERSON', threshold_hours: null, waited_seconds: null });
+      expect(
+        escalationViewOf(AT, { trigger: null, threshold_hours: null, waited_seconds: null }),
+      ).toEqual({ by: 'PERSON', threshold_hours: null, waited_seconds: null });
+    });
+
+    it('says it does not know who where the ledger holds no event, and nothing where there was no escalation', () => {
+      expect(escalationViewOf(AT, null)).toEqual({
+        by: 'UNKNOWN',
+        threshold_hours: null,
+        waited_seconds: null,
+      });
+      expect(escalationViewOf(null, null)).toBeNull();
+      expect(
+        escalationViewOf(null, { trigger: 'BACKSTOP', threshold_hours: 24, waited_seconds: 1 }),
+      ).toBeNull();
+    });
+
+    it.each([
+      ['a fraction', 2.5],
+      ['a negative number', -3],
+      ['text that is not a number', '24h'],
+      ['an object', {}],
+      ['nothing', null],
+    ])('reads %s as no figure, never as one', (_what, value) => {
+      const view = escalationViewOf(AT, {
+        trigger: 'BACKSTOP',
+        threshold_hours: value as number | string | null,
+        waited_seconds: value as number | string | null,
+      });
+      expect(view).toEqual({ by: 'BACKSTOP', threshold_hours: null, waited_seconds: null });
+    });
+
+    it('reads a threshold below one hour as no threshold: the backstop cannot have judged by it', () => {
+      expect(
+        escalationViewOf(AT, { trigger: 'BACKSTOP', threshold_hours: 0, waited_seconds: 5 }),
+      ).toEqual({ by: 'BACKSTOP', threshold_hours: null, waited_seconds: 5 });
+    });
   });
 });

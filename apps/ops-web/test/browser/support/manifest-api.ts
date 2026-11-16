@@ -329,7 +329,7 @@ const LIST_STATES: readonly string[] = [
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
 
 /**
- * Whether `YYYY-MM-DD` names a calendar day that exists, as the API judges it (`apps/api/src/pickup/calendar-day.ts`): four digits of year, two
+ * Whether `YYYY-MM-DD` names a calendar day that exists, as the API judges it (`apps/api/src/platform/time/calendar-day.ts`): four digits of year, two
  * of month and two of day, nothing around them, a real month and a day within it, and no year 0.
  */
 export function isCalendarDay(text: string): boolean {

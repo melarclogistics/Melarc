@@ -75,6 +75,7 @@ const PORT_NAMES = [
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'dispatch/rider-record-lookup.adapter.ts',
   'fleet/fleet-run-custody.adapter.ts',
+  'hub/hub-queue-counters.adapter.ts',
   'pickup/pickup-queue-counters.adapter.ts',
   'pickup/pickup-record-lookup.adapter.ts',
   'pickup/pickup-run-access.adapter.ts',
@@ -154,6 +155,7 @@ const DOMAIN_ADAPTERS: readonly string[] = [
   // S1.24: each domain's side of the port the other uses (`platform/domain-ports/`), which is not one of the platform's seventeen.
   'fleet/fleet-run-custody.adapter.ts',
   // Task C1: each domain's side of the port that counts the work waiting in a queue (`platform/domain-ports/queue-counter.port.ts`).
+  'hub/hub-queue-counters.adapter.ts',
   'pickup/pickup-queue-counters.adapter.ts',
   'pickup/pickup-run-access.adapter.ts',
   // Task C2: each domain's side of the port that finds a record for the global lookup (`platform/domain-ports/record-lookup.port.ts`).
@@ -1561,16 +1563,103 @@ describe('pickup and fleet meet only through ports', () => {
     expect(importedFrom('pickup', 'fleet')).toEqual([]);
   });
 
-  // Break caught: a third file wiring one domain to the other, or a domain reaching into fleet or pickup from outside the composition root.
+  // Break caught: a third file wiring one domain to the other, or a domain reaching into fleet or pickup from outside the composition root. The one other file that names a file of
+  // pickup is the hub's table, for its foreign keys (`HUB_MAY_REFERENCE_FROM_PICKUP`, held by the rules of the hub below).
   it('lets only the composition root, and the domain itself, import fleet or pickup', () => {
     const offenders = production()
       .filter((source) => !COMPOSITION_ROOT.includes(source.path))
       .filter((source) => !source.path.startsWith('fleet/') && !source.path.startsWith('pickup/'))
+      .filter((source) => source.path !== 'hub/pickup-intake.schema.ts')
       .filter((source) =>
         importsOf(source.text).some((path) => /(^|\/)(fleet|pickup)\//.test(path)),
       )
       .map((source) => source.path);
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * The hub domain (S1.31) is the third that meets the run, and it meets it **through the same two ports**: `RunAccess` (the run, its stops and its completion) and `RunCustody` (who holds
+   * the parcels). It imports nothing of `pickup` or `fleet` but the schema of the tables its own table names for a foreign key (a decision of the Product Owner's to add to), it names no
+   * table of the run, of its stops, of the collection or of the custody in a statement, and neither of those domains imports it.
+   */
+  const HUB_MAY_REFERENCE_FROM_PICKUP = ['pickup-manifest.schema', 'pickup-request.schema'];
+  const HUB_NAMES_ANOTHER_DOMAINS_TABLE =
+    /\b(?:from|join|update|into)\s+(?:public\.)?(?:pickup_(?:manifest|stop|request)|collection_record|run_custody_handover)\b|\bmelarc\.run_custody_holder\b/i;
+  const hubFiles = (): SourceFile[] =>
+    production().filter((source) => source.path.startsWith('hub/'));
+
+  // Break caught: a file of the hub using a file of the run's or the custody's domain (the loader of a manifest, the completion, the custody service), which is the coupling the ports replace.
+  it('has no file of hub import a file of pickup or fleet but the schemas a foreign key names', () => {
+    const offenders = hubFiles()
+      .flatMap((source) =>
+        importsOf(source.text)
+          .filter((path) => /^\.\.\/(pickup|fleet)\//.test(path))
+          .map((path) => ({ file: source.path, path })),
+      )
+      .filter(
+        ({ file, path }) =>
+          !(
+            file.endsWith('.schema.ts') &&
+            HUB_MAY_REFERENCE_FROM_PICKUP.some((name) => path === `../pickup/${name}.js`)
+          ),
+      );
+    expect(offenders).toEqual([]);
+  });
+
+  // Break caught: the coupling moved from the imports to the SQL: the hub reading the run's, its stops', the collection's or the custody's tables by their names.
+  it('has the hub name no table of the run or of its custody in a statement', () => {
+    expect(
+      hubFiles()
+        .filter((source) => !source.path.endsWith('.schema.ts'))
+        .filter((source) => HUB_NAMES_ANOTHER_DOMAINS_TABLE.test(codeOf(source.text)))
+        .map((source) => source.path),
+    ).toEqual([]);
+    expect(HUB_NAMES_ANOTHER_DOMAINS_TABLE.test('select 1 from collection_record c')).toBe(true);
+    expect(HUB_NAMES_ANOTHER_DOMAINS_TABLE.test('insert into pickup_intake (id) values ($1)')).toBe(
+      false,
+    );
+  });
+
+  // Break caught: a read of the receiving side that names the declaration, or what the rider's form was pre-filled with, in a statement of its own (S1.32, S1.33). The blind count is held by
+  // the grants and by the two functions of the database that answer for an intake that has been counted and commit its count: a statement that read the column itself is refused by the
+  // database today, and would be a leak the day a grant were widened. The columns a read selects are the two lists of `hub-intake-view.ts`, and a line of the services that names the
+  // declaration is the call of one of the two functions (or the type of what it answers).
+  it('has no read of the receiving side name the declaration but the calls of the functions that answer it', () => {
+    const NAMES_IT = /\b(?:rider_declared_count|prefilled_count)\b/;
+    const ALLOWED =
+      /hub_intake_after_count|commit_blind_count|rider_declared_count: number|\.rider_declared_count/;
+    const codeIn = (path: string): string =>
+      codeOf(hubFiles().find((source) => source.path === path)?.text ?? '');
+    const view = codeIn('hub/hub-intake-view.ts');
+    expect(view.length, 'the view is read').toBeGreaterThan(0);
+    // The column lists: every template of `sql.raw(...)` in the view.
+    const lists = [...view.matchAll(/sql\.raw\(\s*`([^`]*)`/g)].map((match) => match[1] ?? '');
+    expect(lists.length).toBeGreaterThanOrEqual(2);
+    for (const list of lists) expect(NAMES_IT.test(list), list).toBe(false);
+    // The files that read intakes: `prefilled_count` never, and `rider_declared_count` only on the call of a function that answers it, in the type of what it answers and in its use.
+    for (const path of [
+      'hub/hub-after-count.ts',
+      'hub/hub-intakes.service.ts',
+      'hub/blind-count.service.ts',
+    ]) {
+      const code = codeIn(path);
+      expect(code.length, `${path} is read`).toBeGreaterThan(0);
+      expect(/\bprefilled_count\b/.test(code), path).toBe(false);
+      for (const line of code.split('\n').filter((each) => NAMES_IT.test(each))) {
+        expect(ALLOWED.test(line), `${path}: ${line}`).toBe(true);
+      }
+    }
+    expect(codeIn('hub/hub-after-count.ts')).toMatch(/hub_intake_after_count/);
+    expect(codeIn('hub/blind-count.service.ts')).toMatch(/commit_blind_count/);
+    // The detector sees what it is meant to see.
+    expect(NAMES_IT.test('select id, rider_declared_count from pickup_intake')).toBe(true);
+    expect(NAMES_IT.test('select id, declaration_captured_at from pickup_intake')).toBe(false);
+  });
+
+  // Break caught: the run's or the custody's domain importing the hub, which would put the three in a circle.
+  it('has no file of pickup or fleet import a file of hub', () => {
+    expect(importedFrom('pickup', 'hub')).toEqual([]);
+    expect(importedFrom('fleet', 'hub')).toEqual([]);
   });
 
   // Break caught: the detector going blind, so that the rule below passes because it can see nothing. A table is named in a statement when it follows
@@ -1626,6 +1715,7 @@ describe('pickup and fleet meet only through ports', () => {
       'platform/domain-ports/run-access.port.ts',
       'platform/domain-ports/run-custody.port.ts',
       // Task C1: the counters of the queues are called with the caller's handle, under the context of the list's key, and open none of their own.
+      'hub/hub-queue-counters.adapter.ts',
       'pickup/pickup-queue-counters.adapter.ts',
       'staff/staff-queue-counter.adapter.ts',
       'platform/domain-ports/queue-counter.port.ts',
@@ -1659,5 +1749,26 @@ describe('pickup and fleet meet only through ports', () => {
       expect(code, name).not.toMatch(/\bclass\b|\bfunction\b|=>\s*\{|\bawait\b/);
       expect(code, name).toMatch(/Symbol\(/);
     }
+  });
+});
+
+describe('the process entry point', () => {
+  // Break caught: the application's module graph loaded before the configuration is judged, which makes a refused start cost the whole load (about two seconds of processor time, and
+  // many times that on a loaded machine) for code it never runs. Found when the refusal of a production start with the capture adapter ran past its 20 seconds with no output at all, in a
+  // run that shared the machine with the browser and database suites. The entry point imports the three modules a refusal needs, and loads the rest once the configuration is valid.
+  it('imports statically only what judging the configuration needs, and loads the application after it', () => {
+    const main = readFileSync(join(import.meta.dirname, 'main.ts'), 'utf8');
+    const staticImports = [...main.matchAll(/^import (?!type )[^;]*?from '([^']+)';/gm)].map(
+      (found) => found[1],
+    );
+    expect(staticImports).toEqual([
+      './platform/config/load-config.js',
+      './platform/config/report-config-problems.js',
+      './platform/logging/redaction.js',
+    ]);
+    const judged = main.indexOf('loadConfig(process.env)');
+    const loaded = main.indexOf("import('./app.module.js')");
+    expect(judged).toBeGreaterThan(-1);
+    expect(loaded).toBeGreaterThan(judged);
   });
 });

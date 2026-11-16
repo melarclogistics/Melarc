@@ -3,6 +3,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
 import { riderRecordLookupSources } from './dispatch/rider-record-lookup.adapter.js';
+import { hubQueueCounters } from './hub/hub-queue-counters.adapter.js';
 import { pickupQueueCounters } from './pickup/pickup-queue-counters.adapter.js';
 import { pickupRecordLookupSources } from './pickup/pickup-record-lookup.adapter.js';
 import type { TransactionHandle } from './platform/auth/ports/unit-of-work.port.js';
@@ -37,6 +38,7 @@ interface ContractDocument {
       readonly QueueId: { readonly enum: readonly string[] };
       readonly RecordLookupKind: { readonly enum: readonly string[] };
     };
+    readonly parameters: Readonly<Record<string, { readonly name?: string; readonly in?: string }>>;
   };
 }
 
@@ -63,23 +65,29 @@ const FOLLOWS: Readonly<Record<QueueId, { readonly list: string; readonly decisi
   PICKUP_UNMANIFESTED_POOL: { list: 'listPickupRequests' },
   PICKUP_RUNS_IN_PROGRESS: { list: 'listPickupManifests' },
   STAFF_AWAITING_APPROVAL: { list: 'listStaffIdentities', decision: 'approveStaffIdentity' },
+  HUB_RECEIVING_RUNS_WAITING: { list: 'listReceivingRuns' },
+  HUB_MISSING_PARCELS_SEARCHING: { list: 'listMissingParcels' },
 };
 
-const counters = [...pickupQueueCounters(), ...staffQueueCounters()];
+const counters = [...pickupQueueCounters(), ...staffQueueCounters(), ...hubQueueCounters()];
 
 /**
- * The column that is the hub of the records of each queue, which a count with a hub narrows by (task C3, `AC-HUBF-04`): the hub a pickup request
- * and a run answer to is `responsible_hub_id`, the hub of a staff profile is its `primary_hub_id` (as the staff list's own `hub_id` reads it). A
- * closed record over the queues of the contract, so that a queue added to the list has to say here whose hub it counts by, and cannot be added
- * without a hub filter that this file reads.
+ * How the statement of each queue takes the hub it is narrowed by (task C3, `AC-HUBF-04`): the hub a pickup request and a run answer to is the column
+ * `responsible_hub_id`, the hub of a staff profile its `primary_hub_id` (as the staff list's own `hub_id` reads it), and the two queues of the receiving
+ * side are counted by the function their list calls (S1.35b), whose first argument is the hub (the function narrows by it and never widens). A closed
+ * record over the queues of the contract, so that a queue added to the list has to say here whose hub it counts by, and cannot be added without a hub
+ * filter that this file reads.
  */
-const HUB_COLUMN_OF: Readonly<Record<QueueId, string>> = {
-  PICKUP_AWAITING_CONFIRMATION: 'responsible_hub_id',
-  PICKUP_CUTOFF_REVIEW: 'responsible_hub_id',
-  PICKUP_EXCEPTION_APPROVAL: 'responsible_hub_id',
-  PICKUP_UNMANIFESTED_POOL: 'responsible_hub_id',
-  PICKUP_RUNS_IN_PROGRESS: 'responsible_hub_id',
-  STAFF_AWAITING_APPROVAL: 'primary_hub_id',
+type HubBinding = { readonly column: string } | { readonly call: string };
+const HUB_BINDING_OF: Readonly<Record<QueueId, HubBinding>> = {
+  PICKUP_AWAITING_CONFIRMATION: { column: 'responsible_hub_id' },
+  PICKUP_CUTOFF_REVIEW: { column: 'responsible_hub_id' },
+  PICKUP_EXCEPTION_APPROVAL: { column: 'responsible_hub_id' },
+  PICKUP_UNMANIFESTED_POOL: { column: 'responsible_hub_id' },
+  PICKUP_RUNS_IN_PROGRESS: { column: 'responsible_hub_id' },
+  STAFF_AWAITING_APPROVAL: { column: 'primary_hub_id' },
+  HUB_RECEIVING_RUNS_WAITING: { call: 'melarc.receiving_runs' },
+  HUB_MISSING_PARCELS_SEARCHING: { call: 'melarc.missing_parcels' },
 };
 
 const CONTEXT: SecurityContext = {
@@ -108,13 +116,18 @@ function recording(): { readonly handle: TransactionHandle; readonly statements:
   return { handle: bindTransactionHandle(transaction), statements };
 }
 
-/** What each comparison of `column` with a bound, `uuid`-cast value is bound to, in the order they stand in the statement the counter ran. */
-function hubComparisons(statement: SQL | undefined, column: string): unknown[] {
+/**
+ * What each place where the statement takes a hub is bound to, in the order they stand in the statement the counter ran: a comparison of the column
+ * with a bound, `uuid`-cast value, or the first argument of the function, bound and `uuid`-cast the same.
+ */
+function hubComparisons(statement: SQL | undefined, binding: HubBinding): unknown[] {
   if (statement === undefined) throw new Error('The counter ran no statement');
   const { sql: text, params } = new PgDialect().sqlToQuery(statement);
-  return [...text.matchAll(new RegExp(`\\b${column}\\s*=\\s*\\$(\\d+)::uuid`, 'g'))].map(
-    (match) => params[Number(match[1]) - 1],
-  );
+  const pattern =
+    'column' in binding
+      ? `\\b${binding.column}\\s*=\\s*\\$(\\d+)::uuid`
+      : `${binding.call.replace('.', '\\.')}\\(\\s*\\$(\\d+)::uuid`;
+  return [...text.matchAll(new RegExp(pattern, 'g'))].map((match) => params[Number(match[1]) - 1]);
 }
 
 const A_HUB = '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e01';
@@ -152,7 +165,7 @@ describe('the counters of the queues', () => {
 
   // Break caught: a queue, of any domain, whose counter takes the filter and does not narrow by it (a count of every hub beside a list of one, which the
   // comparison of a count with its list cannot see, both being written from one function), or narrows by the wrong column, or by it twice, or by a hub
-  // that is not the one asked for (task C3, `AC-HUBF-04`, `-06`): each of the six counts its table by its own hub column, bound to the hub of the filter.
+  // that is not the one asked for (task C3, `AC-HUBF-04`, `-06`): each of the eight counts by its own hub column (or the hub argument of its function), bound to the hub of the filter.
   it.each(QUEUE_IDS.map((queue) => [queue] as const))(
     '%s counts the hub it is given, by the hub column of its records',
     async (queue) => {
@@ -162,7 +175,7 @@ describe('the counters of the queues', () => {
       await counter?.count(handle, { hubId: A_HUB });
 
       expect(statements).toHaveLength(1);
-      expect(hubComparisons(statements[0], HUB_COLUMN_OF[queue])).toEqual([A_HUB]);
+      expect(hubComparisons(statements[0], HUB_BINDING_OF[queue])).toEqual([A_HUB]);
     },
   );
 
@@ -179,7 +192,7 @@ describe('the counters of the queues', () => {
 
       expect(statements).toHaveLength(2);
       expect(
-        hubComparisons(statements[1], HUB_COLUMN_OF[queue]).every((value) => value === null),
+        hubComparisons(statements[1], HUB_BINDING_OF[queue]).every((value) => value === null),
       ).toBe(true);
     },
   );
@@ -192,19 +205,25 @@ describe('the counters of the queues', () => {
       const listed = Object.values(contract.paths)
         .flatMap((item) => Object.values(item))
         .find((operation) => operation.operationId === FOLLOWS[queue].list) as
-        { parameters?: { name?: string; in?: string }[] } | undefined;
-      const hub = listed?.parameters?.find((parameter) => parameter.name === 'hub_id');
+        { parameters?: { name?: string; in?: string; $ref?: string }[] } | undefined;
+      // A parameter the lists share is a reference to the one declared once (`#/components/parameters/WorkListHubId`): it is read as the parameter it is.
+      const declared = (listed?.parameters ?? []).map((parameter) =>
+        parameter.$ref === undefined
+          ? parameter
+          : contract.components.parameters[parameter.$ref.split('/').pop() ?? ''],
+      );
+      const hub = declared.find((parameter) => parameter?.name === 'hub_id');
 
       expect(hub, FOLLOWS[queue].list).toMatchObject({ name: 'hub_id', in: 'query' });
     },
   );
 
   // Break caught: a hub that is handed down some links of the chain and not all (the service to its counters, a counter to its statement, a statement
-  // to the criteria its list also calls): through the real service and the real counters of both domains, the statement each of the six queues
-  // runs, in the two transactions the keys need, is the one of the hub the read was asked for (`AC-HUBF-04`).
+  // to the criteria its list also calls): through the real service and the real counters of the three domains, the statement each of the eight queues
+  // runs, in the three transactions the keys need, is the one of the hub the read was asked for (`AC-HUBF-04`).
   it('gives the hub of the filter to the statement of every queue, from the service down', async () => {
     const { handle, statements } = recording();
-    // A session that holds the four keys, each at its own hubs: every queue is the session's, in two groups (pickup.read, staff.read).
+    // A session that holds the five keys, each at its own hubs: every queue is the session's, in three groups (pickup.read, staff.read, hub.read).
     const authorized = {
       session: {
         principalType: 'STAFF',
@@ -216,6 +235,7 @@ describe('the counters of the queues', () => {
               'pickup.exception.approve',
               'staff.read',
               'staff.identity.approve',
+              'hub.read',
             ].map((permission) => ({
               permission,
               hubScope: 'own',
@@ -240,9 +260,9 @@ describe('the counters of the queues', () => {
 
     expect(answer.queues.map((entry) => entry.queue)).toEqual([...QUEUE_IDS]);
     expect(statements).toHaveLength(QUEUE_IDS.length);
-    // The statements are in the order the queues were counted in: the five of pickup.read, then the one of staff.read, which is the contract's order.
+    // The statements are in the order the queues were counted in: the five of pickup.read, the one of staff.read, then the two of hub.read, which is the contract's order.
     expect(
-      QUEUE_IDS.map((queue, at) => hubComparisons(statements[at], HUB_COLUMN_OF[queue])),
+      QUEUE_IDS.map((queue, at) => hubComparisons(statements[at], HUB_BINDING_OF[queue])),
     ).toEqual(QUEUE_IDS.map(() => [A_HUB]));
   });
 });

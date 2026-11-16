@@ -1313,6 +1313,8 @@ The Ops Portal should show:
 
 It must not expose the rider-declared count before the receiver submits the blind physical count.
 
+**Revision, 16 November 2026 (Product Owner, D-D1 to D-D3).** The queue is by run, and the rule above holds for an intake of a stop that has no parcel photos (the blind-count mode of §22.4 below). The text is kept as the record of the rule as it was; [hub-intake.md](features/hub/hub-intake.md) owns the behaviour.
+
 ## 22.4 Blind receive
 
 1. Authorized receiver opens an intake.
@@ -1324,6 +1326,8 @@ It must not expose the rider-declared count before the receiver submits the blin
 7. Intake becomes eligible for itemization when reconciliation conditions pass.
 
 The client must never submit the hidden declared count as authoritative input.
+
+**Revision, 16 November 2026 (Product Owner, D-D1 to D-D4).** The blind receive above is now the mode of a stop that has **no parcel photos** (Ops let its count through without them): the physical count is typed before the rider's number is shown, and a mismatch goes to the senior officer. **For a stop with parcel photos the officer receives the run against the rider's door photos**, which officers see from the handover on: each parcel is checked in against its photo ("All N here" confirmed, or each parcel tapped as it is found), no number is typed, a parcel that is not found is missing and **is searched for first, inside the hub**, a parcel on the table with no photo is an extra, and damage is a finding of the parcel. The rider-declared count is then a recorded fact and is not withheld. [hub-intake.md](features/hub/hub-intake.md) owns the behaviour.
 
 ## 22.5 Discrepancy and condition handling
 
@@ -1337,6 +1341,8 @@ Damage, tampering, or dispute may be recorded even when the physical count match
 
 
 Damaged/Dispute cases require senior review in the approved product model.
+
+**Revision, 16 November 2026 (D-D4, D-D7).** A condition is recorded once for each parcel (a photo check-in) or once for an intake (a blind count), and only a senior officer changes it after deciding. A missing parcel is searched for first, inside the hub; the senior officer's outcomes are *Still searching* (the case stays open), accept, write off and, after a write-off, *Vendor told*, which records only that someone told the vendor: the system sends nothing.
 
 ## 22.6 Intake lifecycle
 
@@ -1358,9 +1364,13 @@ The physical parcel count recorded by the hub is the intake-close authority. An 
 
 Detailed domain design must still specify how damaged, quarantined, cancelled, removed, or temporarily unitemizable physical parcels are represented; who may reopen or correct a closed intake; and which exception events and evidence are required.
 
+**Revision, 16 November 2026 (D-D8).** A senior officer may correct a count or a check-in, with a required reason, before itemizing starts; the old and the new numbers are recorded in an enhanced audit event. With no limit on the parcels of an intake, this is the safety net for a mistaken count. A closed intake's correction remains for the later design above.
+
 ## 22.8 Concurrency
 
 Receiving is sensitive to duplicate users and race conditions. The approved product boundary permits an advisory soft lock showing the active receiver and allowing takeover after an idle TTL. Backend transition and idempotency controls are still required; a visual lock alone is not sufficient.
+
+**Revision, 16 November 2026.** The lock is taken on the officer's first act on a vendor, not by opening the page, and the screen says in plain words who opened the check-in and when; it remains advisory.
 
 ## 22.9 Vendor visibility
 
@@ -2014,6 +2024,7 @@ Offboarding a staff member or rider immediately revokes system access and creden
 | Pickup failure | Ops event; registered vendor in-app/email; ad-hoc PII-safe SMS |
 | Pickup stop skipped by Ops (MSC-DEC-412) | Registered vendor: in-app feed, with the reason and the requested action; no raw note |
 | Pickup counted short (MSC-DEC-194) | Ops feed: the office is told in the system when the shortfall is recorded (AC-SLICE-001-21); no text, no count, no raw note |
+| Pickup counted over (D-D5) | Ops feed: the office is told in the system when a count above the booking is recorded (the Product Owner, 16 November 2026: title "Pickup counted over", the count over the booking and the reason as a token); no text, no raw note |
 | Failure escalation | Senior Ops internal queue/notification |
 | Hub handover submitted | Ops receive queue |
 | Intake completed | Registered vendor in-app order summary; ad-hoc tracking SMS |
@@ -2178,7 +2189,6 @@ Settings must be stored and changed through a controlled mechanism with:
 | `station_drop_fee` | Hub-scoped; confirmed (settings.md) | Hub Senior Ops proposes and Platform Admin approves/rejects; changes are effective-dated, apply to new Station Drop charges only, and every charge snapshots the applied value/version. |
 | `MELARC_EXPRESS_SURCHARGE` | NOT APPLICABLE IN VERSION 1 | Express service is outside Version 1 and must not create a launch charge |
 | `cod_ceiling` | SUPERSEDED / NOT APPLICABLE | Merchandise COD is not supported; the legacy setting must not govern target behaviour |
-| `intake_parcel_cap` | 100 — source default, technical review required | Validate operational capacity, error handling, and safe change governance |
 | `delivery_confirmation_max_attempts` | OPEN — operational/technical design | Define contact/confirmation attempt limits and escalation without changing the separate three doorstep-delivery-attempt rule |
 | Motorcycle compliance warning lead times | OPEN — operational/technical design | Define advance-warning intervals, expiry-review SLA/escalation, reminder cadence, and responsible recipients |
 | Fuel-record governance | CONFIRMED | Melarc pays fuel; the system records each fuel expense for audit and reporting without a rider-reimbursement claim workflow |
@@ -2412,6 +2422,8 @@ The following rules consolidate the product's strongest behavioural constraints.
 5. Itemization cannot close until the authoritative hub-received count is reconciled with the number of itemized parcels, subject only to an approved exception process.
 6. Concurrency controls must prevent two users from independently closing or mutating the same intake inconsistently.
 7. Vendors may receive appropriate status visibility but must not see internal operational notes or other vendors' data.
+
+**Revision, 16 November 2026 (Product Owner, D-D1 to D-D3).** Rules 2 and 3 describe the blind-count mode, which applies to a stop with no parcel photos. For a stop with photos the receiving is a check-in against the rider's door photos: the declaration is not withheld (nothing is hidden, so no comparison is "revealed"), the count is the number of parcels checked in, and the system routes by the parcels: a missing parcel, an extra, a condition finding or a zero declaration goes to reconciliation. [hub-intake.md](features/hub/hub-intake.md) owns the behaviour.
 
 ## 35.6 Itemization and pricing rules
 

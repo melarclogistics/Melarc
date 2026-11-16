@@ -40,6 +40,14 @@ export const QUEUE_WORDS: Readonly<Record<QueueName, QueueWords>> = {
     title: 'Staff profiles waiting for approval',
     meaning: 'waiting for approval',
   },
+  HUB_RECEIVING_RUNS_WAITING: {
+    title: 'Runs waiting to be checked in',
+    meaning: 'waiting to be checked in',
+  },
+  HUB_MISSING_PARCELS_SEARCHING: {
+    title: 'Parcels being searched for',
+    meaning: 'being searched for',
+  },
 };
 
 /**
@@ -52,6 +60,7 @@ export const QUEUE_WORDS: Readonly<Record<QueueName, QueueWords>> = {
  *   `PENDING_OPS_REVIEW` is the late bookings, which the list has its own filter for since task C1.1, `AC-QSUM-11`).
  * - The approvals page and the staff page's *waiting* view are the approver's queues.
  * - The manifest list takes `state` (`IN_PROGRESS`).
+ * - The queue by run and the list of missing parcels take their own `view` (`waiting`, `searching`): the set the count counted.
  */
 export function queueLink(queue: QueueName, holds: (permission: string) => boolean): string {
   switch (queue) {
@@ -69,5 +78,9 @@ export function queueLink(queue: QueueName, holds: (permission: string) => boole
       return '/manifests?state=IN_PROGRESS';
     case 'STAFF_AWAITING_APPROVAL':
       return '/admin/staff?view=waiting';
+    case 'HUB_RECEIVING_RUNS_WAITING':
+      return '/receiving?view=waiting';
+    case 'HUB_MISSING_PARCELS_SEARCHING':
+      return '/missing-parcels?view=searching';
   }
 }

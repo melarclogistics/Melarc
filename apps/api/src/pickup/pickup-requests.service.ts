@@ -11,7 +11,7 @@ import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
-import { isCalendarDay } from './calendar-day.js';
+import { isCalendarDay } from '../platform/time/calendar-day.js';
 import { exceptionViewOf, exceptionsShownFor } from './one-package-exception-view.js';
 import { loadRequest } from './pickup-request-loader.js';
 import { pickupRequestCriteria } from './pickup-request-criteria.js';

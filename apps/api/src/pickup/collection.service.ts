@@ -26,15 +26,17 @@ import {
   requireStoredParcelPhotos,
   stopIsExcused,
 } from './collection-parcel-photos.js';
-import { momentOf } from './device-moment.js';
+import { momentOf } from '../platform/time/device-moment.js';
 import { attachEvidence, requireStoredEvidence } from './pickup-failure-evidence.js';
 import { stopViewOf, STOP_COLUMNS, type PickupStopRow } from './pickup-manifest-view.js';
 import { reasonRefusedByGuard, validatedReason } from './pickup-reason-validation.js';
 import { pickupStopEtagOf } from './pickup-stop-etag.js';
-import { pickupReasonRequest } from './pickup-vocabulary.js';
+import { overCountReasonRequest, pickupReasonRequest } from './pickup-vocabulary.js';
 
 const OPERATION = 'recordCollection';
 const EXCEPTION_OPERATION = 'authoriseParcelPhotoException';
+/** The most parcels a count can say: what the column of the record holds (a whole number of four bytes). A count above the booking is recorded (D-D5), so the database's range is the only bound. */
+const MAX_COLLECTED_COUNT = 2_147_483_647;
 
 export interface CollectionOptions {
   readonly runner: Pick<OperationRunner, 'mutate'>;
@@ -160,23 +162,27 @@ const notTheRidersWork = (): ApiException =>
  * - **Judged in this order**, so that a caller learns of its own work first: the principal and the key's format; a count of zero, which is a failed
  *   pickup (`ZERO_COLLECTION_IS_FAILURE`: nothing is made, no sender is promoted, no handover is touched); then, in the transaction, the retry
  *   (`Idempotency-Key`); the stop under its lock (not the rider's: `NOT_ASSIGNED_RIDER`, one answer); the run (`MANIFEST_NOT_STARTED`,
- *   `STATE_CONFLICT`); the stop's `ETag`; that the stop was arrived at and has no record; the count against what the stop declared and the reason of a short one; and last
+ *   `STATE_CONFLICT`); the stop's `ETag`; that the stop was arrived at and has no record; the count against what the stop declared and the reason of a count that is not equal to it; and last
  *   the photos (D-A10, Run A2): **the photo of every parcel** (`parcel_photo_ids`: exactly `collected_count` stored photos of this rider and this stop, each attached once, or none
  *   for a stop Ops let through without them, `authoriseParcelPhotoException`; `VALIDATION_FAILED` for the wrong number or a photo named twice, `EVIDENCE_NOT_STORED`, one answer, for
  *   a photo that cannot be counted) and the photo a short count's reason asks for (`evidence_ids`, attached to the stop as a failure's photo is). The database holds the number of
  *   parcel photos for every writer, at the end of the transaction (migration 0088).
  * - **The actual count, never the declared one.** The declared count is what the stop's dispatch-time summary said (the rider was shown it, and it is
  *   the one request fact the rider's context reads as itself). Fewer is a `SHORT` count and needs a reason of the `PICKUP_SHORT_COUNT` catalogue
- *   with the note and the photo its metadata asks for (`REASON_REQUIRED`); equal is `MATCH`, which has no reason; **more than was declared is not a
- *   variance either section names and is refused** (`VALIDATION_FAILED`, OB-S1-50). `variance` is recorded on every collection.
- * - **A shortfall raises the office flag in the same transaction**: `office_notified_at` is the database's own instant, taken with `recorded_at` once the
- *   stop's lock is held (the record's guard, migration 0069, OB-S1-60: this act gives the database neither), and the count's event says that it was
+ *   with the note and the photo its metadata asks for (`REASON_REQUIRED`); equal is `MATCH`, which has no reason; **more than was declared is an `OVER` count**
+ *   (D-D5, the Product Owner, 15 and 16 November 2026: the rider may count more parcels than were booked; before, it was refused, OB-S1-50) and needs a reason of the
+ *   `PICKUP_OVER_COUNT` catalogue with the note its metadata asks for (`REASON_REQUIRED`; a reason of the other catalogue is `REASON_NOT_ACTIVE`, whichever way the count goes:
+ *   the comparison is the server's). The only number refused is one the column cannot hold (`VALIDATION_FAILED`, rule `range`). `variance` is recorded on every collection.
+ * - **A count that is not equal raises the office flag in the same transaction**: `office_notified_at` is the database's own instant, taken with `recorded_at` once the
+ *   stop's lock is held (the record's guard, migrations 0069 and 0099, OB-S1-60: this act gives the database neither), and the count's event says that it was
  *   raised (`office_notified`). The reason of the record is held to the catalogue by the same guard, at the insert: a catalogue that changed after this
  *   act read it is `REASON_NOT_ACTIVE` (or `REASON_REQUIRED`), the act is undone and the same key is a retry. **The office is told in the system as well**
- *   (OB-S1-51): the database writes one outbox envelope, `pickup.collection.shortfall_flagged`, from the record just made (`melarc.shortfall_envelope`: the act
- *   gives it the stop and nothing it says), in the same transaction, and the notification lane makes the Ops feed entry `COLLECTION_SHORT_OPS_FEED`, which the staff of
- *   the hub read under `notification.read`. A count that matches queues nothing. The entry is a draft in wording and carries no count and no note.
- * - **One event, the count's own** (`pickup.collection.recorded`, OB-S1-54), the same for a clean count and a short one: its object is the record, it
+ *   (OB-S1-51, D-D5): the database writes one outbox envelope from the record just made (a short count's `pickup.collection.shortfall_flagged` by
+ *   `melarc.shortfall_envelope`, an over count's `pickup.collection.over_count_flagged` by `melarc.over_count_envelope`, which also says how many parcels over the booking:
+ *   the act gives the database the stop and nothing it says), in the same transaction, and the notification lane makes the Ops feed entry (`COLLECTION_SHORT_OPS_FEED`,
+ *   `COLLECTION_OVER_OPS_FEED`), which the staff of the hub read under `notification.read`. A count that matches queues nothing. The entries carry no note.
+ * - **The stop of an over count closes `COLLECTED`** when the handshake ends (the vendor confirms the counted number with the code as for any count): no hold, no inspection.
+ * - **One event, the count's own** (`pickup.collection.recorded`, OB-S1-54), the same for a clean count, a short one and an over one: its object is the record, it
  *   names the stop, its run and request, the rider and the hub, carries the counts, the variance, the flag and the direction, and says the stop is
  *   still `ARRIVED`. It carries no note. `pickup.stop.collected` and `pickup.stop.partially_collected` are the handshake's, written when it closes
  *   the stop (S1.27), and the ledger admits neither to the counting key.
@@ -233,6 +239,9 @@ export class Collections {
         'A count of zero is a failed pickup: report the failure',
       );
     }
+    // A count above the booking is an OVER count (D-D5), so nothing above the declared count refuses it any more; what the column cannot hold is a malformed body, and is told so
+    // before anything is read (the database would answer a server error, and a record it could never keep).
+    if (body.collected_count > MAX_COLLECTED_COUNT) throw invalid('collected_count', 'range');
     // What the ledger could not keep, and a moment the database could not hold, are malformed bodies, before anything is read.
     if (body.variance_note !== undefined && body.variance_note.trim() !== '') {
       const rule = noteRefusal(body.variance_note);
@@ -322,24 +331,34 @@ export class Collections {
       if (!Number.isSafeInteger(declared) || declared < 1) {
         throw new Error('A dispatched stop carries no declared count');
       }
-      if (body.collected_count > declared) {
-        throw invalid('collected_count', 'above_declared');
-      }
-      const short = body.collected_count < declared;
-      if (!short && (body.variance_reason_code !== undefined || body.variance_note !== undefined)) {
+      // The comparison is the server's: equal is MATCH, fewer is SHORT and more is OVER (D-D5). The client never says which.
+      const variance: 'MATCH' | 'SHORT' | 'OVER' =
+        body.collected_count === declared
+          ? 'MATCH'
+          : body.collected_count < declared
+            ? 'SHORT'
+            : 'OVER';
+      if (
+        variance === 'MATCH' &&
+        (body.variance_reason_code !== undefined || body.variance_note !== undefined)
+      ) {
         // A count that matches has no variance, so it has no reason: one sent with it would be kept nowhere, and a record must say what was sent.
         throw invalid(
           body.variance_reason_code !== undefined ? 'variance_reason_code' : 'variance_note',
-          'not_short',
+          'count_matches',
         );
       }
-      const reason = short
-        ? await validatedReason(
-            reasons,
-            handle,
-            pickupReasonRequest(OPERATION, body.variance_reason_code, body.variance_note),
-          )
-        : undefined;
+      // The reason of a count that is not equal is read from the catalogue of its variance: a short count's from PICKUP_SHORT_COUNT, an over count's from PICKUP_OVER_COUNT.
+      const reason =
+        variance === 'MATCH'
+          ? undefined
+          : await validatedReason(
+              reasons,
+              handle,
+              variance === 'SHORT'
+                ? pickupReasonRequest(OPERATION, body.variance_reason_code, body.variance_note)
+                : overCountReasonRequest(body.variance_reason_code, body.variance_note),
+            );
       // The photo a reason demands (`reason_code.requires_photo`) is a stored record of this stop named in `evidence_ids`, attached to the stop below as a failure's is.
       const reasonPhotos = body.evidence_ids ?? [];
       if (reason?.requiresPhoto === true && reasonPhotos.length === 0) {
@@ -397,7 +416,7 @@ export class Collections {
             insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot,
                                            handshake_type, recorded_by, captured_at)
             values (${id}::uuid, ${stop.id}::uuid, ${stop.responsible_hub_id}::uuid, ${declared}, ${body.collected_count},
-                    ${short ? 'SHORT' : 'MATCH'}, ${snapshot === null ? null : JSON.stringify(snapshot)}::jsonb,
+                    ${variance}, ${snapshot === null ? null : JSON.stringify(snapshot)}::jsonb,
                     ${handshakeType}, ${riderId}::uuid, ${capturedAt ?? null}::timestamptz)
             returning ${COLLECTION_RECORD_COLUMNS}`);
         } catch (error) {
@@ -439,10 +458,13 @@ export class Collections {
         },
       });
 
-      // A shortfall tells the office in the system (OB-S1-51), beside the flag: the envelope of the notification lane, written by the database from the record just made
-      // and in this transaction, so it is kept or undone with the count. The act chooses nothing the envelope says; a count that matches writes none.
+      // A count that is not equal tells the office in the system (OB-S1-51, D-D5), beside the flag: the envelope of the notification lane, written by the database from the record just made
+      // and in this transaction, so it is kept or undone with the count. The act chooses nothing the envelope says (a short count's is `shortfall_flagged`, an over count's
+      // `over_count_flagged` with how many parcels over the booking); a count that matches writes none.
       if (row.variance === 'SHORT') {
         await tx.execute(sql`select melarc.shortfall_envelope(${stop.id}::uuid)`);
+      } else if (row.variance === 'OVER') {
+        await tx.execute(sql`select melarc.over_count_envelope(${stop.id}::uuid)`);
       }
 
       // An individual sender becomes reusable when a count is recorded for it, without waiting for the handshake. The database makes the one change
@@ -451,7 +473,9 @@ export class Collections {
       // and an event the ledger cannot take undoes the promotion with the rest of the act.
       await tx.execute(sql`select melarc.promote_collected_sender(${stop.id}::uuid)`);
 
-      const view = collectionRecordViewOf(row);
+      // The answer states the photos it attached, in the order the rider named them, and the stored answer that a replay returns is this one (Run B, Part 1, item 5).
+      // (Run D, Part 2, finding F2: the evidence the count attached beside its reason is in the answer, and so in the replay that returns this stored answer.)
+      const view = collectionRecordViewOf(row, parcelPhotos, reasonPhotos);
       const answer: StoredCollection = { record: view };
       await idempotency.complete(handle, scope, {
         status: 200,

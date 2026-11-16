@@ -1012,6 +1012,27 @@ describe('a run is completed only with nothing left to work, and started only wi
   const completeSql = (id: string) =>
     `update pickup_manifest set state = 'COMPLETED', completed_at = now() where id = '${id}'`;
 
+  /**
+   * A run that collected is completed together with its intake, as the hub handover does it: the database holds that the intakes of a run are exactly its collected requests (migration
+   * 0092, checked at the end of the transaction), so the completion and the intake of the one collected stop are one transaction. The fixtures here are rows and not a rider's session, so the
+   * route of the handover itself is held by `hub-handover.db.test.ts`, and what is asked here is only that the guard of the run lets such a run complete.
+   */
+  async function completeWithItsIntake(run: Fixture): Promise<void> {
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(completeSql(run.manifest.id));
+      await routes.admin.query(
+        `insert into pickup_intake (id, code, responsible_hub_id, pickup_request_id, pickup_manifest_id, handed_over_by, declaration_captured_at, rider_declared_count, prefilled_count)
+         values (gen_random_uuid(), 'ACC-IN-' || upper(substr(md5(random()::text), 1, 6)), $1, $2, $3, $4, now() - interval '1 minute', 1, 1)`,
+        [HUB_A, run.stop.requestId, run.manifest.id, run.riderId],
+      );
+      await routes.admin.query('commit');
+    } catch (error) {
+      await routes.admin.query('rollback').catch(() => undefined);
+      throw error;
+    }
+  }
+
   // Break caught: a run completed while a stop is still to be worked (pending or arrived at), by any writer.
   it.each(['PENDING', 'ARRIVED'] as const)(
     'refuses the completion of a run that has a %s stop',
@@ -1038,7 +1059,11 @@ describe('a run is completed only with nothing left to work, and started only wi
     async (stopState) => {
       const run = await fixture('IN_PROGRESS', stopState);
       const other = await fixture('IN_PROGRESS', 'PENDING');
-      await routes.admin.query(completeSql(run.manifest.id));
+      if (stopState === 'COLLECTED' || stopState === 'PARTIALLY_COLLECTED') {
+        await completeWithItsIntake(run);
+      } else {
+        await routes.admin.query(completeSql(run.manifest.id));
+      }
       expect(
         (
           await routes.rows(`select state from pickup_manifest where id = $1`, [run.manifest.id])

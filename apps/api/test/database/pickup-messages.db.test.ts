@@ -6,7 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SystemClock } from '../../src/platform/auth/clock/system.clock.adapter.js';
 import { guardReasonIn, serverErrorIn } from '../../src/platform/database/database-failures.js';
 import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles.js';
-import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
+import {
+  toContextSettings,
+  type SecurityContext,
+} from '../../src/platform/database/transaction-context.js';
 import {
   CaptureTextMessageSender,
   type TextCaptureEntry,
@@ -83,6 +86,8 @@ const ORDINARY = {
   note: NOTE,
 } as const;
 const SHORT = { collected_count: 2, variance_reason_code: 'SOME_PARCELS_NOT_READY' } as const;
+/** A count of two parcels more than the three the stop declared, with the reason of the over-count catalogue (D-D5). */
+const OVER = { collected_count: 5, variance_reason_code: 'VENDOR_ADDED_PARCELS' } as const;
 
 /** What a rider is shown for a stop (the contract's `PickupStopSummary`): a closed fixture that satisfies the stop's check, three packages declared. */
 const summaryOf = (code: string): Record<string, unknown> => ({
@@ -709,20 +714,166 @@ const failSql = (stopId: string): string =>
     where id = '${stopId}' returning id`;
 const failureEnvelopeSql = (stopId: string): string =>
   `select melarc.failure_envelope('${stopId}'::uuid)`;
+/** The count of a stop that declares three: fewer is a short count, more an over count (D-D5), with the reason each gives. */
 const countSql = (arranged: Arranged, over: { collected?: number } = {}): string => {
   const collected = over.collected ?? 2;
-  const short = collected < 3;
+  const variance = collected < 3 ? 'SHORT' : collected > 3 ? 'OVER' : 'MATCH';
+  const reason =
+    variance === 'SHORT'
+      ? {
+          reason_code: 'SOME_PARCELS_NOT_READY',
+          label: 'Some parcels not ready',
+          attribution: 'CUSTOMER',
+        }
+      : variance === 'OVER'
+        ? {
+            reason_code: 'VENDOR_ADDED_PARCELS',
+            label: 'Vendor added parcels after booking',
+            attribution: 'CUSTOMER',
+          }
+        : null;
   return `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot, handshake_type, recorded_by)
-          values ('${randomUUID()}', '${arranged.stopId}', '${HUB_A}', 3, ${String(collected)}, '${short ? 'SHORT' : 'MATCH'}',
-                  ${
-                    short
-                      ? `'${JSON.stringify({ reason_code: 'SOME_PARCELS_NOT_READY', label: 'Some parcels not ready', attribution: 'CUSTOMER' })}'::jsonb`
-                      : 'null'
-                  },
+          values ('${randomUUID()}', '${arranged.stopId}', '${HUB_A}', 3, ${String(collected)}, '${variance}',
+                  ${reason === null ? 'null' : `'${JSON.stringify(reason)}'::jsonb`},
                   'VENDOR_ENTERED_RIDER_DISPLAYED', '${arranged.rider.id}') returning id`;
 };
 const shortfallEnvelopeSql = (stopId: string): string =>
   `select melarc.shortfall_envelope('${stopId}'::uuid)`;
+const overCountEnvelopeSql = (stopId: string): string =>
+  `select melarc.over_count_envelope('${stopId}'::uuid)`;
+
+describe('recordCollection tells the office in the system of an over count (D-D5)', () => {
+  // Break caught: no envelope for a count above the booking (the office told by a timestamp only), the short count's envelope written for it (the office would read "counted short"), a
+  // number that is not how many parcels over the booking were counted, the note in it, a second one on a retry, or one that outlives a refused act.
+  it('writes one envelope for a count above the booking, from the record just made, with the stop, the reason and how many over, and none for a refused count or a retry', async () => {
+    const refused = await vendorStop();
+    // An over count with no reason is refused, and nothing is made.
+    expect((await collect(refused, { collected_count: 5 })).status).toBeGreaterThanOrEqual(400);
+    expect(await envelopesOf(refused.requestId)).toEqual([]);
+
+    const arranged = await vendorStop();
+    const key = randomUUID();
+    const counted = await collect(arranged, { ...OVER, variance_note: 'Two more came out' }, key);
+    expect(counted.status, counted.text).toBe(200);
+    const [envelope, ...rest] = await envelopesOf(arranged.requestId);
+    expect(rest).toEqual([]);
+    expect(envelope).toEqual({
+      event_type: 'pickup.collection.over_count_flagged',
+      aggregate_type: 'PICKUP_REQUEST',
+      aggregate_id: arranged.requestId,
+      responsible_hub_id: HUB_A,
+      vendor_organization_id: vendorA.row.organizationId,
+      rider_id: null,
+      originating_principal_type: 'RIDER',
+      originating_principal_id: arranged.rider.id,
+      operation_id: 'recordCollection',
+      payload: { stop: arranged.stopId, reason: 'VENDOR_ADDED_PARCELS', n: '2' },
+      relay_state: 'PENDING',
+      last_outcome: null,
+    });
+    expect(JSON.stringify(envelope)).not.toContain('came out');
+    // The retry writes nothing more.
+    expect(
+      (await collect(arranged, { ...OVER, variance_note: 'Two more came out' }, key)).status,
+    ).toBe(200);
+    expect(await envelopesOf(arranged.requestId)).toHaveLength(1);
+  });
+
+  // Break caught: an entry missing for a walk-in's request, a text for the office, the note or a count other than the number over in the entry, or an entry for the vendor (it is the office's).
+  it('becomes one Ops feed entry for the hub, for a vendor’s request and for an individual sender’s alike, with the reason as a token and the number over as a number, and no text sent', async () => {
+    const vendor = await vendorStop();
+    expect((await collect(vendor, { ...OVER })).status).toBe(200);
+    const walkIn = await adHocStop();
+    expect(
+      (
+        await collect(walkIn, {
+          collected_count: 4,
+          variance_reason_code: 'OVER_OTHER',
+          variance_note: 'One more',
+        })
+      ).status,
+    ).toBe(200);
+    const sent = await relay();
+    expect(
+      sent.filter(
+        (entry) =>
+          entry.text.includes(vendor.requestCode) || entry.text.includes(walkIn.requestCode),
+      ),
+    ).toEqual([]);
+    for (const [arranged, vendorOrganizationId, parameters] of [
+      [vendor, vendorA.row.organizationId, { reason: 'VENDOR_ADDED_PARCELS', n: '2' }],
+      [walkIn, null, { reason: 'OVER_OTHER', n: '1' }],
+    ] as const) {
+      expect(await noticesOf(arranged.requestId)).toEqual([
+        {
+          message_kind: 'COLLECTION_OVER_OPS_FEED',
+          audience: 'OPS_FEED',
+          channel: 'FEED',
+          state: 'DELIVERED',
+          suppression_reason: null,
+          vendor_organization_id: vendorOrganizationId,
+          responsible_hub_id: HUB_A,
+          parameters,
+          destination_hint: null,
+        },
+      ]);
+    }
+  });
+
+  // Break caught: the table's check on a notification's parameters left as it was (the number cannot be kept, so the entry is refused by the table and dead-lettered), or widened to every
+  // member (a reason or a category that is a number or a word in lower case would be kept), or `n` allowed to be a token, a zero, a number with a sign or a leading zero.
+  it('holds, in the table of the notifications, that `n` is a whole number above zero and that no other member is a number', async () => {
+    const arranged = await vendorStop();
+    expect((await collect(arranged, { ...OVER })).status).toBe(200);
+    await relay();
+    const [notice] = await routes.rows<{ id: string }>(
+      `select id from notification where subject_id = $1`,
+      [arranged.requestId],
+    );
+    const parametersAre = async (parameters: string): Promise<string | undefined> => {
+      await routes.admin.query('begin');
+      try {
+        await routes.admin.query('set local session_replication_role = replica');
+        await routes.admin.query(
+          `update notification set parameters = '${parameters}'::jsonb where id = $1`,
+          [notice?.id],
+        );
+        return undefined;
+      } catch (error) {
+        return (error as { constraint?: string }).constraint;
+      } finally {
+        await routes.admin.query('rollback');
+      }
+    };
+    const closed = 'notification_parameters_closed';
+    // Kept.
+    for (const kept of [
+      '{"reason":"VENDOR_ADDED_PARCELS","n":"2"}',
+      '{"n":"123456789"}',
+      '{"n":"1"}',
+      '{"category":"ACCESS_DENIED","reason":"LOCATION_CLOSED"}',
+    ]) {
+      expect(await parametersAre(kept), kept).toBeUndefined();
+    }
+    // Refused: `n` that is not a whole number above zero in at most nine digits, another member that is a number, a number that is not a string, a token under `n`.
+    for (const refused of [
+      '{"n":"0"}',
+      '{"n":"02"}',
+      '{"n":"-1"}',
+      '{"n":"2.5"}',
+      '{"n":"1234567890"}',
+      '{"n":"TWO"}',
+      '{"n":""}',
+      '{"n":2}',
+      '{"n":["2"]}',
+      '{"reason":"12"}',
+      '{"count":"2"}',
+      '{"reason":2}',
+    ]) {
+      expect(await parametersAre(refused), refused).toBe(closed);
+    }
+  });
+});
 
 describe('melarc.failure_envelope: the one operation that writes the envelope of a failure', () => {
   // Break caught: a caller that cannot write the envelope of its own failure, or one that writes it for a stop it did not just fail.
@@ -910,5 +1061,238 @@ describe('melarc.shortfall_envelope: the one operation that writes the envelope 
     );
     expect(await envelopesOf(arranged.requestId)).toEqual([]);
     expect(await envelopesOf(other.requestId)).toEqual([]);
+  });
+
+  // Break caught (D-D5): the short count's envelope written for a count above the booking (the office would be told "counted short" of extra parcels).
+  it('refuses a count above the booking: that count has an envelope of its own', async () => {
+    const arranged = await vendorStop();
+    expect(
+      (
+        await attemptAll(rider(arranged.rider.id, COUNTING), [
+          countSql(arranged, { collected: 5 }),
+          shortfallEnvelopeSql(arranged.stopId),
+        ])
+      ).code,
+    ).toBe('42501');
+    expect(await envelopesOf(arranged.requestId)).toEqual([]);
+  });
+});
+
+describe('melarc.over_count_envelope: the one operation that writes the envelope of a count above the booking (D-D5)', () => {
+  it('writes the envelope for the rider that has just counted the stop over, in that transaction, with the number over', async () => {
+    const arranged = await vendorStop();
+    const done = await attemptAll(rider(arranged.rider.id, COUNTING), [
+      countSql(arranged, { collected: 5 }),
+      overCountEnvelopeSql(arranged.stopId),
+    ]);
+    expect(done.code, JSON.stringify(done)).toBeUndefined();
+    expect(await envelopesOf(arranged.requestId)).toMatchObject([
+      {
+        event_type: 'pickup.collection.over_count_flagged',
+        operation_id: 'recordCollection',
+        payload: { stop: arranged.stopId, reason: 'VENDOR_ADDED_PARCELS', n: '2' },
+      },
+    ]);
+  });
+
+  // Break caught: the envelope of a count that matches or is short (nothing was counted over), of a count made earlier, or a second in the transaction.
+  it('refuses a stop with no count, a count that matches, a short count, a count of an earlier transaction and a second call', async () => {
+    const none = await vendorStop();
+    expect(
+      (await attemptAll(rider(none.rider.id, COUNTING), [overCountEnvelopeSql(none.stopId)])).code,
+    ).toBe('42501');
+
+    for (const collected of [3, 2]) {
+      const other = await vendorStop();
+      expect(
+        (
+          await attemptAll(rider(other.rider.id, COUNTING), [
+            countSql(other, { collected }),
+            overCountEnvelopeSql(other.stopId),
+          ])
+        ).code,
+        `counted ${String(collected)}`,
+      ).toBe('42501');
+    }
+
+    const arranged = await vendorStop();
+    const context = rider(arranged.rider.id, COUNTING);
+    const twice = await attemptAll(context, [
+      countSql(arranged, { collected: 5 }),
+      overCountEnvelopeSql(arranged.stopId),
+      overCountEnvelopeSql(arranged.stopId),
+    ]);
+    expect(twice.code).toBe('23505');
+    expect(await envelopesOf(arranged.requestId)).toEqual([]);
+
+    const earlier = await vendorStop();
+    expect(
+      (await attemptAll(rider(earlier.rider.id, COUNTING), [countSql(earlier, { collected: 5 })]))
+        .code,
+    ).toBeUndefined();
+    expect(
+      (await attemptAll(rider(earlier.rider.id, COUNTING), [overCountEnvelopeSql(earlier.stopId)]))
+        .code,
+    ).toBe('42501');
+    expect(await envelopesOf(earlier.requestId)).toEqual([]);
+  });
+
+  // Break caught: the envelope of a count written by another rider, under another key, or by staff or a vendor; or one the login inserts itself.
+  it('refuses another rider, another key, staff and a vendor, and the login’s own insert', async () => {
+    const arranged = await vendorStop();
+    const other = await vendorStop();
+    const count = countSql(arranged, { collected: 5 });
+    expect(
+      (
+        await attemptAll(rider(other.rider.id, COUNTING), [
+          count,
+          overCountEnvelopeSql(arranged.stopId),
+        ])
+      ).code,
+    ).toBeDefined();
+    for (const context of [
+      rider(arranged.rider.id, FAILURE),
+      rider(arranged.rider.id, 'pickup.run.execute'),
+      staff(COUNTING),
+      vendor(COUNTING),
+    ]) {
+      expect(
+        (await attemptAll(context, [overCountEnvelopeSql(arranged.stopId)])).code,
+        context.principalType + ' ' + (context.authorizationKey ?? ''),
+      ).toBe('42501');
+    }
+    const insert = `insert into outbox (id, event_type, aggregate_type, aggregate_id, responsible_hub_id, vendor_organization_id, originating_principal_type,
+                                          originating_principal_id, operation_id, correlation_id, payload)
+                    values ('${randomUUID()}', 'pickup.collection.over_count_flagged', 'PICKUP_REQUEST', '${arranged.requestId}', '${HUB_A}', '${vendorA.row.organizationId}', 'RIDER',
+                            '${arranged.rider.id}', 'recordCollection', 'x', '{}'::jsonb)`;
+    expect(REFUSED_INSERT).toContain(
+      (await attemptAll(rider(arranged.rider.id, COUNTING), [count, insert])).code,
+    );
+    expect(await envelopesOf(arranged.requestId)).toEqual([]);
+    expect(await envelopesOf(other.requestId)).toEqual([]);
+  });
+
+  /**
+   * One transaction, always rolled back, in which each step runs as the role it names (the runtime login, or the owner that the functions run as) under the context it names: the SQLSTATE
+   * and the message of the first refusal, or `ran`. The two layers that refuse an envelope, **the function's own checks and the outbox's policy**, both answer 42501, so a test that reads the
+   * code alone cannot tell which of them refused; the message can: the function's begins `the envelope of an over count is written for`, the policy's names the row-level security of
+   * the table (Run D, the break check of the over-count envelope: seven of its rules were held by one layer and had no test that noticed the other layer alone gone).
+   */
+  async function stepsAs(
+    plan: readonly {
+      role: 'melarc_api_runtime' | 'melarc_owner' | 'administrator';
+      context: SecurityContext;
+      text: string;
+    }[],
+  ): Promise<{ code: string; message: string }> {
+    await routes.admin.query('begin');
+    try {
+      for (const step of plan) {
+        await routes.admin.query(
+          step.role === 'administrator' ? 'reset role' : `set local role ${step.role}`,
+        );
+        for (const [name, value] of toContextSettings(step.context)) {
+          await routes.admin.query('select set_config($1, $2, true)', [name, value]);
+        }
+        await routes.admin.query(step.text);
+      }
+      return { code: 'ran', message: '' };
+    } catch (error) {
+      const failure = serverErrorIn(error);
+      return { code: failure?.code ?? 'other', message: failure?.message ?? '' };
+    } finally {
+      await routes.admin.query('rollback');
+    }
+  }
+  const RUNTIME = 'melarc_api_runtime';
+  const OWNER = 'melarc_owner';
+  const FUNCTION_REFUSAL = 'the envelope of an over count is written for';
+
+  // Break caught (the break check of 0099: E1, E2, E3 and E5 survived, each held by the function and by the outbox's policy alike): a rule of the function taken out, with the policy's
+  // copy of it still refusing, so that the code is the same and the function says nothing of the rule. Each case below is the function's own refusal.
+  it('refuses by its own check, before the policy of the outbox is asked: a count that is short, another rider’s count, a count of an earlier transaction and another key', async () => {
+    const arranged = await vendorStop();
+    const context = rider(arranged.rider.id, COUNTING);
+    const call = (as: SecurityContext) =>
+      ({ role: RUNTIME, context: as, text: overCountEnvelopeSql(arranged.stopId) }) as const;
+    const record = (collected: number) =>
+      ({ role: RUNTIME, context, text: countSql(arranged, { collected }) }) as const;
+
+    // A short count: the function names no count over the booking.
+    const short = await stepsAs([record(2), call(context)]);
+    expect(short.code).toBe('42501');
+    expect(short.message, 'a short count').toContain(FUNCTION_REFUSAL);
+
+    // Another rider's count: the record is the first rider's, the call is another's (and holds the same key).
+    const otherRider = (await vendorStop()).rider.id;
+    const another = await stepsAs([record(5), call(rider(otherRider, COUNTING))]);
+    expect(another.code).toBe('42501');
+    expect(another.message, 'another rider').toContain(FUNCTION_REFUSAL);
+
+    // Another key: the same rider, with the key of its failure reports.
+    const key = await stepsAs([record(5), call(rider(arranged.rider.id, FAILURE))]);
+    expect(key.code).toBe('42501');
+    expect(key.message, 'another key').toContain(FUNCTION_REFUSAL);
+
+    // A count of an earlier transaction: made and committed, and the call is the next transaction's.
+    const earlier = await vendorStop();
+    expect(
+      (await attemptAll(rider(earlier.rider.id, COUNTING), [countSql(earlier, { collected: 5 })]))
+        .code,
+    ).toBeUndefined();
+    const past = await stepsAs([
+      {
+        role: RUNTIME,
+        context: rider(earlier.rider.id, COUNTING),
+        text: overCountEnvelopeSql(earlier.stopId),
+      },
+    ]);
+    expect(past.code).toBe('42501');
+    expect(past.message, 'an earlier transaction').toContain(FUNCTION_REFUSAL);
+
+    // And the same call after the right count, in the right transaction, is the function's to write: the refusals above are its own and not a failure of the set-up.
+    const right = await stepsAs([record(5), call(context)]);
+    expect(right, 'the control').toEqual({ code: 'ran', message: '' });
+  });
+
+  // Break caught (the break check of 0099: O1, O2 and O3 survived): the outbox's arm for the envelope of an over count widened beyond what the function writes. The arm is asked **alone**
+  // here: as the owner, which is what the function runs as (O1, O2), and as the runtime login given the privilege to insert (O3: without the privilege the login is refused before the policy is asked,
+  // so the policy's own refusal of the login was never the one that answered). Everything but the one condition under test is right, and the control is admitted.
+  it('admits to the outbox, through its arm for an over count, the owner’s own row for an over count of this transaction and nothing else', async () => {
+    const arranged = await vendorStop();
+    const context = rider(arranged.rider.id, COUNTING);
+    const row = (event = 'pickup.collection.over_count_flagged'): string =>
+      `insert into outbox (id, event_type, aggregate_type, aggregate_id, responsible_hub_id, vendor_organization_id, originating_principal_type,
+                           originating_principal_id, operation_id, correlation_id, payload)
+       values ('${randomUUID()}', '${event}', 'PICKUP_REQUEST', '${arranged.requestId}', '${HUB_A}', '${vendorA.row.organizationId}', 'RIDER',
+               '${arranged.rider.id}', 'recordCollection', 'over-count-arm', '{"stop":"${arranged.stopId}","reason":"VENDOR_ADDED_PARCELS","n":"2"}'::jsonb)`;
+    const record = (collected: number) =>
+      ({ role: RUNTIME, context, text: countSql(arranged, { collected }) }) as const;
+    const asOwner = (text: string) => ({ role: OWNER, context, text }) as const;
+
+    // The control: an over count of this transaction, the owner's statement, the event of the arm.
+    expect(await stepsAs([record(5), asOwner(row())]), 'the control').toEqual({
+      code: 'ran',
+      message: '',
+    });
+
+    const refused = (result: { code: string; message: string }, what: string): void => {
+      expect(result.code, what).toBe('42501');
+      expect(result.message, what).toContain('row-level security');
+    };
+    // O1: a count that is short is not one the arm admits the event of an over count for.
+    refused(await stepsAs([record(2), asOwner(row())]), 'a short count');
+    // O2: no other event type goes through the arm (the short count's own is another arm's, for a short count).
+    refused(
+      await stepsAs([record(5), asOwner(row('pickup.collection.shortfall_flagged'))]),
+      'another event',
+    );
+    // O3: the login's own statement is not the owner's. **A layered pair, answered by another layer:** the login holds the privilege to insert (0055) and every condition of the arm but the owner's
+    // statement holds, and the row is refused all the same, by the outbox's insert guard (0055: an envelope names an aggregate its writer can read, and the rider cannot read the request under the
+    // counting key) with the table's check violation, before the policy is asked. The policy's clause is the second layer; the break check mutated both (the clause and the guard's aggregate
+    // check) and the pair was killed by this case.
+    const own = await stepsAs([record(5), { role: RUNTIME, context, text: row() }]);
+    expect(own.code, 'the runtime login').toBe('23514');
+    expect(own.message, 'the runtime login').toContain('an envelope');
   });
 });

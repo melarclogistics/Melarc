@@ -261,7 +261,9 @@ Do not:
 A link drawn as a button, for going somewhere that is the main thing a surface offers ("Add a staff profile", "Reset authenticator"). It is
 an anchor with an address, so it can be followed in a new tab and is announced as a link; an act that changes something is a Button, and
 navigation that is not the point of a surface is a Link. It has the Primary and Secondary recipes and the same size and focus ring, and no
-Danger, because a link never does harm.
+Danger, because a link never does harm. **It takes the hub floor's size as the Button does** (`size="lg"`, 56px by `--control-height-lg`, asked for by the screen and never by the
+component): the run's page sends an officer to the blind count with it (S1.35c). The foot of a confirmation dialog (`CommandOutcomeActions`, and the page helper `ActDialog` over it)
+takes the same `size` and gives it to every button it draws, the ways out of an unknown outcome and of a conflict included, so that no button of a dialog on the floor is smaller than its neighbour.
 
 ---
 
@@ -1916,6 +1918,70 @@ The facts of a card, where a table is too narrow for its columns and draws a car
 - **Anatomy.** A list of terms and definitions (`dl`), a `div` of its own around each pair, the label in `text.secondary` at the small size in a column of 5rem to 7.5rem (the longest label of the portal wraps in its column and is never cut off), the value taking the rest and wrapping at its words (an address is whole). It draws no heading and no control: the table draws the card’s heading, its one button over the card and its act around it.
 - **Do** draw the facts of every card of every list with it, each fact with the name its column has, so that a card is the same on every screen. **Do not** put a button, a link or a field in a value (the card’s one hit target is the table’s, and a second one makes two ways to open a row; a row that opens nothing is the table’s own exception), repeat the heading’s code among the facts, or leave out a fact that a lesser column of the table carries: a card shows every fact.
 
+#### LockIndicator
+
+> **Status:** IMPLEMENTING (14 November 2026) · **Code:** `apps/ops-web/src/components/ui/lock-indicator/`
+
+Who holds an **advisory** lock on a record, told in words ([surfaces/ops-portal.md §9](../surfaces/ops-portal.md#9-concurrency-is-a-first-class-interface-concern): the receiver's lock of an intake). The words do the saying and the icon (a closed padlock, an open one for a lock nobody holds) and the tone (info for the person's own, warning for another's, neutral for a free or an unknown one) support them. It decides nothing and knows nothing of the policy: it does not know what the lock is for, how long it lasts or who may take it over, and **a lock that is advisory is never drawn as a gate**.
+
+- **Props.** `holder` (`free`, `yours`, `other`, `unknown`: what the page was told), `subject?` (what the lock is on, after "on": "this intake"), `who?` (the page's words for the other holder: "Another receiver", never a name the page does not have), `since?` (when the holder last showed it was there, as the page tells a time), `note?` (one line from the page that says what the lock does and does not do) and `action?` (the page's own control: "Ask again").
+- **Anatomy.** A state line ("Held by someone else"), the sentence ("Another receiver holds the lock on this intake."), when the holder was last active, the note and the action. **Who holds it is a `status` region and the moment of the last refresh is outside it**, so that a change of holder is said once and the time, which moves every minute while a page keeps its lock, is never read out each time.
+- **Do** pass the one line that says a lock only shows who is working, and the action only where there is one. **Do not** disable a form because of it, or word it as a refusal: the server refuses a count only for the intake's facts.
+
+#### EvidenceUpload
+
+> **Status:** IMPLEMENTING (14 November 2026) · **Code:** `apps/ops-web/src/components/ui/evidence-upload/`
+
+The files a person adds as evidence of an act (the photos of a condition found at receiving), each **sent as soon as it is chosen** and told one by one. It is generic and decides no policy: it knows no operation, no owner, no limit and no address, and is given the function that sends a file and the function that words a failure.
+
+- **Props.** `label`, `help?`, `error?`, `required?`, `accept?` (what the file chooser offers: a hint, the platform judges every file), `disabled?`, `upload(file, report, signal)` (the page's: sends one file and answers with the identifier of the stored record, or throws; `report` tells where the file is, in the page's words; `signal` is aborted when the file is left out or the component goes), `failureText(error)` (the page's words), `onChange(stored)` (the identifiers of the stored files, in the order they were added) and `onBusyChange?` (whether a file is on its way, so that the page does not send its act without the evidence it was told to attach).
+- **Anatomy.** A native file input in a `Field` (the keyboard and the forced-colours drawing are the browser's), and under it one row for each file: its name and size, its state (*Sending*, *Stored*, *Not sent*) as a badge beside words, the page's words for a failure, **Try again** for a file that failed and **Leave out** for any. One polite region says each file's outcome once. **It never draws a storage key, an upload address or the identifier of a record**: the page cites the identifiers and the person sees names.
+- **Do** compute nothing here: the checksum, the declaration, the `PUT` of the bytes to the issued address and the completion are the page's (`platform/evidence/`). **Do not** let the page send its act while `onBusyChange` says a file is on its way.
+- **The photo mode (Run D, S1.35c-0, the hub floor).** `mode="photos"` (the default is `files`): **two buttons the size of the hub floor**, *Take a photo* (`capture="environment"`: the camera at the back, one photo) and *Choose from the gallery* (several), in a group the field names, for **images and never a document** (`accept` is not used). Each photo is **shown back** (a decorative preview **drawn on a canvas from the file, never from an object URL**: the portal's policy, `img-src 'self'`, refuses a `blob:` or a `data:` picture ([SECURITY_DESIGN §14.8](../architecture/SECURITY_DESIGN.md)), and a preview the browser blocked would be a broken picture beside every photo; the file is decoded at the preview's own size, its middle square is drawn and the bitmap is closed at once, so that nothing holds the photo but the file; a photo the browser cannot decode has no preview and the field works as it did), **named by its place** ("Photo 2": a camera gives every photo the same file name, so the rows, the buttons and the outcome said aloud name it by place), and **can be retaken** (*Retake* opens the camera and the photo it brings replaces that photo in its place, stopping the one it replaces; a retake the person gives up by taking another photo changes nothing). **The buttons of a photo's row (*Try again*, *Retake*, *Leave out*) are the hub floor's 56px too** (`size="lg"` in this mode: a dialog of the floor has no button of 44px); in the file mode they keep the working height. The sending, the words of a failure and what the page is handed are those of the file mode.
+- **The platform half** (`platform/evidence/`, not a component): the page passes the policy's limits to the uploader (`useEvidenceLimits()`, never defaulted; `imagesOnly` for this mode), and a file is **judged before it is read** (type, then size, in the policy's words); a **stored** record that a lost answer made the platform ask for again is a success and is not sent again; an upload address that ran out is asked for again **once**; every step has its time (provisional budgets, pinned by a test); a photo the browser's own policy stopped is told **as blocked** and not as a connection that was lost; and the words of a refusal to attach evidence to a *decision* are the decision's own (`use: 'decision'`).
+- **The gate of a form on its uploads.** `useUploadGate()` gives each upload's `onBusyChange` (`gate.watch('Photos of the damage')`) and `UploadGateNotice` says beside the submit, in a polite status region that is in the page before it has words, **what the form waits for, by name** ("Photos of the damage is still being sent. Wait until it says Stored, then send."), also for an upload in a part of the form that is shut or scrolled away. The submit is disabled while `gate.busy` and named by the notice (`aria-describedby`): **a submit that does nothing and says nothing is the one thing a person cannot find the cause of.**
+
+#### PhotoGrid
+
+> **Status:** IMPLEMENTING (16 November 2026) · **Code:** `apps/ops-web/src/components/ui/photo-grid/` (the picture of a tile: `app/pages/evidence/PhotoPicture.tsx`)
+
+The photos of a vendor, a parcel or a finding as **tiles of one shape** (a square made by the grid and not by the picture, so that the grid never jumps while pictures arrive or fail), **three to a row on a 390px phone** and as many as fit on a desk. It is generic and decides nothing: it knows no photo store and no rule, draws the picture the page gives each tile that is near the screen, says a tile's state, and tells the page which tile was pressed.
+
+- **Props.** `label` (names the list), `items` (`{ key, label, state?, badge?, disabled? }`: the `label` is the tile's name for assistive technology and is never an identifier or an address; `state` is `normal` or `selected`, `marked`, `dimmed` with the page's words), `renderPicture(item, { near })` (the page's: draws nothing and asks the platform for nothing until `near`), `onSelect?(item, index)` and `selectable?` (the tiles are toggles: `aria-pressed` by `selected`).
+- **Anatomy.** A list of buttons of **at least 56px** (`--control-height-lg`) on a side, in **one stop of the Tab key** with the arrow keys (left and right by one, up and down by a row as the grid is laid out now, Home and End); a state in **an icon and words** in a strip along the foot of the tile on a background of its own (success, warning, neutral status tokens: the words read on any picture), the tile's border taking the same colour as a second sign, a dimmed photo fading its picture and never its words; a small badge on a surface of its own. Forced colours draw a border on every tile and the selected one in the system's highlight; under reduced motion the border does not fade.
+- **The columns and the strip (the second look at the pictures, 16 November 2026).** A column is **6rem (96px) at least**: three fit in the 324px that a receiving screen leaves a 390px phone (a 360px phone has 294px and gets two), and a narrower tile leaves a state's words too little room: at 5.5rem "Checked in" took two lines in every checked tile, which left the photo a strip of 40px, and "Damaged" was broken in two. The state is **an icon and one line of words** in a strip 27px high **with no padding at its sides** (the icon, its gap and "Checked in" are 84.3px of the 92px inside a tile of 96px); a state that is longer ("Checked in, damaged", while the officer taps) wraps at its spaces, and a word is broken only where large text cannot hold it. The kit's showcase gives its two grid specimens the room a screen gives a grid (`Specimen edge`: it is framed twice, which left a grid 292px at 390px). `test/photo-grid-style.test.ts` holds the arithmetic; `test/browser/receiving.spec.ts` measures it on the run's page at 390, 768 and 1280px and in the narrowest tile (96px).
+- **The picture (`PhotoPicture`).** `tile`: until the tile is near, a placeholder; then the **retrieved original** as a decorative picture (`alt=""`, `loading="lazy"`, no referrer) cropped to the tile's box. **No small copy is made yet (OB-S1-86, part 2: provisional)**, so a tile costs the whole photo; the page asks for the link of a tile only when it is near, through a queue of four at a time, once for as long as the link lives, so that sixty photos do not spend the session's limit of requests. A photo that cannot be shown says **"Photo not available"** whatever the cause (no sentence of a refusal on sixty tiles), and a picture the browser's own policy stopped says **"Photo blocked"**. **No address, key or identifier is ever drawn as text.**
+- **Do** keep the page's meaning of a press (open the photo, tick it as found) in the page, and the photo's place in its label. **Do not** draw a tile's state by colour alone, put a photo of a stop on a page of the receiving side before the count commits (`test/stop-photos-not-on-the-receiving-side.test.ts` holds the kit's two doors, `usePhotoLink` and `PhotoPicture`, to the same list as the dialog), or hand-build a grid of photo buttons.
+
+#### PhotoViewer
+
+> **Status:** IMPLEMENTING (16 November 2026) · **Code:** `apps/ops-web/src/components/ui/photo-viewer/`
+
+One photo at a time over the dialog kit (`Dialog size="wide" fill`), among the others of its grid. It is generic and decides nothing: the page gives it the items, the index it holds and the picture, and the viewer says where the person is and tells the page where they moved. **The window is as tall as the screen allows, the controls are the last thing in it, and the photo is the part that gives way.**
+
+- **Props.** `items` (`{ key, label, detail? }`), `index` (the page's: so that the grid can say which photo was seen last), `onIndexChange`, `onClose`, `renderPicture(item, { current })` (`current` is the photo looked at; the other call is the one neighbour loaded ahead, hidden) and `note?` (one line about the photos together).
+- **Anatomy.** The photo's name as the dialog's heading, its detail and the note as the description, the picture, and under it the controls: **Previous, "3 of 12" and Next in one row that does not break**, and *Close the photo* (the one with the initial focus) apart from it. The place is a polite status that also says the photo's name. **The two buttons are the hub floor's 56px each way** (with the padding of `--space-4`, so that the three fit the 324px of a 390px phone) and are drawn as *Previous* and *Next* beside their icon, **named in full (*Previous photo*, *Next photo*) for assistive technology** (the name holds the words that are drawn); on a phone of 360px or less they are their icon alone. *Close the photo* is at the end of the same row where there is room and in the middle of a row of its own where there is not (a 390px phone). The buttons are disabled at the ends, and **a button that was pressed and reaches its end hands focus to the other**, so that a person at the keyboard is never dropped out of the dialog. A single photo has no place and no buttons but *Close*.
+- **Where the controls are (the pictures of the receiving screens, 16 November 2026, defects 1 and 11).** A window as tall as its content was as tall as the photo: at 1280 x 800 the viewer was 886px of content in a window of 766px, the place and the buttons began below the fold, and the viewer scrolled back to the top at every *Next*. The window now **fills** (`Dialog fill`: the screen's height less the margin of every dialog, and never more than 56rem), the controls are the last thing in it and keep their size, and **the stage that holds the photo is the part that gives way** (a basis of nothing, so that how tall a photo is never says how tall the viewer is): every control is on the screen, the viewer does not scroll, and the buttons do not move from one photo to the next, at 320 x 568, 390 x 844, 768 x 1024, 1280 x 800 and 1024 x 600 (`test/browser/kit.spec.ts`, which also serves a photo with pixels of its own and no size in its markup, as a stored photo is). **A photo is laid out by the room it is given and not by what it is**: what the page draws for a photo is a column as tall as the stage, whose first child, the picture, takes the room that is left, and whose others (a button of the page's under the picture) keep their size; the picture is told how much room it has (`--ui-photo-room`, the whole of the box it is drawn in, and the screen's 70vh for a picture drawn anywhere else).
+- **Moving.** The two buttons; **ArrowLeft and ArrowRight** (taken from the browser; a key with a modifier, Alt+Arrow being the browser's history, and every other key are left alone); and **a swipe of a finger or a pen**: across by at least 48px and at least 1.5 times as far across as down, so that a vertical scroll and a diagonal slip are left to the browser (`touch-action: pan-y`); a mouse, a second finger and a cancelled gesture are ignored. Left is next, right is previous, and it never goes past an end. **At most one neighbour is loaded ahead**, in the way the person is going. Focus, the trap and the return of focus to the control that opened it are the dialog's; Escape asks the page to close. The change of photo fades in over `motion.fast` and not at all under reduced motion (the stylesheet's, on the tokens).
+- **Do** draw each photo with `PhotoPicture size="full"` (the photo whole, its text alternative the page's words, the cause of a failure told in full in the words of the one table, *Try again* for a platform that was unavailable, the one new link of a picture that would not load). **Do not** let the viewer name a store or an address.
+
+#### ConnectionBanner
+
+> **Status:** IMPLEMENTING (16 November 2026) · **Code:** `apps/ops-web/src/components/ui/connection-banner/`
+
+A line of the page that says **what a person does now is not saved** ("No connection. What you do now is not saved.", or the page's own words) while the browser says it is offline (`useOnlineStatus`: `navigator.onLine` and the window's `online` and `offline` events) **or** the page says a request failed for the network (`requestFailed`: the browser may still say it is online, with a captive portal or a signal that carries nothing). It stays while either says so. It is generic and routes nothing: a page draws it where it wants it.
+
+- **Anatomy.** One **polite `status` region that is in the page before it has anything to say** (a region that is added with its words in it is not announced reliably), an icon beside the words and never instead of them, in the warning status tokens (light and dark). **There is no way to dismiss it**: it goes when the connection is back, and only then. It never blocks the page: a line of the page and not a layer over it, taking no focus and making nothing inert.
+- **Do** draw it above the form a person types into on the hub floor and set `requestFailed` from the page's own failed request. **Do not** give it a close button or use it for a failure that is not the network's (the page's own error words).
+
+#### The hub floor's sizes
+
+> **Status:** IMPLEMENTING (16 November 2026) · **Code:** `size="lg"` of `button/`, `radio/` and `checkbox/`, and `HubFloor` (`apps/ops-web/src/components/ui/hub-floor/`)
+
+A hub-floor task is tablet-first at 768px with **56px touch rows and controls** ([DESIGN_SYSTEM §11 and §12](DESIGN_SYSTEM.md#11-control-sizing); the Product Owner, 5 November 2026). `size="lg"` on the button, the radio group and the checkbox sets it by the token `--control-height-lg` (the radio row and the checkbox label by `--density-row-touch`, the same value): the target is the **whole row**, not the 20px circle or box, and the height is still a minimum, so enlarged text grows the control. **The page that is a hub-floor task asks for it; no component takes it by itself.** A *Cancel* is a real button of the size, never a link. `test/hub-floor-sizes.test.ts` holds the tokens and the rules.
+
+**`HubFloor`: the scope for what a page does not draw itself (Run D polish, the review of the pictures, defect 7).** A page's own buttons, radio groups and checkboxes ask for `size="lg"`; the parts that the kit draws for it (the way up the page header's trail and *Refresh*, the views of a queue, its lookup and its *Filter* button, the code of a row that opens a page, and a card's title) had no size to ask for, and stood at 44px, 36px and 17 to 24px on the receiving screens. A page that is a hub-floor task is wrapped in `<HubFloor>` (one `div`, no behaviour), and `hub-floor.css` draws those parts at the touch height **by the token** (`--control-height-lg`; the code of a row by its own row token, 56px at `density: 'touch'`, which the page asks for as well): no number is written in the file, every height is a minimum, and a selector is one class more specific than the rule it raises, so that the order of the stylesheets does not decide. **A row of views wraps in the scope and does not scroll**: a view behind the edge is found by no thumb (the kit's own row scrolls under a fade, which a phone's second view that ends at the edge defeats). What the scope does not reach: the photo kit (`PhotoGrid`, `PhotoViewer`, which have their own sizes), the 32px chip of an applied filter and the 24px target that removes it (a desk control, inside the 24px of WCAG 2.5.8), and a dialog (a portal outside the page, whose own buttons ask for `size="lg"`). The pages in the scope: the receiving queue, a run, a vendor's record, the decision, the count and the list of missing parcels, and *Count differences*.
+
 #### SidePanel
 
 > **Status:** ACTIVE (10 November 2026) · **Code:** `apps/ops-web/src/components/ui/side-panel/`
@@ -2077,6 +2143,46 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `VENDOR_DEVICE` | `ACTIVE` | success | Active |
 | `VENDOR_DEVICE` | `REVOKED` | neutral | Revoked |
 | `VENDOR_DEVICE` | `REPLACED` | neutral | Replaced |
+| `PICKUP_FAILURE` | `PENDING` | waiting | Waiting for Ops |
+| `PICKUP_FAILURE` | `ESCALATED` | waiting | Escalated, still waiting |
+| `PICKUP_FAILURE` | `RESCHEDULED` | success | Rescheduled |
+| `PICKUP_FAILURE` | `CANCELLED` | neutral | Cancelled |
+| `HANDSHAKE` | `PENDING` | neutral | Not asked for yet |
+| `HANDSHAKE` | `CODE_GENERATED` | info | Code made |
+| `HANDSHAKE` | `CODE_DELIVERED` | info | Code with the vendor |
+| `HANDSHAKE` | `VERIFIED` | success | Confirmed |
+| `HANDSHAKE` | `EXPIRED` | waiting | Code ran out |
+| `HANDSHAKE` | `EXHAUSTED` | waiting | Attempts used up |
+| `HANDSHAKE` | `DISPUTED` | danger | Disputed |
+| `HANDSHAKE` | `MANUALLY_RESOLVED` | success | Settled by Ops |
+| `COLLECTION_DISPUTE` | `OPEN` | waiting | Open |
+| `COLLECTION_DISPUTE` | `RESOLVED` | success | Resolved |
+| `STOP_EVIDENCE` | `STORED` | success | Stored |
+| `STOP_EVIDENCE` | `PENDING_UPLOAD` | waiting | Waiting to upload |
+| `STOP_EVIDENCE` | `EXPIRED` | danger | Never uploaded |
+| `HUB_INTAKE` | `AWAITING_COUNT` | waiting | Awaiting count |
+| `HUB_INTAKE` | `COUNTED` | info | Counted |
+| `HUB_INTAKE` | `RECONCILIATION_REQUIRED` | waiting | Needs a decision |
+| `HUB_INTAKE` | `READY_FOR_ITEMIZATION` | success | Ready to itemise |
+| `HUB_INTAKE` | `ITEMIZING` | info | Being itemised |
+| `HUB_INTAKE` | `CLOSED` | neutral | Closed |
+| `INTAKE_COUNT` | `MATCH` | success | Matches |
+| `INTAKE_COUNT` | `SHORT` | waiting | Short |
+| `INTAKE_COUNT` | `OVER` | waiting | Over |
+| `INTAKE_CONDITION` | `OK` | success | Good condition |
+| `INTAKE_CONDITION` | `DAMAGED` | danger | Damaged |
+| `INTAKE_CONDITION` | `TAMPERED` | danger | Tampered with |
+| `INTAKE_CONDITION` | `OTHER` | waiting | Another problem |
+| `RECEIVING_VENDOR` | `AWAITING_COUNT` | waiting | Waiting to be checked in |
+| `RECEIVING_VENDOR` | `COUNTED` | info | Checked in |
+| `RECEIVING_VENDOR` | `RECONCILIATION_REQUIRED` | waiting | Needs a decision |
+| `RECEIVING_VENDOR` | `READY_FOR_ITEMIZATION` | success | Checked in and cleared |
+| `RECEIVING_VENDOR` | `ITEMIZING` | info | Orders being listed |
+| `RECEIVING_VENDOR` | `CLOSED` | neutral | Closed |
+| `RECEIVING_PARCEL` | `EXPECTED` | neutral | Not checked in |
+| `RECEIVING_PARCEL` | `ARRIVED` | success | Checked in |
+| `RECEIVING_PARCEL` | `MISSING` | danger | Missing |
+| `RECEIVING_PARCEL` | `VOID` | neutral | Taken back |
 
 
 The same state name in two domains (`PENDING`, `ACTIVE`, `CANCELLED`) is two different states of two different records. The words are sentence case and plain, with no raw value and no full stop.
@@ -2203,6 +2309,8 @@ A small panel that opens under what opened it, with Melarc's defaults: **8px** a
 #### Dialog and AlertDialog: reused, with the Melarc defaults
 
 > **Status:** the `Dialog` and `AlertDialog` of §20 stay ACTIVE · **Code:** `apps/ops-web/src/components/ui/dialog/` (the motion was added to `dialog.css` on 7 November 2026, afternoon; the components and their props are as they were)
+
+**`size="wide"` (Run D, S1.35c-0)** is the first prop the dialog has gained: a window of 56rem, never wider than the screen, for what is shown whole (the photo viewer); the default stays the 32rem window of a question, and every default below is the same in both. **`fill` (the pictures of the receiving screens, 16 November 2026)** is the second: a window as tall as the screen lets it be (the margin of every dialog, and never taller than 56rem) with a column inside that its content fills, for what is shown whole and has controls (a photo and its buttons), so that the content is the part that gives way and the controls never leave the screen; a window that is not asked to fill is as tall as its content. The width is `size`'s: the two are asked for apart.
 
 The Product Owner accepted, on 7 November 2026 (afternoon), that pages keep using Melarc's own wrappers of the modal dialog and that no second modal is built on the `dialog` primitive, **provided they carry the Melarc defaults**. They were checked against the list below, in a real browser, in each of the two (`test/browser/dialogs.spec.ts`: it reads the computed style and the starts of the animations, and compares each with its token). What they carry, and what had to be added:
 

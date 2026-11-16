@@ -184,6 +184,8 @@ describe('the generated description of the real application', () => {
         ['post'],
         ['createEvidenceRetrievalAuthorization'],
       ],
+      // S1.35b: the limits the evidence store holds a photo to, read by the page before it offers one.
+      ['/evidence-limits', ['get'], ['getEvidenceLimits']],
       // S0.53a: the rider roster, the first routes of the `dispatch` module.
       ['/ops/riders', ['get'], ['listRiders']],
       ['/ops/riders/{riderId}', ['get'], ['getRider']],
@@ -193,6 +195,25 @@ describe('the generated description of the real application', () => {
       ['/pickup-manifests/{id}/custody-handover/fail', ['post'], ['failRunCustodyHandover']],
       ['/run-custody-handovers', ['get'], ['listRunCustodyHandovers']],
       ['/run-custody-handovers/{id}', ['get'], ['getRunCustodyHandover']],
+      // S1.31: the custody holder's hub handover (the `hub` domain), which completes the run and opens one intake for each collected request.
+      ['/pickup-manifests/{id}/hub-handover', ['post'], ['submitHubHandover']],
+      // S1.32: the receiving side's reads (the awaiting-receive queue, one intake) and the advisory receive lock.
+      ['/hub-intakes', ['get'], ['listHubIntakes']],
+      ['/hub-intakes/{id}', ['get'], ['getHubIntake']],
+      ['/hub-intakes/{id}/lock', ['post'], ['acquireIntakeLock']],
+      // S1.33: the receiver's blind count.
+      ['/hub-intakes/{id}/count', ['post'], ['submitBlindCount']],
+      // S1.34: what is found at an intake after its count, and Senior Ops's adjudication.
+      ['/hub-intakes/{id}/condition', ['post'], ['recordIntakeCondition']],
+      ['/hub-intakes/{id}/discrepancy', ['post'], ['adjudicateDiscrepancy']],
+      // S1.35b: receiving by run: the runs waiting at the hub, one run, the parcels being searched for, the photo check-in's acts and the senior officer's correction.
+      ['/receiving-runs', ['get'], ['listReceivingRuns']],
+      ['/receiving-runs/{manifest_id}', ['get'], ['getReceivingRun']],
+      ['/missing-parcels', ['get'], ['listMissingParcels']],
+      ['/intake-parcels/{parcel_id}/arrival', ['put'], ['recordParcelArrival']],
+      ['/hub-intakes/{id}/check-in', ['post'], ['finishCheckIn']],
+      ['/hub-intakes/{id}/extra-parcels', ['post'], ['addExtraParcel']],
+      ['/hub-intakes/{id}/correction', ['post'], ['correctIntakeCount']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.
@@ -211,6 +232,8 @@ describe('the generated description of the real application', () => {
       // S1.22: the rider's two acts on a run, the first operations of the pickup domain that only a rider performs.
       ['/pickup-manifests/{id}/start', ['post'], ['startRun']],
       ['/pickup-stops/{id}', ['get'], ['getPickupStop']],
+      // S1.30: the evidence of a stop with the progress of its parcel photos, for Ops staff alone.
+      ['/pickup-stops/{id}/evidence', ['get'], ['listPickupStopEvidence']],
       ['/pickup-stops/{id}/arrive', ['post'], ['arriveAtPickupStop']],
       ['/pickup-stops/{id}/skip', ['post'], ['skipPickupStop']],
       // S1.28: the rider's report that a stop failed.

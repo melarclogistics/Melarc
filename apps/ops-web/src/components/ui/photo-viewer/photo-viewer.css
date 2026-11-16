@@ -1,0 +1,124 @@
+/*
+ * The photo viewer (design/COMPONENT_PATTERNS.md, PhotoViewer): one photo at a time in the wide dialog that fills the screen's height, and under it the controls: Previous, where the person is and Next in one row, and Close apart.
+ * **The photo is what gives way and the controls are what does not** (the pictures of the receiving screens, 16 November 2026): a viewer as tall as its content was as tall as the photo, with the controls below the fold
+ * of a short screen and a scroll that went back to the top at every change of photo. A vertical scroll stays the browser's (`touch-action: pan-y`) and a drag across is the viewer's swipe. The change of photo fades in
+ * from the side it came from over motion.fast, and not at all under reduced motion. Every colour, size and space comes from tokens.css.
+ */
+.ui-photo-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: var(--space-4);
+}
+
+/*
+ * The stage is the part that gives way: a basis of nothing and it may shrink to nothing, so that how tall a photo is never says how tall the viewer is, and the same room is left whatever the photo (or no photo yet, or none
+ * that can be shown). The photo is laid out inside it by position, so that its height is the stage's, which is definite, and a percentage of it is a size.
+ */
+.ui-photo-viewer__stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  touch-action: pan-y;
+}
+
+/*
+ * What the page draws for the photo, in a column as tall as the stage: the picture (the first thing it draws) takes the room that is left, and what the page draws under it (a button) keeps its size. The picture is told how
+ * much room it has (`--ui-photo-room`): the whole of the box it is drawn in, where a picture that is drawn anywhere else has the screen's 70vh.
+ */
+.ui-photo-viewer__photo {
+  --ui-photo-room: 100%;
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-photo-viewer__photo > :first-child {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.ui-photo-viewer__photo > :not(:first-child) {
+  flex: none;
+}
+
+.ui-photo-viewer__photo[data-way='next'] {
+  animation: ui-photo-viewer-next var(--motion-fast) var(--motion-ease-enter);
+}
+
+.ui-photo-viewer__photo[data-way='previous'] {
+  animation: ui-photo-viewer-previous var(--motion-fast) var(--motion-ease-enter);
+}
+
+@keyframes ui-photo-viewer-next {
+  from {
+    opacity: 0;
+    transform: translateX(var(--space-4));
+  }
+}
+
+@keyframes ui-photo-viewer-previous {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--space-4)));
+  }
+}
+
+/*
+ * The controls are the last thing in the viewer and keep their size. Previous, the place and Next are one row that does not break, and it asks for room for the three of them (18rem): where it is not given that beside Close,
+ * Close is a control of its own that wraps to a row of its own, in the middle of it; where there is room, Close is at the end of the same row.
+ */
+.ui-photo-viewer__controls {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.ui-photo-viewer__nav {
+  display: flex;
+  flex: 1 1 18rem;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The place between the two buttons it counts for, in the room they leave. */
+.ui-photo-viewer__position {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+  text-align: center;
+}
+
+/* The two buttons that move keep the floor's target (56px high, and at least as wide) with less padding than a floor button has, so that the three of them fit the 324px of a 390px phone. */
+.ui-photo-viewer__nav .ui-button {
+  flex: none;
+  min-width: var(--control-height-lg);
+  padding-inline: var(--space-4);
+}
+
+/* Where even that is too much (a phone of 360px or less) the buttons are their icon: each is named in full by its label, which is not drawn. */
+@media (max-width: 22.5rem) {
+  .ui-photo-viewer__label {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-photo-viewer__photo[data-way='next'],
+  .ui-photo-viewer__photo[data-way='previous'] {
+    animation: none;
+  }
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Clock } from '../ports/clock.port.js';
-import { randomUUIDv7, uuidV7From } from './uuid-v7.js';
+import { orderedUUIDv7, randomUUIDv7, uuidV7From } from './uuid-v7.js';
 
 const clockAt = (iso: string): Clock => ({
   now: () => new Date(iso),
@@ -130,5 +130,38 @@ describe('randomUUIDv7 (S0.3b): identity code reads time only through the inject
     expect(() => randomUUIDv7({ now: () => new Date(Number.NaN) })).toThrow(RangeError);
     expect(() => randomUUIDv7({ now: () => new Date(-1) })).toThrow(RangeError);
     expect(() => randomUUIDv7({ now: () => new Date(2 ** 48) })).toThrow(RangeError);
+  });
+});
+
+describe('orderedUUIDv7, identifiers that sort in the order they are made', () => {
+  // Break caught: two identifiers made in the same millisecond that are not in the order of the calls (a handover's vendors drawn in an order that changes from read to read, against the contract's "in the order the
+  // handover opened them"): the clock stands still and fifty identifiers still sort as they were made; each is a UUIDv7 of the clock's time or a millisecond on.
+  it('keeps the order of the calls when the clock does not move, one millisecond on for each', () => {
+    const next = orderedUUIDv7(clockAt('2026-11-16T09:00:00.000Z'));
+    const made = Array.from({ length: 50 }, () => next());
+
+    expect(made).toEqual(made.toSorted());
+    expect(new Set(made).size).toBe(50);
+    for (const [at, uuid] of made.entries()) {
+      expect(uuid).toMatch(FORMAT);
+      expect(timestampOf(uuid)).toBe(Date.parse('2026-11-16T09:00:00.000Z') + at);
+    }
+  });
+
+  // Break caught: a generator that steps ahead of a clock that has moved on (its identifiers drifting into the future for good), or one that follows a clock that steps back (an identifier out of order).
+  it('follows a clock that moves on and never goes back', () => {
+    let now = Date.parse('2026-11-16T09:00:00.000Z');
+    const next = orderedUUIDv7({ now: () => new Date(now) });
+    const first = next();
+    const second = next();
+    now += 5_000;
+    const third = next();
+    now -= 60_000;
+    const fourth = next();
+
+    expect([first, second, third, fourth]).toEqual([first, second, third, fourth].toSorted());
+    expect(timestampOf(second) - timestampOf(first)).toBe(1);
+    expect(timestampOf(third)).toBe(Date.parse('2026-11-16T09:00:05.000Z'));
+    expect(timestampOf(fourth)).toBe(timestampOf(third) + 1);
   });
 });

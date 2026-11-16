@@ -1,0 +1,90 @@
+/*
+ * The hub floor's scope (DESIGN_SYSTEM sections 11 and 12; COMPONENT_PATTERNS, *The hub floor's sizes*): a tablet in a hand, in a hurry, at a table with a rider waiting. Everything a page of the floor draws
+ * at the working height (44px, or less) is drawn here at the touch height, **by the token** (`--control-height-lg`, and the row of a table by its own `--ui-data-table-row`): no height is written in this
+ * file (the 1px is the separator inside a row, as in the table's own rule), and every height is a minimum, so enlarged text grows it. The selectors are as specific as the rules they raise (and one class more), so that the order of the stylesheets does not decide.
+ */
+
+/* The links of the page header: the way back up the trail, and Refresh (which keeps its words and its underline: only its reach grows). */
+.ui-hub-floor .ui-page-head__trail a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-lg);
+}
+
+.ui-hub-floor .ui-page-head__freshness .ui-page-head__refresh {
+  min-height: var(--control-height-lg);
+  padding-inline: var(--space-3);
+}
+
+/*
+ * The views of a queue: at the touch height, and **a row that does not fit wraps** where the kit's own scrolls sideways under a fade (the end that is cut off fades): a view that is out of sight is not
+ * found by a thumb, and on a phone a third view lay wholly behind the edge with a second that ended at it and looked complete.
+ *
+ * **Every row of wrapped views is a whole row with its own baseline, and the underline of the current view is on its own tab** (the second review of the pictures: the first view stood alone on a row with
+ * the underline under it, and the rest below the line, so that the underline read as the line between the rows): the views have no gap between them, each takes its share of its row, and each carries a
+ * 1px baseline on its own border. The underline of the current view (2px, drawn on that border by the kit) lies over its baseline as it lies over the list's track in the kit's own row.
+ */
+.ui-hub-floor .ui-view-tabs__tab {
+  flex: 1 1 auto;
+  min-height: var(--control-height-lg);
+  background-image: linear-gradient(var(--color-border-default), var(--color-border-default));
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 1px;
+  background-origin: border-box;
+}
+
+.ui-hub-floor .ui-view-tabs__scroll {
+  overflow-x: visible;
+}
+
+.ui-hub-floor .ui-view-tabs__list {
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+/* A text field: the count of the parcels (the kit's Input), and a queue's lookup (the primitive's, which the filter bar draws and which has no class of the kit's Input). */
+.ui-hub-floor .ui-input,
+.ui-hub-floor .ui-filter-bar__search .ui-filter-bar__search-field {
+  min-height: var(--control-height-lg);
+}
+
+/* The button of a queue's lookup and the Filter button. */
+.ui-hub-floor .ui-filter-bar__search button,
+.ui-hub-floor .ui-filter-bar .ui-filter-bar__add {
+  min-height: var(--control-height-lg);
+}
+
+/* The code of a row that opens a page (a link in the row header, or the title of a card) is as tall as its row, so that the whole row's height is the link's reach. */
+.ui-hub-floor .ui-data-table__title a {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--ui-data-table-row) - 1px);
+}
+
+.ui-hub-floor .ui-data-table__card-title a,
+.ui-hub-floor .ui-data-table__card-title button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-lg);
+}
+
+/*
+ * The help line of a choice belongs to its choice (the second review of the pictures: on the decision the help lines floated midway between their own choice and the next, 24px under the one and 27 over the
+ * other). The label of a choice that has a help line is the whole of the choice: it covers both rows of the choice's grid, its words at the top, and the help line lies under them inside the label's reach, and
+ * lets a press through to the label, so that a press on the help line chooses its own choice. The choices stand further apart than a choice and its help line, so that the help is nearer to its own choice
+ * than to the next (8px above it, and 22px below it, at the size of the text of the floor).
+ */
+.ui-hub-floor .ui-radio-group--lg .ui-radio:has(.ui-radio__help) .ui-radio__label {
+  grid-row: 1 / span 2;
+  align-items: flex-start;
+  padding-block-start: var(--space-1);
+}
+
+.ui-hub-floor .ui-radio-group--lg .ui-radio__help {
+  pointer-events: none;
+}
+
+.ui-hub-floor .ui-radio-group--lg .ui-radio-group__choices {
+  gap: var(--space-4);
+}

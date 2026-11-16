@@ -14,9 +14,11 @@ import {
 } from '../platform/settings/reason-validator.js';
 import { WORKFLOW_REASONS } from '../tools/seed/workflow-reasons.js';
 import {
+  OVER_COUNT_REASON_DOMAIN,
   PICKUP_FAILURE_CATEGORIES,
   PICKUP_REASON_DOMAINS,
   SKIP_REQUESTED_VENDOR_ACTIONS,
+  overCountReasonRequest,
   pickupReasonRequest,
   requestedVendorActionOf,
 } from './pickup-vocabulary.js';
@@ -83,6 +85,29 @@ describe('the reason domain of each pickup operation', () => {
       recordCollection: 'PICKUP_SHORT_COUNT',
       createPickupManifest: 'PICKUP_CARRYOVER',
     });
+  });
+
+  // Break caught (D-D5): the count of a stop having two catalogues, by its variance, with the second one not fixed by the operation: a client-chosen domain, the short count's domain used
+  // for a count above the booking (a reason about missing parcels given for extra ones), or a domain that is not a workflow domain of the catalogue.
+  it('gives the count above the booking its own catalogue, fixed by the operation and never by the client', () => {
+    expect(OVER_COUNT_REASON_DOMAIN).toBe('PICKUP_OVER_COUNT');
+    expect(WORKFLOW_REASON_DOMAINS as readonly string[]).toContain(OVER_COUNT_REASON_DOMAIN);
+    expect(OVER_COUNT_REASON_DOMAIN).not.toBe(PICKUP_REASON_DOMAINS.recordCollection);
+    expect(overCountReasonRequest('VENDOR_ADDED_PARCELS')).toEqual({
+      reasonCode: 'VENDOR_ADDED_PARCELS',
+      operationId: 'recordCollection',
+      domain: 'PICKUP_OVER_COUNT',
+    });
+    expect(overCountReasonRequest('OVER_OTHER', 'Two more boxes')).toEqual({
+      reasonCode: 'OVER_OTHER',
+      operationId: 'recordCollection',
+      domain: 'PICKUP_OVER_COUNT',
+      note: 'Two more boxes',
+    });
+    // The short count's request is as it was.
+    expect(pickupReasonRequest('recordCollection', 'SOME_PARCELS_NOT_READY').domain).toBe(
+      'PICKUP_SHORT_COUNT',
+    );
   });
 });
 

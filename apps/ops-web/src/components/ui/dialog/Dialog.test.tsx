@@ -489,3 +489,37 @@ describe('Dialog: accessibility', () => {
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
+
+describe('Dialog: its size', () => {
+  const bare = (size?: DialogProps['size']) =>
+    render(
+      <Dialog open title="A photo" {...(size === undefined ? {} : { size })}>
+        <p>Content</p>
+      </Dialog>,
+    ).container.querySelector('dialog');
+
+  // Break caught: a size that is asked for and never reaches the markup, so that a photo shown whole is drawn in the 32rem of a question.
+  it('is the width of a question unless the page asks for the wide one, which is for what is shown whole', () => {
+    expect(bare()).not.toHaveClass('ui-dialog--wide');
+    expect(bare('default')).not.toHaveClass('ui-dialog--wide');
+    expect(bare('wide')).toHaveClass('ui-dialog--wide');
+  });
+
+  // Break caught (the pictures of the receiving screens, defect 1): a window that is as tall as its content, so that what is shown whole (a photo) pushes its own controls off a short screen. `fill` is a window as
+  // tall as the screen lets it be, with a column inside it that the content fills, so that the content gives way and the controls stay.
+  it('is as tall as its content unless the page asks for it to fill the screen, and the width and the height are asked for apart', () => {
+    const filled = (props: Partial<DialogProps>) =>
+      render(
+        <Dialog open title="A photo" {...props}>
+          <p>Content</p>
+        </Dialog>,
+      ).container.querySelector('dialog');
+
+    expect(bare()).not.toHaveClass('ui-dialog--fill');
+    expect(bare('wide')).not.toHaveClass('ui-dialog--fill');
+    expect(filled({ fill: false })).not.toHaveClass('ui-dialog--fill');
+    expect(filled({ fill: true })).toHaveClass('ui-dialog--fill');
+    expect(filled({ fill: true })).not.toHaveClass('ui-dialog--wide');
+    expect(filled({ size: 'wide', fill: true })).toHaveClass('ui-dialog--wide', 'ui-dialog--fill');
+  });
+});

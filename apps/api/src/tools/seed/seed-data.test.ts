@@ -17,6 +17,7 @@ import {
 import {
   parseCarryoverReasons,
   parseIdentityReasons,
+  parseOverCountReasons,
   parsePermissionCatalogue,
   parsePickupCatalogueReasons,
   parseSettings,
@@ -882,6 +883,58 @@ describe('the workflow reasons (domain-model.md section 3.9)', () => {
       const prefixed = reason.code.startsWith('CARRYOVER_');
       expect(held.has(reason.code), reason.code).toBe(false);
       expect(held.has(reason.code.replace(/^CARRYOVER_/, '')), reason.code).toBe(prefixed);
+    }
+  });
+
+  // Break caught (D-D5): an over-count code, attribution, note requirement or label that drifted from the table, which decides what the rider is offered when it counts more parcels
+  // than were booked and what the office reads of it.
+  it('are the three PICKUP_OVER_COUNT rows of the document: code, attribution, note and label', () => {
+    const rows = parseOverCountReasons(DOMAIN_MODEL);
+    const seeded = WORKFLOW_REASONS.filter((reason) => reason.domain === 'PICKUP_OVER_COUNT');
+    expect(rows).toHaveLength(3);
+    expect(seeded.map((reason) => reason.code).toSorted()).toEqual(
+      rows.map((row) => row.code).toSorted(),
+    );
+    for (const row of rows) {
+      const reason = WORKFLOW_REASONS.find((each) => each.code === row.code);
+      expect(
+        [reason?.domain, reason?.attribution, reason?.requiresNote, reason?.label],
+        row.code,
+      ).toEqual(['PICKUP_OVER_COUNT', row.attribution, row.requiresNote, row.label]);
+    }
+  });
+
+  // Break caught: the drafted words changed or lost in the document and the seed together (the comparison above cannot see it), the "Other" reason that asks for no note, a code another
+  // domain already holds (a code is the table's primary key, so the second name of "the booked number was wrong" carries the OVER_ prefix), and a flag that would make an over-count
+  // reason do more than say why (a photo, a contact attempt, an approval, a review, an escalation, a consumed attempt).
+  it('are the three over-count reasons the Product Owner drafted on 16 November 2026, one of them asking for a note, none holding a code of another domain', () => {
+    const seeded = WORKFLOW_REASONS.filter((reason) => reason.domain === 'PICKUP_OVER_COUNT');
+    expect(
+      seeded.map((reason) => [reason.code, reason.attribution, reason.requiresNote, reason.label]),
+    ).toEqual([
+      ['VENDOR_ADDED_PARCELS', 'CUSTOMER', false, 'Vendor added parcels after booking'],
+      ['OVER_BOOKED_NUMBER_WRONG', 'CUSTOMER', false, 'Booked number was wrong'],
+      ['OVER_OTHER', 'CUSTOMER', true, 'Other'],
+    ]);
+    const others = new Set(
+      WORKFLOW_REASONS.filter((reason) => reason.domain !== 'PICKUP_OVER_COUNT').map(
+        (reason) => reason.code,
+      ),
+    );
+    for (const reason of seeded) {
+      expect(others.has(reason.code), reason.code).toBe(false);
+      expect(reason, reason.code).toMatchObject({
+        active: true,
+        validCheckpoints: null,
+        permittedOperations: null,
+        consumesDeliveryAttempt: false,
+        requiresPhoto: false,
+        requiresContactAttempt: false,
+        requiresApproval: false,
+        requiresOpsReview: false,
+        requiresEscalation: false,
+        failureCategory: null,
+      });
     }
   });
 

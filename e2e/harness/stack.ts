@@ -2,6 +2,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { evidenceOriginFromEnvironment } from '../../apps/ops-web/config/content-security-policy.ts';
 import { apiEnvironment, runKeys } from './api-environment.ts';
 import type { ArtifactSource, StackDescription } from './artifacts.ts';
 import { artifactSourceOf, describeConnection, type StackConnection } from './connection.ts';
@@ -208,7 +209,14 @@ export async function startStack(options: StartStackOptions = {}): Promise<Stack
     started.push(ops);
 
     if (options.tls !== undefined && frontPort !== undefined) {
-      const front = await startHttpsFront({ upstream: origin, tls: options.tls, port: frontPort });
+      // The evidence store's origin, where the run has one: the deployment owner's variable, the same one a production edge is configured by (DEPLOYMENT_AND_ENVIRONMENTS.md §12.4). Unset, the policy is the strict one.
+      const evidenceOrigin = evidenceOriginFromEnvironment(process.env);
+      const front = await startHttpsFront({
+        upstream: origin,
+        tls: options.tls,
+        port: frontPort,
+        ...(evidenceOrigin === undefined ? {} : { evidenceOrigin }),
+      });
       started.push({ name: 'https-front', stop: () => front.stop() });
       if (front.origin !== httpsOrigin) {
         throw new Error('The HTTPS front is not at the origin the API was configured with.');

@@ -2,20 +2,9 @@ import 'reflect-metadata';
 
 import type { Logger } from 'pino';
 
-import { AppModule } from './app.module.js';
-import { createApp } from './create-app.js';
 import { loadConfig } from './platform/config/load-config.js';
 import { reportConfigProblems } from './platform/config/report-config-problems.js';
-import { installFaultHandlers } from './platform/lifecycle/fault-handlers.js';
-import { listenAndMarkReady } from './platform/lifecycle/listen-and-mark-ready.js';
-import { installProcessShutdown } from './platform/lifecycle/shutdown-handlers.js';
-import { ShutdownRegistry } from './platform/lifecycle/shutdown.registry.js';
 import { describeError } from './platform/logging/redaction.js';
-import {
-  applicationMetricsSource,
-  startProcessMetrics,
-} from './platform/metrics/process-metrics.js';
-import { LOGGER } from './platform/platform.tokens.js';
 
 /**
  * The process entry point. It validates configuration before anything else exists, refuses to start
@@ -23,6 +12,9 @@ import { LOGGER } from './platform/platform.tokens.js';
  * the event loop drain, so every buffer is flushed and every handle closed first. The one exception is
  * a shutdown that ran out of its budget, which ends the process non-zero at once because a stalled
  * resource can hold a handle open for ever (see installShutdownHandlers).
+ *
+ * The application is loaded only once the configuration is valid. Loading it is most of a start's cost (the whole module graph, a few seconds of processor time), and a refusal has no use for
+ * it: a start that is refused on a bad setting answers at once, and on a loaded machine it does not wait behind the load of code it will never run.
  */
 async function main(): Promise<void> {
   const loaded = loadConfig(process.env);
@@ -32,6 +24,26 @@ async function main(): Promise<void> {
     return;
   }
   const { config } = loaded;
+
+  const [
+    { AppModule },
+    { createApp },
+    { installFaultHandlers },
+    { listenAndMarkReady },
+    { installProcessShutdown },
+    { ShutdownRegistry },
+    { applicationMetricsSource, startProcessMetrics },
+    { LOGGER },
+  ] = await Promise.all([
+    import('./app.module.js'),
+    import('./create-app.js'),
+    import('./platform/lifecycle/fault-handlers.js'),
+    import('./platform/lifecycle/listen-and-mark-ready.js'),
+    import('./platform/lifecycle/shutdown-handlers.js'),
+    import('./platform/lifecycle/shutdown.registry.js'),
+    import('./platform/metrics/process-metrics.js'),
+    import('./platform/platform.tokens.js'),
+  ]);
 
   const app = await createApp({ config, rootModule: (options) => AppModule.register(options) });
   const logger = app.get<Logger>(LOGGER);

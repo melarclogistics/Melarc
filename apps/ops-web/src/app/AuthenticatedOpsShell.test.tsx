@@ -464,8 +464,9 @@ describe('the authenticated Ops shell: where it is not', () => {
           .map((link) => link.textContent),
       ]);
     expect(groups).toEqual([
-      ['Today', ['My work', 'Decisions']],
-      ['Pickups', ['Requests', 'Pickup runs']],
+      ['Today', ['My work', 'Decisions', 'Handshakes']],
+      ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes']],
+      ['Hub', ['Receiving', 'Missing parcels']],
       ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
       ['System', ['Message log']],
     ]);

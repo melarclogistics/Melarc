@@ -36,6 +36,19 @@ function Held(props: Partial<RadioGroupProps> & { readonly initial?: string | nu
   );
 }
 
+describe('RadioGroup: the hub floor', () => {
+  // Break caught: the floor's 56 px choice rows asked for and not drawn (jsdom sees the class; test/hub-floor-sizes.test.ts holds the stylesheet to the token).
+  it('is a standard group unless the floor size is asked for', () => {
+    const { rerender } = render(<Held />);
+    expect(screen.getByRole('group', { name: 'Demo question' })).not.toHaveClass(
+      'ui-radio-group--lg',
+    );
+
+    rerender(<Held size="lg" />);
+    expect(screen.getByRole('group', { name: 'Demo question' })).toHaveClass('ui-radio-group--lg');
+  });
+});
+
 describe('RadioGroup: what it is', () => {
   it('is a group named by its legend, each choice named by its label', () => {
     render(<Held />);

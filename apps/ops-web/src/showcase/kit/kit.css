@@ -138,6 +138,19 @@
   padding: 0;
 }
 
+/*
+ * A specimen drawn in the room a screen gives it (`edge`): no padding at its sides, and the frame keeps its line and its space above and below. The page is framed twice and a specimen a third time (98px at 390px),
+ * where a receiving screen is framed once (66px): a grid of photos has 324px there and 292px in a frame of padding, which is two tiles to a row and not three.
+ */
+.showcase-kit-specimen__body--edge {
+  padding-inline: 0;
+}
+
+/* What is drawn beside a component in an edge specimen keeps the frame's space at its sides. */
+.showcase-kit-specimen__note {
+  margin: var(--space-3) var(--space-4) 0;
+}
+
 .showcase-kit-row {
   display: flex;
   flex-wrap: wrap;
@@ -316,4 +329,47 @@
 
 .showcase-kit-scroll [data-slot='table-container'] {
   overflow: visible;
+}
+
+/*
+ * The photo kit's specimens (Run D, S1.35c-0). Nothing here is a photo: a box with its number stands for one, so that no picture is read from a store or made up to look like a parcel. Tokens only.
+ */
+.showcase-photo-sample {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: var(--color-surface-selected);
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line-height);
+}
+
+/* A button of the page's under the picture, as the receiving run draws "Open this parcel" (`.receiving-viewer__act`): it keeps its size, and the picture takes the room that is left. */
+.showcase-photo-act {
+  display: flex;
+  justify-content: center;
+  margin-block-start: var(--space-3);
+}
+
+/* What a tile says when its picture cannot be shown, as the page's picture draws it: an icon and short words. */
+.showcase-photo-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-sm-size);
+  line-height: var(--text-label-sm-line-height);
+  text-align: center;
+}
+
+/* A form that holds uploads, one in a shut part of it: its parts one under the other. */
+.showcase-photo-form {
+  display: grid;
+  gap: var(--space-4);
 }

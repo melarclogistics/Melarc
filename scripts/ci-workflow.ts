@@ -26,6 +26,10 @@
  *     scripts/browser-shards.test.ts, from Playwright's own listing;
  *   - the HTTPS journeys run as the matrix of a job too (the shards of e2e/harness/https-shards.ts: MELARC_HTTPS_SHARD,
  *     and the browsers its runs need), every shard once; scripts/https-shards.test.ts holds the matrix to the harness;
+ *   - WebKit is launched headed under a virtual display (the Product Owner's decision D-B4 of 13 November 2026): a job that holds WebKit's runs
+ *     (the Firefox and WebKit shards, the HTTPS journeys) installs the display and runs the step of its tests as `xvfb-run ... <command>`
+ *     (`DISPLAY_WRAPPER`, the one prefix a mandatory command may have) with MELARC_WEBKIT_HEADED=1, which both Playwright configurations read;
+ *     a job that holds none has neither, and xvfb-run is written nowhere else;
  *   - so do the database tests (the whole suite is longer than a job may last): the matrix of the database job lists its shards of
  *     MELARC_DB_SHARD, every shard once, and scripts/db-shards.test.ts proves, from Vitest's own listing, that they hold every test file once;
  *   - every job runs on the one runner image the toolchain was tried on;
@@ -101,6 +105,7 @@ export type WorkflowProblemCode =
   | 'BROWSER_SHARDS_DRIFT'
   | 'BROWSER_ENGINES_DRIFT'
   | 'BROWSER_INSTALL_DRIFT'
+  | 'DISPLAY_DRIFT'
   | 'HTTPS_SHARD_ENV'
   | 'HTTPS_SHARDS_DRIFT'
   | 'ARTIFACT_NOT_PER_SHARD'
@@ -216,7 +221,25 @@ function jobFrom(id: string, body: Record<string, unknown>, localActions: LocalA
   return { id, body, steps, expanded: expandSteps(steps, localActions, new Set()) };
 }
 
-const scriptOf = (step: Step): string => (typeof step.run === 'string' ? step.run : '');
+/**
+ * WebKit is launched headed under a virtual display in CI (the Product Owner's decision D-B4 of 13 November 2026): the test steps of the jobs that hold WebKit's runs are
+ * `${DISPLAY_WRAPPER}${command}`, with `DISPLAY_INSTALL` before them and the one value `HEADED_VARIABLE` set to `1` on them, which both Playwright configurations read to launch
+ * WebKit headed (a developer's machine, Chromium and Firefox stay headless: the display is there for the engine that needs it, and the configurations decide who uses it).
+ * **This is the one prefix a mandatory command may have**: `xvfb-run` returns the status of the command it runs, so nothing is hidden, and `checkDisplay` holds the exact
+ * text, the two commands, and the jobs that hold WebKit.
+ */
+export const DISPLAY_WRAPPER = 'xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" ';
+/** `xvfb-run` needs `xauth` (Debian and Ubuntu recommend it, and `--no-install-recommends` leaves it out). The browsers' install step before it has updated the package index. */
+export const DISPLAY_INSTALL = 'sudo apt-get install --no-install-recommends --yes xvfb xauth';
+export const HEADED_VARIABLE = 'MELARC_WEBKIT_HEADED';
+
+const rawScriptOf = (step: Step): string => (typeof step.run === 'string' ? step.run : '');
+/** The command a step runs: its script, less the wrapper that puts it under the virtual display (`DISPLAY_WRAPPER`), which `checkDisplay` places. */
+const scriptOf = (step: Step): string => {
+  const script = rawScriptOf(step);
+  const trimmed = script.trimStart();
+  return trimmed.startsWith(DISPLAY_WRAPPER) ? trimmed.slice(DISPLAY_WRAPPER.length) : script;
+};
 const linesOf = (script: string): string[] => script.split('\n').map((line) => line.trim());
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
   a.size === b.size && [...a].every((item) => b.has(item));
@@ -930,6 +953,90 @@ function checkBrowsers(jobs: readonly Job[]): WorkflowProblem[] {
     });
   }
   return [...problems, ...checkBrowserEvents(jobs)];
+}
+
+/**
+ * The engines a job's matrix lists for the command it runs: the browsers of the HTTPS shards' runs, or the engines of the browser tests' shards. `undefined` when the matrix cannot be read
+ * (its own rules report that), so that a job whose matrix is broken is not also judged on a display it may or may not need.
+ */
+function enginesOfJob(body: Record<string, unknown>, command: string): string[] | undefined {
+  const found =
+    command === HTTPS_TESTS
+      ? (() => {
+          const matrix = httpsMatrix(body);
+          return {
+            faults: matrix.faults,
+            engines: matrix.shards.flatMap((entry) => entry.browsers),
+          };
+        })()
+      : (() => {
+          const matrix = browserMatrix(body);
+          return { faults: matrix.faults, engines: matrix.shards.map((entry) => entry.engine) };
+        })();
+  return found.faults.length > 0 || found.engines.length === 0 ? undefined : found.engines;
+}
+
+/**
+ * WebKit under a virtual display (the Product Owner's decision D-B4; `DISPLAY_WRAPPER`). **A job that holds WebKit's runs** (a matrix with a WebKit shard of the browser tests, or a WebKit
+ * browser in the HTTPS shards) runs the step of its tests as exactly `DISPLAY_WRAPPER` and the command, sets `HEADED_VARIABLE` to `1` on it (the one value both Playwright configurations read to
+ * launch WebKit headed) and installs the display in a step before it; **a job that holds none** has neither the wrapper nor the value, and **`xvfb-run` is written nowhere else**, so that no
+ * other step runs a mandatory command under anything. A pipeline that dropped the wrapper, the value or the install would stay green while WebKit ran headless again, the stall the decision meets,
+ * or failed to open a window for want of a display.
+ */
+function checkDisplay(jobs: readonly Job[]): WorkflowProblem[] {
+  const problems: WorkflowProblem[] = [];
+  const allowed = [BROWSER_TESTS, HTTPS_TESTS].map((command) => `${DISPLAY_WRAPPER}${command}`);
+  for (const { id, body, steps } of jobs) {
+    for (const step of steps) {
+      const script = rawScriptOf(step).trim();
+      if (/\bxvfb-run\b/.test(script) && !allowed.includes(script)) {
+        problems.push({
+          code: 'DISPLAY_DRIFT',
+          message: `Job ${id}: a step runs xvfb-run otherwise than as the whole script "${DISPLAY_WRAPPER}<command>" of the step that runs ${BROWSER_TESTS} or ${HTTPS_TESTS}: another wrapper is not read as the command it wraps, and the step would be held to none of the rules of the tests.`,
+        });
+      }
+    }
+    steps.forEach((step, index) => {
+      const command = scriptOf(step).trim();
+      if (command !== BROWSER_TESTS && command !== HTTPS_TESTS) return;
+      const engines = enginesOfJob(body, command);
+      if (engines === undefined) return;
+      const holdsWebKit = engines.includes('webkit');
+      const wrapped = rawScriptOf(step).trim().startsWith(DISPLAY_WRAPPER);
+      const env = isRecord(step.env) ? step.env : {};
+      const label = `Job ${id}: the step that runs ${command}`;
+      if (!holdsWebKit) {
+        if (wrapped || HEADED_VARIABLE in env) {
+          problems.push({
+            code: 'DISPLAY_DRIFT',
+            message: `${label} has the virtual display or ${HEADED_VARIABLE}, and the job holds no WebKit run: only a job that holds WebKit's runs has either.`,
+          });
+        }
+        return;
+      }
+      if (!wrapped) {
+        problems.push({
+          code: 'DISPLAY_DRIFT',
+          message: `${label} must run under the virtual display, as exactly "${DISPLAY_WRAPPER}${command}": the job holds WebKit's runs, which are launched headed.`,
+        });
+      }
+      if (String(env[HEADED_VARIABLE]) !== '1') {
+        problems.push({
+          code: 'DISPLAY_DRIFT',
+          message: `${label} must set env ${HEADED_VARIABLE} to 1, the one value both Playwright configurations read to launch WebKit headed: without it WebKit runs headless under a display that nobody uses.`,
+        });
+      }
+      if (
+        !steps.slice(0, index).some((earlier) => rawScriptOf(earlier).trim() === DISPLAY_INSTALL)
+      ) {
+        problems.push({
+          code: 'DISPLAY_DRIFT',
+          message: `Job ${id}: a step before ${command} must be exactly "${DISPLAY_INSTALL}": xvfb-run needs Xvfb and xauth, and the runner image is not what guarantees them.`,
+        });
+      }
+    });
+  }
+  return problems;
 }
 
 const sameName = (value: unknown, name: string): boolean =>
@@ -1671,6 +1778,7 @@ export function findWorkflowProblems(
     ...checkRunners(jobs),
     ...checkCommands(workflow, jobs),
     ...checkBrowsers(jobs),
+    ...checkDisplay(jobs),
     ...checkBrowserCaches(jobs),
     ...checkPlan(jobs),
     ...checkStepTimeouts(jobs),

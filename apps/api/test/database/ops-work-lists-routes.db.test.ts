@@ -7,6 +7,7 @@ import type { TestClient, TestResponse } from '../../src/test-support/test-clien
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { excusePhotos, photoOf } from './support/evidence-photo.js';
+import { submitHandover } from './support/handed-over.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -149,6 +150,8 @@ interface World {
   readonly handshakeResolved: string;
   readonly handshakeOtherHub: string;
   readonly shortfallOpen: string;
+  /** A count above the booking (D-D5), on a run still in progress: the office's list shows it beside the short counts. */
+  readonly shortfallOver: string;
   readonly shortfallClosed: string;
   readonly shortfallOtherHub: string;
   readonly failurePending: string;
@@ -168,7 +171,7 @@ const stopAt = (run: ArrangedRun, at: number): string => {
   return stop.id;
 };
 
-/** The rider's count of a stop (S1.26): three declared, so fewer than three is a shortfall with its reason. */
+/** The rider's count of a stop (S1.26): three declared, so fewer than three is a shortfall and more than three an over count (D-D5), each with its reason. */
 async function count(rider: ArrangedRider, stopId: string, collected = 3): Promise<void> {
   // The work lists are about what the count leaves for Ops, not the photos (D-A10): the stop is let through without them.
   await excusePhotos(routes, stopId);
@@ -176,7 +179,9 @@ async function count(rider: ArrangedRider, stopId: string, collected = 3): Promi
     `${STOP(stopId)}/collect`,
     collected < 3
       ? { collected_count: collected, variance_reason_code: 'SOME_PARCELS_NOT_READY' }
-      : { collected_count: collected },
+      : collected > 3
+        ? { collected_count: collected, variance_reason_code: 'VENDOR_ADDED_PARCELS' }
+        : { collected_count: collected },
     { headers: { 'If-Match': await tokenOf(rider, stopId), 'Idempotency-Key': randomUUID() } },
   );
   expect(response.status, `count: ${response.text}`).toBe(200);
@@ -267,8 +272,8 @@ async function build(): Promise<World> {
       hubId,
     });
 
-  // Hub A, vendor A: twelve stops the rider has arrived at, each worked a different way.
-  const runA = await open(vendorA, HUB_A, 13);
+  // Hub A, vendor A: fourteen stops the rider has arrived at, each worked a different way.
+  const runA = await open(vendorA, HUB_A, 14);
   const riderA = runA.rider;
   const at = (n: number): string => stopAt(runA, n);
   // 0. A clean count closed by Ops's override and disputed by the vendor: an open dispute, and a handshake Ops settled.
@@ -350,16 +355,16 @@ async function build(): Promise<World> {
     outcome(await browserA.post(`${STOP(at(12))}/handshake/verify`, { code: codeOfStop(at(12)) })),
   ).toEqual([422, 'CODE_EXPIRED']);
   await resolveByHand(seniorA, at(12));
+  // 13. A count above the booking (D-D5): the office is flagged while the run is in progress, as for a short count.
+  await count(riderA, at(13), 5);
 
   // Hub A, vendor B: a short count, closed by Ops, disputed, the run completed and the dispute resolved.
   const runB = await open(vendorB, HUB_A, 1);
   await count(runB.rider, stopAt(runB, 0), 2);
   await override(opsA, stopAt(runB, 0));
   await dispute(browserB, stopAt(runB, 0));
-  await routes.admin.query(
-    `update pickup_manifest set state = 'COMPLETED', completed_at = now() where id = $1`,
-    [runB.manifest.id],
-  );
+  // The run that collected is completed by its rider's hub handover, the real route: the database holds that the intakes of a run are exactly its collected requests (migration 0092).
+  await submitHandover(runB, [{ requestId: runB.stops[0]?.requestId ?? '', declared: 2 }]);
   await routes.admin.query(
     `update collection_dispute set state = 'RESOLVED', resolved_at = now() where pickup_stop_id = $1`,
     [stopAt(runB, 0)],
@@ -392,6 +397,7 @@ async function build(): Promise<World> {
     handshakeResolved: at(12),
     handshakeOtherHub: stopAt(runC, 1),
     shortfallOpen: at(7),
+    shortfallOver: at(13),
     shortfallClosed: stopAt(runB, 0),
     shortfallOtherHub: stopAt(runC, 2),
     failurePending: at(8),
@@ -631,12 +637,17 @@ describe('listHandshakesForOps', () => {
   });
 });
 
-describe('listCollectionShortfalls', () => {
-  // Break caught (AC-SLICE-001-21, OB-S1-51): a clean count listed, the shortfall computed the wrong way, the reason or the rider missing.
-  it('lists the short counts of the hub, oldest first, with what was declared, counted and why', async () => {
+describe('listCollectionShortfalls: the office’s list of count differences, short and over together (D-D5)', () => {
+  // Break caught (AC-SLICE-001-21, OB-S1-51, D-D5): a clean count listed, an over count left out (the office told of it by the feed and finding nothing in the list), the difference computed
+  // the wrong way (a negative number, or declared less counted for both), the variance missing, the reason or the rider missing.
+  it('lists the short counts and the over counts of the hub, oldest first, with what was declared, counted and why', async () => {
     const items = await everything(opsA.client, 'shortfalls');
 
-    expect(stopsOf(items)).toEqual([world.shortfallOpen, world.shortfallClosed]);
+    expect(stopsOf(items)).toEqual([
+      world.shortfallOpen,
+      world.shortfallOver,
+      world.shortfallClosed,
+    ]);
     expect(items[0]).toMatchObject({
       pickup_request_id: world.runA.stops[7]?.requestId,
       pickup_manifest_id: world.runA.manifest.id,
@@ -644,7 +655,8 @@ describe('listCollectionShortfalls', () => {
       request_code: world.runA.stops[7]?.requestCode,
       declared_count: 3,
       collected_count: 2,
-      shortfall_count: 1,
+      variance: 'SHORT',
+      difference_count: 1,
       reason: { code: 'SOME_PARCELS_NOT_READY', attribution: 'CUSTOMER' },
       note: null,
       recorded_by: world.runA.rider.id,
@@ -654,6 +666,24 @@ describe('listCollectionShortfalls', () => {
     expect((items[0]?.reason as { label: string }).label.length).toBeGreaterThan(0);
     expect(Date.parse(String(items[0]?.office_notified_at))).not.toBeNaN();
     expect(items[1]).toMatchObject({
+      pickup_request_id: world.runA.stops[13]?.requestId,
+      pickup_manifest_id: world.runA.manifest.id,
+      responsible_hub_id: HUB_A,
+      request_code: world.runA.stops[13]?.requestCode,
+      declared_count: 3,
+      collected_count: 5,
+      variance: 'OVER',
+      difference_count: 2,
+      reason: { code: 'VENDOR_ADDED_PARCELS', attribution: 'CUSTOMER' },
+      note: null,
+      recorded_by: world.runA.rider.id,
+      stop_state: 'ARRIVED',
+      run_state: 'IN_PROGRESS',
+    });
+    expect(Date.parse(String(items[1]?.office_notified_at))).not.toBeNaN();
+    expect(Object.keys(items[0] ?? {})).not.toContain('shortfall_count');
+    expect(items[2]).toMatchObject({
+      variance: 'SHORT',
       stop_state: 'PARTIALLY_COLLECTED',
       run_state: 'COMPLETED',
       recorded_by: world.runB.rider.id,
@@ -661,13 +691,47 @@ describe('listCollectionShortfalls', () => {
   });
 
   // Break caught: `open` read from the stop and not the run, or its complement left out.
-  it('open is the shortfalls of runs still in progress, and its complement those of runs that ended', async () => {
+  it('open is the count differences of runs still in progress, and its complement those of runs that ended', async () => {
     expect(stopsOf(await everything(opsA.client, 'shortfalls', { open: true }))).toEqual([
       world.shortfallOpen,
+      world.shortfallOver,
     ]);
     expect(stopsOf(await everything(opsA.client, 'shortfalls', { open: false }))).toEqual([
       world.shortfallClosed,
     ]);
+  });
+
+  // Break caught (D-D5): the `variance` filter ignored, read the other way round, accepted with a value that is not one, or widening what the hub scope shows.
+  it('narrows to the short counts or to the over counts by variance, together with open and the hub, and refuses a value that is not a variance', async () => {
+    expect(stopsOf(await everything(opsA.client, 'shortfalls', { variance: 'SHORT' }))).toEqual([
+      world.shortfallOpen,
+      world.shortfallClosed,
+    ]);
+    expect(stopsOf(await everything(opsA.client, 'shortfalls', { variance: 'OVER' }))).toEqual([
+      world.shortfallOver,
+    ]);
+    expect(
+      stopsOf(await everything(opsA.client, 'shortfalls', { variance: 'SHORT', open: true })),
+    ).toEqual([world.shortfallOpen]);
+    expect(
+      stopsOf(await everything(opsA.client, 'shortfalls', { variance: 'OVER', open: false })),
+    ).toEqual([]);
+    expect(
+      stopsOf(await everything(opsA.client, 'shortfalls', { variance: 'OVER', hub_id: HUB_A })),
+    ).toEqual([world.shortfallOver]);
+    // Another hub's staff do not see hub A's over count, whatever the filter says.
+    expect(stopsOf(await everything(opsB.client, 'shortfalls', { variance: 'OVER' }))).toEqual([]);
+    for (const refused of ['MATCH', 'over', '', 'SHORT,OVER']) {
+      const response = await pageOf(opsA.client, 'shortfalls', { variance: refused });
+      expect(outcome(response), refused).toEqual([400, 'VALIDATION_FAILED']);
+      expect(
+        violationsOf(response).map((violation) => [
+          violation.pointer.replace(/^\//, ''),
+          violation.rule,
+        ]),
+        refused,
+      ).toEqual([['variance', 'enum']]);
+    }
   });
 });
 

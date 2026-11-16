@@ -90,6 +90,15 @@ export class AuthorizationGuard implements CanActivate {
       throw ApiException.of(ErrorCode.PermissionDenied, 'Permission denied');
     }
 
+    // ... and, of an owner operation that lists the keys of its acts (S1.34), that the session holds one of the keys listed for its kind: before the body is read, so that a caller who can do
+    // none of the acts is told nothing of the schema. A kind the operation lists no key for is refused.
+    if (options.ownerKeys !== undefined) {
+      const listed: readonly string[] = options.ownerKeys[session.principalType] ?? [];
+      if (!listed.some((key) => grantOfSession(session, key) !== undefined)) {
+        throw ApiException.of(ErrorCode.PermissionDenied, 'Permission denied');
+      }
+    }
+
     // 5. The permission, from the snapshot the session was issued with.
     let grant;
     if (kind === 'permission') {

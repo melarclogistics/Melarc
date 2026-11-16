@@ -39,6 +39,22 @@ export const TASK_CAPABILITIES = [
   // pickup failure that has sat undecided in the Ops decision context beyond its hub's `stale_failure_backstop_hours`, and does nothing else. Held by the worker's login
   // through the grant set `melarc_worker_cap_pickup_backstop`, whose one privilege is the execution of `melarc.failure_backstop_escalate`: a separation and not only a label.
   'pickup_backstop',
+  // The end-of-transaction check of a collection record (Run B, Part 1, item 2 of the review of Run A2; migration 0090): the number of the parcel photos of a count and the photo a short
+  // count's reason asks for. Only the database function `melarc.collection_photos_check` asserts it, for its own statements, at the end of the transaction of whoever writes a count or a
+  // photo, so that it reads the count, its photos and the exception of its stop as the system and not as the context the writer happens to be in at the commit. No application context is
+  // opened under it, no login may execute the function, and every policy that admits the label names the owner too: a statement of any other login reaches nothing.
+  'collection_photo_check',
+  // The end-of-transaction checks of a photo intake's parcels (Run D, S1.35b; migration 0103): that the door parcels of an intake are exactly the door photos of its stop, and that a finished
+  // intake's count is the number of its parcels that arrived. Only the database functions `melarc.intake_parcel_set_check` and `melarc.intake_parcel_count_check` assert it, for their own
+  // statements, at the end of the transaction of whoever opens or moves a parcel or counts an intake, so that they read the intake, its parcels, its stop and the links of its photos as the
+  // system and not as the context the writer happens to be in at the commit. No application context is opened under it, no login may execute the functions, and every policy that admits the
+  // label names the owner too: a statement of any other login reaches nothing.
+  'intake_parcel_check',
+  // The names of the receiving side (Run D, S1.35b, OB-S1-106; migration 0106): the one function `melarc.receiving_names` answers staff that read intakes the display names of the parties of the intakes
+  // they may see (the vendor, the rider, the officers) and never a phone number. It finds the ids from the rows the caller sees and only then asserts this label for the one statement that reads the
+  // names of the rider and officer identities, as the system and as the owner, so that no policy on an identity table has to name the intake tables. No application context is opened under it, and
+  // every policy that admits the label names the owner too: a statement of any other login reaches nothing.
+  'receiving_names',
 ] as const;
 
 export type TaskCapability = (typeof TASK_CAPABILITIES)[number];

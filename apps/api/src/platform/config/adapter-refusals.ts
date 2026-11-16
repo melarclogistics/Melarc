@@ -10,7 +10,8 @@ import type { AppConfig, ConfigProblem } from './load-config.js';
  * - **Production** refuses the local key substitute (there is no production key custody yet, so a production start is refused
  *   until a task builds one), the capture delivery adapter, the substitute attestation verifier, the in-process stand-ins of the
  *   evidence store and of the content scanner, and the describe composition. (Staging keeps the stand-in store until the owner's
- *   bucket exists, D-A8, and the stand-in scanner with it.)
+ *   bucket exists, D-A8, and the stand-in scanner with it; **staging with the real store requires a scanner that looks at the bytes**:
+ *   the stand-in scanner never stands beside a real bucket outside a local run.)
  * - **Staging and production** refuse the in-memory limiter, because the authoritative PostgreSQL limiter serves every
  *   integrated or deployed environment, and refuse the describe composition and the describe key custody, which are for a
  *   local run and for the tools that describe the application only.
@@ -56,9 +57,19 @@ export function adapterRefusals(config: AppConfig): ConfigProblem[] {
   if (production && config.adapters.evidenceStore.kind === 'in-process') {
     refuse('EVIDENCE_STORE', EXPECTED.EVIDENCE_STORE);
   }
-  // The in-process stand-in of the content scanner looks for the EICAR test file and calls everything else clean: production refuses it (D-A6, Run A2). Production with **no** scanner
-  // is not refused here: the application starts, and every completion of evidence is refused until a scanner is configured (`unconfigured.content-scanner.adapter.ts`).
-  if (production && config.adapters.contentScanner.kind === 'in-process') {
+  // The in-process stand-in of the content scanner looks for the EICAR test file and calls everything else clean: production refuses it (D-A6, Run A2), and so does every environment
+  // but a local run **beside the real store** (Run B, Part 1, item 5 of the review of Run A2): the stand-in never stands beside a real bucket, because it would store a real file that
+  // nobody scanned. Staging keeps the stand-in store and the stand-in scanner together until the owner's bucket exists (D-A8). One problem for the one setting, whichever reason applies.
+  // A scanner that is not configured at all is **not** refused here: the application starts, and every completion of evidence is refused until a scanner is configured
+  // (`unconfigured.content-scanner.adapter.ts`).
+  const standInBesideRealBucket =
+    deployed &&
+    config.adapters.evidenceStore.kind === 'r2' &&
+    config.adapters.contentScanner.kind === 'in-process';
+  if (
+    (production && config.adapters.contentScanner.kind === 'in-process') ||
+    standInBesideRealBucket
+  ) {
     refuse('EVIDENCE_SCANNER', EXPECTED.EVIDENCE_SCANNER);
   }
   if (deployed && config.adapters.limiter === 'memory')

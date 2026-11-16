@@ -286,8 +286,29 @@ describe('who can reach the bootstrap, and by what', () => {
       // S1.28 and OB-S1-51: the outbox envelopes of the rider's failure and short count.
       'melarc.failure_envelope',
       'melarc.shortfall_envelope',
+      // D-D5 (migration 0099): the outbox envelope of a count above the booking.
+      'melarc.over_count_envelope',
       // D-A10 (migration 0088): Ops's exception for the day the camera fails, once for a stop and before its count.
       'melarc.authorise_parcel_photo_exception',
+      // S1.32 and S1.33 (migrations 0093 and 0094): what a counted intake carries beyond the columns the login can read (the declaration, the photos), and the commit of the count.
+      'melarc.hub_intake_after_count',
+      'melarc.commit_blind_count',
+      // S1.34 (migration 0096): the receiver's condition and Senior Ops's adjudication, each written with the move of the intake.
+      'melarc.record_intake_condition',
+      'melarc.adjudicate_discrepancy',
+      // Run D, S1.35b (migration 0103): the handover's opening of a photo intake's parcels.
+      'melarc.open_intake_parcels',
+      // Run D, S1.35b (migration 0104): the check-in of a photo intake's parcels (the tap and the find, the finish, the extra) and a senior's correction of a count or a check-in.
+      'melarc.record_parcel_arrival',
+      'melarc.finish_check_in',
+      'melarc.add_extra_parcel',
+      'melarc.correct_intake_count',
+      // Run D, S1.35b (migration 0106): the display names of the vendor, the rider and the officers of the intakes the caller may see.
+      'melarc.receiving_names',
+      // Run D, S1.35b (migration 0107): the queue by run, the missing parcels and the codes of runs.
+      'melarc.receiving_runs',
+      'melarc.missing_parcels',
+      'melarc.receiving_run_codes',
     ]);
   });
 

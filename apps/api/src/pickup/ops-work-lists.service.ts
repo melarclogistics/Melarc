@@ -29,6 +29,8 @@ import {
 export interface WorkListFilter {
   /** `true`: only what still waits for Ops; `false`: only what no longer does; left out: all of it. What "waits" means is each list's own rule. */
   readonly open?: string;
+  /** Only the count differences that are short (`SHORT`) or over (`OVER`): the office's list of count differences alone (D-D5), refused by no other list's query. */
+  readonly variance?: string;
   /** Only the items of this hub: a filter that narrows what the caller may read and never widens it (task C3, `AC-HUBF-01`). */
   readonly hubId?: string;
   readonly pageSize?: number;
@@ -205,16 +207,27 @@ export class PickupOpsWorkLists {
   }
 
   /**
-   * `listCollectionShortfalls`: the short counts flagged to the office (`AC-SLICE-001-21`; OB-S1-51), so that Ops finds in the system what the rider also tells
-   * it by phone: what was declared, what was counted, the reason and the rider's note. **Open is a shortfall whose run is still in progress** (the rider is
-   * still out with the parcels the office was told are missing); not open is the shortfalls of runs that have ended. Nothing yet marks a shortfall as read or
-   * worked (no acknowledgement is built, R67), so this is the one distinction the data supports; it is the owner's to replace with a marker.
+   * `listCollectionShortfalls`: **the office's list of count differences, short counts and over counts together** (`AC-SLICE-001-21`; OB-S1-51; D-D5, 16 November 2026), so that
+   * Ops finds in the system what the rider also tells it by phone: what was declared, what was counted, the reason and the rider's note. Each item says which way the count
+   * differs (`variance`: `SHORT` or `OVER`) and by how many parcels (`difference_count`). **Open is a difference whose run is still in progress** (the rider is still out with the
+   * parcels the office was told are missing, or the extra ones); not open is the differences of runs that have ended. Nothing yet marks one as read or worked (no acknowledgement
+   * is built, R67), so this is the one distinction the data supports; it is the owner's to replace with a marker. The optional `variance` narrows to one kind. The operation keeps its
+   * id (`listCollectionShortfalls`) and its path; its screen is named "Count differences".
    */
   listCollectionShortfalls(
     authorized: AuthorizedRequest,
     correlationId: string,
     filter: WorkListFilter,
   ): Promise<WorkListPage<CollectionShortfallView>> {
+    // Judged beside the other query values, before the read: a value that is not a variance is a refusal and no statement is made. (`#list` judges the rest and refuses a caller that is not staff first.)
+    if (
+      filter.variance !== undefined &&
+      filter.variance !== 'SHORT' &&
+      filter.variance !== 'OVER'
+    ) {
+      refuseNotStaff(authorized);
+      throw invalid('variance', 'enum');
+    }
     return this.#list(
       authorized,
       correlationId,
@@ -222,14 +235,15 @@ export class PickupOpsWorkLists {
       'listCollectionShortfalls',
       (parts) => sql`
         select c.id, c.pickup_stop_id, s.pickup_manifest_id, s.pickup_request_id, c.responsible_hub_id, r.code as request_code, r.sender_name,
-               c.declared_count, c.collected_count, c.variance_reason_snapshot, c.office_notified_at, c.recorded_at, c.recorded_by,
+               c.declared_count, c.collected_count, c.variance, c.variance_reason_snapshot, c.office_notified_at, c.recorded_at, c.recorded_by,
                s.state as stop_state, m.state as run_state,
                c.recorded_at::text as position_text, c.id as position_id
           from collection_record c
           join pickup_stop s on s.id = c.pickup_stop_id
           join pickup_manifest m on m.id = s.pickup_manifest_id
           join pickup_request r on r.id = s.pickup_request_id
-         where c.variance = 'SHORT'
+         where c.variance in ('SHORT', 'OVER')
+           and ${filter.variance === undefined ? sql`true` : sql`c.variance = ${filter.variance}`}
            and ${hubIs('c.responsible_hub_id', parts.hubId)}
            and ${openIs(`m.state = 'IN_PROGRESS'`, parts)}
            and ${after('c.recorded_at', 'c.id', parts)}
@@ -246,6 +260,9 @@ export class PickupOpsWorkLists {
    * replacement when it was rescheduled. **The waiting time is the database's:** from the moment the failure was reported until the decision where there
    * is one, and until the read where there is not. **`photo_count`** is how many photos the rider attached to the failure (`pickup_stop_evidence`, read under the
    * same key and hub scope as the stop): a count and never an address, the photo itself being read with `createEvidenceRetrievalAuthorization`.
+   * **`escalation`** (S1.30, section 17.3) says who escalated the request, from the audit event of the escalation, which the caller's own hub scope shows (the ledger's read policy
+   * is the hub's, and the statement names no key beside it): an officer's event records the trigger `OPS` and an actor, the backstop's the trigger `BACKSTOP` with the threshold
+   * in hours and the seconds the failure had waited and no actor; the officer is not named, because that is a read of the staff directory.
    */
   listPickupFailures(
     authorized: AuthorizedRequest,
@@ -268,7 +285,16 @@ export class PickupOpsWorkLists {
                  when r.escalated_at is not null then 'ESCALATED'
                  else 'PENDING'
                end as decision,
-               r.attempt_number, (r.attempt_extension_id is not null) as attempt_extended, r.escalated_at, r.cancelled_at as decided_at,
+               r.attempt_number, (r.attempt_extension_id is not null) as attempt_extended, r.escalated_at,
+               case when r.escalated_at is null then null else (
+                 select jsonb_build_object('trigger', a.detail ->> 'trigger', 'threshold_hours', a.detail -> 'threshold_hours',
+                                           'waited_seconds', a.detail -> 'waited_seconds')
+                   from audit_event a
+                  where a.object_type = 'PickupRequest' and a.object_id = r.id and a.event_code = 'pickup.request.escalated' and a.outcome = 'SUCCEEDED'
+                  order by a.recorded_at desc, a.id desc
+                  limit 1
+               ) end as escalation_event,
+               r.cancelled_at as decided_at,
                r.replacement_request_id, m.assigned_rider_id as rider_id,
                (select count(*) from pickup_stop_evidence e where e.pickup_stop_id = s.id)::integer as photo_count,
                s.resolved_at::text as position_text, s.id as position_id

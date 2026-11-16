@@ -42,8 +42,8 @@ describe('the answer of an act is written into the cache through one door (run 7
     expect(writing).toEqual([THE_DOOR]);
   });
 
-  // Break caught: the door left unused, or one of the three places that keep an answer writing around it in another way.
-  it('is used by the three places that keep an act’s answer', () => {
+  // Break caught: the door left unused, or one of the four places that keep an answer writing around it in another way.
+  it('is used by the four places that keep an act’s answer', () => {
     const using = applicationSources()
       .filter((source) => /\bwriteAnswer\s*(?:<[^>(]*>)?\s*\(/.test(source.text))
       .map(relativePath)
@@ -54,6 +54,8 @@ describe('the answer of an act is written into the cache through one door (run 7
       'app/pages/manifests/CustodySection.tsx',
       'app/pages/manifests/ManifestDetailPage.tsx',
       'app/pages/pickup/PickupRequestListPage.tsx',
+      // The taps of the receiving run's page: the answer of a tap, merged into the run that was read (S1.35c).
+      'app/pages/receiving/use-run-acts.ts',
     ]);
   });
 

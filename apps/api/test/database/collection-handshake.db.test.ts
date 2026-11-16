@@ -10,7 +10,7 @@ import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles
 import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
 import { NOTIFICATION_LANE_PRINCIPAL_ID } from '../../src/platform/notifications/notification-store.js';
 import { MIGRATIONS_FOLDER } from '../../src/tools/database/run-migrations.js';
-import { excusePhotos } from './support/evidence-photo.js';
+import { excusePhotos, parcelPhotosOf } from './support/evidence-photo.js';
 import { waitUntilBlockedBy } from './support/lock-wait.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
@@ -18,7 +18,7 @@ import { insertAdHocSender, insertPickupRequest, pickupRequestRow } from './supp
 import { arrangeRun, arrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { buildService } from './support/service.js';
-import { HUB_A, HUB_B } from './support/staff-routes.js';
+import { API, HUB_A, HUB_B } from './support/staff-routes.js';
 import { clientFor } from './support/test-database.js';
 import {
   startVendorRoutes,
@@ -240,10 +240,28 @@ interface Counted {
   readonly recordId: string;
 }
 
+/** How a count compares with the three it declares: equal, fewer (a shortfall) or more (an over count, D-D5). */
+type Variance = 'MATCH' | 'SHORT' | 'OVER';
+/** The count each variance makes of a stop that declares three. */
+const COLLECTED_FOR = { MATCH: 3, SHORT: 2, OVER: 4 } as const;
+/** The reason each variance that is not a match gives, as the catalogue of its domain holds it. */
+const REASON_FOR = {
+  SHORT: {
+    reason_code: 'SOME_PARCELS_NOT_READY',
+    label: 'Some parcels not ready',
+    attribution: 'CUSTOMER',
+  },
+  OVER: {
+    reason_code: 'VENDOR_ADDED_PARCELS',
+    label: 'Vendor added parcels after booking',
+    attribution: 'CUSTOMER',
+  },
+} as const;
+
 const insertRecordFor = async (
   arranged: ArrangedRun,
   stopId: string,
-  variance: 'MATCH' | 'SHORT',
+  variance: Variance,
   direction: 'VENDOR_ENTERED_RIDER_DISPLAYED' | 'SENDER_SMS_RIDER_ENTERED',
   recordedBy: string = arranged.rider.id,
 ): Promise<string> => {
@@ -257,15 +275,9 @@ const insertRecordFor = async (
       id,
       stopId,
       HUB_A,
-      variance === 'MATCH' ? 3 : 2,
+      COLLECTED_FOR[variance],
       variance,
-      variance === 'SHORT'
-        ? JSON.stringify({
-            reason_code: 'SOME_PARCELS_NOT_READY',
-            label: 'Some parcels not ready',
-            attribution: 'CUSTOMER',
-          })
-        : null,
+      variance === 'MATCH' ? null : JSON.stringify(REASON_FOR[variance]),
       direction,
       recordedBy,
     ],
@@ -278,7 +290,7 @@ const insertRecordFor = async (
  * (`closed`) is one the administrator closes after the count, as a stop that has been collected.
  */
 async function counted(
-  over: { vendor?: ArrangedVendor; variance?: 'MATCH' | 'SHORT'; closed?: boolean } = {},
+  over: { vendor?: ArrangedVendor; variance?: Variance; closed?: boolean } = {},
 ): Promise<Counted> {
   const arranged = await arrangeRun(routes.kit, routes.admin, {
     vendorOrganizationId: (over.vendor ?? vendorA).row.organizationId,
@@ -309,6 +321,73 @@ async function counted(
     recordId,
   };
 }
+
+/**
+ * A vendor's pickup the rider has arrived at and counted **as a rider counts it** (Run B, Part 1, item 5): through `recordCollection`, with the photo of each parcel counted, which the
+ * database holds to the number of the count. `counted` inserts the record of a stop that Ops let through without photos (`insertRecordFor`), so that no test of this file had a count
+ * with photos.
+ */
+async function countedWithPhotos(variance: Variance): Promise<Counted> {
+  const arranged = await arrangeRun(routes.kit, routes.admin, {
+    vendorOrganizationId: vendorA.row.organizationId,
+    serviceDate: days.today,
+    state: 'IN_PROGRESS',
+    stops: 1,
+    stopStates: ['ARRIVED'],
+  });
+  const stop = arranged.stops[0];
+  if (stop === undefined) throw new Error('stop');
+  const collected = COLLECTED_FOR[variance];
+  const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, collected);
+  const read = await arranged.rider.client.get(`${API}/pickup-stops/${stop.id}`);
+  const response = await arranged.rider.client.post(
+    `${API}/pickup-stops/${stop.id}/collect`,
+    {
+      collected_count: collected,
+      ...(variance === 'MATCH' ? {} : { variance_reason_code: REASON_FOR[variance].reason_code }),
+      parcel_photo_ids: photos,
+    },
+    { headers: { 'If-Match': read.header('etag') ?? '', 'Idempotency-Key': randomUUID() } },
+  );
+  if (response.status !== 200) {
+    throw new Error(`recordCollection answered ${String(response.status)}: ${response.text}`);
+  }
+  return {
+    arranged,
+    riderId: arranged.rider.id,
+    stopId: stop.id,
+    requestId: stop.requestId,
+    recordId: (response.json() as { id: string }).id,
+  };
+}
+
+/**
+ * What a statement does as the owner under an operation's keys, in a transaction that is always rolled back: `ran`, or the SQLSTATE of the refusal. The keys are an operation's, so a statement
+ * of the runtime login never meets them; the guard of the stop and the policies judge the statement itself.
+ */
+const asOwner = async (context: SecurityContext, text: string): Promise<string> => {
+  await routes.admin.query('begin');
+  try {
+    await routes.admin.query('set local role melarc_owner');
+    const { toContextSettings } =
+      await import('../../src/platform/database/transaction-context.js');
+    for (const [name, value] of toContextSettings(context))
+      await routes.admin.query('select set_config($1, $2, true)', [name, value]);
+    await routes.admin.query(text);
+    return 'ran';
+  } catch (error) {
+    return serverErrorIn(error)?.code ?? 'other';
+  } finally {
+    await routes.admin.query('rollback');
+  }
+};
+
+/** The links of a count to its photos, as the table keeps them. */
+const photoLinksOf = (stopId: string) =>
+  routes.rows<{ evidence_id: string; collection_record_id: string; attached_at: Date }>(
+    `select evidence_id, collection_record_id, attached_at from collection_parcel_photo where pickup_stop_id = $1 order by evidence_id`,
+    [stopId],
+  );
 
 /** An individual sender's pickup, arrived at and counted: the code goes to the sender by SMS and the rider enters it. */
 async function countedIndividual(variance: 'MATCH' | 'SHORT' = 'MATCH'): Promise<Counted> {
@@ -760,9 +839,11 @@ describe('what the runtime login can and cannot do with the table', () => {
 
 describe('entering a code (verifyHandshake)', () => {
   // Break caught: the stop not closed by a verified handshake, closed as the wrong state, or the record's three columns or the events left out.
+  // (D-D5: an over count, more parcels than booked, closes the stop COLLECTED: nothing the booking promised was left behind.)
   it.each([
     ['a clean count', 'MATCH', 'COLLECTED', 'pickup.stop.collected'],
     ['a short count', 'SHORT', 'PARTIALLY_COLLECTED', 'pickup.stop.partially_collected'],
+    ['an over count', 'OVER', 'COLLECTED', 'pickup.stop.collected'],
   ] as const)(
     'closes the stop of %s as %s when the vendor enters the code, on the portal, with the events',
     async (_what, variance, closed, closeEvent) => {
@@ -1478,6 +1559,77 @@ describe('the officer’s override and resolution', () => {
   });
 });
 
+/**
+ * The close of a stop whose count has its photos (Run B, Part 1, item 5). Every test above counts a stop that Ops let through without photos, so the path a real count takes had no
+ * test of the handshake: the close must leave the count's photos attached as they were made, and must not be refused for them.
+ */
+describe('the close of a stop whose count has its photos (D-A10, AC-SLICE-001-23, -86)', () => {
+  // Break caught: a close that is refused, or that detaches, moves or changes a photo of the count, when the count has them (the three ways of closing a counted stop: the vendor's code of a
+  // clean count and of a short one, and the officer's override).
+  it.each([
+    [
+      'the vendor enters the code of a clean count',
+      'MATCH',
+      async (s: Counted) => {
+        await issue(riderCtx(s.riderId), s.stopId, '4321');
+        return verify(vendorCtx(vendorA), s.stopId, '4321');
+      },
+      'COLLECTED',
+    ],
+    [
+      'the vendor enters the code of a short count',
+      'SHORT',
+      async (s: Counted) => {
+        await issue(riderCtx(s.riderId), s.stopId, '4321');
+        return verify(vendorCtx(vendorA), s.stopId, '4321');
+      },
+      'PARTIALLY_COLLECTED',
+    ],
+    [
+      'an officer overrides the handshake of a short count',
+      'SHORT',
+      (s: Counted) => override(staffCtx(OVERRIDE, [HUB_A]), s.stopId),
+      'PARTIALLY_COLLECTED',
+    ],
+    [
+      'the vendor enters the code of an over count',
+      'OVER',
+      async (s: Counted) => {
+        await issue(riderCtx(s.riderId), s.stopId, '4321');
+        return verify(vendorCtx(vendorA), s.stopId, '4321');
+      },
+      'COLLECTED',
+    ],
+    [
+      'an officer overrides the handshake of an over count',
+      'OVER',
+      (s: Counted) => override(staffCtx(OVERRIDE, [HUB_A]), s.stopId),
+      'COLLECTED',
+    ],
+  ] as const)(
+    'closes the stop when %s, and leaves the photos attached to the count as they were',
+    async (_what, variance, act, closed) => {
+      const stop = await countedWithPhotos(variance);
+      const before = await photoLinksOf(stop.stopId);
+      expect(before).toHaveLength(COLLECTED_FOR[variance]);
+      expect(new Set(before.map((link) => link.collection_record_id))).toEqual(
+        new Set([stop.recordId]),
+      );
+
+      expect(rowOf(await act(stop))).toMatchObject({ out_state: 'VERIFIED' });
+
+      expect(await stopState(stop.stopId)).toBe(closed);
+      expect((await recordOf(stop.stopId))?.handshake_confirmed_at).toBeInstanceOf(Date);
+      expect(await photoLinksOf(stop.stopId)).toEqual(before);
+      const states = await routes.rows<{ state: string }>(
+        `select state from evidence where id = any($1::uuid[])`,
+        [before.map((link) => link.evidence_id)],
+      );
+      expect(states.map((each) => each.state)).toEqual(before.map(() => 'STORED'));
+    },
+  );
+});
+
 describe('the delivery of a code (the notification lane)', () => {
   // Break caught: the handshake moved by anyone but the lane, at a generation it has left, or twice; the event written more than once or by the wrong actor.
   it('moves the handshake to delivered once, for the generation it was told, as the system, and for nobody else', async () => {
@@ -1808,22 +1960,6 @@ describe('the table’s own guard, for every writer', () => {
     expect(await stopState(stop.stopId)).toBe('ARRIVED');
     await issue(riderCtx(stop.riderId), stop.stopId, '1111');
     // A closing under the operations' keys with no handshake that has ended (the keys are an operation's: the statement runs as the owner under the key).
-    const asOwner = async (context: SecurityContext, text: string): Promise<string> => {
-      await routes.admin.query('begin');
-      try {
-        await routes.admin.query('set local role melarc_owner');
-        const { toContextSettings } =
-          await import('../../src/platform/database/transaction-context.js');
-        for (const [name, value] of toContextSettings(context))
-          await routes.admin.query('select set_config($1, $2, true)', [name, value]);
-        await routes.admin.query(text);
-        return 'ran';
-      } catch (error) {
-        return serverErrorIn(error)?.code ?? 'other';
-      } finally {
-        await routes.admin.query('rollback');
-      }
-    };
     const close = (state: string) =>
       `update pickup_stop set state = '${state}', resolved_at = now() where id = '${stop.stopId}'`;
     expect(
@@ -1857,6 +1993,29 @@ describe('the table’s own guard, for every writer', () => {
       ),
       'a close that writes another column',
     ).toBe('23514');
+  });
+
+  // Break caught (D-D5): the guard of a stop that names the closes of a clean count and a short one only, so that an over count could be closed by no handshake at all (a stop that
+  // never leaves ARRIVED), or closed as PARTIALLY_COLLECTED (more parcels than booked read as parcels left behind), or as COLLECTED with no handshake that has ended.
+  it('closes the stop of an over count as COLLECTED, for the operations alone, and never as PARTIALLY_COLLECTED', async () => {
+    const stop = await counted({ variance: 'OVER' });
+    await issue(riderCtx(stop.riderId), stop.stopId, '1111');
+    const close = (state: string) =>
+      `update pickup_stop set state = '${state}', resolved_at = now() where id = '${stop.stopId}'`;
+    expect(
+      await asOwner(vendorCtx(vendorA), close('COLLECTED')),
+      'no handshake that has ended',
+    ).toBe('23514');
+    await age(
+      stop.stopId,
+      `state = 'VERIFIED', code_digest = null, channel = 'PORTAL', confirmed_at = now(), confirmed_by_type = 'VENDOR_ACCOUNT', confirmed_by_id = gen_random_uuid()`,
+    );
+    expect(
+      await asOwner(vendorCtx(vendorA), close('PARTIALLY_COLLECTED')),
+      'the other state than the count says',
+    ).toBe('23514');
+    expect(await asOwner(vendorCtx(vendorA), close('COLLECTED')), 'as the count says').toBe('ran');
+    expect(await asOwner(vendorCtx(vendorA), close('FAILED')), 'any other state').toBe('23514');
   });
 
   // Break caught: the ledger admitting the events of the handshake to a statement of the runtime login (a marker, a key, the right facts): they are the operations', run as the owner.

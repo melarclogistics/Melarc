@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
-import { excusePhotos } from './support/evidence-photo.js';
+import { excusePhotos, parcelPhotosOf } from './support/evidence-photo.js';
 import { backendPidOf, waitUntilBlockedBy } from './support/lock-wait.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertManifest, insertStop, manifestRow, stopRow } from './support/manifests.js';
@@ -439,6 +439,160 @@ describe('recordCollection: the count makes the record and the stop stays ARRIVE
   });
 });
 
+describe('recordCollection: a count above the booking is an OVER count (D-D5)', () => {
+  // Break caught (D-D5): more than was booked refused (as it was before), taken as a clean count or as a short one, kept without its reason or without the office flag, or written as an event that
+  // does not say OVER; the count closing the stop (the handshake's), or writing the request.
+  it('records more than was booked as OVER, with a reason of the over-count catalogue, raises the office flag with the recording, leaves the stop ARRIVED and writes the count’s own event', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    const stopBefore = await stopRow1(stop.id);
+    const requestBefore = await requestRow(stop.requestId);
+
+    const from = await clock();
+    const response = await collect(arranged.rider, stop.id, {
+      collected_count: 5,
+      variance_reason_code: 'VENDOR_ADDED_PARCELS',
+      captured_at: '2026-11-16T08:15:00.250Z',
+    });
+    const to = await clock();
+    expect(response.status, response.text).toBe(200);
+    const body = response.json() as Collection;
+    expect(body).toMatchObject({
+      pickup_stop_id: stop.id,
+      declared_count: 3,
+      collected_count: 5,
+      variance: 'OVER',
+      variance_reason_code: 'VENDOR_ADDED_PARCELS',
+      captured_at: '2026-11-16T08:15:00.250Z',
+    });
+    expect(typeof body.office_notified_at).toBe('string');
+
+    const [record] = await recordsOf(stop.id);
+    expect(record).toMatchObject({
+      id: body.id,
+      declared_count: 3,
+      collected_count: 5,
+      variance: 'OVER',
+      handshake_type: 'VENDOR_ENTERED_RIDER_DISPLAYED',
+      handshake_channel: null,
+      recorded_by: arranged.rider.id,
+    });
+    expect(record?.variance_reason_snapshot).toEqual({
+      reason_code: 'VENDOR_ADDED_PARCELS',
+      label: 'Vendor added parcels after booking',
+      attribution: 'CUSTOMER',
+    });
+    expect(record?.office_notified_at).toBeInstanceOf(Date);
+    // The count does not close the stop (the handshake does) and writes nothing of the request.
+    expect(await stopRow1(stop.id)).toEqual(stopBefore);
+    expect(await requestRow(stop.requestId)).toEqual(requestBefore);
+
+    // The recording and the flag are the database's own instants, as for a short count: the flag is raised at the recording, between the readings taken around the request.
+    const instants = await routes.rows<{
+      inside: boolean;
+      flagged_at_recording: boolean;
+      apart: boolean;
+    }>(
+      `select (recorded_at >= $2::timestamptz and recorded_at <= $3::timestamptz) as inside,
+              (office_notified_at = recorded_at) as flagged_at_recording,
+              (captured_at <> recorded_at) as apart
+         from collection_record where pickup_stop_id = $1`,
+      [stop.id, from, to],
+    );
+    expect(instants).toEqual([{ inside: true, flagged_at_recording: true, apart: true }]);
+
+    // The count's own event, the same one a clean count and a short one write, saying OVER, with the reason the record keeps and the flag.
+    const written = await events('pickup.collection.recorded', body.id);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toEqual({
+      actor_type: 'RIDER',
+      actor_id: arranged.rider.id,
+      object_type: 'CollectionRecord',
+      responsible_hub_id: HUB_A,
+      previous_state: 'ARRIVED',
+      resulting_state: 'ARRIVED',
+      reason_code: 'VENDOR_ADDED_PARCELS',
+      reason_label: 'Vendor added parcels after booking',
+      note: null,
+      enhanced: false,
+      related_ids: {
+        pickup_stop_id: stop.id,
+        pickup_manifest_id: arranged.manifest.id,
+        pickup_request_id: stop.requestId,
+        rider_id: arranged.rider.id,
+      },
+      detail: {
+        declared_count: 3,
+        collected_count: 5,
+        variance: 'OVER',
+        office_notified: true,
+        handshake_type: 'VENDOR_ENTERED_RIDER_DISPLAYED',
+      },
+    });
+    expect(await countAndCloseEventsOf(stop.id)).toEqual([
+      { event_code: 'pickup.collection.recorded' },
+    ]);
+  });
+
+  // Break caught: a note kept for the reason that asks for one but lost from the record, one that leaks to the ledger, or the reason that asks for it accepted without it.
+  it('keeps the note of an over-count reason that asks for one, out of the ledger, and refuses that reason without it', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    const kept = await collect(arranged.rider, stop.id, {
+      collected_count: 4,
+      variance_reason_code: 'OVER_OTHER',
+      variance_note: 'A neighbour’s parcel was on the same table',
+    });
+    expect(kept.status, kept.text).toBe(200);
+    expect((kept.json() as Collection).variance_note).toBe(
+      'A neighbour’s parcel was on the same table',
+    );
+    expect((await recordsOf(stop.id))[0]?.variance_reason_snapshot).toMatchObject({
+      reason_code: 'OVER_OTHER',
+      note: 'A neighbour’s parcel was on the same table',
+    });
+    const written = await events('pickup.collection.recorded', (kept.json() as Collection).id);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.note).toBeNull();
+    expect(JSON.stringify(written[0])).not.toContain('neighbour');
+  });
+
+  // Break caught: a retry under the key that makes a second record, a second event or a second entry for the office, or answers something else than the first answer; another body under the
+  // same key accepted.
+  it('answers a retry with the original record and writes one record, one event and one entry for the office', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    await excusePhotos(routes, stop.id);
+    const etag = await tokenOf(arranged.rider, stop.id);
+    const key = randomUUID();
+    const body = { collected_count: 4, variance_reason_code: 'VENDOR_ADDED_PARCELS' };
+    const send = (over: Record<string, unknown> = {}) =>
+      arranged.rider.client.post(
+        COLLECT(stop.id),
+        { ...body, ...over },
+        {
+          headers: { 'If-Match': etag, 'Idempotency-Key': key },
+        },
+      );
+    const first1 = await send();
+    expect(first1.status, first1.text).toBe(200);
+    const again = await send();
+    expect(again.status).toBe(200);
+    expect(again.json()).toEqual(first1.json());
+    expect(outcome(await send({ collected_count: 5 }))).toEqual([409, 'IDEMPOTENCY_KEY_CONFLICT']);
+    expect(await recordsOf(stop.id)).toHaveLength(1);
+    expect(
+      await events('pickup.collection.recorded', (first1.json() as Collection).id),
+    ).toHaveLength(1);
+    expect(
+      await routes.rows(
+        `select id from outbox where aggregate_id = $1 and event_type = 'pickup.collection.over_count_flagged'`,
+        [stop.requestId],
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -21)', () => {
   const nothingMade = async (arranged: ArrangedRun, requestBefore: unknown): Promise<void> => {
     const stop = first(arranged);
@@ -466,18 +620,20 @@ describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -
     expect(await events('pickup.sender.promoted', individual.sender.id)).toEqual([]);
   });
 
-  // Break caught: more than was declared recorded as a variance nobody defined, or taken as a short count, or answered with a server error.
-  it('refuses more than was declared, naming the count', async () => {
+  // Break caught (D-D5): a count the column cannot hold (more than a whole number of four bytes) left to the database, which would answer a server error and, for a count above the
+  // booking, could never keep the record; or answered as anything but the contract's validation failure naming the count. (A count above the booking itself is recorded as OVER now.)
+  it('refuses a count the column cannot hold, naming the count, and makes nothing', async () => {
     const arranged = await run();
     const stop = first(arranged);
     const before = await requestRow(stop.requestId);
-    const over = await collect(arranged.rider, stop.id, { collected_count: 4 });
-    expect(outcome(over)).toEqual([400, 'VALIDATION_FAILED']);
-    expect(violationsOf(over)).toEqual([
-      { in: 'body', pointer: '/collected_count', rule: 'above_declared' },
-    ]);
-    const huge = await collect(arranged.rider, stop.id, { collected_count: 2_147_483_648 });
+    const huge = await collect(arranged.rider, stop.id, {
+      collected_count: 2_147_483_648,
+      variance_reason_code: 'VENDOR_ADDED_PARCELS',
+    });
     expect(outcome(huge)).toEqual([400, 'VALIDATION_FAILED']);
+    expect(violationsOf(huge)).toEqual([
+      { in: 'body', pointer: '/collected_count', rule: 'range' },
+    ]);
     await nothingMade(arranged, before);
   });
 
@@ -505,13 +661,13 @@ describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -
       'REASON_REQUIRED',
     ],
     [
-      'a reason that needs a photo, which cannot be given yet',
+      'a reason that needs a photo, with none named',
       { collected_count: 2, variance_reason_code: 'PARCEL_DAMAGED_OR_UNSAFE' },
       422,
       'REASON_REQUIRED',
     ],
     [
-      'a reference to evidence, none of which can be stored yet',
+      'a reference to evidence that is not there',
       {
         collected_count: 2,
         variance_reason_code: 'SOME_PARCELS_NOT_READY',
@@ -523,6 +679,44 @@ describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -
     [
       'a reason for a count that matches',
       { collected_count: 3, variance_reason_code: 'SOME_PARCELS_NOT_READY' },
+      400,
+      'VALIDATION_FAILED',
+    ],
+    // (D-D5: a count above the booking is an OVER count with a reason of its own catalogue; each catalogue answers for its own variance and no other.)
+    ['no reason for a count above the booking', { collected_count: 5 }, 422, 'REASON_REQUIRED'],
+    [
+      'a reason of the short-count catalogue for a count above the booking',
+      { collected_count: 5, variance_reason_code: 'SOME_PARCELS_NOT_READY' },
+      422,
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'a reason of the over-count catalogue for a short count',
+      { collected_count: 2, variance_reason_code: 'VENDOR_ADDED_PARCELS' },
+      422,
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'a code of another domain for a count above the booking',
+      { collected_count: 5, variance_reason_code: 'RUN_CUT_SHORT' },
+      422,
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'an unknown code for a count above the booking',
+      { collected_count: 5, variance_reason_code: 'NO_SUCH_REASON' },
+      422,
+      'REASON_NOT_ACTIVE',
+    ],
+    [
+      'an over-count reason that needs a note, with a blank one',
+      { collected_count: 5, variance_reason_code: 'OVER_OTHER', variance_note: '  ' },
+      422,
+      'REASON_REQUIRED',
+    ],
+    [
+      'a reason of the over-count catalogue for a count that matches',
+      { collected_count: 3, variance_reason_code: 'VENDOR_ADDED_PARCELS' },
       400,
       'VALIDATION_FAILED',
     ],
@@ -797,6 +991,88 @@ describe('recordCollection: replay (AC-SLICE-001-29)', () => {
     );
     expect(answers.map((each) => each.status).toSorted()).toEqual([200, 409]);
     expect(await recordsOf(stop.id)).toHaveLength(1);
+  });
+});
+
+/**
+ * The replay and the race again, on a count **with its photos** (Run B, Part 1, item 5 of the review of Run A2). Every test above counts a stop that Ops let through without photos
+ * (`collect` excuses it, D-A10), so the path a real count takes had no replay test and no race test: the photos, which each belong to one count only, are what a replay must not attach a
+ * second time and what two counts must not both take.
+ */
+describe('recordCollection: replay and race on a count with photos (AC-SLICE-001-29, -86)', () => {
+  const linksOf = (stopId: string) =>
+    routes.rows<{ evidence_id: string; collection_record_id: string }>(
+      `select evidence_id, collection_record_id from collection_parcel_photo where pickup_stop_id = $1 order by evidence_id`,
+      [stopId],
+    );
+  const photosOfAnswer = (response: TestResponse): readonly string[] | undefined =>
+    (response.json() as { parcel_photo_ids?: string[] }).parcel_photo_ids;
+
+  // Break caught: an answer, or its replay, that does not state the photos the count attached (the contract's `CollectionRecord.parcel_photo_ids`; neither did on 809817b); a replay that attaches
+  // them a second time, makes a second record or event, or takes the same key for the same count with its photos left out.
+  it('returns the original answer with its photos for the same key and body, attaches them once, and refuses the count without them under the key', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, 3);
+    const key = randomUUID();
+    const etag = await tokenOf(arranged.rider, stop.id);
+    const body = { collected_count: 3, parcel_photo_ids: photos };
+
+    const original = await collect(arranged.rider, stop.id, body, { key, etag, unexcused: true });
+    expect(original.status, original.text).toBe(200);
+    expect(photosOfAnswer(original)).toEqual(photos);
+
+    const replay = await collect(arranged.rider, stop.id, body, { key, etag, unexcused: true });
+    expect(replay.status, replay.text).toBe(200);
+    expect(replay.json()).toEqual(original.json());
+    expect(photosOfAnswer(replay)).toEqual(photos);
+
+    const [record, ...more] = await recordsOf(stop.id);
+    expect(more).toEqual([]);
+    const links = await linksOf(stop.id);
+    expect(links.map((link) => link.evidence_id)).toEqual([...photos].toSorted());
+    expect(new Set(links.map((link) => link.collection_record_id))).toEqual(new Set([record?.id]));
+    expect(await countAndCloseEventsOf(stop.id)).toEqual([
+      { event_code: 'pickup.collection.recorded' },
+    ]);
+
+    const other = await collect(
+      arranged.rider,
+      stop.id,
+      { collected_count: 3 },
+      { key, etag, unexcused: true },
+    );
+    expect(outcome(other)).toEqual([409, 'IDEMPOTENCY_KEY_CONFLICT']);
+    expect(await linksOf(stop.id)).toHaveLength(3);
+  });
+
+  // Break caught: two counts of the same photos at the same moment, under different keys, that both record, take a photo twice, or leave one of them with a server error: the stop's lock and the
+  // photo's one link hold it, and the answer of the count that was made names the photos that were attached.
+  it('makes one record and one set of links of two counts that name the same photos at the same moment', async () => {
+    const arranged = await run();
+    const stop = first(arranged);
+    const photos = await parcelPhotosOf(routes, arranged.rider, stop.id, 3);
+    const etag = await tokenOf(arranged.rider, stop.id);
+
+    const answers = await Promise.all(
+      [0, 1].map(() =>
+        collect(
+          arranged.rider,
+          stop.id,
+          { collected_count: 3, parcel_photo_ids: photos },
+          { etag, unexcused: true },
+        ),
+      ),
+    );
+
+    expect(answers.map((each) => each.status).toSorted()).toEqual([200, 409]);
+    const made = answers.find((each) => each.status === 200);
+    const [record, ...more] = await recordsOf(stop.id);
+    expect(more).toEqual([]);
+    expect(made?.json()).toMatchObject({ id: record?.id, parcel_photo_ids: photos });
+    const links = await linksOf(stop.id);
+    expect(links.map((link) => link.evidence_id)).toEqual([...photos].toSorted());
+    expect(new Set(links.map((link) => link.collection_record_id))).toEqual(new Set([record?.id]));
   });
 });
 

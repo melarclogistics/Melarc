@@ -9,7 +9,13 @@ import type {
 import type { Secret } from '../config/secret.js';
 import { currentBudget } from '../execution/execution-budget.js';
 import { EvidenceStoreError } from './evidence-store-error.js';
-import { checksumHexOf, expiryOf, objectPathOf, uploadHeadersOf } from './object-capability.js';
+import {
+  checksumHexOf,
+  expiryOf,
+  objectPathOf,
+  RETRIEVAL_QUERY,
+  uploadHeadersOf,
+} from './object-capability.js';
 import {
   amzDateOf,
   authorizeRequest,
@@ -129,6 +135,7 @@ export class R2EvidenceStore implements EvidenceStore {
       method: 'GET',
       host: this.#host,
       path: objectPathOf(this.#options.bucket, request.key),
+      query: RETRIEVAL_QUERY,
       expiresSeconds: request.ttlSeconds,
     });
     return {

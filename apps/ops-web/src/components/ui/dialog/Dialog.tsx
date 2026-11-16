@@ -12,6 +12,14 @@ export interface DialogProps {
   readonly description?: ReactNode;
   /** `alertdialog` for a question that interrupts: a high-risk confirmation. Most dialogs are `dialog`. */
   readonly role?: 'dialog' | 'alertdialog';
+  /** `wide` for what is shown whole (a photo): a larger window, never wider than the screen. The default is the window of a question. */
+  readonly size?: 'default' | 'wide';
+  /**
+   * As tall as the screen lets the window be (the margin of every dialog, and never taller than 56rem), with a column inside it that its content fills: **for what is shown whole and has controls** (a photo
+   * and its buttons), so that the content is the part that gives way and the controls never leave the screen. A window that is not asked to fill is as tall as its content, which a photo makes as tall as the
+   * screen and more, with the controls below the fold (the pictures of the receiving screens, 16 November 2026). The width is `size`'s: the two are asked for apart.
+   */
+  readonly fill?: boolean;
   /**
    * Escape, and a close the browser made on its own, ask the page to close the dialog. The page decides. Leave it out and the dialog cannot
    * be dismissed: it stays, and is opened again if the browser closed it. A click on the backdrop never asks.
@@ -47,6 +55,8 @@ export function Dialog({
   title,
   description,
   role = 'dialog',
+  size = 'default',
+  fill = false,
   onRequestClose,
   children,
 }: DialogProps) {
@@ -87,7 +97,13 @@ export function Dialog({
   return (
     <dialog
       ref={attach}
-      className="ui-dialog"
+      className={[
+        'ui-dialog',
+        size === 'wide' ? 'ui-dialog--wide' : '',
+        fill ? 'ui-dialog--fill' : '',
+      ]
+        .filter((name) => name !== '')
+        .join(' ')}
       role={role === 'alertdialog' ? 'alertdialog' : undefined}
       aria-labelledby={titleId}
       aria-describedby={description === undefined ? undefined : descriptionId}

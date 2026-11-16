@@ -338,8 +338,11 @@ test.describe('the filters', () => {
     // Nothing is held back in the feed: a filter that hides everything, and the way out of it is the empty state's action.
     await expect(page.getByRole('heading', { name: 'No messages match' })).toBeVisible();
 
-    // Out of the popover and on to the way out of the empty state, by the Tab key.
+    // Out of the popover and on to the way out of the empty state, by the Tab key. The popover gives focus back to the button that opened it, and the Tab key is pressed from
+    // there and not before: a Tab pressed while the popover is still closing starts from inside it, and the order from there is not the page's (it wraps to the start of the page,
+    // where the number of presses depends on how many entries the sidebar has, which is how the run of 70f829e failed when a session that reads pickups gained the Disputes entry).
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
     await tabTo(page, page.getByRole('button', { name: 'Show every message' }));
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(LOG);
