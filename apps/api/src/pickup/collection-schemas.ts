@@ -15,7 +15,7 @@ const PARCEL_PHOTO_IDS = {
 /**
  * The body of `recordCollection` as the application describes it (S1.26; the contract's `CollectionRecordCreate`): the count, the reason of a short
  * one, a note, the evidence, and the moment the device counted. The conformance check compares it with the contract. A body the schema refuses never
- * reaches the service; what the schema cannot say (zero, more than was declared, a reason for a count that matches, a reason the catalogue refuses)
+ * reaches the service; what the schema cannot say (zero, a count the column cannot hold, a reason for a count that matches, a reason the catalogue refuses)
  * is the service's.
  */
 export const COLLECTION_RECORD_CREATE_BODY = described({
@@ -31,7 +31,7 @@ export const COLLECTION_RECORD_CREATE_BODY = described({
     variance_reason_code: {
       type: 'string',
       description:
-        'Required when `collected_count < declared_count`. Its metadata may make a note or photo mandatory in turn (§35.9.2). Absent on a short count → `REASON_REQUIRED`.',
+        'Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer were collected, of the `PICKUP_OVER_COUNT` catalogue when more were (D-D5). Its metadata may make a note or photo mandatory in turn (§35.9.2). Absent on a count that differs → `REASON_REQUIRED`; refused on a count that matches.',
     },
     variance_note: { type: 'string' },
     evidence_ids: {
@@ -104,7 +104,7 @@ export const COLLECTION_RECORD_SCHEMA = described({
     id: { type: 'string', format: 'uuid' },
     pickup_stop_id: { type: 'string', format: 'uuid' },
     declared_count: { type: 'integer' },
-    variance: { type: 'string', enum: ['MATCH', 'SHORT'] },
+    variance: { type: 'string', enum: ['MATCH', 'SHORT', 'OVER'] },
     office_notified_at: { type: ['string', 'null'], format: 'date-time' },
   },
 });

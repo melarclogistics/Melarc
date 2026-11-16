@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm';
 
-/** The reason of a short count as it is kept on the record: the code and the label as they were (domain-model.md section 3.7), and the note. */
+/** The reason of a short count or of a count above the booking as it is kept on the record: the code and the label as they were (domain-model.md section 3.7), and the note. */
 export interface VarianceReasonSnapshot {
   readonly reason_code: string;
   readonly label: string;
@@ -8,13 +8,16 @@ export interface VarianceReasonSnapshot {
   readonly note?: string;
 }
 
+/** How the count compares with the booking: equal, fewer (a shortfall) or more (an over count, D-D5). */
+export type CollectionVariance = 'MATCH' | 'SHORT' | 'OVER';
+
 export interface CollectionRecordRow {
   readonly id: string;
   readonly pickup_stop_id: string;
   readonly responsible_hub_id: string;
   readonly declared_count: number;
   readonly collected_count: number;
-  readonly variance: 'MATCH' | 'SHORT';
+  readonly variance: CollectionVariance;
   readonly variance_reason_snapshot: VarianceReasonSnapshot | null;
   readonly office_notified_at: string | Date | null;
   readonly handshake_type: 'VENDOR_ENTERED_RIDER_DISPLAYED' | 'SENDER_SMS_RIDER_ENTERED';
@@ -33,9 +36,11 @@ export interface CollectionRecordView {
   readonly pickup_stop_id: string;
   readonly declared_count: number;
   readonly collected_count: number;
-  readonly variance: 'MATCH' | 'SHORT';
+  readonly variance: CollectionVariance;
   readonly variance_reason_code?: string;
   readonly variance_note?: string;
+  /** The evidence the count attached beside its reason (the photo of the parcel left behind that a short count's reason may ask for), as the rider named it; absent, and never an empty list, when none was attached. */
+  readonly evidence_ids?: readonly string[];
   /** The photo of each parcel counted, as the rider named them (D-A10); absent, and never an empty list, for a stop Ops let through without photos. */
   readonly parcel_photo_ids?: readonly string[];
   readonly captured_at?: string;
@@ -50,10 +55,13 @@ const iso = (value: string | Date | null): string | null =>
  * of the handshake to come) is never on the wire. The label and the attribution of the reason are the catalogue's and are not repeated to the rider.
  * `parcelPhotoIds` are the photos the count attached, in the order the rider named them (the record's own row does not hold them: they are links to it); the answer states them as the
  * contract's `CollectionRecord.parcel_photo_ids` declares, and the stored answer that a replay returns carries them with it. None attached (a stop Ops let through without photos) states none.
+ * `evidenceIds` are the other evidence the count attached to the stop beside its reason (the photo of the parcel left behind), in the order the rider named it, stated as the contract's
+ * `CollectionRecord.evidence_ids` declares (Run D, Part 2, finding F2: the answer and its replay used to drop them); none attached states none.
  */
 export function collectionRecordViewOf(
   row: CollectionRecordRow,
   parcelPhotoIds: readonly string[] = [],
+  evidenceIds: readonly string[] = [],
 ): CollectionRecordView {
   const reason = row.variance_reason_snapshot;
   const captured = iso(row.captured_at);
@@ -65,6 +73,7 @@ export function collectionRecordViewOf(
     variance: row.variance,
     ...(reason === null ? {} : { variance_reason_code: reason.reason_code }),
     ...(reason?.note === undefined ? {} : { variance_note: reason.note }),
+    ...(evidenceIds.length === 0 ? {} : { evidence_ids: evidenceIds }),
     ...(parcelPhotoIds.length === 0 ? {} : { parcel_photo_ids: parcelPhotoIds }),
     ...(captured === null ? {} : { captured_at: captured }),
     office_notified_at: iso(row.office_notified_at),

@@ -97,6 +97,22 @@ export function pickupReasonRequest(
 }
 
 /**
+ * The catalogue of the reason of a count ABOVE the booking (D-D5, the Product Owner, 15 and 16 November 2026): the second catalogue of `recordCollection`, the first being the short
+ * count's (`PICKUP_REASON_DOMAINS.recordCollection`). The operation fixes which of the two the reason is read from by the variance it finds (the comparison of the counts is the
+ * server's and never the client's), so the reason of a count that is short is refused here, and the reason of a count above the booking is refused there: `REASON_NOT_ACTIVE`.
+ */
+export const OVER_COUNT_REASON_DOMAIN = 'PICKUP_OVER_COUNT';
+
+/** The request the reason validator takes for the reason of a count above the booking: the code the client sent, the note, and the over-count domain `recordCollection` fixes. */
+export function overCountReasonRequest(reasonCode: unknown, note?: string | null): ReasonRequest {
+  const operationId = 'recordCollection';
+  const domain = OVER_COUNT_REASON_DOMAIN;
+  return note === undefined
+    ? { reasonCode, operationId, domain }
+    : { reasonCode, operationId, domain, note };
+}
+
+/**
  * What the Vendor is asked to do, where anything would unblock the pickup, for each reason of the skip (S1.23; domain-model.md section 3.9,
  * the column "The next action that differs" of the four `PICKUP_STOP_SKIP` rows; MSC-DEC-412, "the requested vendor action where anything
  * would unblock it"). Only a location the rider could not reach asks anything of the vendor; the other three are decisions Melarc takes, or

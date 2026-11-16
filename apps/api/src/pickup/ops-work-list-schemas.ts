@@ -131,6 +131,10 @@ export const OPS_HANDSHAKE_SCHEMA = described({
   },
 });
 
+/**
+ * A count the office was flagged on (D-D5: the office's list of count differences, a short count and an over count together; the schema keeps its name and the operation its id).
+ * `variance` says which way the count differs from the booking and `difference_count` by how many parcels, whichever way.
+ */
 export const COLLECTION_SHORTFALL_SCHEMA = described({
   type: 'object',
   required: [
@@ -138,7 +142,8 @@ export const COLLECTION_SHORTFALL_SCHEMA = described({
     ...CONTEXT_REQUIRED,
     'declared_count',
     'collected_count',
-    'shortfall_count',
+    'variance',
+    'difference_count',
     'reason',
     'note',
     'office_notified_at',
@@ -153,7 +158,8 @@ export const COLLECTION_SHORTFALL_SCHEMA = described({
     ...CONTEXT_PROPERTIES,
     declared_count: { type: 'integer', minimum: 1 },
     collected_count: { type: 'integer', minimum: 1 },
-    shortfall_count: { type: 'integer', minimum: 1 },
+    variance: { type: 'string', enum: ['SHORT', 'OVER'] },
+    difference_count: { type: 'integer', minimum: 1 },
     reason: REASON,
     note: { type: ['string', 'null'] },
     office_notified_at: moment,

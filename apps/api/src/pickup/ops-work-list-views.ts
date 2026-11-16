@@ -1,4 +1,5 @@
 import { HANDSHAKE_CHANNELS, HANDSHAKE_TYPES } from './collection-record.schema.js';
+import type { CollectionVariance } from './collection-record-view.js';
 import { HANDSHAKE_STATES } from './collection-handshake.schema.js';
 import type {
   PickupManifestState,
@@ -73,7 +74,7 @@ export interface CollectionDisputeRow extends ListedRow {
   readonly stop_state: PickupStopState;
   readonly declared_count: number;
   readonly collected_count: number;
-  readonly variance: 'MATCH' | 'SHORT';
+  readonly variance: CollectionVariance;
 }
 
 export interface CollectionDisputeView extends PickupContext {
@@ -87,7 +88,7 @@ export interface CollectionDisputeView extends PickupContext {
   readonly stop_state: PickupStopState;
   readonly declared_count: number;
   readonly collected_count: number;
-  readonly variance: 'MATCH' | 'SHORT';
+  readonly variance: CollectionVariance;
 }
 
 export function disputeViewOf(row: CollectionDisputeRow): CollectionDisputeView {
@@ -181,7 +182,7 @@ export function opsHandshakeViewOf(row: OpsHandshakeRow): OpsHandshakeView {
   };
 }
 
-// ---- Short counts flagged to the office ---------------------------------------------------------------------------------------------------------------
+// ---- Count differences flagged to the office: short counts and over counts ------------------------------------------------------------------------------
 
 export interface CollectionShortfallRow extends ListedRow {
   readonly id: string;
@@ -192,6 +193,8 @@ export interface CollectionShortfallRow extends ListedRow {
   readonly sender_name: string;
   readonly declared_count: number;
   readonly collected_count: number;
+  /** The record's variance: the list holds the two that raise the office flag (`SHORT`, `OVER`). */
+  readonly variance: 'SHORT' | 'OVER';
   readonly variance_reason_snapshot: {
     readonly reason_code: string;
     readonly label: string;
@@ -210,8 +213,10 @@ export interface CollectionShortfallView extends PickupContext {
   readonly id: string;
   readonly declared_count: number;
   readonly collected_count: number;
-  /** The declared count less the counted one: the parcels the office was told are missing. */
-  readonly shortfall_count: number;
+  /** Which way the count differs from the booking: `SHORT` (fewer parcels, the office was told some are missing) or `OVER` (more, D-D5). */
+  readonly variance: 'SHORT' | 'OVER';
+  /** By how many parcels, whichever way: the booking's count and the counted one, apart. */
+  readonly difference_count: number;
   readonly reason: { readonly code: string; readonly label: string; readonly attribution: string };
   /** The rider's note where the reason asked for one; staff read it, no vendor does. */
   readonly note: string | null;
@@ -235,7 +240,8 @@ export function shortfallViewOf(row: CollectionShortfallRow): CollectionShortfal
     sender_name: row.sender_name,
     declared_count: row.declared_count,
     collected_count: row.collected_count,
-    shortfall_count: row.declared_count - row.collected_count,
+    variance: row.variance,
+    difference_count: Math.abs(row.collected_count - row.declared_count),
     reason: { code: reason.reason_code, label: reason.label, attribution: reason.attribution },
     note: reason.note ?? null,
     office_notified_at: instant(row.office_notified_at),

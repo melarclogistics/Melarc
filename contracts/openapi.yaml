@@ -449,6 +449,7 @@ paths:
         hub, where the grant reaches it, is audited without contents, as every staff read is.
       parameters:
         - $ref: '#/components/parameters/OpenFilter'
+        - $ref: '#/components/parameters/CountVarianceFilter'
         - $ref: '#/components/parameters/WorkListHubId'
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/PageToken'
@@ -12928,6 +12929,13 @@ components:
       description: >-
         What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the
         list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`.
+    CountVarianceFilter:
+      name: variance
+      in: query
+      schema: { type: string, enum: [SHORT, OVER] }
+      description: >-
+        Only the count differences of one kind: `SHORT` (fewer parcels than were booked) or `OVER` (more, D-D5); left out, both. Combined with the other filters as "and"; a value that is
+        neither is `VALIDATION_FAILED`.
     WorkListHubId:
       name: hub_id
       in: query
@@ -14809,8 +14817,9 @@ components:
         variance_reason_code:
           type: string
           description: |
-            Required when `collected_count < declared_count`. Its metadata may make a note or
-            photo mandatory in turn (§35.9.2). Absent on a short count → `REASON_REQUIRED`.
+            Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer
+            were collected, of the `PICKUP_OVER_COUNT` catalogue when more were (D-D5). Its metadata may make a note or photo
+            mandatory in turn (§35.9.2). Absent on a count that differs → `REASON_REQUIRED`; refused on a count that matches.
         variance_note: { type: string }
         evidence_ids:
           type: array
@@ -14851,8 +14860,9 @@ components:
         variance_reason_code:
           type: string
           description: |
-            Required when `collected_count < declared_count`. Its metadata may make a note or
-            photo mandatory in turn (§35.9.2). Absent on a short count → `REASON_REQUIRED`.
+            Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer
+            were collected, of the `PICKUP_OVER_COUNT` catalogue when more were (D-D5). Its metadata may make a note or photo
+            mandatory in turn (§35.9.2). Absent on a count that differs → `REASON_REQUIRED`; refused on a count that matches.
         variance_note: { type: string }
         evidence_ids:
           type: array
@@ -14877,10 +14887,11 @@ components:
         declared_count: { type: integer, description: 'As stated by the sender at the door.' }
         variance:
           type: string
-          enum: [MATCH, SHORT]
+          enum: [MATCH, SHORT, OVER]
           description: |
             Present on every collection, not only partials — a clean count is a recorded
-            outcome, not an absence.
+            outcome, not an absence. `OVER` is a count above the booking (D-D5): the rider may
+            count more parcels than were booked, with a reason of the `PICKUP_OVER_COUNT` catalogue.
         office_notified_at:
           type: [string, 'null']
           format: date-time
@@ -15342,7 +15353,7 @@ components:
           description: The stop as it closed; a dispute never changes it.
         declared_count: { type: integer, minimum: 1 }
         collected_count: { type: integer, minimum: 1 }
-        variance: { type: string, enum: [MATCH, SHORT] }
+        variance: { type: string, enum: [MATCH, SHORT, OVER] }
       description: >-
         A collection dispute as Ops reads it (`listCollectionDisputes`): the reconciliation item, the pickup it is about and what was counted at the door.
         It is not the `CollectionDispute` a vendor is answered with when it raises one.
@@ -15443,7 +15454,8 @@ components:
         - sender_name
         - declared_count
         - collected_count
-        - shortfall_count
+        - variance
+        - difference_count
         - reason
         - note
         - office_notified_at
@@ -15469,10 +15481,14 @@ components:
           description: The vendor or sender as booked. Never a phone number or an address.
         declared_count: { type: integer, minimum: 1 }
         collected_count: { type: integer, minimum: 1 }
-        shortfall_count:
+        variance:
+          type: string
+          enum: [SHORT, OVER]
+          description: Which way the count differs from the booking - `SHORT` (fewer parcels) or `OVER` (more, D-D5).
+        difference_count:
           type: integer
           minimum: 1
-          description: The declared count less the counted one.
+          description: By how many parcels, whichever way - the booked count and the counted one, apart.
         reason:
           type: object
           required: [code, label, attribution]
@@ -15481,7 +15497,7 @@ components:
             code: { type: string }
             label: { type: string }
             attribution: { type: string }
-          description: The reason of the `PICKUP_SHORT_COUNT` catalogue the rider gave, as the catalogue held it then.
+          description: The reason the rider gave, of the `PICKUP_SHORT_COUNT` catalogue for a short count and of the `PICKUP_OVER_COUNT` catalogue for an over one, as the catalogue held it then.
         note:
           type: [string, 'null']
           description: The rider's note where the reason asked for one. Staff read it; no vendor does.
@@ -15501,7 +15517,7 @@ components:
           type: string
           enum: [DRAFT, DISPATCHED, IN_PROGRESS, COMPLETED, CANCELLED]
       description: >-
-        A short count flagged to the office (`listCollectionShortfalls`).
+        A count difference flagged to the office (`listCollectionShortfalls`): a short count or, since D-D5, an over count.
 
     PickupFailureQueueItem:
       type: object

@@ -179,14 +179,16 @@ describe('the items hold the contract’s members and no other', () => {
     expect(item.expires_at).toBe('2026-11-03T09:45:00.000Z');
   });
 
-  // Break caught: the shortfall computed the wrong way round, a note that is absent shown as an empty string, or a member of the rider’s count left on the wire.
-  it('a shortfall carries the contract’s members, the shortfall as declared less counted, and a missing note as null', () => {
+  // Break caught: the difference computed the wrong way round (a negative number for an over count, or the declared count less the counted one for both), the variance not stated, a note that is
+  // absent shown as an empty string, or a member of the rider’s count left on the wire. (D-D5: the list is the office's list of count differences, short and over together.)
+  it('a count difference carries the contract’s members, the variance and the size of the difference whichever way it goes, and a missing note as null', () => {
     const row = {
       ...CONTEXT,
       ...LEAK,
       id: ID(12),
       declared_count: 5,
       collected_count: 3,
+      variance: 'SHORT',
       variance_reason_snapshot: {
         reason_code: 'SOME_PARCELS_NOT_READY',
         label: 'Some parcels not ready',
@@ -209,7 +211,9 @@ describe('the items hold the contract’s members and no other', () => {
     });
 
     expect(names(plain)).toEqual(names(schemaOf('CollectionShortfall').properties));
-    expect(plain.shortfall_count).toBe(2);
+    expect(plain.variance).toBe('SHORT');
+    expect(plain.difference_count).toBe(2);
+    expect(Object.keys(plain)).not.toContain('shortfall_count');
     expect(plain.note).toBeNull();
     expect(plain.reason).toEqual({
       code: 'SOME_PARCELS_NOT_READY',
@@ -217,6 +221,21 @@ describe('the items hold the contract’s members and no other', () => {
       attribution: 'CUSTOMER',
     });
     expect(noted.note).toBe('Two cartons were still open');
+
+    const over = shortfallViewOf({
+      ...row,
+      declared_count: 3,
+      collected_count: 8,
+      variance: 'OVER',
+      variance_reason_snapshot: {
+        reason_code: 'VENDOR_ADDED_PARCELS',
+        label: 'Vendor added parcels after booking',
+        attribution: 'CUSTOMER',
+      },
+    } as unknown as CollectionShortfallRow);
+    expect(over.variance).toBe('OVER');
+    expect(over.difference_count).toBe(5);
+    expect(over.reason.code).toBe('VENDOR_ADDED_PARCELS');
   });
 
   // Break caught: the members of a contact attempt copied wholesale (so that what the snapshot holds beside them reaches the wire), a note that is absent shown

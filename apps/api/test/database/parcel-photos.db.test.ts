@@ -283,16 +283,21 @@ describe('recordCollection: the photos make the count (AC-SLICE-001-86)', () => 
     expect(await recordsOf(stop.id)).toEqual([]);
   });
 
-  // Break caught: the photos judged before the count's other rules, so that a count refused for another reason is told it lacks photos.
-  it('judges the count before its photos: a count above the declared one is told so, photos or none', async () => {
-    const arranged = await run();
-    const stop = stopAt(arranged);
-    const response = await collect(arranged.rider, stop.id, { collected_count: 5 });
-    expect(outcome(response)).toEqual([400, 'VALIDATION_FAILED']);
-    expect(violationsOf(response)).toEqual([
-      { in: 'body', pointer: '/collected_count', rule: 'above_declared' },
-    ]);
-  });
+  // Break caught: the photos judged before the count's other rules, so that a count refused for another reason is told it lacks photos. (A count above the declared one is an OVER count since
+  // D-D5 and has its own reason, which is judged first: the order this test held for `above_declared` is held for the reason of a count that is not equal.)
+  it.each([
+    ['a short count', 2],
+    ['a count above the booking', 5],
+  ] as const)(
+    'judges the reason of %s before its photos: the missing reason is told so, photos or none',
+    async (_what, collected) => {
+      const arranged = await run();
+      const stop = stopAt(arranged);
+      const response = await collect(arranged.rider, stop.id, { collected_count: collected });
+      expect(outcome(response)).toEqual([422, 'REASON_REQUIRED']);
+      expect(await recordsOf(stop.id)).toEqual([]);
+    },
+  );
 
   // The body that names two hundred photos is admitted by the transport, and the schema sets no cap: `collection-parcel-photos.test.ts` holds the reading.
 });

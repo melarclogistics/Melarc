@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.108.0
- *   SHA-256 dad81c4d231d1c20f4e292ada0490133189e19b11e171eb87f4fa991e4425b5c (of the contract, line endings normalized to LF)
+ *   SHA-256 858a7634d6a707f975ab0296f1b46c71f8f4c49c40f0537a4070972b08ec7270 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -9506,8 +9506,9 @@ export interface components {
             /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). */
             collected_count: number;
             /**
-             * @description Required when `collected_count < declared_count`. Its metadata may make a note or
-             *     photo mandatory in turn (§35.9.2). Absent on a short count → `REASON_REQUIRED`.
+             * @description Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer
+             *     were collected, of the `PICKUP_OVER_COUNT` catalogue when more were (D-D5). Its metadata may make a note or photo
+             *     mandatory in turn (§35.9.2). Absent on a count that differs → `REASON_REQUIRED`; refused on a count that matches.
              */
             variance_reason_code?: string;
             variance_note?: string;
@@ -9535,8 +9536,9 @@ export interface components {
             /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). */
             collected_count: number;
             /**
-             * @description Required when `collected_count < declared_count`. Its metadata may make a note or
-             *     photo mandatory in turn (§35.9.2). Absent on a short count → `REASON_REQUIRED`.
+             * @description Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer
+             *     were collected, of the `PICKUP_OVER_COUNT` catalogue when more were (D-D5). Its metadata may make a note or photo
+             *     mandatory in turn (§35.9.2). Absent on a count that differs → `REASON_REQUIRED`; refused on a count that matches.
              */
             variance_reason_code?: string;
             variance_note?: string;
@@ -9558,10 +9560,11 @@ export interface components {
             declared_count: number;
             /**
              * @description Present on every collection, not only partials — a clean count is a recorded
-             *     outcome, not an absence.
+             *     outcome, not an absence. `OVER` is a count above the booking (D-D5): the rider may
+             *     count more parcels than were booked, with a reason of the `PICKUP_OVER_COUNT` catalogue.
              * @enum {string}
              */
-            variance: "MATCH" | "SHORT";
+            variance: "MATCH" | "SHORT" | "OVER";
             /**
              * Format: date-time
              * @description Set when the shortfall flag reached the Ops surface.
@@ -9861,7 +9864,7 @@ export interface components {
             declared_count: number;
             collected_count: number;
             /** @enum {string} */
-            variance: "MATCH" | "SHORT";
+            variance: "MATCH" | "SHORT" | "OVER";
         };
         /** @description A collection handshake as Ops reads it (`listHandshakesForOps`). It holds no code, no digest and no note of Ops's. */
         OpsHandshake: {
@@ -9913,7 +9916,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        /** @description A short count flagged to the office (`listCollectionShortfalls`). */
+        /** @description A count difference flagged to the office (`listCollectionShortfalls`): a short count or, since D-D5, an over count. */
         CollectionShortfall: {
             /**
              * Format: uuid
@@ -9934,9 +9937,14 @@ export interface components {
             sender_name: string;
             declared_count: number;
             collected_count: number;
-            /** @description The declared count less the counted one. */
-            shortfall_count: number;
-            /** @description The reason of the `PICKUP_SHORT_COUNT` catalogue the rider gave, as the catalogue held it then. */
+            /**
+             * @description Which way the count differs from the booking - `SHORT` (fewer parcels) or `OVER` (more, D-D5).
+             * @enum {string}
+             */
+            variance: "SHORT" | "OVER";
+            /** @description By how many parcels, whichever way - the booked count and the counted one, apart. */
+            difference_count: number;
+            /** @description The reason the rider gave, of the `PICKUP_SHORT_COUNT` catalogue for a short count and of the `PICKUP_OVER_COUNT` catalogue for an over one, as the catalogue held it then. */
             reason: {
                 code: string;
                 label: string;
@@ -14295,6 +14303,8 @@ export interface components {
         PageToken: string;
         /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
         OpenFilter: boolean;
+        /** @description Only the count differences of one kind: `SHORT` (fewer parcels than were booked) or `OVER` (more, D-D5); left out, both. Combined with the other filters as "and"; a value that is neither is `VALIDATION_FAILED`. */
+        CountVarianceFilter: "SHORT" | "OVER";
         /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
         WorkListHubId: string;
     };
@@ -14454,6 +14464,8 @@ export interface operations {
             query?: {
                 /** @description What still waits for Ops, as each Ops work list defines it in its own description: `true` is the items that wait, `false` the rest of what the list holds, and left out, all of them. Authorization-checked like every filter; a value that is not `true` or `false` is `VALIDATION_FAILED`. */
                 open?: components["parameters"]["OpenFilter"];
+                /** @description Only the count differences of one kind: `SHORT` (fewer parcels than were booked) or `OVER` (more, D-D5); left out, both. Combined with the other filters as "and"; a value that is neither is `VALIDATION_FAILED`. */
+                variance?: components["parameters"]["CountVarianceFilter"];
                 /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
                 hub_id?: components["parameters"]["WorkListHubId"];
                 page_size?: components["parameters"]["PageSize"];
