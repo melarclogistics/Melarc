@@ -58,7 +58,9 @@ type Queue =
   | 'PICKUP_EXCEPTION_APPROVAL'
   | 'PICKUP_UNMANIFESTED_POOL'
   | 'PICKUP_RUNS_IN_PROGRESS'
-  | 'STAFF_AWAITING_APPROVAL';
+  | 'STAFF_AWAITING_APPROVAL'
+  | 'HUB_RECEIVING_RUNS_WAITING'
+  | 'HUB_MISSING_PARCELS_SEARCHING';
 
 interface Entry {
   readonly queue: Queue;
@@ -79,6 +81,12 @@ interface ManifestItem {
 }
 interface StaffItem {
   readonly id: string;
+}
+interface ReceivingRunItem {
+  readonly handed_over_at: string;
+}
+interface MissingParcelItem {
+  readonly missing_since: string;
 }
 
 /**
@@ -105,6 +113,10 @@ const QUEUES: readonly QueueDefinition[] = [
     listKey: 'staff.read',
     decisionKey: 'staff.identity.approve',
   },
+  // S1.35b: the receiving side's two queues. This file arranges no intake (the pickup and staff records are its subject), so their entries are 0 here and are compared with their lists all the same; the
+  // runs and parcels that make them more than 0 are arranged in `hub-receiving-reads.db.test.ts`, which compares them with the lists again.
+  { queue: 'HUB_RECEIVING_RUNS_WAITING', listKey: 'hub.read' },
+  { queue: 'HUB_MISSING_PARCELS_SEARCHING', listKey: 'hub.read' },
 ];
 
 let routes: StaffRoutes;
@@ -143,6 +155,14 @@ const manifestsOf = async (actor: Actor, path: string) => {
 const staffOf = async (actor: Actor, path: string) => {
   const read = await everyItemOf(actor, path);
   return { status: read.status, items: read.items as readonly StaffItem[] };
+};
+const runsOf = async (actor: Actor, path: string) => {
+  const read = await everyItemOf(actor, path);
+  return { status: read.status, items: read.items as readonly ReceivingRunItem[] };
+};
+const missingOf = async (actor: Actor, path: string) => {
+  const read = await everyItemOf(actor, path);
+  return { status: read.status, items: read.items as readonly MissingParcelItem[] };
 };
 
 const earliest = (moments: readonly string[]): string | undefined =>
@@ -232,6 +252,26 @@ async function fromTheList(
               )
             ).map((row) => row.created_at.toISOString());
       return { status: list.status, entry: entry(moments, list.items.length) };
+    }
+    case 'HUB_RECEIVING_RUNS_WAITING': {
+      const list = await runsOf(actor, '/receiving-runs?view=waiting');
+      return {
+        status: list.status,
+        entry: entry(
+          list.items.map((item) => item.handed_over_at),
+          list.items.length,
+        ),
+      };
+    }
+    case 'HUB_MISSING_PARCELS_SEARCHING': {
+      const list = await missingOf(actor, '/missing-parcels?view=searching');
+      return {
+        status: list.status,
+        entry: entry(
+          list.items.map((item) => item.missing_since),
+          list.items.length,
+        ),
+      };
     }
   }
 }
@@ -494,9 +534,9 @@ describe('a count is what its list returns', () => {
   // Break caught: the comparison above passing because both sides are empty, or the arranged data never reaching a queue.
   it('is not a comparison of empty things: the arranged data reaches every queue of the first hub’s officer and the second hub’s', async () => {
     const officerA = await summaryOf(await routes.opsStaff(HUB_A));
-    expect(officerA.queues.map((entry) => entry.count)).toEqual([5, 1, 2, 4, 2]);
+    expect(officerA.queues.map((entry) => entry.count)).toEqual([5, 1, 2, 4, 2, 0, 0]);
     const officerB = await summaryOf(await routes.opsStaff(HUB_B));
-    expect(officerB.queues.map((entry) => entry.count)).toEqual([2, 1, 1, 1, 1]);
+    expect(officerB.queues.map((entry) => entry.count)).toEqual([2, 1, 1, 1, 1, 0, 0]);
   });
 });
 
@@ -525,6 +565,8 @@ describe('the figures a reader can check by eye', () => {
       // The pool: confirmed, no claim held, not awaiting the cutoff decision: the returned one, the two plain ones and the resolved one.
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 4, oldest_at: T.releasedA.toISOString() },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 2, oldest_at: T.startedA1.toISOString() },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 0 },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ]);
   });
 
@@ -546,6 +588,8 @@ describe('the figures a reader can check by eye', () => {
       },
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 1, oldest_at: T.poolB.toISOString() },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 1, oldest_at: T.startedB.toISOString() },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 0 },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ]);
   });
 
@@ -560,6 +604,8 @@ describe('the figures a reader can check by eye', () => {
       ['PICKUP_UNMANIFESTED_POOL', 4],
       ['PICKUP_RUNS_IN_PROGRESS', 2],
       ['STAFF_AWAITING_APPROVAL', 2],
+      ['HUB_RECEIVING_RUNS_WAITING', 0],
+      ['HUB_MISSING_PARCELS_SEARCHING', 0],
     ]);
     expect(entryFor(queues, 'STAFF_AWAITING_APPROVAL')?.oldest_at).toBe(
       await staffCreatedAt(staff['a.first']),
@@ -579,6 +625,8 @@ describe('the figures a reader can check by eye', () => {
       ['PICKUP_UNMANIFESTED_POOL', 5],
       ['PICKUP_RUNS_IN_PROGRESS', 3],
       ['STAFF_AWAITING_APPROVAL', 4],
+      ['HUB_RECEIVING_RUNS_WAITING', 0],
+      ['HUB_MISSING_PARCELS_SEARCHING', 0],
     ]);
     expect(entryFor(queues, 'PICKUP_CUTOFF_REVIEW')?.oldest_at).toBe(T.lateB.toISOString());
     expect(entryFor(queues, 'PICKUP_UNMANIFESTED_POOL')?.oldest_at).toBe(T.poolB.toISOString());
@@ -803,9 +851,14 @@ describe('the shape of the answer', () => {
       expect(Object.keys(entry)).toEqual(['queue', 'count']);
     }
     const officer = await summaryOf(await routes.opsStaff(HUB_A));
-    for (const entry of officer.queues) {
+    // The five queues of the pickup desk hold records here and each has its moment; the two of the receiving side hold none (this file arranges no intake) and have none.
+    expect(officer.queues.filter((each) => each.count > 0)).toHaveLength(5);
+    for (const entry of officer.queues.filter((each) => each.count > 0)) {
       expect(Object.keys(entry)).toEqual(['queue', 'count', 'oldest_at']);
       expect(entry.oldest_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    }
+    for (const entry of officer.queues.filter((each) => each.count === 0)) {
+      expect(Object.keys(entry)).toEqual(['queue', 'count']);
     }
     expect(Object.keys(officer.response.json() as object)).toEqual(['queues']);
   });

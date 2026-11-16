@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 
 import { riderRecordLookupSources } from './dispatch/rider-record-lookup.adapter.js';
 import { FleetRunCustody } from './fleet/fleet-run-custody.adapter.js';
+import { hubQueueCounters } from './hub/hub-queue-counters.adapter.js';
 import { pickupRecordLookupSources } from './pickup/pickup-record-lookup.adapter.js';
 import { pickupQueueCounters } from './pickup/pickup-queue-counters.adapter.js';
 import { PickupRunAccess } from './pickup/pickup-run-access.adapter.js';
@@ -26,9 +27,9 @@ import { vendorRecordLookupSources } from './vendor/vendor-record-lookup.adapter
  * Global, so that a domain module asks for the token and does not import the module that provides it (a module import would be the dependency again).
  * The run port is `undefined` where it cannot be built (an application composed without the ledger), and a service that needs it then fails closed.
  *
- * It also joins the counters of the queues to the one read that counts them (task C1): `pickup` and `staff` each own the queues they
+ * It also joins the counters of the queues to the one read that counts them (task C1): `pickup`, `staff` and `hub` each own the queues they
  * count, and `platform/queue-summary/` calls them through the port `platform/domain-ports/queue-counter.port.ts` defines, without importing
- * either.
+ * any of the three.
  *
  * And the sources of the records a lookup finds (task C2): `pickup`, `vendor`, `dispatch` and `staff` each own the kinds of record they search,
  * and `platform/lookup/` calls them through the port `platform/domain-ports/record-lookup.port.ts` defines, without importing any of the four.
@@ -48,6 +49,7 @@ import { vendorRecordLookupSources } from './vendor/vendor-record-lookup.adapter
       useFactory: (): readonly QueueCounter[] => [
         ...pickupQueueCounters(),
         ...staffQueueCounters(),
+        ...hubQueueCounters(),
       ],
     },
     {

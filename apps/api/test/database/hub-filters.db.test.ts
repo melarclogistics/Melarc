@@ -55,6 +55,8 @@ const RUNS = `${API}/pickup-manifests`;
 const MESSAGES = `${API}/notifications`;
 const SUMMARY = `${API}/ops/queue-summary`;
 const STAFF = `${API}/staff-identities`;
+const RECEIVING_RUNS = `${API}/receiving-runs`;
+const MISSING_PARCELS = `${API}/missing-parcels`;
 
 /** A hub that exists and holds none of the records, and the identifier of no hub at all. */
 const HUB_C = 'c0c0c0c0-0000-4000-8000-00000000000c';
@@ -654,7 +656,13 @@ type PickupQueue =
   | 'PICKUP_EXCEPTION_APPROVAL'
   | 'PICKUP_UNMANIFESTED_POOL'
   | 'PICKUP_RUNS_IN_PROGRESS';
-type Queue = PickupQueue | 'STAFF_AWAITING_APPROVAL';
+/** The two queues of the receiving side (S1.35b): this arrangement hands no run over, so each is 0 wherever the session reads them; the runs and parcels that fill them are `hub-receiving-reads.db.test.ts`'s. */
+type ReceivingQueue = 'HUB_RECEIVING_RUNS_WAITING' | 'HUB_MISSING_PARCELS_SEARCHING';
+const RECEIVING_QUEUES: readonly ReceivingQueue[] = [
+  'HUB_RECEIVING_RUNS_WAITING',
+  'HUB_MISSING_PARCELS_SEARCHING',
+];
+type Queue = PickupQueue | 'STAFF_AWAITING_APPROVAL' | ReceivingQueue;
 
 interface Entry {
   readonly queue: Queue;
@@ -723,6 +731,8 @@ interface Role {
   readonly become: () => Promise<Actor>;
   readonly reaches: readonly string[];
   readonly staff: { readonly hubs: readonly string[]; readonly hubless: boolean } | null;
+  /** Whether the session holds `hub.read`, the key of the lists of the receiving side: its two queues then have an entry (0 here). */
+  readonly hub?: boolean;
 }
 
 let routes: VendorRoutes;
@@ -743,7 +753,12 @@ const named = new Map<string, string>();
 const ROLES: readonly [string, Role][] = [
   [
     'an Ops Staff officer of the first hub',
-    { become: () => routes.actor(BUNDLE_IDS.opsStaff, HUB_A), reaches: [HUB_A], staff: null },
+    {
+      become: () => routes.actor(BUNDLE_IDS.opsStaff, HUB_A),
+      reaches: [HUB_A],
+      staff: null,
+      hub: true,
+    },
   ],
   [
     'a Senior Ops user of the first hub',
@@ -751,6 +766,7 @@ const ROLES: readonly [string, Role][] = [
       become: () => routes.actor(BUNDLE_IDS.seniorOps, HUB_A),
       reaches: [HUB_A],
       staff: { hubs: [HUB_A], hubless: false },
+      hub: true,
     },
   ],
   [
@@ -759,6 +775,7 @@ const ROLES: readonly [string, Role][] = [
       become: () => routes.platformAdmin(),
       reaches: [HUB_A, HUB_B],
       staff: { hubs: [HUB_A, HUB_B], hubless: true },
+      hub: true,
     },
   ],
   [
@@ -767,6 +784,7 @@ const ROLES: readonly [string, Role][] = [
       become: () => routes.actor(BUNDLE_IDS.platformAdmin, HUB_A),
       reaches: [HUB_A, HUB_B],
       staff: { hubs: [HUB_A, HUB_B], hubless: true },
+      hub: true,
     },
   ],
 ];
@@ -896,6 +914,12 @@ interface StaffItem {
   readonly id: string;
   readonly primary_hub_id: string | null;
 }
+interface ReceivingRunItem {
+  readonly handed_over_at: string;
+}
+interface MissingParcelItem {
+  readonly missing_since: string;
+}
 
 interface Read<T> {
   readonly status: number;
@@ -1008,6 +1032,7 @@ function expectedSummary(role: Role, hub: string | undefined): Entry[] {
     }
     entries.push({ queue: 'STAFF_AWAITING_APPROVAL', ...combined(groups) });
   }
+  if (role.hub === true) for (const queue of RECEIVING_QUEUES) entries.push({ queue, count: 0 });
   return entries;
 }
 
@@ -1721,7 +1746,12 @@ const QUEUES: readonly {
     listKey: 'staff.read',
     decisionKey: 'staff.identity.approve',
   },
+  { queue: 'HUB_RECEIVING_RUNS_WAITING', listKey: 'hub.read' },
+  { queue: 'HUB_MISSING_PARCELS_SEARCHING', listKey: 'hub.read' },
 ];
+
+/** The queues of the pickup desk and of the staff: the ones whose records this file arranges, and the ones a session without `hub.read` is given. */
+const ARRANGED_QUEUES = QUEUES.filter((each) => each.listKey !== 'hub.read');
 
 /**
  * What the queue's own list returns to the session with the hub (the list's own `hub_id`), read to its last page in pages of two, as the entry
@@ -1827,6 +1857,36 @@ async function fromTheList(
             ).map((row) => row.created_at.toISOString());
       return { status: list.status, entry: entry(moments, list.items.length) };
     }
+    case 'HUB_RECEIVING_RUNS_WAITING': {
+      const list = await readAll<ReceivingRunItem>(
+        client,
+        RECEIVING_RUNS,
+        { view: 'waiting', hub_id: hub },
+        2,
+      );
+      return {
+        status: list.status,
+        entry: entry(
+          list.items.map((item) => item.handed_over_at),
+          list.items.length,
+        ),
+      };
+    }
+    case 'HUB_MISSING_PARCELS_SEARCHING': {
+      const list = await readAll<MissingParcelItem>(
+        client,
+        MISSING_PARCELS,
+        { view: 'searching', hub_id: hub },
+        2,
+      );
+      return {
+        status: list.status,
+        entry: entry(
+          list.items.map((item) => item.missing_since),
+          list.items.length,
+        ),
+      };
+    }
   }
 }
 
@@ -1909,6 +1969,8 @@ describe('AC-HUBF-04: getQueueSummary counts one hub’s work, entry by entry as
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 3, oldest_at: '2026-10-31T08:00:00.000Z' },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 1, oldest_at: '2026-11-03T07:00:00.000Z' },
       { queue: 'STAFF_AWAITING_APPROVAL', count: 2, oldest_at: profileMoments['a.first'] },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 0 },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ]);
     expect((await summaryOf(admin.client, HUB_B)).queues).toEqual([
       { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 2, oldest_at: '2026-10-19T08:01:00.000Z' },
@@ -1917,6 +1979,8 @@ describe('AC-HUBF-04: getQueueSummary counts one hub’s work, entry by entry as
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 1, oldest_at: '2026-11-02T10:00:00.000Z' },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 2, oldest_at: '2026-11-02T07:00:00.000Z' },
       { queue: 'STAFF_AWAITING_APPROVAL', count: 1, oldest_at: profileMoments['b.only'] },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 0 },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ]);
     // All of it: the oldest pending and the oldest late booking and run are the second hub's, the oldest exception and pool entry the first's,
     // and the oldest profile is the one with no hub, which no hub's count has.
@@ -1927,12 +1991,14 @@ describe('AC-HUBF-04: getQueueSummary counts one hub’s work, entry by entry as
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 4, oldest_at: '2026-10-31T08:00:00.000Z' },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 3, oldest_at: '2026-11-02T07:00:00.000Z' },
       { queue: 'STAFF_AWAITING_APPROVAL', count: 4, oldest_at: profileMoments.none },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 0 },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ]);
   });
 
   // Break caught: the first hub's officer given another hub's work, or the hub the officer names not narrowing its own: its own hub is the whole of
-  // its summary, and the second hub is five entries at 0 (the officer holds no staff key: no sixth entry).
-  it('has, for an Ops Staff officer of the first hub, its own figures for its hub and for none, and 0 in each of its five entries for the second', async () => {
+  // its summary, and the second hub is seven entries at 0 (the officer holds no staff key: no staff entry; its two receiving queues are 0 in both hubs, nothing having been handed over).
+  it('has, for an Ops Staff officer of the first hub, its own figures for its hub and for none, and 0 in each of its seven entries for the second', async () => {
     const officer = await OFFICER.become();
     const own = [
       { queue: 'PICKUP_AWAITING_CONFIRMATION', count: 4, oldest_at: '2026-10-19T08:02:00.000Z' },
@@ -1940,6 +2006,8 @@ describe('AC-HUBF-04: getQueueSummary counts one hub’s work, entry by entry as
       { queue: 'PICKUP_EXCEPTION_APPROVAL', count: 2, oldest_at: '2026-10-30T09:00:00.000Z' },
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 3, oldest_at: '2026-10-31T08:00:00.000Z' },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 1, oldest_at: '2026-11-03T07:00:00.000Z' },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 0 },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ];
 
     expect((await summaryOf(officer.client)).queues).toEqual(own);
@@ -2024,6 +2092,8 @@ describe('AC-HUBF-04: getQueueSummary counts one hub’s work, entry by entry as
         'PICKUP_EXCEPTION_APPROVAL',
         'PICKUP_UNMANIFESTED_POOL',
         'PICKUP_RUNS_IN_PROGRESS',
+        'HUB_RECEIVING_RUNS_WAITING',
+        'HUB_MISSING_PARCELS_SEARCHING',
       ],
     ],
     [
@@ -2256,7 +2326,8 @@ describe('AC-HUBF-06: a count with a hub is what the list with that hub returns,
   it('is not a comparison of empty things: every queue of both hubs has records in its list', async () => {
     const admin = await ADMIN_NO_HUB.become();
     for (const hub of [HUB_A, HUB_B]) {
-      for (const { queue } of QUEUES) {
+      // The two queues of the receiving side are compared with their lists everywhere above, at 0 (no run is handed over here); their records are `hub-receiving-reads.db.test.ts`'s.
+      for (const { queue } of ARRANGED_QUEUES) {
         const read = await fromTheList(admin.client, queue, hub);
         expect(read.status).toBe(200);
         expect(read.entry.count, `${queue} in ${describeHub(hub)}`).toBeGreaterThan(0);
@@ -2596,7 +2667,9 @@ describe('AC-HUBF-10, GBT-GS14: the filter is narrowed by the grant of the read�
 
       const asked = await summaryOf(actor.client, other);
       expect(asked.queues.map((entry) => entry.count)).toEqual([0, 0, 0, 0, 0, otherStaff]);
-      expect(asked.queues.map((entry) => entry.queue)).toEqual(QUEUES.map((each) => each.queue));
+      expect(asked.queues.map((entry) => entry.queue)).toEqual(
+        ARRANGED_QUEUES.map((each) => each.queue),
+      );
       // The same session's lists agree with each count, queue by queue.
       expect(asked.queues).toEqual(await predictedFor(actor, other));
       expect(asked.queues).toEqual(expectedSummary(role, other));
@@ -2674,7 +2747,7 @@ describe('AC-HUBF-10, GBT-GS14: the filter is narrowed by the grant of the read�
       expect(
         summary.queues.map((entry) => entry.queue),
         label,
-      ).toEqual(QUEUES.map((each) => each.queue));
+      ).toEqual(ARRANGED_QUEUES.map((each) => each.queue));
       expect(
         summary.queues.every((entry) => entry.count === 0),
         label,

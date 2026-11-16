@@ -126,6 +126,8 @@ const EVERY_QUEUE = [
     listKey: 'staff.read',
     decisionKey: 'staff.identity.approve',
   },
+  { queue: 'HUB_RECEIVING_RUNS_WAITING', listKey: 'hub.read' },
+  { queue: 'HUB_MISSING_PARCELS_SEARCHING', listKey: 'hub.read' },
 ] as const;
 
 describe('the queues a session is given', () => {
@@ -156,6 +158,7 @@ describe('the queues a session is given', () => {
         held('pickup.exception.approve'),
         held('staff.read'),
         held('staff.identity.approve'),
+        held('hub.read'),
       ]),
       'c1',
     );
@@ -218,6 +221,7 @@ describe('the queues a session is given', () => {
         held('pickup.exception.approve'),
         held('staff.read'),
         held('staff.identity.approve'),
+        held('hub.read'),
       ]),
       'c1',
     );
@@ -483,16 +487,17 @@ describe('the hub filter (task C3)', () => {
   /** An identifier with letters in it, so that its capitals are another text and the same hub. */
   const LETTERED_HUB = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
 
-  /** Every key the summary reads: pickup.read for five queues and staff.read for one, so that there are two groups of counters and two transactions. */
+  /** Every key the summary reads: pickup.read for five queues, staff.read for one and hub.read for two, so that there are three groups of counters and three transactions. */
   const EVERY_KEY = [
     held('pickup.read'),
     held('pickup.exception.approve'),
     held('staff.read'),
     held('staff.identity.approve'),
+    held('hub.read'),
   ];
 
   /**
-   * The same four keys, each held at every hub. A hub that no set of hubs holds is then no reason to answer without counting (task A1), so these are
+   * The same five keys, each held at every hub. A hub that no set of hubs holds is then no reason to answer without counting (task A1), so these are
    * the sessions of the tests that follow the filter into the counters; a session that holds its keys at its own hubs is the subject of the tests of
    * the shortcut, below.
    */
@@ -501,6 +506,7 @@ describe('the hub filter (task C3)', () => {
     held('pickup.exception.approve', 'all'),
     held('staff.read', 'all'),
     held('staff.identity.approve', 'all'),
+    held('hub.read', 'all'),
   ];
 
   // Break caught: the filter handed to the counters of the first key group alone (the staff queue is counted in a transaction of its own), to the
@@ -515,9 +521,9 @@ describe('the hub filter (task C3)', () => {
 
     await service.read(request(EVERYWHERE), 'c3', { hubId: FILTER_HUB });
 
-    // The arrangement is what the test says: the six queues, each counted once, in two transactions (a group for each key).
+    // The arrangement is what the test says: the eight queues, each counted once, in three transactions (a group for each key).
     expect(calls.map((call) => call.queue)).toEqual([...QUEUE_IDS]);
-    expect(new Set(calls.map((call) => call.handle)).size).toBe(2);
+    expect(new Set(calls.map((call) => call.handle)).size).toBe(3);
     expect(calls.map((call) => call.filter)).toEqual(QUEUE_IDS.map(() => ({ hubId: FILTER_HUB })));
   });
 
@@ -529,6 +535,8 @@ describe('the hub filter (task C3)', () => {
     { ...EVERY_QUEUE[3], result: { count: 7, oldestAt: new Date('2026-10-30T12:30:00.000Z') } },
     { ...EVERY_QUEUE[4], result: { count: 1, oldestAt: new Date('2026-11-05T07:45:00.000Z') } },
     { ...EVERY_QUEUE[5], result: { count: 4, oldestAt: new Date('2026-11-01T10:10:10.010Z') } },
+    { ...EVERY_QUEUE[6], result: { count: 5, oldestAt: new Date('2026-11-04T06:20:00.000Z') } },
+    { ...EVERY_QUEUE[7], result: { count: 0, oldestAt: null } },
   ];
   /** What the counters above answer, as the read answers it: written out, in the order of the contract's queues, the 0 with no moment. */
   const THE_ANSWER = {
@@ -539,6 +547,8 @@ describe('the hub filter (task C3)', () => {
       { queue: 'PICKUP_UNMANIFESTED_POOL', count: 7, oldest_at: '2026-10-30T12:30:00.000Z' },
       { queue: 'PICKUP_RUNS_IN_PROGRESS', count: 1, oldest_at: '2026-11-05T07:45:00.000Z' },
       { queue: 'STAFF_AWAITING_APPROVAL', count: 4, oldest_at: '2026-11-01T10:10:10.010Z' },
+      { queue: 'HUB_RECEIVING_RUNS_WAITING', count: 5, oldest_at: '2026-11-04T06:20:00.000Z' },
+      { queue: 'HUB_MISSING_PARCELS_SEARCHING', count: 0 },
     ],
   };
 
@@ -617,7 +627,7 @@ describe('the hub filter (task C3)', () => {
   });
 
   // Break caught (AC-HUBF-10, GBT-GS1, task A1): the shortcut judged on the session's widest grant, or on another key's: the hub is outside the grant of
-  // the pickup key (so those five queues are not counted) and inside the grant of the staff key (so that one is), and what is counted is counted in
+  // the pickup key and of the hub key (so those seven queues are not counted) and inside the grant of the staff key (so that one is), and what is counted is counted in
   // that key's own context, the one it has without a hub. The hub is in what the runner is given for the staff key because that grant is of every
   // hub, and for no other reason.
   it('decides the shortcut key by key: the pickup key does not reach the hub and is not counted, the staff key does and is', async () => {
@@ -626,6 +636,7 @@ describe('the hub filter (task C3)', () => {
       held('pickup.exception.approve', 'all'),
       held('staff.read', 'all'),
       held('staff.identity.approve', 'own'),
+      held('hub.read', 'own'),
     ];
     const without = runner();
     const withHub = runner();
@@ -699,7 +710,7 @@ describe('the hub filter (task C3)', () => {
       counters: own.made,
     }).read(request(EVERY_KEY, [HUB]), 'c3', { hubId: HUB.toUpperCase() });
     expect(own.calls.map((call) => call.queue)).toEqual([...QUEUE_IDS]);
-    expect(ownReader.readings).toHaveLength(2);
+    expect(ownReader.readings).toHaveLength(3);
 
     const everywhere = counters(EVERY_QUEUE);
     const everywhereReader = runner();
@@ -709,7 +720,7 @@ describe('the hub filter (task C3)', () => {
       counters: everywhere.made,
     }).read(request(EVERYWHERE, []), 'c3', { hubId: FILTER_HUB });
     expect(everywhere.calls.map((call) => call.queue)).toEqual([...QUEUE_IDS]);
-    expect(everywhereReader.readings).toHaveLength(2);
+    expect(everywhereReader.readings).toHaveLength(3);
 
     // A session with no hub at all (an empty set reaches nothing): every queue it may read is 0 and nothing is counted.
     const none = counters(EVERY_QUEUE);
@@ -836,11 +847,14 @@ describe('the hub filter (task C3)', () => {
 
     await service.read(request(EVERYWHERE), 'c3', { hubId: FILTER_HUB });
 
-    // One transaction for each key (pickup.read for five queues, staff.read for one), each bounded once, before its first count.
-    expect(limits.map((limit) => limit.milliseconds)).toEqual([3000, 3000]);
-    expect(limits.map((limit) => limit.countsBefore)).toEqual([0, 5]);
+    // One transaction for each key (pickup.read for five queues, staff.read for one, hub.read for two), each bounded once, before its first count.
+    expect(limits.map((limit) => limit.milliseconds)).toEqual([3000, 3000, 3000]);
+    expect(limits.map((limit) => limit.countsBefore)).toEqual([0, 5, 6]);
     expect(
-      calls.map((call) => [call.queue, call.handle === limits[0]?.handle ? 'first' : 'second']),
+      calls.map((call) => [
+        call.queue,
+        ['first', 'second', 'third'][limits.findIndex((limit) => limit.handle === call.handle)],
+      ]),
     ).toEqual([
       ['PICKUP_AWAITING_CONFIRMATION', 'first'],
       ['PICKUP_CUTOFF_REVIEW', 'first'],
@@ -848,8 +862,10 @@ describe('the hub filter (task C3)', () => {
       ['PICKUP_UNMANIFESTED_POOL', 'first'],
       ['PICKUP_RUNS_IN_PROGRESS', 'first'],
       ['STAFF_AWAITING_APPROVAL', 'second'],
+      ['HUB_RECEIVING_RUNS_WAITING', 'third'],
+      ['HUB_MISSING_PARCELS_SEARCHING', 'third'],
     ]);
-    expect(calls.at(-1)?.handle).toBe(limits[1]?.handle);
+    expect(calls.at(-1)?.handle).toBe(limits[2]?.handle);
   });
 
   /** The sessions of the tests of the entries, and the queues each is given (written out, in the order of the contract). */

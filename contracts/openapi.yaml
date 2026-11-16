@@ -4984,6 +4984,8 @@ paths:
         | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
         | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
         | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+        | `HUB_RECEIVING_RUNS_WAITING` | runs waiting to be checked in at the hub (runs, never vendors or intakes) | `listReceivingRuns` with `view=waiting` | `hub.read` | `handed_over_at` of the run's intakes that still wait |
+        | `HUB_MISSING_PARCELS_SEARCHING` | parcels missing from a vendor whose case a senior officer has yet to close (parcels, never vendors) | `listMissingParcels` with `view=searching` | `hub.read` | `missing_marked_at` of the parcel |
 
         **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
         breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
@@ -16944,6 +16946,8 @@ components:
         - PICKUP_UNMANIFESTED_POOL
         - PICKUP_RUNS_IN_PROGRESS
         - STAFF_AWAITING_APPROVAL
+        - HUB_RECEIVING_RUNS_WAITING
+        - HUB_MISSING_PARCELS_SEARCHING
       description: |
         A queue of the Ops Portal that has a count (reporting data dictionary, section 5.5). **A closed list: a value is never renamed or
         reused**, and a queue that is built later is added here with its own entry in the dictionary. `getQueueSummary` lists, for each,

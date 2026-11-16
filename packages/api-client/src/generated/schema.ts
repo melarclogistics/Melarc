@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.108.0
- *   SHA-256 858a7634d6a707f975ab0296f1b46c71f8f4c49c40f0537a4070972b08ec7270 (of the contract, line endings normalized to LF)
+ *   SHA-256 14246c2f2f9ca71108e6c61b0ab6b70a551ef0a204c77dd18105a915af26017a (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -3097,6 +3097,8 @@ export interface paths {
          *     | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
          *     | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
          *     | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+         *     | `HUB_RECEIVING_RUNS_WAITING` | runs waiting to be checked in at the hub (runs, never vendors or intakes) | `listReceivingRuns` with `view=waiting` | `hub.read` | `handed_over_at` of the run's intakes that still wait |
+         *     | `HUB_MISSING_PARCELS_SEARCHING` | parcels missing from a vendor whose case a senior officer has yet to close (parcels, never vendors) | `listMissingParcels` with `view=searching` | `hub.read` | `missing_marked_at` of the parcel |
          *
          *     **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
          *     breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
@@ -11040,7 +11042,7 @@ export interface components {
          *     the records it counts and the keys that admit it.
          * @enum {string}
          */
-        QueueId: "PICKUP_AWAITING_CONFIRMATION" | "PICKUP_CUTOFF_REVIEW" | "PICKUP_EXCEPTION_APPROVAL" | "PICKUP_UNMANIFESTED_POOL" | "PICKUP_RUNS_IN_PROGRESS" | "STAFF_AWAITING_APPROVAL";
+        QueueId: "PICKUP_AWAITING_CONFIRMATION" | "PICKUP_CUTOFF_REVIEW" | "PICKUP_EXCEPTION_APPROVAL" | "PICKUP_UNMANIFESTED_POOL" | "PICKUP_RUNS_IN_PROGRESS" | "STAFF_AWAITING_APPROVAL" | "HUB_RECEIVING_RUNS_WAITING" | "HUB_MISSING_PARCELS_SEARCHING";
         /** @description One queue's count and the moment its oldest record entered it, and nothing else: no record, code, name, hub, vendor or breakdown. */
         QueueSummaryEntry: {
             queue: components["schemas"]["QueueId"];
