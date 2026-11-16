@@ -13,14 +13,23 @@ const SHEET = readFileSync(
 
 /**
  * The look of the receiving screens of a run (S1.35c; the hub floor, DESIGN_SYSTEM sections 11 and 12): a tablet in a hand, at a table, with a rider waiting. jsdom sees the class and not the pixel, so the
- * sheet is read here and the pixels are measured in the receiving spec's browser. What is held: **the action bar of a vendor is at the foot of the visible screen** (sticky), **above the on-screen keyboard**
- * (`--keyboard-inset`, written from the visual viewport) and **clear of the home indicator** (the safe area), and every size, space and colour of the sheet is a token.
+ * sheet is read here and the pixels are measured in the receiving spec's browser. What is held: **the action bar of the vendor in work is at the foot of the visible screen** (sticky, by the modifier
+ * `receiving-actions--sticky`, and by no other: a bar kept there for every vendor was drawn over the name of its own card), **above the on-screen keyboard** (`--keyboard-inset`, written from the visual
+ * viewport) and **clear of the home indicator** (the safe area), and every size, space and colour of the sheet is a token.
  */
 describe('the receiving screens’ stylesheet', () => {
-  const bar = ruleOf(SHEET, '.receiving-actions');
+  const plain = ruleOf(SHEET, '.receiving-actions');
+  const bar = ruleOf(SHEET, '.receiving-actions--sticky');
+
+  // Break caught (the pictures' review, defect 3): the plain bar of every vendor kept at the foot of the screen, which drew the bar of a vendor whose card began there over its own card's name.
+  it('keeps no bar at the foot of the screen but the vendor in work’s', () => {
+    expect(plain).toBeDefined();
+    expect(plain).not.toMatch(/position:\s*(?:sticky|fixed)\s*;/);
+    expect(plain).not.toMatch(/inset-block-end:/);
+  });
 
   // Break caught: a bar that scrolls away with the photos, so that "All 12 here" is a scroll back from the thumb; or one that is fixed over the page and hides the last photos.
-  it('keeps the action bar at the foot of the visible screen without covering what is above it', () => {
+  it('keeps the action bar of the vendor in work at the foot of the visible screen without covering what is above it', () => {
     expect(bar).toBeDefined();
     expect(bar).toMatch(/position:\s*sticky\s*;/);
     expect(bar).toMatch(/inset-block-end:/);
@@ -47,8 +56,8 @@ describe('the receiving screens’ stylesheet', () => {
 
   // Break caught: buttons of the bar side by side at a width that makes each narrower than its words, or buttons that do not wrap on a phone.
   it('lets the buttons of the bar wrap, each as wide as its words need', () => {
-    expect(bar).toMatch(/display:\s*flex\s*;/);
-    expect(bar).toMatch(/flex-wrap:\s*wrap\s*;/);
+    expect(plain).toMatch(/display:\s*flex\s*;/);
+    expect(plain).toMatch(/flex-wrap:\s*wrap\s*;/);
     expect(ruleOf(SHEET, '.receiving-actions > *')).toMatch(/flex:\s*1\s+1\s+14rem\s*;/);
   });
 

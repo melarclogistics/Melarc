@@ -116,17 +116,19 @@ function CountForm({
               help={WORDS.blindCount.fieldHelp}
               {...(invalid === undefined ? {} : { error: invalid })}
             >
-              <Input
-                name="physical_count"
-                value={text}
-                inputMode="numeric"
-                autoComplete="off"
-                onChange={(event) => {
-                  setText(event.target.value);
-                  setInvalid(undefined);
-                  if (event.target.value.trim() !== '') void locks.ensure(intake.id);
-                }}
-              />
+              <div className="receiving-count__control">
+                <Input
+                  name="physical_count"
+                  value={text}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  onChange={(event) => {
+                    setText(event.target.value);
+                    setInvalid(undefined);
+                    if (event.target.value.trim() !== '') void locks.ensure(intake.id);
+                  }}
+                />
+              </div>
             </Field>
             <LockLine intake={intake} cannotCheck={locks.status(intake.id) === 'cannot-check'} />
           </TaskFormWide>

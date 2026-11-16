@@ -104,15 +104,10 @@
 }
 
 /*
- * The summary of a finished run: what to do next first, then what each vendor came to, then the photos of what is missing. **Its heading is not smaller than the sentence under it** (the panel's own title is a
- * label, and the sentence that leads is a line of body text a size up: the title is set a size up here, on the heading's token), and **the gaps are the same everywhere**: one gap between the blocks, and one
- * between what a vendor came to and its photos.
+ * The summary of a finished run: what to do next first, then what each vendor came to, then the photos of what is missing. **Its heading is not smaller than the sentence under it**: the panel's own title
+ * is a label (a page does not style the panel's markup), so the sentence that leads is at the label's size too, and its weight, a step under the title's, carries the order. **The gaps are the same everywhere**:
+ * one gap between the blocks, and one between what a vendor came to and its photos.
  */
-.receiving-summary .ui-panel__title {
-  font-size: var(--text-heading-sm-size);
-  line-height: var(--text-heading-sm-line-height);
-}
-
 .receiving-summary__body {
   display: grid;
   gap: var(--space-4);
@@ -123,7 +118,8 @@
 }
 
 .receiving-summary__lead {
-  font-size: var(--text-body-lg-size);
+  font-size: var(--text-label-md-size);
+  line-height: var(--text-label-md-line-height);
   font-weight: var(--text-label-md-weight);
 }
 
@@ -160,7 +156,7 @@
 
 /*
  * The fields of the decision and of the count, which have no section heading of their own (the page has one heading): a column, with the gap the task form's sections keep between fields. The count of the
- * parcels is a few digits, so its field is as wide as a few digits need and is the floor's 56px high.
+ * parcels is a few digits, so its field is as wide as a few digits need.
  */
 .receiving-decision__fields,
 .receiving-count {
@@ -177,9 +173,9 @@
   margin-block-end: var(--space-6);
 }
 
-.receiving-count .ui-input {
-  inline-size: min(100%, calc(var(--space-20) * 2));
-  min-block-size: var(--control-height-lg);
+/* The field is as wide as a few digits need (its label and its help keep the width of the page); the floor's own scope draws it 56px high. */
+.receiving-count__control {
+  max-inline-size: calc(var(--space-20) * 2);
 }
 
 /* The record of a vendor (S1.35c): the parcels that need someone, group by group, each group the photos of its parcels. */

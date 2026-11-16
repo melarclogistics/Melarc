@@ -32,8 +32,12 @@
   flex-wrap: wrap;
 }
 
-/* The lookup of a queue (its field and its button) and the Filter button. */
-.ui-hub-floor .ui-filter-bar__search .ui-filter-bar__search-field,
+/* A text field (the count of the parcels, a queue's lookup). */
+.ui-hub-floor .ui-input {
+  min-height: var(--control-height-lg);
+}
+
+/* The button of a queue's lookup and the Filter button. */
 .ui-hub-floor .ui-filter-bar__search button,
 .ui-hub-floor .ui-filter-bar .ui-filter-bar__add {
   min-height: var(--control-height-lg);

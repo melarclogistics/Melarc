@@ -59,7 +59,7 @@ describe('the hub floor’s 56 px, held to the tokens', () => {
 
     for (const selector of [
       '.ui-hub-floor .ui-view-tabs__tab',
-      '.ui-hub-floor .ui-filter-bar__search .ui-filter-bar__search-field',
+      '.ui-hub-floor .ui-input',
       '.ui-hub-floor .ui-filter-bar__search button',
       '.ui-hub-floor .ui-filter-bar .ui-filter-bar__add',
       '.ui-hub-floor .ui-page-head__trail a',
