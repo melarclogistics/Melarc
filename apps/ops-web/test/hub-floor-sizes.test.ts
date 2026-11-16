@@ -52,6 +52,40 @@ describe('the hub floor’s 56 px, held to the tokens', () => {
     expect(rule).not.toMatch(/\d+px/);
   });
 
+  // Break caught (the pictures' review, defect 7): a floor scope that leaves the views, the lookup, the Filter button, the way up the trail or Refresh at their working height, or that writes the number as a
+  // literal (a second place for it).
+  it('raises the parts of a floor page that the page does not draw itself to the touch height, by the token', () => {
+    const floor = css('hub-floor/hub-floor.css');
+
+    for (const selector of [
+      '.ui-hub-floor .ui-view-tabs__tab',
+      '.ui-hub-floor .ui-filter-bar__search .ui-filter-bar__search-field',
+      '.ui-hub-floor .ui-filter-bar .ui-filter-bar__add',
+      '.ui-hub-floor .ui-page-head__trail a',
+      '.ui-hub-floor .ui-page-head__freshness .ui-page-head__refresh',
+      '.ui-hub-floor .ui-data-table__card-title a',
+    ]) {
+      const rule = ruleOf(floor, selector);
+      expect(rule, selector).toBeDefined();
+      expect(rule, selector).toMatch(/min-height:\s*var\(--control-height-lg\)\s*;/);
+      expect(rule, selector).not.toMatch(/\d+px/);
+    }
+    // The code of a row is as tall as its row, which is its own token (56px at the touch density).
+    expect(ruleOf(floor, '.ui-hub-floor .ui-data-table__title a')).toMatch(
+      /min-height:\s*calc\(var\(--ui-data-table-row\) - 1px\)\s*;/,
+    );
+  });
+
+  // Break caught: a row of views that scrolls under a fade where the floor wants every view in sight, so that a view behind the edge is found by no thumb.
+  it('wraps the views of a floor page and does not scroll them', () => {
+    const floor = css('hub-floor/hub-floor.css');
+
+    expect(ruleOf(floor, '.ui-hub-floor .ui-view-tabs__list')).toMatch(/flex-wrap:\s*wrap\s*;/);
+    expect(ruleOf(floor, '.ui-hub-floor .ui-view-tabs__scroll')).toMatch(
+      /overflow-x:\s*visible\s*;/,
+    );
+  });
+
   // The reader proved on text it must find and text it must leave alone.
   it('finds a rule by one of its selectors and leaves the rule of another alone', () => {
     const text = '/* .a { x: 1; } */ .b, .c { min-height: 1rem; } .d { min-height: 2rem; }';
