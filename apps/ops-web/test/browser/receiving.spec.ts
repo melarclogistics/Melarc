@@ -17,7 +17,6 @@ import {
 } from './support/receiving-api';
 import { parcelRow, type RunRow, type VendorRow } from './support/receiving-runs-api';
 import { watchPage, wcagViolations } from './support/page';
-import { parcelRow } from './support/receiving-runs-api';
 import { menuEntry } from './support/shell';
 import { expectNoTableScrollsSideways } from './support/tables';
 import { expectWholeInTheWindow } from './support/whole';
