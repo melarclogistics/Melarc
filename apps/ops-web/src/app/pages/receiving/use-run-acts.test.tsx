@@ -249,6 +249,37 @@ describe('a tap on the run’s page', () => {
     expect(page?.vendors[0]?.parcels[0]?.state).toBe('EXPECTED');
   });
 
+  // Break caught: a tap that never arrived told as a refusal (the officer is not told what they do now is not saved), a refusal told as a lost connection, or a lost connection that is never over.
+  it('says the connection is lost when a tap does not arrive, and that it is back when one is answered, a refusal included', async () => {
+    let attempt = 0;
+    open({
+      [arrival(1)]: () => {
+        attempt += 1;
+        if (attempt === 1) return Promise.reject(new TypeError('Failed to fetch'));
+        if (attempt === 2)
+          return errorResponse(409, 'STATE_CONFLICT', { rule: 'check_in_finished' });
+        return answerFor([arrivedParcel(1), parcelFixture(2), parcelFixture(3)], 0, '"kente-2"');
+      },
+    });
+    await loaded();
+    expect(actsNow().requestFailed).toBe(false);
+
+    const lost = await actsNow().tap(KENTE_INTAKE_ID, parcelFixture(1).id, true);
+    expect(lost.problem).toBeDefined();
+    await waitFor(() => {
+      expect(actsNow().requestFailed).toBe(true);
+    });
+
+    // A refusal is an answer: the connection is there.
+    await actsNow().tap(KENTE_INTAKE_ID, parcelFixture(1).id, true);
+    await waitFor(() => {
+      expect(actsNow().requestFailed).toBe(false);
+    });
+
+    await actsNow().tap(KENTE_INTAKE_ID, parcelFixture(1).id, true);
+    expect(actsNow().requestFailed).toBe(false);
+  });
+
   // Break caught: a lock that refuses the officer (its words) stopping the tap: the lock is advisory.
   it('goes on with the tap when the lock could not be taken', async () => {
     open({

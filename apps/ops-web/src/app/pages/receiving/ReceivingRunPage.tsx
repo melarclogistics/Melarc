@@ -3,6 +3,7 @@ import { useLayoutEffect, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 
 import { PageHeading } from '../../../components/PageHeading';
+import { ConnectionBanner } from '../../../components/ui/connection-banner/ConnectionBanner';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
@@ -100,6 +101,10 @@ function Run({
   const updatedAt =
     query.dataUpdatedAt > 0 ? formatClock(new Date(query.dataUpdatedAt).toISOString()) : undefined;
   const at = formatClock(page.handed_over_at) ?? '';
+  // A refresh that did not reach the platform is told as a lost connection too: the page may still say it is online (a signal that carries nothing).
+  const readFailed =
+    query.isRefetchError &&
+    problemOf(query.error, { operation: 'getReceivingRun' }).kind === 'unavailable';
 
   return (
     <>
@@ -116,6 +121,7 @@ function Run({
           },
         }}
       />
+      <ConnectionBanner requestFailed={acts.requestFailed || readFailed} />
       {mayCount ? null : (
         <p className="receiving-note">{WORDS.run.lookOnly(cannotText('hub.intake.count'))}</p>
       )}

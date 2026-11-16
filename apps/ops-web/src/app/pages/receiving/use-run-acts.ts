@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import { useApiClient } from '../../../platform/api/api-client';
 import { applyParcelAnswer } from '../../../platform/hub-receiving/apply-parcel-answer';
@@ -32,6 +32,11 @@ export interface RunActs {
   readonly ensureLock: (intakeId: string) => Promise<void>;
   /** What the lock of a vendor says, or nothing for a vendor the officer has not acted on in this page. */
   readonly lockStatus: (intakeId: string) => LockStatus | undefined;
+  /**
+   * The last tap did not reach the platform (the network, not a refusal), and none has got through since: the page says that what the officer does now is not saved. A tap that is answered, in any way, says the
+   * connection is there.
+   */
+  readonly requestFailed: boolean;
 }
 
 /**
@@ -51,6 +56,7 @@ export function useRunActs(manifestId: string, readAgain: () => unknown): RunAct
   useLayoutEffect(() => {
     latest.current = readAgain;
   });
+  const [requestFailed, setRequestFailed] = useState(false);
   /** The taps of the page, one after the other. */
   const chain = useRef<Promise<unknown>>(Promise.resolve());
   const { ensure } = locks;
@@ -61,6 +67,7 @@ export function useRunActs(manifestId: string, readAgain: () => unknown): RunAct
         await ensure(intakeId);
         try {
           const answer = await recordParcelArrival(client, parcelId, arrived);
+          setRequestFailed(false);
           // The answer is merged into the page as it is now and written at once, so that a read that began before this tap (answered with the vendor as it was) is dropped and cannot write over it.
           const page = queryClient.getQueryData<RunPageView>(runKey(manifestId));
           if (page !== undefined) {
@@ -75,6 +82,8 @@ export function useRunActs(manifestId: string, readAgain: () => unknown): RunAct
           // The answer is for a session that has gone: nothing is said to the person who replaced the one it was for.
           if (error instanceof StaleSessionError) return {};
           const problem = problemOf(error, { operation: 'recordParcelArrival' });
+          // A refusal is an answer, and says the connection is there; a request that never arrived says it is not.
+          setRequestFailed(problem.kind === 'unavailable');
           if (problem.kind === 'conflict') void latest.current();
           return { problem };
         }
@@ -85,5 +94,5 @@ export function useRunActs(manifestId: string, readAgain: () => unknown): RunAct
     [client, queryClient, manifestId, ensure],
   );
 
-  return { tap, ensureLock: ensure, lockStatus: locks.status };
+  return { tap, ensureLock: ensure, lockStatus: locks.status, requestFailed };
 }

@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
@@ -729,6 +730,66 @@ describe('an officer who can look at the run and cannot check parcels in', () =>
       }),
     ).toBeNull();
     expect(screen.queryByRole('button', { name: 'Add a parcel not on the list' })).toBeNull();
+  });
+});
+
+describe('a lost connection', () => {
+  const WORDS = 'No connection. What you do now is not saved.';
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Break caught: a page that says nothing when the tablet loses its connection, so that the officer goes on checking parcels in and none of it is saved; or one that is blocked by it.
+  it('says what the officer does now is not saved while the browser says it is offline, and says nothing when it is back', async () => {
+    open();
+    await kente();
+    expect(screen.queryByText(WORDS)).toBeNull();
+
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+    expect(await screen.findByText(WORDS)).toBeVisible();
+    // The page is not blocked by it.
+    expect(screen.getByRole('button', { name: 'All 3 here' })).toBeEnabled();
+
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(WORDS)).toBeNull();
+    });
+  });
+
+  // Break caught: a tap that did not reach the platform drawn as nothing (the browser may say it is online while the signal carries nothing).
+  it('says it too when a tap does not arrive although the browser says it is online, and goes when one gets through', async () => {
+    let attempt = 0;
+    const { user } = open({
+      handlers: {
+        [lockOf(KENTE_INTAKE_ID)]: () => json(200, checkInFixture([parcelFixture(1)])),
+        [arrivalOf(parcelFixture(1).id)]: () => {
+          attempt += 1;
+          return attempt === 1
+            ? Promise.reject(new TypeError('Failed to fetch'))
+            : tapAnswer([arrivedParcel(1), parcelFixture(2), parcelFixture(3)], 0);
+        },
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'The count is different' }));
+    await user.click(screen.getByRole('button', { name: 'Parcel 1' }));
+
+    expect(await screen.findByText(WORDS)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Parcel 1' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Parcel 1' }));
+    await waitFor(() => {
+      expect(screen.queryByText(WORDS)).toBeNull();
+    });
+    expect(await screen.findByRole('button', { name: 'Parcel 1, Checked in' })).toBeVisible();
   });
 });
 
