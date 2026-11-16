@@ -104,7 +104,7 @@ describe('the short counts: what the list shows', () => {
       await screen.findByRole('heading', { level: 1, name: 'Count differences' }),
     ).toBeVisible();
     const row = within((await screen.findByText('ACC-PR-7KQ2MZ')).closest('tr') as HTMLElement);
-    expect(row.getByText('3 counted of 5 declared')).toBeVisible();
+    expect(row.getByText('3 counted of 5 booked')).toBeVisible();
     expect(row.getByText('Short by 2')).toBeVisible();
     expect(row.getByText('Some parcels were not ready')).toBeVisible();
     expect(row.getByText('The rest were still being packed.')).toBeVisible();
@@ -119,7 +119,7 @@ describe('the short counts: what the list shows', () => {
     open(() => page([over, flagged]));
 
     const row = within((await screen.findByText('ACC-PR-4HT8WE')).closest('tr') as HTMLElement);
-    expect(row.getByText('6 counted of 4 declared')).toBeVisible();
+    expect(row.getByText('6 counted of 4 booked')).toBeVisible();
     expect(row.getByText('Over by 2')).toBeVisible();
     expect(row.queryByText(/Short by/)).toBeNull();
     expect(row.getByText('Vendor added parcels')).toBeVisible();
@@ -169,6 +169,73 @@ describe('the short counts: what the list shows', () => {
     await table();
 
     expect(queryOf().get('open')).toBe(value);
+  });
+});
+
+// Run D, D-D5: the list holds the short counts and the over counts, and the kind of difference is a filter of it, in the address like the others (the contract's `variance`, SHORT or OVER).
+describe('the kind of difference', () => {
+  // Break caught: a filter the address holds and the list does not ask for, or one drawn with no word of it on the screen.
+  it('asks for the kind the address holds, and says it in a chip', async () => {
+    open(() => page([flagged]), KEYS, '/collection-shortfalls?variance=SHORT');
+    await table();
+
+    expect(queryOf().get('variance')).toBe('SHORT');
+    expect(screen.getByText('Kind of difference: Short')).toBeVisible();
+  });
+
+  it('asks for no kind when the address holds none, so that short and over come together', async () => {
+    open();
+    await table();
+
+    expect(queryOf().has('variance')).toBe(false);
+    expect(screen.queryByText(/Kind of difference:/)).toBeNull();
+  });
+
+  // Break caught: a kind chosen that is not put in the address (so that a reload or a shared link loses it), or one that cannot be taken off.
+  it('chooses a kind in the filter, puts it in the address, and takes it off with its chip', async () => {
+    const { user, router } = open();
+    await table();
+
+    await user.click(screen.getByRole('button', { name: 'Filter' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Kind of difference' }), 'OVER');
+
+    await waitFor(() => {
+      expect(queryOf().get('variance')).toBe('OVER');
+    });
+    expect(router.state.location.search).toContain('variance=OVER');
+    expect(await screen.findByText('Kind of difference: Over')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: /Remove.*Kind of difference: Over/ }));
+    await waitFor(() => {
+      expect(queryOf().has('variance')).toBe(false);
+    });
+    expect(router.state.location.search).not.toContain('variance');
+  });
+
+  // Break caught: a value in the address that the contract does not have sent to the API, which refuses it, or drawn as a chip.
+  it('ignores a kind the contract does not have', async () => {
+    open(() => page([flagged]), KEYS, '/collection-shortfalls?variance=BOTH');
+    await table();
+
+    expect(queryOf().has('variance')).toBe(false);
+    expect(screen.queryByText(/Kind of difference:/)).toBeNull();
+  });
+
+  // Break caught: a view that forgets the kind (the filters are the list's together), or a kind that forgets the view.
+  it('keeps the kind when the view changes, and the view when the kind does', async () => {
+    const { user, router } = open(
+      () => page([flagged]),
+      KEYS,
+      '/collection-shortfalls?variance=SHORT',
+    );
+    await table();
+
+    await user.click(screen.getByRole('tab', { name: 'Ended runs' }));
+    await waitFor(() => {
+      expect(queryOf().get('open')).toBe('false');
+    });
+    expect(queryOf().get('variance')).toBe('SHORT');
+    expect(router.state.location.search).toContain('variance=SHORT');
   });
 });
 

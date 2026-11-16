@@ -315,7 +315,7 @@ test.describe('the short counts and the collection disputes', () => {
     const row = table(page, 'Count differences')
       .getByRole('row')
       .filter({ hasText: 'ACC-PR-7KQ2MZ' });
-    await expect(row).toContainText('3 counted of 5 declared');
+    await expect(row).toContainText('3 counted of 5 booked');
     await expect(row).toContainText('Short by 2');
     await expect(
       page.getByText(/Nothing marks a count difference as read or worked yet/),
@@ -329,6 +329,32 @@ test.describe('the short counts and the collection disputes', () => {
     expect(await page.getByRole('main').innerText()).not.toMatch(
       /GH₵|\bfee\b|\bprice\b|\btotal\b/i,
     );
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (D-D5): a kind of difference chosen that is not put in the address, not sent to the API as its own filter, or not told on the screen.
+  test('filter the kind of difference, in the address and as the API’s own filter, and say it in a chip', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, SHORTFALLS);
+    const row = table(page, 'Count differences')
+      .getByRole('row')
+      .filter({ hasText: 'ACC-PR-7KQ2MZ' });
+    await expect(row).toBeVisible();
+
+    await page.getByRole('button', { name: 'Filter' }).click();
+    await page.getByRole('combobox', { name: 'Kind of difference' }).selectOption('OVER');
+
+    await expect(page.getByText('Kind of difference: Over')).toBeVisible();
+    await expect(page).toHaveURL(/variance=OVER/);
+    await expect(row).toHaveCount(0);
+    expect(
+      api.calls.some(
+        (call) =>
+          call.path.endsWith('/collection-shortfalls') && call.search.includes('variance=OVER'),
+      ),
+    ).toBe(true);
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });

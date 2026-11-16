@@ -3,7 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
+import { Field } from '../../../components/ui/field/Field';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
+import { Select } from '../../../components/ui/select/Select';
 import { QueuePager } from '../../../components/ui/templates/QueuePager';
 import {
   QueueWorkspace,
@@ -85,6 +87,19 @@ export interface WorkListProps<Item> {
     readonly minLength: number;
     readonly maxLength: number;
   };
+  /**
+   * One filter beside the view and the lookup, in the address under a name of its own and in the filter bar (a chip when it is applied, a choice in the popover of the *Filter* button): the count differences' kind,
+   * SHORT or OVER (the contract's `variance`, D-D5). A value in the address that is none of the options is no filter. **The server filters** it too: the list's own hook sends it.
+   */
+  readonly choice?: {
+    /** The parameter of the address. */
+    readonly param: string;
+    /** What the filter is called: the label of its field and the start of its chip ("Kind of difference: Over"). */
+    readonly label: string;
+    /** The option that takes the filter off. */
+    readonly allLabel: string;
+    readonly options: readonly { readonly id: string; readonly label: string }[];
+  };
   /** A refusal of the list, in the words of the screen: what the account cannot do, or the hub it does not work in. */
   readonly refusal: (problem: Problem) => string;
   readonly useList: (params: WorkListParams) => UseQueryResult<WorkListPageView<Item>>;
@@ -116,6 +131,7 @@ export function WorkList<Item>({
   refusal,
   hubFilter = true,
   lookup,
+  choice,
   useList,
   rowId,
   table,
@@ -129,17 +145,24 @@ export function WorkList<Item>({
   // The lookup the address holds, if the list has one and the text is long enough for the server to take: a shorter text in the address is no search.
   const typed = lookup === undefined ? '' : (params.get('q') ?? '').trim();
   const q = lookup !== undefined && typed.length >= lookup.minLength ? typed : '';
+  // The page's one extra filter, as the address holds it: only one of its options is a filter.
+  const picked =
+    choice === undefined
+      ? undefined
+      : choice.options.find((option) => option.id === params.get(choice.param));
+  const [filterOpen, setFilterOpen] = useState(false);
   // The hub the switcher chose (task C3) is a filter of the list like the view: another hub or another view starts again at the first page.
   const chosenHub = useActiveHub();
   const hubId = hubFilter ? chosenHub : undefined;
   const { hub: chosen, showAllHubs } = useHubScope();
   const hub = hubFilter ? chosen : undefined;
-  const signature = `${name}|${current.id}|${hubId ?? ''}|${q}`;
+  const signature = `${name}|${current.id}|${hubId ?? ''}|${q}|${picked?.id ?? ''}`;
   const paging = useQueuePaging(signature);
   const list = useList({
     ...(current.open === undefined ? {} : { open: current.open }),
     view: current.id,
     ...(q === '' ? {} : { q }),
+    ...(picked === undefined ? {} : { choice: picked.id }),
     ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
@@ -201,8 +224,19 @@ export function WorkList<Item>({
     setNotice(undefined);
     const next = new URLSearchParams();
     if (id !== first.id) next.set('view', id);
-    // The search is a filter like the view: another view keeps it.
+    // The search and the kind are filters like the view: another view keeps them.
     if (q !== '') next.set('q', q);
+    if (choice !== undefined && picked !== undefined) next.set(choice.param, picked.id);
+    setParams(next, { replace: true });
+  }
+
+  /** Applies the page's one extra filter (a choice in the popover, or its chip taken off): the others in the address stay, and the list starts again at its first page. */
+  function applyChoice(id: string): void {
+    if (choice === undefined) return;
+    setNotice(undefined);
+    const next = new URLSearchParams(params);
+    if (id === '') next.delete(choice.param);
+    else next.set(choice.param, id);
     setParams(next, { replace: true });
   }
 
@@ -347,21 +381,55 @@ export function WorkList<Item>({
           onValueChange: changeView,
           tabs: views.map((view) => ({ id: view.id, label: view.label })),
         }}
-        {...(lookup === undefined
+        {...(lookup === undefined && choice === undefined
           ? {}
           : {
               filters: {
-                label: 'Search',
-                search: {
-                  label: lookup.label,
-                  value: q,
-                  onSearch: applyLookup,
-                  maxLength: lookup.maxLength,
+                label: lookup === undefined ? `Filter the ${noun.plural}` : 'Search',
+                ...(lookup === undefined
+                  ? {}
+                  : {
+                      search: {
+                        label: lookup.label,
+                        value: q,
+                        onSearch: applyLookup,
+                        maxLength: lookup.maxLength,
+                      },
+                    }),
+                chips: [
+                  ...(q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }]),
+                  ...(choice === undefined || picked === undefined
+                    ? []
+                    : [{ id: 'choice', label: `${choice.label}: ${picked.label}` }]),
+                ],
+                onRemove: (chip: string) => {
+                  if (chip === 'choice') applyChoice('');
+                  else applyLookup('');
                 },
-                chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
-                onRemove: () => {
-                  applyLookup('');
-                },
+                ...(choice === undefined
+                  ? {}
+                  : {
+                      filterOpen,
+                      onFilterOpenChange: setFilterOpen,
+                      filterPanel: (
+                        <Field label={choice.label}>
+                          <Select
+                            value={picked?.id ?? ''}
+                            onChange={(event) => {
+                              applyChoice(event.target.value);
+                              setFilterOpen(false);
+                            }}
+                          >
+                            <option value="">{choice.allLabel}</option>
+                            {choice.options.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                      ),
+                    }),
               },
             })}
         {...(banner === undefined ? {} : { notice: banner })}

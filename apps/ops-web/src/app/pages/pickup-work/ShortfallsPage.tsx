@@ -19,7 +19,7 @@ import { hubNameOf } from '../staff/staff-presentation';
 import {
   countDifferenceLabel,
   countDifferenceText,
-  shortCountText,
+  countedOfBookedText,
   stopPathOf,
 } from './pickup-work-presentation';
 import { WorkList, type WorkView } from './WorkList';
@@ -45,6 +45,17 @@ const VIEWS: readonly [WorkView, ...WorkView[]] = [
   },
 ];
 
+/** The kind of difference, a filter of the list in the address (`variance`): the contract's two, and the way to take it off. */
+const KINDS = {
+  param: 'variance',
+  label: 'Kind of difference',
+  allLabel: 'Short and over',
+  options: [
+    { id: 'SHORT', label: 'Short' },
+    { id: 'OVER', label: 'Over' },
+  ],
+} as const;
+
 const refusalWords = (problem: Problem): string =>
   refusalText(problem.forbidden, 'pickup.handshake.override', { of: 'count differences' });
 
@@ -59,7 +70,7 @@ function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly 
       head={<StatusBadge status={item.run_state} map={MANIFEST_STATE_MAP} />}
       lead={item.sender_name}
       facts={[
-        { label: 'Counted', value: shortCountText(item.declared_count, item.collected_count) },
+        { label: 'Counted', value: countedOfBookedText(item.declared_count, item.collected_count) },
         { label: countDifferenceLabel(item.variance), value: String(item.difference_count) },
         { label: 'Reason', value: item.reason.label },
         ...(item.note === null ? [] : [{ label: 'Rider’s note', value: item.note }]),
@@ -96,7 +107,7 @@ export function ShortfallsPage() {
       kind: 'prose',
       cell: (item) => (
         <CellLines
-          first={shortCountText(item.declared_count, item.collected_count)}
+          first={countedOfBookedText(item.declared_count, item.collected_count)}
           second={countDifferenceText(item.variance, item.difference_count)}
         />
       ),
@@ -147,6 +158,7 @@ export function ShortfallsPage() {
       }}
       tableLabel="Count differences"
       refusal={refusalWords}
+      choice={KINDS}
       useList={useCollectionShortfalls}
       rowId={(item) => item.id}
       note="This list supplements the rider’s phone call and replaces nothing. Nothing marks a count difference as read or worked yet, so there is no act here."

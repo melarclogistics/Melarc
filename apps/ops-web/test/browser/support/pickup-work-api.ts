@@ -466,8 +466,12 @@ function answer(route: Route, state: PickupWorkApi, call: Call): Promise<void> {
   // The short counts and the disputes.
   if (method === 'GET' && path === '/api/v1/collection-shortfalls') {
     const open = openOf(query);
+    // The kind of difference (D-D5): the API's own filter, SHORT or OVER; left out, both.
+    const kind = query.get('variance');
     const rows = w.shortfalls.filter(
-      (item) => open === undefined || open === (item.run_state === 'IN_PROGRESS'),
+      (item) =>
+        (open === undefined || open === (item.run_state === 'IN_PROGRESS')) &&
+        (kind === null || item.variance === kind),
     );
     return route.fulfill(ok(paged(rows, query, w.pageSize)));
   }
