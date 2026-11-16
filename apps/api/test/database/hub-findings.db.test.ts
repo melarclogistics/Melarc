@@ -291,17 +291,25 @@ describe('recordIntakeCondition (AC-SLICE-001-41, -42)', () => {
     const stale = await record(receiver, id, { condition: 'OTHER' }, { etag });
     expect([stale.status, codeOf(stale)]).toEqual([409, 'STATE_CONFLICT']);
     expect((stale.json() as { details?: { rule?: string } }).details?.rule).toBe('stale');
-    // One condition: an intake whose condition is recorded is not recorded again once it is not OK.
-    const second = await record(receiver, id, {
-      condition: 'DAMAGED',
-      evidence_ids: [await storedIntakeEvidence(routes, receiver, id)],
-    });
-    expect(second.status).toBe(200);
-    const third = await record(receiver, id, { condition: 'OTHER' });
-    expect([third.status, codeOf(third)]).toEqual([409, 'STATE_CONFLICT']);
-    expect((third.json() as { details?: { rule?: string } }).details?.rule).toBe(
-      'condition_already_recorded',
+    // One condition, once: a recording of OK leaves the intake's condition as it was, and it is the finding that says it was recorded. A second recording, on a fresh token and a fresh key, is refused
+    // whatever it says (the audit of 15 November 2026, point 1).
+    const photo = await storedIntakeEvidence(routes, receiver, id);
+    for (const body of [
+      { condition: 'DAMAGED', evidence_ids: [photo] },
+      { condition: 'OTHER' },
+      { condition: 'OK' },
+    ]) {
+      const again = await record(receiver, id, body);
+      expect([again.status, codeOf(again)]).toEqual([409, 'STATE_CONFLICT']);
+      expect((again.json() as { details?: { rule?: string } }).details?.rule).toBe(
+        'condition_already_recorded',
+      );
+    }
+    expect((await rowOf(id))?.condition).toBe('OK');
+    expect(((await receiver.client.get(ONE(id))).json() as Found).condition_findings).toHaveLength(
+      1,
     );
+    expect(await events('hub.intake.condition_recorded', id)).toHaveLength(1);
     // The contract's body, and the headers it requires.
     for (const [name, body] of [
       ['no condition', {}],
@@ -336,6 +344,32 @@ describe('recordIntakeCondition (AC-SLICE-001-41, -42)', () => {
     expect(await events('hub.intake.condition_recorded', id)).toHaveLength(1);
     const another = await record(receiver, id, { condition: 'OTHER' }, { etag, key });
     expect([another.status, codeOf(another)]).toEqual([409, 'IDEMPOTENCY_KEY_CONFLICT']);
+  });
+
+  // Break caught: a receiver given another turn once Senior Ops has put the condition back to OK (the corrections are Senior Ops's): the intake then reads as it did before the recording.
+  it('refuses the receiver a second recording after Senior Ops has adjudicated the condition back to OK', async () => {
+    const { id, receiver, senior } = await counted();
+    const photo = await storedIntakeEvidence(routes, receiver, id);
+    const first = await record(receiver, id, { condition: 'DAMAGED', evidence_ids: [photo] });
+    expect(first.status).toBe(200);
+    const adjudicated = await adjudicate(senior, id, {
+      outcome: 'ACCEPTED',
+      condition: 'OK',
+      note: 'The box is sound',
+    });
+    expect(adjudicated.status).toBe(200);
+    expect(adjudicated.json()).toMatchObject({ state: 'READY_FOR_ITEMIZATION', condition: 'OK' });
+    const again = await record(receiver, id, { condition: 'OTHER' });
+    expect([again.status, codeOf(again)]).toEqual([409, 'STATE_CONFLICT']);
+    expect((again.json() as { details?: { rule?: string } }).details?.rule).toBe(
+      'condition_already_recorded',
+    );
+    expect(await rowOf(id)).toMatchObject({ state: 'READY_FOR_ITEMIZATION', condition: 'OK' });
+    expect(
+      ((await receiver.client.get(ONE(id))).json() as Found).condition_findings?.map(
+        (finding) => finding.kind,
+      ),
+    ).toEqual(['CONDITION', 'ADJUDICATION']);
   });
 
   // Break caught: a condition open to a user without hub.intake.count, to Senior Ops by their other key, to a rider, to another hub's officer or on an id that matches nothing.

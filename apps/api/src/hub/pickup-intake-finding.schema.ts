@@ -7,6 +7,7 @@ import {
   type PgTableExtraConfigValue,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -78,6 +79,11 @@ export const pickupIntakeFinding = pgTable(
       foreignColumns: [hub.id],
     }).onDelete('restrict'),
     index('pickup_intake_finding_intake_idx').on(table.pickupIntakeId, table.recordedAt),
+    // A condition is recorded once for an intake, whatever it said and whatever Senior Ops adjudicates afterwards (audit of 15 November 2026, point 1): the history is what says so, and the database holds it for every
+    // writer. The adjudications are not recordings of a condition and are as many as there are.
+    uniqueIndex('pickup_intake_finding_one_condition_idx')
+      .on(table.pickupIntakeId)
+      .where(sql`${table.kind} = 'CONDITION'`),
     check(
       'pickup_intake_finding_kind_closed',
       sql.raw(`"pickup_intake_finding"."kind" IN (${quoted(FINDING_KINDS)})`),

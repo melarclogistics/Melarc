@@ -97,7 +97,14 @@ export const BLIND_COUNT_BODY = described({
 /** An intake as `getHubIntake` and `acquireIntakeLock` answer it: the shape the intake's phase calls for, told apart by `count_phase`. */
 export const HUB_INTAKE_VIEW_SCHEMA = described({
   oneOf: [HUB_INTAKE_PRE_COUNT_SCHEMA, HUB_INTAKE_POST_COUNT_SCHEMA],
-  discriminator: { propertyName: 'count_phase' },
+  // The values on the wire, mapped to the two shapes (contract 5.107.0): without a mapping a generator takes the schemas' own names as the values, which `count_phase` never carries.
+  discriminator: {
+    propertyName: 'count_phase',
+    mapping: {
+      PRE_COUNT: '#/components/schemas/HubIntakePreCount',
+      POST_COUNT: '#/components/schemas/HubIntakePostCount',
+    },
+  },
 });
 
 /** The page of `listHubIntakes`. */

@@ -1,7 +1,7 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.106.0 with Run C, SLICE-001 Stage 6)
+# Version: see `info.version` below (5.107.0, the audit of 15 November 2026 of Run C, SLICE-001 Stage 6)
 # Date:    14 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
@@ -20,6 +20,7 @@
 #   5.104.0 C    Run C (SLICE-001, Stage 6, S1.32): the reads and the lock of the receiving side, as built: `listHubIntakes`, `getHubIntake` and `acquireIntakeLock` declare `VALIDATION_FAILED` (and `NOT_FOUND` on the two addressed by an id, each with its response), say who is served (staff of the Ops Portal, by the hubs of the grant), that the `ETag` of an intake is the digest of its facts and does not move with the advisory lock, that a hub with no usable `intake_lock_idle_ttl_minutes` offers no takeover, that the lock request is `background` activity, and that a counted intake is `HubIntakePostCount` (no shape changes)
 #   5.105.0 C    Run C (SLICE-001, Stage 6, S1.33): `submitBlindCount` says what it does as built (staff of the Ops Portal, by the hubs of the grant; the count is committed once, so a second count, a stale ETag and a missing one are STATE_CONFLICT whoever holds the lock; the database makes the comparison and the intake goes to READY_FOR_ITEMIZATION or RECONCILIATION_REQUIRED, a zero declaration always to the latter) and declares HUB_SCOPE_VIOLATION and NOT_FOUND (with its 404); `HubIntakePostCount` gains the optional `parcel_photo_ids` (the photos of the parcels counted at the door, readable only from the response to the committed count on, D-A10)
 #   5.106.0 C    Run C (SLICE-001, Stage 6, S1.34): `recordIntakeCondition` and `adjudicateDiscrepancy` say what they do as built (staff of the Ops Portal by the hubs of the grant; the condition after the count and before itemization, once, and a condition on a cleared intake sends it back to RECONCILIATION_REQUIRED; the adjudication under a key Ops Staff do not hold, with a mandatory reason, ESCALATED leaving the case open and the other outcomes clearing it; no count ever changes) and declare HUB_SCOPE_VIOLATION and NOT_FOUND (and STATE_CONFLICT and VALIDATION_FAILED on the adjudication, with their responses); `HubIntakePostCount.condition_findings` is described (no shape changes)
+#   5.107.0 C    The audit of 15 November 2026 of Run C (SLICE-001, Stage 6): the three discriminators on `count_phase` (`listHubIntakes`, `getHubIntake`, `acquireIntakeLock`) name their values by an explicit `mapping` (`PRE_COUNT`, `POST_COUNT`), so that the generated types can be satisfied (the generator took the schema names, which `count_phase` never carries, and the two shapes were `never`); `recordIntakeCondition` says that "once" is judged by the intake's findings and not by its `condition` (the behaviour of 5.106.0 was a defect: a second recording after `OK` was accepted; no shape changes)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -30,7 +31,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.106.0
+  version: 5.107.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -2188,6 +2189,9 @@ paths:
                         - $ref: '#/components/schemas/HubIntakePostCount'
                       discriminator:
                         propertyName: count_phase
+                        mapping:
+                          PRE_COUNT: '#/components/schemas/HubIntakePreCount'
+                          POST_COUNT: '#/components/schemas/HubIntakePostCount'
                   next_page_token: { type: [string, 'null'] }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
@@ -2249,6 +2253,9 @@ paths:
                   - $ref: '#/components/schemas/HubIntakePostCount'
                 discriminator:
                   propertyName: count_phase
+                  mapping:
+                    PRE_COUNT: '#/components/schemas/HubIntakePreCount'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2307,6 +2314,9 @@ paths:
                   - $ref: '#/components/schemas/HubIntakePostCount'
                 discriminator:
                   propertyName: count_phase
+                  mapping:
+                    PRE_COUNT: '#/components/schemas/HubIntakePreCount'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2431,7 +2441,13 @@ paths:
         grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that does not
         exist). `If-Match` is the `ETag` of `getHubIntake`. Recorded **after the count and before
         itemization starts, once**: an intake that is waiting for its count, one being itemized or closed,
-        and one whose condition is recorded already are `STATE_CONFLICT` (a stale `ETag` is too). The
+        and one whose condition is recorded already are `STATE_CONFLICT` (a stale `ETag` is too). **Once**
+        is judged by the intake's findings and never by its `condition`: a recording of `OK` leaves the
+        `condition` as it was, and a condition Senior Ops has put back to `OK` leaves the receiver no
+        second turn, so an intake with a finding of kind `CONDITION` is `STATE_CONFLICT` (`details.rule`
+        `condition_already_recorded`) whatever it says, and so is one whose `condition` is not `OK`
+        although no receiver recorded it (Senior Ops set it): that one stands until it is adjudicated.
+        The database holds it for every writer, two recordings at once included. The
         evidence is each one's own: the records are declared with `createEvidence` for the owner
         `PICKUP_INTAKE` (purpose `CONDITION`, under this key), each must be `STORED`, about this very
         intake and cited once (`EVIDENCE_NOT_STORED` otherwise). `OK` is a finding and changes nothing;

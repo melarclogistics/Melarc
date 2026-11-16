@@ -1748,3 +1748,24 @@ describe('pickup and fleet meet only through ports', () => {
     }
   });
 });
+
+describe('the process entry point', () => {
+  // Break caught: the application's module graph loaded before the configuration is judged, which makes a refused start cost the whole load (about two seconds of processor time, and
+  // many times that on a loaded machine) for code it never runs. Found when the refusal of a production start with the capture adapter ran past its 20 seconds with no output at all, in a
+  // run that shared the machine with the browser and database suites. The entry point imports the three modules a refusal needs, and loads the rest once the configuration is valid.
+  it('imports statically only what judging the configuration needs, and loads the application after it', () => {
+    const main = readFileSync(join(import.meta.dirname, 'main.ts'), 'utf8');
+    const staticImports = [...main.matchAll(/^import (?!type )[^;]*?from '([^']+)';/gm)].map(
+      (found) => found[1],
+    );
+    expect(staticImports).toEqual([
+      './platform/config/load-config.js',
+      './platform/config/report-config-problems.js',
+      './platform/logging/redaction.js',
+    ]);
+    const judged = main.indexOf('loadConfig(process.env)');
+    const loaded = main.indexOf("import('./app.module.js')");
+    expect(judged).toBeGreaterThan(-1);
+    expect(loaded).toBeGreaterThan(judged);
+  });
+});

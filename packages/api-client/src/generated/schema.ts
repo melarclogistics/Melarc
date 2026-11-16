@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.106.0
- *   SHA-256 5f6dbf8009c01ae56048a234792df4d18f4ecde96101ad3dd61fb09fc3d669cb (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.107.0
+ *   SHA-256 d479ad8036174fa8d99040394c2b49cab9068129ef4031ef77669525ff8893ce (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1404,7 +1404,13 @@ export interface paths {
          *     grant (`HUB_SCOPE_VIOLATION` for an intake outside them, `NOT_FOUND` for one that does not
          *     exist). `If-Match` is the `ETag` of `getHubIntake`. Recorded **after the count and before
          *     itemization starts, once**: an intake that is waiting for its count, one being itemized or closed,
-         *     and one whose condition is recorded already are `STATE_CONFLICT` (a stale `ETag` is too). The
+         *     and one whose condition is recorded already are `STATE_CONFLICT` (a stale `ETag` is too). **Once**
+         *     is judged by the intake's findings and never by its `condition`: a recording of `OK` leaves the
+         *     `condition` as it was, and a condition Senior Ops has put back to `OK` leaves the receiver no
+         *     second turn, so an intake with a finding of kind `CONDITION` is `STATE_CONFLICT` (`details.rule`
+         *     `condition_already_recorded`) whatever it says, and so is one whose `condition` is not `OK`
+         *     although no receiver recorded it (Senior Ops set it): that one stands until it is adjudicated.
+         *     The database holds it for every writer, two recordings at once included. The
          *     evidence is each one's own: the records are declared with `createEvidence` for the owner
          *     `PICKUP_INTAKE` (purpose `CONDITION`, under this key), each must be `STORED`, about this very
          *     intake and cited once (`EVIDENCE_NOT_STORED` otherwise). `OK` is a finding and changes nothing;
@@ -9784,7 +9790,7 @@ export interface components {
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            count_phase: "HubIntakePreCount";
+            count_phase: "PRE_COUNT";
         };
         HubIntakePostCount: components["schemas"]["HubIntakeBase"] & {
             /** @constant */
@@ -9841,7 +9847,7 @@ export interface components {
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            count_phase: "HubIntakePostCount";
+            count_phase: "POST_COUNT";
         };
         /**
          * @description **No price and no destination zone.** Both are server-derived (§35.6.6, §42.3). A client

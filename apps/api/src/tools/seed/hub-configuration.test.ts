@@ -203,7 +203,6 @@ describe('the launch hub’s settings (settings.md sections 7.2 and 7.3)', () =>
     ['booking_cutoff_time', '10:00'],
     ['MELARC_MAX_PICKUP_ATTEMPTS', 3],
     ['stale_failure_backstop_hours', 24],
-    ['intake_parcel_cap', 100],
     ['intake_lock_idle_ttl_minutes', 15],
     ['pickup_service_window_start', '11:00'],
     ['pickup_service_window_end', '16:00'],
@@ -211,6 +210,12 @@ describe('the launch hub’s settings (settings.md sections 7.2 and 7.3)', () =>
   ])('seeds %s at the value the document states', (key, expected) => {
     expect(find(key)?.value).toBe(expected);
     expect(valueCell(key)).toContain(String(expected));
+  });
+
+  // Break caught: a limit on the parcels of an intake that is seeded or documented again (the Product Owner removed intake_parcel_cap on 15 November 2026, OB-S1-97).
+  it('has no limit on the parcels of an intake, in the seed or in the document', () => {
+    expect(HUB_SETTINGS.map((seed) => seed.key)).not.toContain('intake_parcel_cap');
+    expect(HUB_ROWS.map((row) => row.key)).not.toContain('intake_parcel_cap');
   });
 
   it('seeds auto_reschedule as off, as the document states', () => {

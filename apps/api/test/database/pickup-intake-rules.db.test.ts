@@ -1801,6 +1801,98 @@ describe('the receiver’s condition (S1.34): what the database holds for every 
     expect(messageOf(second)).toMatch(/recorded once/);
   });
 
+  // Break caught: "once" judged by what the intake's condition is now and not by what was recorded (the audit of 15 November 2026, point 1): a recording of OK leaves the condition OK, so a second recording,
+  // of anything, was taken as the first. The history of the findings is what says it was recorded.
+  it('refuses a second recording after OK: the intake’s condition did not change, the finding is what says it was recorded', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const id = done.intakes[0] ?? '';
+    await countedAs(id, 'READY');
+    const receiver = staff(COUNT, [HUB_A]);
+    const photo = await intakeEvidence(id, { by: receiver.principalId });
+    expect(await attempt(receiver, recordCondition(id, 'OK', [], null))).toEqual({
+      rows: [{ previous_state: 'READY_FOR_ITEMIZATION', resulting_state: 'READY_FOR_ITEMIZATION' }],
+    });
+    for (const [condition, evidence] of [
+      ['OK', []],
+      ['OTHER', []],
+      ['DAMAGED', [photo]],
+    ] as const) {
+      const second = await attempt(receiver, recordCondition(id, condition, evidence));
+      expect(codeOf(second), condition).toBe('23514');
+      expect(messageOf(second), condition).toMatch(/recorded once/);
+    }
+    expect(await countOf(id)).toMatchObject({ state: 'READY_FOR_ITEMIZATION', condition: 'OK' });
+    expect(await findingsOf(id)).toHaveLength(1);
+  });
+
+  // Break caught: a receiver given another turn when Senior Ops adjudicates the condition back to OK (the corrections are Senior Ops's): the intake looks as it did before any recording, but the receiver has recorded.
+  it('refuses the receiver a recording after Senior Ops has adjudicated the condition back to OK', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const id = done.intakes[0] ?? '';
+    await countedAs(id, 'READY');
+    const receiver = staff(COUNT, [HUB_A]);
+    const photo = await intakeEvidence(id, { by: receiver.principalId });
+    expect(await attempt(receiver, recordCondition(id, 'DAMAGED', [photo]))).toMatchObject({
+      rows: [{ resulting_state: 'RECONCILIATION_REQUIRED' }],
+    });
+    expect(
+      await attempt(
+        staff(OSD, [HUB_A]),
+        adjudicate(id, 'ACCEPTED', { condition: 'OK', note: 'The box is sound' }),
+      ),
+    ).toEqual({
+      rows: [
+        { previous_state: 'RECONCILIATION_REQUIRED', resulting_state: 'READY_FOR_ITEMIZATION' },
+      ],
+    });
+    expect(await countOf(id)).toMatchObject({ state: 'READY_FOR_ITEMIZATION', condition: 'OK' });
+    const again = await attempt(receiver, recordCondition(id, 'OTHER', []));
+    expect(codeOf(again)).toBe('23514');
+    expect(messageOf(again)).toMatch(/recorded once/);
+    expect(await countOf(id)).toMatchObject({ state: 'READY_FOR_ITEMIZATION', condition: 'OK' });
+    expect((await findingsOf(id)).map((finding) => finding.kind)).toEqual([
+      'CONDITION',
+      'ADJUDICATION',
+    ]);
+  });
+
+  // Break caught: two recordings that both pass the check (the second reads before the first has written): exactly one wins and one finding is kept, whatever the order.
+  it('keeps one recording when two receivers record at once', async () => {
+    const done = await handedOver(['COLLECTED', 'COLLECTED', 'COLLECTED'], HUB_A, [3, 3, 3]);
+    for (const intake of done.intakes) {
+      await countedAs(intake, 'READY');
+      const receivers = [staff(COUNT, [HUB_A]), staff(COUNT, [HUB_A])] as const;
+      const answers = await Promise.all(
+        receivers.map((receiver) => attempt(receiver, recordCondition(intake, 'OK', [], null))),
+      );
+      expect(answers.filter((answer) => 'rows' in answer)).toHaveLength(1);
+      const refused = answers.filter((answer) => !('rows' in answer));
+      expect(refused.map(codeOf)).toEqual(['23514']);
+      expect(messageOf(refused[0] ?? { rows: [] })).toMatch(/recorded once/);
+      expect(await findingsOf(intake)).toHaveLength(1);
+    }
+  });
+
+  // Break caught: a rule that only the operation holds. A second CONDITION finding of one intake is refused to every writer, the owner included (a unique index, not a check in a function).
+  it('holds one condition finding for each intake against any writer, the administrator included', async () => {
+    const done = await handedOver(['COLLECTED'], HUB_A, [3]);
+    const id = done.intakes[0] ?? '';
+    await countedAs(id, 'READY');
+    expect(
+      'rows' in (await attempt(staff(COUNT, [HUB_A]), recordCondition(id, 'OK', [], null))),
+    ).toBe(true);
+    const insert = `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by)
+                    values (gen_random_uuid(), $1, $2, 'CONDITION', 'OK', gen_random_uuid())`;
+    await expect(routes.admin.query(insert, [id, HUB_A])).rejects.toMatchObject({ code: '23505' });
+    expect(await findingsOf(id)).toHaveLength(1);
+    // An adjudication is not a recording of a condition: any number of them may follow it.
+    const adjudication = `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, outcome, note, recorded_by)
+                          values (gen_random_uuid(), $1, $2, 'ADJUDICATION', null, 'ESCALATED', 'looked at', gen_random_uuid())`;
+    await routes.admin.query(adjudication, [id, HUB_A]);
+    await routes.admin.query(adjudication, [id, HUB_A]);
+    expect(await findingsOf(id)).toHaveLength(3);
+  });
+
   // Break caught: a damaged or tampered condition recorded with no evidence, with evidence that is not stored, that is another intake's, of another purpose, or one that cites nothing that exists.
   it('refuses damage or tampering whose evidence is missing, not stored, another intake’s, of another purpose, or made up', async () => {
     const done = await handedOver(
@@ -2014,23 +2106,21 @@ describe('the findings and the edge a condition needs, for every writer (S1.34)'
     const done = await handedOver(['COLLECTED', 'COLLECTED'], HUB_A, [3, 3]);
     const [id, waiting] = [done.intakes[0] ?? '', done.intakes[1] ?? ''];
     await countedAs(id, 'READY');
-    const receiver = staff(COUNT, [HUB_A]);
-    expect('rows' in (await attempt(receiver, recordCondition(id, 'OK', [], null)))).toBe(true);
+    // Written by the administrator with a hub and a moment of its own choosing: the guard gives the intake's hub and the database's moment. It is the intake's one CONDITION finding (a second is the
+    // unique index's to refuse: 0097), so everything after it is judged against it.
+    const written = await adminRefusal([
+      `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by, recorded_at) values (gen_random_uuid(), '${id}', '${HUB_B}', 'CONDITION', 'OTHER', gen_random_uuid(), now() - interval '3 hours')`,
+    ]);
+    expect(written).toBeUndefined();
+    const mine = (await findingsOf(id)).find((finding) => finding.condition === 'OTHER');
+    expect(mine?.responsible_hub_id).toBe(HUB_A);
+    expect(secondsSince(mine?.recorded_at ?? null)).toBeLessThan(120);
     for (const statement of [
       `update pickup_intake_finding set note = 'rewritten' where pickup_intake_id = '${id}'`,
       `delete from pickup_intake_finding where pickup_intake_id = '${id}'`,
     ]) {
       expect((await adminRefusal([statement]))?.code, statement).toBe('23514');
     }
-    // Written by the administrator with a hub and a moment of its own choosing: the guard gives the intake's hub and the database's moment.
-    const written = await adminRefusal([
-      `insert into pickup_intake_finding (id, pickup_intake_id, responsible_hub_id, kind, condition, recorded_by, recorded_at) values (gen_random_uuid(), '${id}', '${HUB_B}', 'CONDITION', 'OTHER', gen_random_uuid(), now() - interval '3 hours')`,
-    ]);
-    expect(written).toBeUndefined();
-    // The one the administrator wrote (a condition of OTHER: the receiver's own recording above was OK), not the latest by the moment, which is what the writer gave.
-    const mine = (await findingsOf(id)).find((finding) => finding.condition === 'OTHER');
-    expect(mine?.responsible_hub_id).toBe(HUB_A);
-    expect(secondsSince(mine?.recorded_at ?? null)).toBeLessThan(120);
     // What each kind is: an adjudication with no outcome or no reason, a condition with an outcome or none, damage with no evidence, a kind that is none.
     for (const [name, columns, values] of [
       ['an adjudication with no outcome', 'kind, note', `'ADJUDICATION', 'why'`],

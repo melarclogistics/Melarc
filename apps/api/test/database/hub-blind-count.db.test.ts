@@ -220,6 +220,64 @@ describe('submitBlindCount: the count, and the comparison it reveals', () => {
   });
 });
 
+describe('submitBlindCount: an intake has no limit on its parcels (OB-S1-97: the Product Owner removed intake_parcel_cap on 15 November 2026)', () => {
+  // Break caught: a limit on the parcels of an intake that comes back as a business rule, at 100 or at any other number (a handover or a count refused or clamped), a comparison that is wrong
+  // for a large number, a next state that ignores a variance at that size, or a declaration shown before the count because the number is large. The sizes are spread across scales on purpose (the
+  // old limit's neighbours, thousands) and none of them is the rule: the system takes what was counted. A match and a discrepancy in each direction.
+  it.each([
+    ['101 declared and 101 counted', 101, 101, 'MATCH', 0, 'READY_FOR_ITEMIZATION'],
+    ['4000 declared and 4000 counted', 4000, 4000, 'MATCH', 0, 'READY_FOR_ITEMIZATION'],
+    ['2500 declared and 1999 counted', 2500, 1999, 'SHORT', -501, 'RECONCILIATION_REQUIRED'],
+    ['150 declared and 1234 counted', 150, 1234, 'OVER', 1084, 'RECONCILIATION_REQUIRED'],
+  ] as const)(
+    'takes the handover and the count, and compares them as any other: %s',
+    async (_name, declared, physical, variance, difference, state) => {
+      const ops = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
+      // The rider counted what it declares here (the handover route answers 201: a declaration of this size is taken).
+      const done = await handOver(routes, vendor, days, {
+        collected: [declared],
+        declared: [declared],
+      });
+      const id = done.intakes[0]?.id ?? '';
+      expect(done.intakes[0]?.state).toBe('AWAITING_COUNT');
+      expect(keysOf(done.intakes)).not.toContain('rider_declared_count');
+      const stored = await routes.rows<{ rider_declared_count: number }>(
+        `select rider_declared_count from pickup_intake where id = $1`,
+        [id],
+      );
+      expect(stored[0]?.rider_declared_count).toBe(declared);
+
+      // Blind, whatever the size: neither the read of the intake nor the list shows the declaration before the count.
+      const read = await ops.client.get(ONE(id));
+      expect(keysOf(read.json())).not.toContain('rider_declared_count');
+      const list = await ops.client.get(`${INTAKES}?state=AWAITING_COUNT&page_size=100`);
+      expect(list.status).toBe(200);
+      expect(keysOf(list.json())).not.toContain('rider_declared_count');
+
+      const response = await count(ops, id, { physical_count: physical });
+      expect(response.status).toBe(200);
+      expect(response.json()).toMatchObject({
+        id,
+        state,
+        count_phase: 'POST_COUNT',
+        rider_declared_count: declared,
+        physical_count: physical,
+        count_variance: variance,
+        count_difference: difference,
+        condition: 'OK',
+      });
+      expect(await rowOf(id)).toMatchObject({
+        state,
+        physical_count: physical,
+        count_variance: variance,
+        count_difference: difference,
+        counted_by: ops.identity.id,
+      });
+      expect((await events('hub.intake.counted', id)).length).toBe(1);
+    },
+  );
+});
+
 describe('submitBlindCount: a count is committed once, and the lock is not a guard (AC-SLICE-001-43)', () => {
   // Break caught: a count that waits for the lock (B, who does not hold it, is refused), one that lets both receivers count (the second replaces the first), or one whose second receiver is
   // told anything but STATE_CONFLICT. B counts while A holds the lock; A's count, with the ETag A read, is the second.

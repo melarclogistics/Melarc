@@ -112,7 +112,7 @@ function refusalOf(error: unknown): ApiException | undefined {
  * - **A finding explains a discrepancy; it never changes a count.** The declared count, the hub count and the variance survive every finding unchanged: the database writes the finding and moves the intake
  *   in one change (`melarc.record_intake_condition`, `melarc.adjudicate_discrepancy`, migration \`0096\`), and the guard of the table holds that no count moves.
  * - **The condition is the receiver's, and independent of the count and of the dispute** (§22.5, §35.5.4): recordable after the count and before itemization starts, on a count that matched as on one that did
- *   not, once. \`DAMAGED\` and \`TAMPERED\` carry stored evidence of the intake (\`REASON_REQUIRED\` when none is attached, \`EVIDENCE_NOT_STORED\` for a record that is not stored or is not this intake's), and route the case to
+ *   not, **once for an intake**: the finding history says so, never what the condition is now (a recording of OK leaves it as it was, and Senior Ops may put it back to OK, which gives the receiver no second turn). \`DAMAGED\` and \`TAMPERED\` carry stored evidence of the intake (\`REASON_REQUIRED\` when none is attached, \`EVIDENCE_NOT_STORED\` for a record that is not stored or is not this intake's), and route the case to
  *   Senior Ops: an intake cleared for itemization goes back to reconciliation (OB-S1-98), and \`hub.osd.opened\` says so. \`OK\` is a finding and moves nothing.
  * - **The adjudication is Senior Ops's** (and the Platform Admin's): the key \`hub.osd.adjudicate\` is not Ops Staff's, who are refused \`PERMISSION_DENIED\` at the guard, whatever they send. It needs a reason in words
  *   (\`REASON_REQUIRED\`; there is no reason catalogue for it, D-05) and an intake in reconciliation (\`STATE_CONFLICT\`). \`ACCEPTED\`, \`WRITTEN_OFF\` and \`VENDOR_NOTIFIED\` resolve the case and clear the intake for
@@ -191,7 +191,12 @@ export class HubIntakeFindings {
           rule: 'itemization_started',
         });
       }
-      if (row.condition !== 'OK') {
+      // Once, judged by the history under the intake's lock (the row is locked by `#lock`): a recording of OK leaves the condition as it was and an adjudication may put it back, so what the intake's
+      // condition is now cannot say whether the receiver has recorded. A condition that is not OK stands until it is adjudicated, recorded by the receiver or not. The database holds both (migration 0097).
+      const recorded = await tx.execute(
+        sql`select 1 from pickup_intake_finding where pickup_intake_id = ${id}::uuid and kind = 'CONDITION' limit 1`,
+      );
+      if (recorded.rows.length > 0 || row.condition !== 'OK') {
         throw ApiException.of(ErrorCode.StateConflict, 'A condition has been recorded', {
           rule: 'condition_already_recorded',
         });

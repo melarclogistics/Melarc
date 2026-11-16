@@ -7,6 +7,7 @@ import type { TestClient, TestResponse } from '../../src/test-support/test-clien
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { excusePhotos, photoOf } from './support/evidence-photo.js';
+import { submitHandover } from './support/handed-over.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -356,10 +357,8 @@ async function build(): Promise<World> {
   await count(runB.rider, stopAt(runB, 0), 2);
   await override(opsA, stopAt(runB, 0));
   await dispute(browserB, stopAt(runB, 0));
-  await routes.admin.query(
-    `update pickup_manifest set state = 'COMPLETED', completed_at = now() where id = $1`,
-    [runB.manifest.id],
-  );
+  // The run that collected is completed by its rider's hub handover, the real route: the database holds that the intakes of a run are exactly its collected requests (migration 0092).
+  await submitHandover(runB, [{ requestId: runB.stops[0]?.requestId ?? '', declared: 2 }]);
   await routes.admin.query(
     `update collection_dispute set state = 'RESOLVED', resolved_at = now() where pickup_stop_id = $1`,
     [stopAt(runB, 0)],

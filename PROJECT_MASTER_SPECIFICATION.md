@@ -2178,7 +2178,6 @@ Settings must be stored and changed through a controlled mechanism with:
 | `station_drop_fee` | Hub-scoped; confirmed (settings.md) | Hub Senior Ops proposes and Platform Admin approves/rejects; changes are effective-dated, apply to new Station Drop charges only, and every charge snapshots the applied value/version. |
 | `MELARC_EXPRESS_SURCHARGE` | NOT APPLICABLE IN VERSION 1 | Express service is outside Version 1 and must not create a launch charge |
 | `cod_ceiling` | SUPERSEDED / NOT APPLICABLE | Merchandise COD is not supported; the legacy setting must not govern target behaviour |
-| `intake_parcel_cap` | 100 — source default, technical review required | Validate operational capacity, error handling, and safe change governance |
 | `delivery_confirmation_max_attempts` | OPEN — operational/technical design | Define contact/confirmation attempt limits and escalation without changing the separate three doorstep-delivery-attempt rule |
 | Motorcycle compliance warning lead times | OPEN — operational/technical design | Define advance-warning intervals, expiry-review SLA/escalation, reminder cadence, and responsible recipients |
 | Fuel-record governance | CONFIRMED | Melarc pays fuel; the system records each fuel expense for audit and reporting without a rider-reimbursement claim workflow |

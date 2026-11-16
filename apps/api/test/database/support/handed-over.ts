@@ -68,6 +68,8 @@ export async function handOver(
     state: 'IN_PROGRESS',
     stops: collected.length,
     stopStates: collected.map(() => 'ARRIVED' as const),
+    // The request declares three parcels, or what the rider counted where that is more (a request of many parcels declares them).
+    packages: collected.map((counted) => Math.max(3, counted)),
     hubId,
   });
   const photoIds: string[] = [];
@@ -84,7 +86,7 @@ export async function handOver(
     try {
       await routes.admin.query(
         `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot, handshake_type, recorded_by)
-         values ($1, $2, $3, 3, $4, $5, $6::jsonb, 'VENDOR_ENTERED_RIDER_DISPLAYED', $7)`,
+         values ($1, $2, $3, $8, $4, $5, $6::jsonb, 'VENDOR_ENTERED_RIDER_DISPLAYED', $7)`,
         [
           recordId,
           stop.id,
@@ -99,6 +101,8 @@ export async function handOver(
               })
             : null,
           run.rider.id,
+          // What the vendor declared at the door: three, or the count where that is more (a large count matches its own declaration).
+          Math.max(3, counted),
         ],
       );
       for (const photo of photos) {
@@ -118,22 +122,38 @@ export async function handOver(
     );
   }
   const declared = run.stops.map((_, at) => options.declared?.[at] ?? collected[at] ?? 0);
+  const intakes = await submitHandover(
+    run,
+    run.stops.map((stop, at) => ({ requestId: stop.requestId, declared: declared[at] ?? 0 })),
+  );
+  return { run, intakes, declared, photoIds };
+}
+
+/**
+ * The custody holder hands a run over through the real route (`submitHubHandover`), with one row for each request the run collected and the number the rider declares for it. The run's
+ * stops are all closed; the handover completes the run and opens its intakes in one transaction, which is how a run that collected parcels is completed (the database holds that its
+ * intakes are exactly its collected requests, migration 0092), so a test that needs such a run completed does it here and not with a statement of its own.
+ */
+export async function submitHandover(
+  run: ArrangedRun,
+  rows: readonly { readonly requestId: string; readonly declared: number }[],
+): Promise<HandedOverIntake[]> {
   const manifest = `${API}/pickup-manifests/${run.manifest.id}`;
   const read = await run.rider.client.get(manifest);
   expect(read.status).toBe(200);
   const response = await run.rider.client.post(
     `${manifest}/hub-handover`,
     {
-      rows: run.stops.map((stop, at) => ({
-        pickup_request_id: stop.requestId,
-        declared_count: declared[at],
+      rows: rows.map((row) => ({
+        pickup_request_id: row.requestId,
+        declared_count: row.declared,
       })),
       captured_at: new Date(Date.now() - 60_000).toISOString(),
     },
     { headers: { 'If-Match': read.header('etag') ?? '', 'Idempotency-Key': randomUUID() } },
   );
   expect(response.status).toBe(201);
-  return { run, intakes: response.json() as HandedOverIntake[], declared, photoIds };
+  return response.json() as HandedOverIntake[];
 }
 
 /**

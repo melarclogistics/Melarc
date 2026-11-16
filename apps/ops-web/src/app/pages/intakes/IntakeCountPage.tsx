@@ -15,7 +15,11 @@ import {
   submitBlindCount,
   type CountedWithVersion,
 } from '../../../platform/hub-intake/hub-intake-commands';
-import { receiverHoldOf, type IntakeView } from '../../../platform/hub-intake/hub-intake-shape';
+import {
+  MAX_PARCELS,
+  receiverHoldOf,
+  type IntakeView,
+} from '../../../platform/hub-intake/hub-intake-shape';
 import {
   useIntakeLock,
   type IntakeLock,
@@ -27,8 +31,8 @@ import { ActDialog } from '../manifests/ManifestActDialogs';
 import { actBreadcrumb, WithIntake } from './WithIntake';
 import { holderWords, intakePath, parcelsText, type DoneState } from './intake-presentation';
 
-/** The count as a person types it: whole digits, nothing else, and no more than a count of parcels can be. A field that is empty is not a count of zero. */
-const WHOLE_COUNT = /^\d{1,7}$/;
+/** The count as a person types it: whole digits, nothing else, and no more than the platform can hold (a limit of representation, not of parcels). A field that is empty is not a count of zero. */
+const WHOLE_COUNT = /^\d{1,10}$/;
 
 const FIELD_ERROR = 'Enter the number of parcels you counted, as a whole number from 0.';
 
@@ -117,7 +121,7 @@ function CountForm({
   function review(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
     const typed = text.trim();
-    if (!WHOLE_COUNT.test(typed)) {
+    if (!WHOLE_COUNT.test(typed) || Number(typed) > MAX_PARCELS) {
       setInvalid(FIELD_ERROR);
       setAttempts((count) => count + 1);
       return;

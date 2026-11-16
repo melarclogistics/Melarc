@@ -78,13 +78,15 @@ export interface ArrangeOptions {
   readonly hubId?: string;
   /** The attempt the requests of the run are at (a request keeps its attempt for ever); the first, where left out. */
   readonly attemptNumber?: number;
+  /** The parcels each request declares, in the order of the stops (the request's, and the summary its stop shows the rider); three for each stop left out. */
+  readonly packages?: readonly number[];
 }
 
 /** What a rider is shown for a stop (the contract's `PickupStopSummary`): a closed fixture that satisfies the stop's check. */
-const summaryOf = (code: string): Record<string, unknown> => ({
+const summaryOf = (code: string, packages = 3): Record<string, unknown> => ({
   reference: code,
   sender_display_name: 'Fixture Sender',
-  declared_package_count: 3,
+  declared_package_count: packages,
   resolved_pickup_location: { address: 'Fixture shop, Osu' },
   location_note: null,
   contact_phone: '+233200000001',
@@ -117,6 +119,7 @@ export async function arrangeRun(
       pickupRequestRow(options.vendorOrganizationId, hubId, {
         state: 'CONFIRMED',
         serviceDate: options.serviceDate,
+        packages: options.packages?.[at - 1] ?? 3,
         ...(options.attemptNumber === undefined ? {} : { attemptNumber: options.attemptNumber }),
       }),
     );
@@ -130,7 +133,9 @@ export async function arrangeRun(
       admin,
       stopRow(manifest, request.id, at, {
         state: options.stopStates?.[at - 1] ?? options.stopState ?? 'PENDING',
-        ...(state === 'DRAFT' ? {} : { pickupSummary: summaryOf(request.code) }),
+        ...(state === 'DRAFT'
+          ? {}
+          : { pickupSummary: summaryOf(request.code, options.packages?.[at - 1] ?? 3) }),
       }),
     );
     stops.push({ id: stop.id, requestId: request.id, requestCode: request.code, sequence: at });

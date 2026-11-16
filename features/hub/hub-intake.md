@@ -122,7 +122,9 @@ Non-obvious: `rider_declared_count` is **never readable before commit and never 
 
 | Key| Why this feature reads it| Home|
 |---|---|---|
-| `intake_parcel_cap`| **`CONFIRMED`** — 100, by decision (`MSC-DEC-256`, 26 August 2026, `OQ-078` closed).| [settings.md](../../contracts/settings.md) §7.3|
+| `intake_lock_idle_ttl_minutes`| **`PROVISIONAL`** — 15 minutes, a development value (§14, `OQ-051`).| [settings.md](../../contracts/settings.md) §7.3|
+
+**There is no limit on the number of parcels of an intake** (the Product Owner, 15 November 2026: the setting `intake_parcel_cap`, 100, is removed). A request and its intake may hold any number of parcels: the system records the quantities declared and counted, and the count comparison and the discrepancy rules apply at any size. Only what the data type holds (a whole number, not negative) is checked.
 
 ## 10. Errors — *pointer*
 
@@ -317,7 +319,7 @@ And the photos become readable on the intake only in the response to the committ
 | `OQ-051`| **The soft-lock idle TTL now has a key** — `intake_lock_idle_ttl_minutes`, added to `contracts/settings.md` §7.3 on 23 August after being found here rather than in that inventory. Still unvalued. **An unset TTL degrades takeover, not correctness**, because §22.8 makes the lock advisory| `VALUE_REQUIRED` — blocks **launch**|
 
 **`OQ-078` closed** 26 August 2026 by `MSC-DEC-256` — the four source-default keys were reviewed
-and confirmed, so `intake_parcel_cap` is `CONFIRMED` by decision and §9 now says so; the status
+and confirmed (`intake_parcel_cap` among them, which the Product Owner has since removed: §9); the status
 disagreement this document raised resolved in `settings.md`'s favour. No `DECISION_NEEDED`
 question blocks this feature.
 

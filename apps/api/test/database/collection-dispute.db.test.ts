@@ -8,6 +8,7 @@ import type { SecurityContext } from '../../src/platform/database/transaction-co
 import type { TestClient, TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import { excusePhotos } from './support/evidence-photo.js';
+import { submitHandover } from './support/handed-over.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { arrangeRun, type ArrangedRider, type ArrangedRun } from './support/runs.js';
 import { seedHubConfiguration } from './support/seeded.js';
@@ -209,8 +210,9 @@ describe('disputeCollection', () => {
 
   // Break caught (AC-SLICE-001-27): the manifest held for a dispute. The rule the database holds for the completion of a run is that nothing is left to work; a
   // stop that closed and was disputed is a stop with nothing left to work. (The system completes only a run that collected nothing, and the completion of a run
-  // that collected parcels is the custody holder's hub handover, which this slice does not build: the completion is made here as the administrator, to whom the
-  // guard applies as it applies to every writer.)
+  // that collected parcels is the custody holder's hub handover, S1.31: it is made here through that route, which is how the database lets such a run complete, with
+  // the intake of each collected request, migration 0092. The refusal while a stop is still to be worked is the administrator's, to whom the guard applies as it
+  // applies to every writer.)
   it('does not hold the manifest: the run can complete when its other stop is settled', async () => {
     const { arranged, stop, second } = await collected();
     expect((await dispute(stop.id)).status).toBe(201);
@@ -230,7 +232,8 @@ describe('disputeCollection', () => {
       },
     );
     expect(skipped.status).toBe(200);
-    await routes.admin.query(complete);
+    const intakes = await submitHandover(arranged, [{ requestId: stop.requestId, declared: 3 }]);
+    expect(intakes).toHaveLength(1);
     expect(
       (
         await routes.rows<{ state: string }>(`select state from pickup_manifest where id = $1`, [

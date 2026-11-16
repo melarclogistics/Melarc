@@ -53,8 +53,11 @@ export const MAX_PAGE_ITEMS = 100;
 const MAX_TOKEN = 2048;
 /** The longest note the audit ledger keeps, and so the longest a screen is shown. */
 const MAX_NOTE = 1000;
-/** Far beyond any parcel count the platform allows (`intake_parcel_cap` is 100), and bounded so that a figure is a figure. */
-const MAX_PARCELS = 1_000_000;
+/**
+ * The largest count the platform can hold (the database's whole number). It is a bound of representation and not a business limit: the platform sets none on the parcels of an intake (OB-S1-97),
+ * and a screen takes a count the server took, so that no count the server accepts is unreadable here.
+ */
+export const MAX_PARCELS = 2_147_483_647;
 const MAX_FINDINGS = 200;
 const MAX_PHOTOS = 1000;
 const MAX_EVIDENCE_PER_FINDING = 100;

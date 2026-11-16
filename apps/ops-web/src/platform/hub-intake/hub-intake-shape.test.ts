@@ -130,6 +130,23 @@ describe('an intake that has been counted', () => {
     expect(parsePostCountIntake(preCountFixture())).toBeUndefined();
   });
 
+  // Break caught: a bound on the parcels of an intake that is narrower than what the server takes, so that a count the platform stored cannot be read (the platform sets no limit on the parcels).
+  it.each([
+    [150, 1234],
+    [2_500_000, 2_499_000],
+    [2_147_483_647, 2_147_483_647],
+  ])('reads a counted intake that was declared at %i and counted at %i', (declared, counted) => {
+    const intake = parsePostCountIntake(
+      postCountFixture({
+        rider_declared_count: declared,
+        physical_count: counted,
+        count_variance: declared === counted ? 'MATCH' : counted > declared ? 'OVER' : 'SHORT',
+        count_difference: counted - declared,
+      }),
+    );
+    expect(intake).toMatchObject({ rider_declared_count: declared, physical_count: counted });
+  });
+
   it('has no photos and no findings where the answer has none, and no difference where the server stated none', () => {
     const without = withoutMember(postCountFixture(), 'count_difference');
     const intake = parsePostCountIntake(without);

@@ -211,8 +211,29 @@ describe('the count', () => {
     expect(await sentCounts()[0]?.clone().json()).toEqual({ physical_count: 0 });
   });
 
-  // Break caught: a count that is not a whole number from zero reviewed or sent.
-  it.each(['-1', '2.5', 'abc', '1e3', '١٢', '12345678'])(
+  // Break caught: a limit on the parcels of an intake that comes back in the form (a count of any size the platform can hold is reviewed and sent as typed, never clamped or refused): the sizes are
+  // examples spread across scales, up to the largest whole number the database holds.
+  it.each(['7', '101', '25000', '12345678', '2147483647'])(
+    'reviews and sends a count of %s as typed',
+    async (typed) => {
+      const counted = Number(typed);
+      const { user } = open({
+        [COUNT]: counting(
+          shortCountFixture({ physical_count: counted, count_difference: counted - 3 }),
+        ),
+      });
+
+      const dialog = within(await enterAndReview(user, typed));
+      await user.click(dialog.getByRole('button', { name: 'Record the count' }));
+      await waitFor(() => {
+        expect(sentCounts()).toHaveLength(1);
+      });
+      expect(await sentCounts()[0]?.clone().json()).toEqual({ physical_count: Number(typed) });
+    },
+  );
+
+  // Break caught: a count that is not a whole number from zero reviewed or sent, or one that no database could keep (the bound is the one of representation, not of parcels).
+  it.each(['-1', '2.5', 'abc', '1e3', '١٢', '2147483648', '99999999999'])(
     'refuses %s at the field and sends nothing',
     async (typed) => {
       const { user } = open();

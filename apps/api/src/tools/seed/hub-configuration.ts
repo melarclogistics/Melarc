@@ -122,7 +122,6 @@ export const HUB_SETTINGS: readonly HubSettingSeed[] = [
   wide('MELARC_MAX_PICKUP_ATTEMPTS', 3, 'attempts'),
   wide('auto_reschedule', false, 'switch'),
   wide('stale_failure_backstop_hours', 24, 'hours'),
-  wide('intake_parcel_cap', 100, 'parcels'),
   // A development value (D-13, 29 October 2026; S1.32): the idle minutes after which another receiver may take over an intake's advisory lock. The launch value stays the owner's.
   wide('intake_lock_idle_ttl_minutes', 15, 'minutes'),
   wide('pickup_service_window_start', '11:00', 'time of day, Africa/Accra'),

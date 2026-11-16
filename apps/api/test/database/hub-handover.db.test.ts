@@ -100,6 +100,8 @@ async function handedRun(
     state: 'IN_PROGRESS',
     stops: legs.length,
     stopStates: legs.map((leg) => (isCounted(leg.state) ? 'ARRIVED' : leg.state)),
+    // A request declares three parcels, or what the rider counted where that is more (a request of many parcels declares them).
+    packages: legs.map((leg) => Math.max(3, leg.collected ?? 3)),
     ...over,
   });
   const counted = new Map<string, number>();
@@ -111,7 +113,7 @@ async function handedRun(
     await excusePhotos(routes, stop.id);
     await routes.admin.query(
       `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, variance_reason_snapshot, handshake_type, recorded_by)
-       values ($1, $2, $3, 3, $4, $5, $6::jsonb, 'VENDOR_ENTERED_RIDER_DISPLAYED', $7)`,
+       values ($1, $2, $3, $8, $4, $5, $6::jsonb, 'VENDOR_ENTERED_RIDER_DISPLAYED', $7)`,
       [
         randomUUID(),
         stop.id,
@@ -126,6 +128,8 @@ async function handedRun(
             })
           : null,
         arranged.rider.id,
+        // What the vendor declared at the door: three, or the count where that is more (a large count matches its own declaration).
+        Math.max(3, collected),
       ],
     );
     await routes.admin.query(
@@ -374,6 +378,34 @@ describe('submitHubHandover: one intake for each collected request, and the run 
     // A zero declaration opens its intake all the same (it routes to reconciliation after the blind count, S1.33).
     expect(stored.get(rows[2]?.pickup_request_id ?? '')?.state).toBe('AWAITING_COUNT');
     expect(stored.size).toBe(4);
+  });
+
+  // Break caught: a limit on the parcels of a request or its intake (the 100 of the removed setting `intake_parcel_cap`, OB-S1-97, the Product Owner, 15 November 2026): a collected count or a
+  // declaration of a few hundred or a few thousand refused, clamped or stored as another number; the sizes are examples and none of them is the rule.
+  it('takes a collected count and a declaration of many parcels, and stores each as given', async () => {
+    const handed = await handedRun([
+      { state: 'COLLECTED', collected: 101 },
+      { state: 'COLLECTED', collected: 2500 },
+    ]);
+    const rows = rowsFor(handed, [101, 2500]);
+    const response = await submit(handed.rider, handed.manifest.id, {
+      rows,
+      captured_at: capturedNow(),
+    });
+    expect(response.status).toBe(201);
+    const stored = new Map(
+      (await intakeRows(handed.manifest.id)).map((row) => [row.pickup_request_id, row]),
+    );
+    expect(rows.map((row) => stored.get(row.pickup_request_id)?.rider_declared_count)).toEqual([
+      101, 2500,
+    ]);
+    expect(rows.map((row) => stored.get(row.pickup_request_id)?.prefilled_count)).toEqual([
+      101, 2500,
+    ]);
+    expect([...stored.values()].map((row) => row.state)).toEqual([
+      'AWAITING_COUNT',
+      'AWAITING_COUNT',
+    ]);
   });
 
   // Break caught: a declaration that the application derives from the collected count when the row is the same number, or one that needs the collected count to exist.

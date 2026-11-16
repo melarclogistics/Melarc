@@ -288,6 +288,12 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.shortfall_envelope',
       // D-A10 (migration 0088): Ops's exception for the day the camera fails, once for a stop and before its count.
       'melarc.authorise_parcel_photo_exception',
+      // S1.32 and S1.33 (migrations 0093 and 0094): what a counted intake carries beyond the columns the login can read (the declaration, the photos), and the commit of the count.
+      'melarc.hub_intake_after_count',
+      'melarc.commit_blind_count',
+      // S1.34 (migration 0096): the receiver's condition and Senior Ops's adjudication, each written with the move of the intake.
+      'melarc.record_intake_condition',
+      'melarc.adjudicate_discrepancy',
     ]);
   });
 

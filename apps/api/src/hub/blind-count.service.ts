@@ -63,7 +63,8 @@ const invalid = (pointer: string, rule: string): ApiException =>
  *   the same two rules as any other when the intake has been counted. The `ETag` does not move with the lock, so a refresh or a takeover never refuses a count.
  * - **The count is audited with both counts** (`hub.intake.counted`: the first moment they may legally appear together, in the ledger and nowhere before); the photos of the parcels counted at
  *   the door are in the response and in no event.
- * - **Not here:** the cap `intake_parcel_cap` (it has no refusal code in any document: F-37e, surfaced before enforcing), a condition (S1.34).
+ * - **No limit on the parcels of an intake** (the Product Owner removed `intake_parcel_cap`, 15 November 2026, OB-S1-97): a count of any size is committed and compared as any other; only a whole number that the column holds is checked.
+ * - **Not here:** a condition (S1.34).
  */
 export class HubBlindCounts {
   readonly #options: HubBlindCountOptions;
