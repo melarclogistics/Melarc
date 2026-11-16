@@ -203,7 +203,8 @@ function Sources({
  * **The photo mode** (`mode="photos"`, the hub floor): "Take a photo" asks for the camera at the back (`capture="environment"`, one photo) and "Choose from the gallery" for images (several), two buttons the size of
  * the hub floor, **for images and never a document**. Each photo is **shown back** (a preview drawn on a canvas from the file, never from an object URL: the portal's policy refuses a `blob:` picture), **named by its
  * place** ("Photo 2": a camera gives every photo the same file name) and **can be retaken**, which replaces that photo in its place and stops the one it replaces. A retake that the person gives up (they go on to
- * take another photo) changes nothing. The sending, the words of a failure and what the page is handed are those of the file mode.
+ * take another photo) changes nothing. **The buttons of a photo's row (Retake, Leave out, Try again) are the hub floor's 56 px too**, as every button of a hub-floor dialog is. The sending, the words of a failure and
+ * what the page is handed are those of the file mode.
  */
 export function EvidenceUpload({
   label,
@@ -219,6 +220,8 @@ export function EvidenceUpload({
   onBusyChange,
 }: EvidenceUploadProps) {
   const photos = mode === 'photos';
+  /** The buttons of a file's row: the hub floor's 56 px in the photo mode, where every button is (a dialog of the floor has no button of 44 px), and the working height for files. */
+  const rowSize = photos ? 'lg' : 'md';
   const [entries, setEntries] = useState<readonly FileEntry[]>([]);
   const [announcement, setAnnouncement] = useState('');
   const next = useRef(0);
@@ -428,6 +431,7 @@ export function EvidenceUpload({
                       <Button
                         type="button"
                         variant="secondary"
+                        size={rowSize}
                         aria-label={`Try ${named} again`}
                         onClick={() => {
                           send(entry.key, entry.file);
@@ -440,6 +444,7 @@ export function EvidenceUpload({
                       <Button
                         type="button"
                         variant="secondary"
+                        size={rowSize}
                         disabled={disabled}
                         aria-label={`Retake ${named}`}
                         onClick={() => {
@@ -454,6 +459,7 @@ export function EvidenceUpload({
                     <Button
                       type="button"
                       variant="secondary"
+                      size={rowSize}
                       aria-label={`Leave out ${named}`}
                       onClick={() => {
                         remove(entry.key);

@@ -366,6 +366,41 @@ describe('EvidenceUpload: the photos taken', () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('image.jpg');
   });
 
+  // Break caught (the pictures of the receiving screens, defect 7): the buttons of a photo's row (Try again, Retake, Leave out) at the medium size, 44 px, in the dialogs of the hub floor, where every other
+  // button is 56 px. They are at the floor's size in the photo mode, which is the mode of the hub floor.
+  it('draws the buttons of a photo’s row at the hub floor’s size', async () => {
+    const { take, pending } = photos();
+    take(photo());
+    await act(async () => {
+      pending[0]?.reject(new Error('refused'));
+      await Promise.resolve();
+    });
+
+    for (const name of ['Try photo 1 again', 'Retake photo 1', 'Leave out photo 1']) {
+      expect(screen.getByRole('button', { name }), name).toHaveClass('ui-button--lg');
+    }
+  });
+
+  // Break caught: the floor's size given to the file mode as well (a list of documents on a desk, with a button of 56 px beside each name).
+  it('keeps the buttons of a file’s row at the medium size in the file mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <EvidenceUpload
+        label="Documents"
+        upload={() => Promise.reject(new Error('refused'))}
+        failureText={() => 'The file could not be sent.'}
+        onChange={() => undefined}
+      />,
+    );
+
+    await user.upload(screen.getByLabelText('Documents'), photo('door.jpg'));
+    await decoding();
+
+    for (const name of ['Try door.jpg again', 'Leave out door.jpg']) {
+      expect(await screen.findByRole('button', { name }), name).not.toHaveClass('ui-button--lg');
+    }
+  });
+
   // Break caught: a failure that is told in words the page did not choose, or a photo that cannot be sent again by its place.
   it('tells a failure in the page’s words and sends the photo again, by its place', async () => {
     const { take, pending, user } = photos();
