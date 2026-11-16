@@ -1,4 +1,11 @@
-import { screen, waitFor, within, type BoundFunctions, type queries } from '@testing-library/react';
+import {
+  act,
+  screen,
+  waitFor,
+  within,
+  type BoundFunctions,
+  type queries,
+} from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -456,7 +463,7 @@ describe('a photo opened', () => {
 });
 
 describe('the photos a page at a time', () => {
-  it('loads the next page by the server’s position when asked, and keeps the photos already shown', async () => {
+  it('loads the next page by the server’s position when asked, reads the pages shown again after it, and keeps the photos', async () => {
     const { user } = open((request) =>
       new URL(request.url).searchParams.get('page_token') === 'p2'
         ? json(200, evidenceListFixture({ items: [photo(3)], parcel_photos: progress(3) }))
@@ -477,10 +484,13 @@ describe('the photos a page at a time', () => {
     await waitFor(() => {
       expect(panel.getAllByRole('listitem')).toHaveLength(3);
     });
-    expect(evidenceReads()).toHaveLength(2);
-    expect(new URL(evidenceReads()[1]?.url ?? 'http://x/').searchParams.get('page_token')).toBe(
-      'p2',
-    );
+    // The next page by the position the server gave, and then the pages already shown once more, in order and by the positions the server gives now: the tiles of the first page are of the moment
+    // of the newest (the progress is the newest page's, for the whole stop).
+    await waitFor(() => {
+      expect(
+        evidenceReads().map((read) => new URL(read.url).searchParams.get('page_token')),
+      ).toEqual([null, 'p2', null, 'p2']);
+    });
     expect(panel.queryByRole('button', { name: 'Load more photos' })).toBeNull();
   });
 
@@ -507,6 +517,132 @@ describe('the photos a page at a time', () => {
     );
     expect(panel.getAllByRole('listitem')).toHaveLength(2);
     expect(panel.getByRole('button', { name: 'Try to load more photos again' })).toBeVisible();
+  });
+});
+
+/** The page is shown or hidden as the browser says it: the state, and the event that follows it. */
+function pageBecomes(state: 'visible' | 'hidden'): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+}
+
+describe('the photos as they arrive', () => {
+  const WAITING = { state: 'PENDING_UPLOAD', uploaded_at: null, scanned_clean: false };
+  /** What the server answers each time the list is read, in the order of the reads: the last answer stands for every read after it. */
+  const reads = (answers: readonly Record<string, unknown>[]): Handler => {
+    let read = 0;
+    return () => {
+      const answer = answers[Math.min(read, answers.length - 1)];
+      read += 1;
+      return json(200, evidenceListFixture(answer));
+    };
+  };
+  const FIRST = { items: [photo(1), photo(2, WAITING)], parcel_photos: progress(1, 1) };
+  const LATER = { items: [photo(1), photo(2)], parcel_photos: progress(2) };
+  const STILL_WAITING = '1 of 2 parcel photos uploaded. 1 photo is still waiting to upload.';
+
+  afterEach(() => {
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  // Break caught (the review of Run B, finding 5): the progress was as old as the moment the page opened, so a stop whose photos were arriving never said so.
+  it('reads the list again when Refresh is pressed, and tells when it last checked', async () => {
+    const { user } = open(reads([FIRST, LATER]));
+
+    const panel = within(await photosPanel());
+    expect(await panel.findByText(STILL_WAITING)).toBeVisible();
+    expect(panel.getByText(/^Updated /)).toBeVisible();
+    await user.click(panel.getByRole('button', { name: 'Refresh' }));
+
+    expect(await panel.findByText('2 of 2 parcel photos uploaded.')).toBeVisible();
+    expect(panel.queryByText('Waiting to upload')).toBeNull();
+    expect(evidenceReads()).toHaveLength(2);
+  });
+
+  // Break caught: a tablet put down on a stop and picked up again showing what it showed when it was put down.
+  it('reads the list again when the page becomes visible', async () => {
+    open(reads([FIRST, LATER]));
+    const panel = within(await photosPanel());
+    expect(await panel.findByText(STILL_WAITING)).toBeVisible();
+
+    pageBecomes('visible');
+
+    expect(await panel.findByText('2 of 2 parcel photos uploaded.')).toBeVisible();
+    expect(evidenceReads()).toHaveLength(2);
+  });
+
+  it('reads nothing when the page is hidden, or on a focus or a reconnection', async () => {
+    open(reads([FIRST, LATER]));
+    const panel = within(await photosPanel());
+    expect(await panel.findByText(STILL_WAITING)).toBeVisible();
+
+    pageBecomes('hidden');
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(evidenceReads()).toHaveLength(1);
+  });
+
+  // Break caught: a read that failed taking the photos that were read away, or drawn as if the list had been read.
+  it('keeps the photos it has when reading again fails, and says when it last checked', async () => {
+    let read = 0;
+    const { user } = open(() => {
+      read += 1;
+      return read === 1
+        ? json(200, evidenceListFixture(FIRST))
+        : refusal(503, 'SERVICE_UNAVAILABLE');
+    });
+
+    const panel = within(await photosPanel());
+    expect(await panel.findByText(STILL_WAITING)).toBeVisible();
+    await user.click(panel.getByRole('button', { name: 'Refresh' }));
+
+    expect(await panel.findByText(/Refresh failed\. Last successful check: /)).toBeVisible();
+    expect(panel.getAllByRole('listitem')).toHaveLength(2);
+    expect(panel.getByText(STILL_WAITING)).toBeVisible();
+  });
+
+  // Break caught (the review of Run B, finding 5): after "Load more" the progress was the newest page's and the tiles of the first page were as old as the first read, so a photo could be drawn as
+  // waiting under a progress that said every photo was uploaded.
+  it('shows the progress and the tiles of one moment after the next page is loaded', async () => {
+    let firstPage = 0;
+    const { user } = open((request) => {
+      if (new URL(request.url).searchParams.get('page_token') === 'p2') {
+        return json(200, evidenceListFixture({ items: [photo(3)], parcel_photos: progress(3) }));
+      }
+      firstPage += 1;
+      // First read: photo 2 is still on its way and so is photo 3 (on the next page). By the time the officer loads the next page, both are in.
+      return json(
+        200,
+        evidenceListFixture(
+          firstPage === 1
+            ? {
+                items: [photo(1), photo(2, WAITING)],
+                next_page_token: 'p2',
+                parcel_photos: progress(1, 2),
+              }
+            : { items: [photo(1), photo(2)], next_page_token: 'p2', parcel_photos: progress(3) },
+        ),
+      );
+    });
+
+    const panel = within(await photosPanel());
+    expect(
+      await panel.findByText(/1 of 3 parcel photos uploaded\. 2 photos are still waiting/),
+    ).toBeVisible();
+    await user.click(panel.getByRole('button', { name: 'Load more photos' }));
+
+    expect(await panel.findByText('3 of 3 parcel photos uploaded.')).toBeVisible();
+    await waitFor(() => {
+      expect(panel.getAllByRole('listitem')).toHaveLength(3);
+      expect(panel.queryByText('Waiting to upload')).toBeNull();
+    });
+    expect(panel.getAllByText('Stored')).toHaveLength(3);
   });
 });
 
@@ -622,8 +758,19 @@ describeInterfaceStates('the stop page', {
   },
   offline: { inapplicable: OFFLINE_NOT_APPLICABLE },
   'stale / conflict': {
-    inapplicable:
-      'The page changes nothing: a photo that arrives while it is open is read with the next page, and the surface says stale is not a state of this page.',
+    test: async () => {
+      // The photos arrive while the page is open: what was read says when it was read, and a refresh that fails keeps the photos that were read and says so.
+      let read = 0;
+      const { user } = open(() => {
+        read += 1;
+        return read === 1 ? json(200, evidenceListFixture()) : refusal(503, 'SERVICE_UNAVAILABLE');
+      });
+      const panel = within(await photosPanel());
+      expect(await panel.findByText(/^Updated /)).toBeVisible();
+      await user.click(panel.getByRole('button', { name: 'Refresh' }));
+      expect(await panel.findByText(/Refresh failed\. Last successful check: /)).toBeVisible();
+      expect(panel.getByText('1 of 1 parcel photos uploaded.')).toBeVisible();
+    },
   },
   success: {
     test: async () => {

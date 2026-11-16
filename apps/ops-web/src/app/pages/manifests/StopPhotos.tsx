@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import { FreshnessLine, type Freshness } from '../../../components/ui/page-header/PageHeader';
 import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
@@ -14,6 +15,7 @@ import type {
   StopEvidencePageView,
 } from '../../../platform/pickup-work/pickup-work-shape';
 import { problemOf } from '../../../platform/problem/problem-copy';
+import { useRefreshWhenVisible } from '../../../platform/query/use-refresh-when-visible';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { actorText } from '../pickup/pickup-presentation';
@@ -134,15 +136,45 @@ function Photos({
   readonly data: InfiniteData<StopEvidencePageView, string | undefined>;
 }) {
   const [opened, setOpened] = useState<Tile | undefined>(undefined);
+  // The photos arrive while the officer is elsewhere, so the page reads them again when the officer asks (Refresh) and when the page is shown again (the one automatic read it makes, held while the
+  // API asks for a wait). Every page that was loaded is read again, in order, so that the progress (the freshest page's, for the whole stop) and the tiles are of one moment.
+  const readAgain = () => {
+    void evidence.refetch();
+  };
+  useRefreshWhenVisible('stop-photos', readAgain);
   const freshest = data.pages.at(-1);
   if (freshest === undefined) return null;
   const items = distinct(data.pages.flatMap((page) => page.items));
   const parcel = tilesOf(items, 'PARCEL_PHOTO', 'Parcel photo');
   const proof = tilesOf(items, 'COLLECTION_PROOF', 'Photo of the failure or short count');
   const moreFailed = evidence.isFetchNextPageError;
+  // The page just added was read after the ones shown before it, and its progress is the newest: the pages already shown are read again once it is in, so that a photo is never drawn as waiting
+  // under a progress that says every photo is uploaded (the review of Run B, finding 5). Not after a page that failed: what was loaded stays as it was read, and the line says so.
+  const loadMore = () => {
+    void evidence.fetchNextPage().then((read) => {
+      if (!read.isFetchNextPageError) void evidence.refetch();
+    });
+  };
+  const updatedAt =
+    evidence.dataUpdatedAt > 0
+      ? formatInstant(new Date(evidence.dataUpdatedAt).toISOString())
+      : undefined;
+  const freshness: Freshness = {
+    state:
+      evidence.isFetching && !evidence.isFetchingNextPage
+        ? 'refreshing'
+        : evidence.isRefetchError && !evidence.isFetchNextPageError
+          ? 'failed'
+          : 'idle',
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+    onRefresh: readAgain,
+  };
 
   return (
     <>
+      <div className="stop-photos__freshness">
+        <FreshnessLine freshness={freshness} />
+      </div>
       {freshest.parcel_photo_exception === null ? null : (
         <ExceptionNote exception={freshest.parcel_photo_exception} />
       )}
@@ -194,9 +226,7 @@ function Photos({
             type="button"
             variant="secondary"
             loading={evidence.isFetchingNextPage}
-            onClick={() => {
-              void evidence.fetchNextPage();
-            }}
+            onClick={loadMore}
           >
             {moreFailed ? 'Try to load more photos again' : 'Load more photos'}
           </Button>
