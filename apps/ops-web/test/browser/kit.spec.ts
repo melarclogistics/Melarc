@@ -3049,14 +3049,17 @@ test.describe('the photo kit in a browser', () => {
             found.y + found.height,
             `${when}: a control ends below the screen (${String(height)} px high)`,
           ).toBeLessThanOrEqual(height);
-          expect(found.x, `${when}: a control starts left of the screen`).toBeGreaterThanOrEqual(
-            0,
-          );
+          expect(found.x, `${when}: a control starts left of the screen`).toBeGreaterThanOrEqual(0);
           expect(
             found.x + found.width,
             `${when}: a control ends right of the screen (${String(width)} px wide)`,
           ).toBeLessThanOrEqual(width);
         }
+        // The place keeps the room it needs: squeezed between two buttons that are too wide for the row it would be broken over three lines ("1", "of", "5").
+        expect(
+          (await box(place)).height,
+          `${when}: the place is not on one line`,
+        ).toBeLessThanOrEqual(30);
         for (const control of [...controls, act]) {
           const found = await box(control);
           expect(found.height, `${when}: a button under the floor`).toBeGreaterThanOrEqual(56);
