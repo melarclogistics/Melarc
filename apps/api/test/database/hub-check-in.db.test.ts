@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { TestResponse } from '../../src/test-support/test-client.js';
 import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
-import { handOver } from './support/handed-over.js';
+import { countIntake, handOver } from './support/handed-over.js';
 import { declareIntakeEvidence, intakeEvidenceBody, storedIntakeEvidence } from './support/intake-evidence.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
@@ -670,6 +670,32 @@ describe('recordIntakeCondition: damage is a finding of one parcel', () => {
     const blindId = blind.intakes[0]?.id ?? '';
     const refused = await record(receiver, blindId, { condition: 'OK', parcel_id: parcels[0]?.id });
     expect([refused.status, codeOf(refused)]).toEqual([400, 'VALIDATION_FAILED']);
+  });
+});
+
+describe('submitBlindCount: a blind count is for a blind-count intake alone', () => {
+  // Break caught: a photo intake counted blind (the officer's typed number replacing its photos, D-D1), or the refusal told as `stale` because the token of a photo intake is its own shape's and the count judged it
+  // against another (the rule of the contract unreachable by a client that holds a valid token): the blind count of a photo intake is STATE_CONFLICT `photo_check_in` whatever token it carries, and changes nothing;
+  // a stop with no photos is still counted blind (AC-SLICE-001-98).
+  it('is refused on a photo intake with the rule photo_check_in, whatever the token, and a stop with no photos is counted blind', async () => {
+    const { id, etag } = await arrange(2);
+    const version = await versionOf(id);
+
+    for (const token of [etag, '"not-a-token"']) {
+      const refused = await receiver.client.post(`${ONE(id)}/count`, { physical_count: 2 }, {
+        origin: OPS,
+        headers: { 'If-Match': token, 'Idempotency-Key': randomUUID() },
+      });
+      expect(outcome(refused), token).toEqual([409, 'STATE_CONFLICT', 'photo_check_in']);
+    }
+    const { intake } = await read(receiver, id);
+    expect([intake.state, intake.received_count]).toEqual(['AWAITING_COUNT', null]);
+    expect(await versionOf(id)).toBe(version);
+    expect(await eventsOf(id)).toEqual([]);
+    // The photo intake is checked in as before, and a stop with no photos is counted by number.
+    expect((await finish(receiver, id, { all_arrived: true, confirmed_count: 2 })).status).toBe(200);
+    const blind = await handOver(routes, vendor, days, { collected: [3] });
+    expect((await countIntake(receiver, blind.intakes[0]?.id ?? '', 3)).status).toBe(200);
   });
 });
 

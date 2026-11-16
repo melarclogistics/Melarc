@@ -18,6 +18,7 @@ import {
   type HubIntakePostCountView,
   type HubIntakeRow,
 } from './hub-intake-view.js';
+import { RECEIVING_INTAKE_COLUMNS, type ReceivingIntakeRow } from './receiving-views.js';
 
 const OPERATION = 'submitBlindCount';
 
@@ -58,7 +59,7 @@ const invalid = (pointer: string, rule: string): ApiException =>
  *   holds the same comparison for every writer.
  * - **Judged in this order**: the principal and the key's format; the number; then, in the transaction, the retry (`Idempotency-Key`: a replay is answered before anything about the intake is
  *   judged, byte for byte, and another body under the same key is `IDEMPOTENCY_KEY_CONFLICT`); the intake under its lock (`NOT_FOUND`: the route's guard has told `HUB_SCOPE_VIOLATION` for
- *   another hub's); that it is waiting for its count (`STATE_CONFLICT`, rule `already_counted`: **the second receiver of two who count at once**); and the `ETag` the receiver read
+ *   another hub's); that it is a blind-count intake (`STATE_CONFLICT`, rule `photo_check_in`: an intake with door photos is checked in, never counted blind); that it is waiting for its count (`STATE_CONFLICT`, rule `already_counted`: **the second receiver of two who count at once**); and the `ETag` the receiver read
  *   (`STATE_CONFLICT`, rule `stale`: missing, weak, another intake's and out of date are one answer).
  * - **The lock is advisory and nothing here treats it as a guard** (§22.8, `AC-SLICE-001-43`): a receiver who does not hold the lock may count, and the receiver who holds it is refused by
  *   the same two rules as any other when the intake has been counted. The `ETag` does not move with the lock, so a refresh or a takeover never refuses a count.
@@ -126,11 +127,20 @@ export class HubBlindCounts {
 
       // The intake, under its lock: two receivers who count at once are judged one after the other, and the second finds the intake counted.
       const found = await tx.execute(
-        sql`select ${HUB_INTAKE_READ_COLUMNS} from pickup_intake where id = ${id}::uuid for update`,
+        sql`select ${RECEIVING_INTAKE_COLUMNS} from pickup_intake where id = ${id}::uuid for update`,
       );
-      const row = found.rows[0] as unknown as HubIntakeRow | undefined;
+      const row = found.rows[0] as unknown as ReceivingIntakeRow | undefined;
       if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
       await noteHubCrossing(audit, handle, authorized, row);
+      // An intake whose stop has door photos is checked in against them and never counted blind, whatever its state and whatever token the caller holds (the token of a photo intake is its own shape's, so
+      // the rule is told before the token is judged; the database holds the same for every writer, Run D, D-D1 and D-D3, migration 0104).
+      if (row.receiving_mode === 'PHOTO_CHECK_IN') {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'The intake is checked in against its door photos: it is never counted blind',
+          { rule: 'photo_check_in' },
+        );
+      }
       if (row.state !== 'AWAITING_COUNT') {
         throw ApiException.of(
           ErrorCode.StateConflict,
