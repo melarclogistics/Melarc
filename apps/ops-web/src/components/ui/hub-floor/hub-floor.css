@@ -1,7 +1,7 @@
 /*
  * The hub floor's scope (DESIGN_SYSTEM sections 11 and 12; COMPONENT_PATTERNS, *The hub floor's sizes*): a tablet in a hand, in a hurry, at a table with a rider waiting. Everything a page of the floor draws
- * at the working height (44px, or less) is drawn here at the touch height, **by the token** (`--control-height-lg`, and the row of a table by its own `--ui-data-table-row`): no number is written in this
- * file, and every height is a minimum, so enlarged text grows it. The selectors are as specific as the rules they raise (and one class more), so that the order of the stylesheets does not decide.
+ * at the working height (44px, or less) is drawn here at the touch height, **by the token** (`--control-height-lg`, and the row of a table by its own `--ui-data-table-row`): no height is written in this
+ * file (the 1px is the separator inside a row, as in the table's own rule), and every height is a minimum, so enlarged text grows it. The selectors are as specific as the rules they raise (and one class more), so that the order of the stylesheets does not decide.
  */
 
 /* The links of the page header: the way back up the trail, and Refresh (which keeps its words and its underline: only its reach grows). */
