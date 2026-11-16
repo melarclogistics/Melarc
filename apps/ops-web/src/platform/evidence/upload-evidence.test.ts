@@ -436,14 +436,27 @@ describe('the budgets of the steps', () => {
 });
 
 describe('the time a step of the upload may take', () => {
+  /**
+   * How long a test waits, on the real clock, for what the upload does next. **A deadline, and never a count of turns of the event loop**: the first step of an upload is the SHA-256 of the file, a real asynchronous
+   * digest on the platform's thread pool whose duration is the machine's, and a count of 500 turns (a few milliseconds) ended the wait before the digest had answered whenever the thread that makes it was not
+   * given a core (CI run 43910214408: four of these tests failed on a loaded runner; with the process pinned to one core, half the runs failed). What these tests prove is that **the budget of a step is counted from the
+   * moment its timer was made**, which has nothing to do with how fast a machine is. The fake clock does not move this one (`performance` is not faked, only the timers and `Date`), and it is far under the test's own
+   * timeout, which stays the ceiling that ends a test that is really stuck. The budgets of the product are not changed.
+   */
+  const REAL_WAIT_MS = 10_000;
+
   /** Waits for what the upload does next on the real event loop, which moves no fake clock: the budget of a step is then counted from the moment its timer was made. */
-  const until = async (seen: () => boolean): Promise<void> => {
-    for (let polls = 0; polls < 500 && !seen(); polls += 1) {
+  const until = async (seen: () => boolean, waitMs = REAL_WAIT_MS): Promise<void> => {
+    const deadline = performance.now() + waitMs;
+    while (!seen() && performance.now() < deadline) {
       await new Promise<void>((resolve) => {
         setImmediate(resolve);
       });
     }
-    expect(seen()).toBe(true);
+    expect(
+      seen(),
+      `the upload did not come to its next step in ${String(waitMs)} ms of real time`,
+    ).toBe(true);
   };
 
   beforeEach(() => {
@@ -451,6 +464,20 @@ describe('the time a step of the upload may take', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  // Break caught: a wait that never ends (a test that hangs until the runner kills it) or that ends without saying what it waited for, or one that counts by the fake clock, which these tests move by hand and which would
+  // never reach the deadline.
+  it('waits for the next step on the real clock, and says what it waited for when the step does not come', async () => {
+    const started = performance.now();
+    const clock = Date.now();
+
+    await expect(until(() => false, 50)).rejects.toThrow(
+      /did not come to its next step in 50 ms of real time/,
+    );
+
+    expect(performance.now() - started).toBeGreaterThanOrEqual(49);
+    expect(Date.now()).toBe(clock);
   });
 
   // Break caught: an upload that waits for ever for an answer that is not coming, with a spinner the officer cannot tell from work.
