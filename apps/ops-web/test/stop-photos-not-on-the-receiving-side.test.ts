@@ -70,7 +70,18 @@ const INTAKE_PHOTOS_USERS = [
  * that is not in the list (the queue, the blind count, a decision) draws no photo.
  */
 const PICTURE_HOOK = 'usePhotoLink';
-const PICTURE_USERS = [PICTURE_HOOK_FILE, 'app/pages/receiving/ParcelPicture.tsx'];
+const PICTURE_USERS = [
+  PICTURE_HOOK_FILE,
+  // The kit's one component that draws the picture of a stored photo from its link (the grid and the viewer are generic and draw what a page gives them).
+  'app/pages/evidence/PhotoPicture.tsx',
+  'app/pages/receiving/ParcelPicture.tsx',
+];
+/** The kit's component that draws a picture from a stored photo's link: named by itself and by the receiving run's picture. */
+const PICTURE_COMPONENT = 'PhotoPicture';
+const PICTURE_COMPONENT_USERS = [
+  'app/pages/evidence/PhotoPicture.tsx',
+  'app/pages/receiving/ParcelPicture.tsx',
+];
 const PHOTO_GRID = 'PhotoGrid';
 const GRID_USERS = ['components/ui/photo-grid/PhotoGrid.tsx', 'app/pages/receiving/ParcelGrid.tsx'];
 
@@ -147,6 +158,14 @@ export function offenders(files: readonly Source[]): string[] {
         `${file.path} names ${PICTURE_HOOK}: the address of a picture is asked for by the run's parcel picture alone.`,
       );
     }
+    if (
+      mentions(file.text, [PICTURE_COMPONENT]).length > 0 &&
+      !PICTURE_COMPONENT_USERS.includes(file.path)
+    ) {
+      found.push(
+        `${file.path} names ${PICTURE_COMPONENT}: a picture is drawn from a stored photo's link by the kit's component and the run's parcel picture alone.`,
+      );
+    }
     if (mentions(file.text, [PHOTO_GRID]).length > 0 && !GRID_USERS.includes(file.path)) {
       found.push(
         `${file.path} names ${PHOTO_GRID}: the grid of photos is drawn by the run's parcel grid alone.`,
@@ -192,7 +211,7 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
   // Break caught: a guard that stops looking because the files it names were renamed: the doors it holds are there.
   it('has the doors it holds', () => {
     for (const door of [...PICTURE_USERS, ...GRID_USERS].filter(
-      (path) => !path.startsWith('app/pages/receiving/'),
+      (path) => path.startsWith('platform/') || path.startsWith('components/'),
     )) {
       expect(
         real.some((file) => file.path === door),
@@ -240,6 +259,38 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
         'a page of the receiving run that asks the platform for the stop’s picture instead of the parcel’s',
         'app/pages/receiving/ParcelPicture.tsx',
         'createRetrievalAuthorization(client, id)',
+      ],
+    ])('finds %s', (_name, path, text) => {
+      expect(synthetic(path, text).length).toBeGreaterThan(0);
+    });
+
+    // Break caught: the photo kit's two doors (the hook that asks for the link of a picture and the component that draws it) used by a page that was not added to the list, so that a page of the receiving side
+    // draws a photo by them and nothing fails: the dialog and the stop's tiles are not the only way to a picture any more.
+    it.each([
+      [
+        'an intake page drawing a photo by the kit’s picture',
+        'app/pages/intakes/IntakeCountPage.tsx',
+        '<PhotoPicture evidenceId={id} near />',
+      ],
+      [
+        'a custody page asking for the link of a photo',
+        'app/pages/manifests/CustodySection.tsx',
+        'const link = usePhotoLink(id, true);',
+      ],
+      [
+        'a page that is not a home drawing a photo by the kit’s picture',
+        'app/pages/pickup/PickupRequestDetailPage.tsx',
+        'import { PhotoPicture } from "../evidence/PhotoPicture";',
+      ],
+      [
+        'a page that is not a home asking for the link of a photo',
+        'app/pages/pickup/ApprovalsPage.tsx',
+        'usePhotoLink(evidenceId, near)',
+      ],
+      [
+        'another file of the evidence platform asking for the authorization of a photo',
+        'platform/evidence/evidence-view.ts',
+        'await createRetrievalAuthorization(client, evidenceId);',
       ],
     ])('finds %s', (_name, path, text) => {
       expect(synthetic(path, text).length).toBeGreaterThan(0);
@@ -300,6 +351,22 @@ describe('where a photo is drawn, and what the receiving side may draw', () => {
       ],
     ])('finds %s', (_name, path, text) => {
       expect(synthetic(path, text).length).toBeGreaterThan(0);
+    });
+
+    // Break caught: the guard widened until it flags the kit's own two doors: the file that asks for the authorization and the component that draws the picture are the homes of those names.
+    it('finds nothing in the file that asks for a photo’s link or in the component that draws the picture', () => {
+      expect(
+        synthetic(
+          'platform/evidence/use-photo-link.ts',
+          'import { createRetrievalAuthorization } from "../pickup-work/pickup-work-commands";',
+        ),
+      ).toEqual([]);
+      expect(
+        synthetic(
+          'app/pages/evidence/PhotoPicture.tsx',
+          'const view = usePhotoLink(evidenceId, near); export function PhotoPicture() {}',
+        ),
+      ).toEqual([]);
     });
 
     it('finds nothing in the doors: the parcel’s picture, the run’s grid, the hook, the counted intake’s photos, the record page and the dialog', () => {
