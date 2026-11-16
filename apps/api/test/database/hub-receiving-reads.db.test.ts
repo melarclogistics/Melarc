@@ -515,12 +515,28 @@ describe('the manifest of a run, as the keys that read intakes see it (migration
     expect(await seenBy('hub.read', [])).toEqual([]);
     // The draft run of the first hub, which no hub has been handed, is in none of them.
     expect(await seenBy('hub.read', [HUB_A, HUB_B])).not.toContain(draft.id);
-    // The policy is for the application's login and the owner's functions and for no other role: its check reads `pickup_intake`, and a role that reads manifests without the right to read intakes (the delivery
-    // worker's lane, which relays the envelope of a dispatched run) would be refused for it (42501) if the policy applied to it (the first CI run of the branch: the lane relayed nothing).
-    const [policy] = await routes.rows<{ roles: string[] }>(
-      `select roles::text[] as roles from pg_policies where tablename = 'pickup_manifest' and policyname = 'pickup_manifest_receiving_read'`,
+    // The check that a run has an intake is a function and not a subquery in the policy: a policy's subquery is checked against the privileges of whoever reads the table, and the delivery worker's lane reads
+    // manifests and may not read intakes, while a function needs EXECUTE alone (the first CI run of the branch: the lane relayed nothing). The lane has the one and not the other, and the policy names no role.
+    const holds = async (statement: string): Promise<boolean | undefined> =>
+      (await routes.rows<{ ok: boolean }>(statement))[0]?.ok;
+    const execute = (role: string): Promise<boolean | undefined> =>
+      holds(
+        `select has_function_privilege('${role}', 'melarc.run_has_intake(uuid)', 'EXECUTE') as ok`,
+      );
+    expect(await execute('melarc_worker_cap_notification')).toBe(true);
+    expect(await execute('melarc_api_runtime')).toBe(true);
+    expect(await execute('public')).toBe(false);
+    expect(
+      await holds(
+        `select has_table_privilege('melarc_worker_cap_notification', 'pickup_intake', 'SELECT') as ok`,
+      ),
+    ).toBe(false);
+    const [policy] = await routes.rows<{ roles: string[]; qual: string }>(
+      `select roles::text[] as roles, qual from pg_policies where tablename = 'pickup_manifest' and policyname = 'pickup_manifest_receiving_read'`,
     );
-    expect(policy?.roles.toSorted()).toEqual(['melarc_api_runtime', 'melarc_owner']);
+    expect(policy?.roles).toEqual(['public']);
+    expect(policy?.qual).toContain('run_has_intake');
+    expect(policy?.qual).not.toContain('pickup_intake');
   });
 });
 

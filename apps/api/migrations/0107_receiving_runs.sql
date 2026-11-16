@@ -4,9 +4,11 @@
 --
 --   * ONE POLICY: staff that hold one of the three keys that read intakes (hub.read, hub.intake.count, hub.osd.adjudicate) read the manifests of the hubs of the grant **that the hub has been handed** (a manifest that has an
 --     intake: the run is the hub's to receive, and no other manifest is reached by these keys). It serves the three functions below, which select the code, the service date and nothing else of a manifest, and the
---     guard of the route that names a run (`getReceivingRun`: the record is asked of the key the route runs under, and a run of another hub is told by the probe policy of 0058). **It is for the application's login and
---     the owner's functions and for no other role** (`TO`): the check that a run has an intake reads `pickup_intake`, and a role that reads manifests without the right to read intakes (the delivery worker's lane, which relays
---     the envelope of a dispatched run) would be refused by the table for it (42501) if the policy applied to it, even where its branch is never taken.
+--     guard of the route that names a run (`getReceivingRun`: the record is asked of the key the route runs under, and a run of another hub is told by the probe policy of 0058). **The check that a run has an intake is a function, not a
+--     subquery** (`melarc.run_has_intake`, below): a policy's subquery is checked against the privileges of whoever reads the table, and the delivery worker's lane, which reads the run it relays the envelope of (0062), may
+--     not read intakes (the first CI run of the branch: 42501 on every unit of the lane, even where the branch of the policy is never taken); a policy's function needs only EXECUTE, which the lane is given, as it is
+--     for `melarc.receiver_stands` (0067). The function is not inlined (a SET clause stops that), so the subquery is never part of the lane's statement. A policy is never given a role (`TO`): policies decide on the
+--     request context (the migration lint holds it).
 --   * melarc.receiving_runs(hub, view, q, after, limit, run): THE ONE CRITERIA of the queue by run. A row for each run whose hub handover opened intakes in the hubs of the grant: its code, its hub, its date, the rider who
 --     handed it over (the first intake's), the earliest handover, and the counts of its vendors (waiting, needing a decision, blind-count), the parcels its door photos expect and the parcels of its open cases that are
 --     missing. `view` is the list's filter (waiting = a vendor still waits to be checked in, needs_decision = a vendor is in reconciliation, all); `q` finds a run by its code and an intake by its code, its run's code or its
@@ -18,11 +20,22 @@
 --   * melarc.receiving_run_codes(manifest ids): the codes of the runs of the intakes a read is about, for the answers that name a run (`run_code`), asked at most a thousand at a time.
 -- Each is for staff that read intakes and for nobody else (42501), judges its arguments (22023) and reads the tables as the owner under the policies of the hub tables, so a hub outside the grant is never shown.
 
-CREATE POLICY "pickup_manifest_receiving_read" ON "pickup_manifest" FOR SELECT TO melarc_api_runtime, melarc_owner USING (
+CREATE FUNCTION melarc.run_has_intake(p_manifest uuid) RETURNS boolean LANGUAGE sql STABLE
+SET search_path = pg_catalog, pg_temp AS $$
+  SELECT EXISTS (SELECT 1 FROM public.pickup_intake AS i WHERE i.pickup_manifest_id = p_manifest)
+$$;
+--> statement-breakpoint
+ALTER FUNCTION melarc.run_has_intake(uuid) OWNER TO melarc_owner;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION melarc.run_has_intake(uuid) FROM PUBLIC;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION melarc.run_has_intake(uuid) TO melarc_api_runtime, melarc_worker_cap_notification;
+--> statement-breakpoint
+CREATE POLICY "pickup_manifest_receiving_read" ON "pickup_manifest" FOR SELECT USING (
   CASE melarc.principal_type()
     WHEN 'STAFF' THEN coalesce(current_setting('melarc.authorization_key', true), '') IN ('hub.read', 'hub.intake.count', 'hub.osd.adjudicate')
       AND (melarc.hub_scope_mode() = 'ALL' OR "pickup_manifest"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
-      AND EXISTS (SELECT 1 FROM "pickup_intake" AS i WHERE i.pickup_manifest_id = "pickup_manifest"."id")
+      AND melarc.run_has_intake("pickup_manifest"."id")
     ELSE false
   END
 );
