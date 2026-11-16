@@ -20,6 +20,7 @@ import {
 import type { WorkListParams } from '../../../platform/pickup-work/use-pickup-work-queries';
 import { refusalText } from '../../../platform/problem/capability-words';
 import type { Problem } from '../../../platform/problem/problem-copy';
+import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
 import { formatInstant } from '../../../platform/time/format-time';
 import { waitedText } from '../../../platform/time/waited';
 import { WorkList, type WorkView } from '../pickup-work/WorkList';
@@ -33,24 +34,9 @@ import {
 
 /** The queue's views are the server's `view` filter, and the page filters nothing itself. */
 const VIEWS: readonly [WorkView, ...WorkView[]] = [
-  {
-    id: 'waiting',
-    label: 'Waiting to be checked in',
-    open: undefined,
-    none: 'No run is waiting to be checked in. A run appears here when a rider hands it over at your hub.',
-  },
-  {
-    id: 'needs_decision',
-    label: 'Needs a decision',
-    open: undefined,
-    none: 'No run has parcels waiting for a senior officer’s decision.',
-  },
-  {
-    id: 'all',
-    label: 'All runs',
-    open: undefined,
-    none: 'A run appears here when a rider hands it over at your hubs.',
-  },
+  { id: 'waiting', open: undefined, ...WORDS.queue.views.waiting },
+  { id: 'needs_decision', open: undefined, ...WORDS.queue.views.needs_decision },
+  { id: 'all', open: undefined, ...WORDS.queue.views.all },
 ];
 
 const refusalWords = (problem: Problem): string =>
@@ -85,17 +71,19 @@ function RunCard({ run }: { readonly run: RunSummaryView }) {
   return (
     <CardFacts
       facts={[
-        { label: 'Rider', value: run.rider_name },
-        { label: 'Vendors', value: vendorsText(run.vendor_names) },
+        { label: WORDS.queue.columns.rider, value: run.rider_name },
+        { label: WORDS.queue.columns.vendors, value: vendorsText(run.vendor_names) },
         {
-          label: 'Parcels',
+          label: WORDS.queue.columns.parcels,
           value:
-            run.parcels_expected > 0 ? parcelsText(run.parcels_expected) : 'Counted without photos',
+            run.parcels_expected > 0
+              ? parcelsText(run.parcels_expected)
+              : WORDS.queue.countedWithoutPhotos,
         },
-        { label: 'To do', value: toDoText(run).join('. ') },
-        { label: 'Waiting', value: waitedText(run.handed_over_at) ?? '' },
-        { label: 'Checking in now', value: checkingInText(run.checking_in) },
-        { label: 'Hub', value: run.hub_name },
+        { label: WORDS.queue.columns.toDo, value: toDoText(run).join('. ') },
+        { label: WORDS.queue.columns.waiting, value: waitedText(run.handed_over_at) ?? '' },
+        { label: WORDS.queue.columns.checkingIn, value: checkingInText(run.checking_in) },
+        { label: WORDS.queue.columns.hub, value: run.hub_name },
       ]}
     />
   );
@@ -112,33 +100,35 @@ export function ReceivingQueuePage() {
   const columns: readonly DataColumn<RunSummaryView>[] = [
     {
       id: 'run',
-      header: 'Run',
+      header: WORDS.queue.columns.run,
       rowHeader: true,
       cell: (run) => <RowTitle code={run.run_code} to={runPath(run.run_id)} />,
     },
     {
       id: 'rider',
-      header: 'Rider',
+      header: WORDS.queue.columns.rider,
       priority: 2,
       cell: (run) => run.rider_name,
     },
     {
       id: 'vendors',
-      header: 'Vendors',
+      header: WORDS.queue.columns.vendors,
       kind: 'prose',
       cell: (run) => vendorsText(run.vendor_names),
     },
     {
       id: 'parcels',
-      header: 'Parcels',
+      header: WORDS.queue.columns.parcels,
       kind: 'count',
       priority: 2,
       cell: (run) =>
-        run.parcels_expected > 0 ? parcelsText(run.parcels_expected) : 'Counted without photos',
+        run.parcels_expected > 0
+          ? parcelsText(run.parcels_expected)
+          : WORDS.queue.countedWithoutPhotos,
     },
     {
       id: 'todo',
-      header: 'To do',
+      header: WORDS.queue.columns.toDo,
       kind: 'prose',
       cell: (run) => (
         <>
@@ -152,19 +142,19 @@ export function ReceivingQueuePage() {
     },
     {
       id: 'waited',
-      header: 'Waiting',
+      header: WORDS.queue.columns.waiting,
       kind: 'date',
       cell: (run) => <WaitedCell run={run} />,
     },
     {
       id: 'checking',
-      header: 'Checking in now',
+      header: WORDS.queue.columns.checkingIn,
       priority: 2,
       cell: (run) => checkingInText(run.checking_in),
     },
     {
       id: 'hub',
-      header: 'Hub',
+      header: WORDS.queue.columns.hub,
       priority: 3,
       cell: (run) => run.hub_name,
     },
@@ -174,15 +164,15 @@ export function ReceivingQueuePage() {
     <WorkList<RunSummaryView>
       name="receiving-runs"
       operation="listReceivingRuns"
-      title="Receiving"
-      description="The runs handed over at your hubs, oldest first. Open a run to check its parcels in."
-      viewsLabel="Views of the runs"
+      title={WORDS.queue.title}
+      description={WORDS.queue.description}
+      viewsLabel={WORDS.queue.viewsLabel}
       views={VIEWS}
       noun={{ plural: 'runs', one: 'run', other: 'runs' }}
-      tableLabel="Runs"
+      tableLabel={WORDS.queue.tableLabel}
       refusal={refusalWords}
       lookup={{
-        label: 'Search by run code or vendor name',
+        label: WORDS.queue.lookupLabel,
         minLength: LOOKUP_MIN,
         maxLength: LOOKUP_MAX,
       }}

@@ -166,7 +166,10 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
   },
 
   // A photo of what was found: its declaration, and its confirmation once the file is in the store.
-  { operation: 'createEvidence', text: 'The photo could not be prepared for sending. Try again.' },
+  {
+    operation: 'createEvidence',
+    text: 'The photo could not be prepared for sending. Take it again.',
+  },
   {
     operation: 'createEvidence',
     code: 'PERMISSION_DENIED',
@@ -183,43 +186,43 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
   {
     operation: 'createEvidence',
     code: 'VALIDATION_FAILED',
-    text: 'This file was not accepted: its type or its size is not one the platform takes. Choose a photo or a PDF.',
+    text: 'This photo was not accepted: its type or its size is not one the platform takes. Take another.',
   },
-  { operation: 'createEvidence', code: 'NOT_FOUND', text: INTAKE_NOT_FOUND },
+  { operation: 'createEvidence', code: 'NOT_FOUND', text: 'This vendor could not be found.' },
   {
     operation: 'createEvidence',
     context: 'intake_not_counted',
     code: 'STATE_CONFLICT',
-    text: 'This intake has not been counted yet. Photos are added after the count.',
+    text: 'This vendor has not been counted yet, so this photo cannot be added. Count it first.',
   },
   {
     operation: 'createEvidence',
     code: 'STATE_CONFLICT',
-    text: 'This intake is no longer as you saw it, so the photo was not accepted. Reload it to see where it stands.',
+    text: 'This vendor is no longer as you saw it, so the photo was not accepted. Refresh the page to see where it stands.',
   },
   {
     operation: 'completeEvidenceUpload',
-    text: 'The photo was sent but could not be confirmed. Try again.',
+    text: 'The photo was sent but could not be confirmed. Take it again.',
   },
   {
     operation: 'completeEvidenceUpload',
     code: 'VALIDATION_FAILED',
-    text: 'The file the store holds is not the one that was declared. Choose the photo again.',
+    text: 'The file in the store is not the photo that was taken. Take it again.',
   },
   {
     operation: 'completeEvidenceUpload',
     code: 'EVIDENCE_UPLOAD_EXPIRED',
-    text: 'The time to send this photo ran out. Choose it again.',
+    text: 'The time to send this photo ran out. Take it again.',
   },
   {
     operation: 'completeEvidenceUpload',
     code: 'NOT_FOUND',
-    text: 'This photo could not be found. Choose it again.',
+    text: 'This photo could not be found. Take it again.',
   },
   {
     operation: 'completeEvidenceUpload',
     code: 'STATE_CONFLICT',
-    text: 'This photo is not in a state that can be confirmed. Choose it again.',
+    text: 'This photo is not in a state that can be confirmed. Take it again.',
   },
 
   // The photos of an intake are opened one at a time, under the key that reads the intake (the stop's photos have their own words).

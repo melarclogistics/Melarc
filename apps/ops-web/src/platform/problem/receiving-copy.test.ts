@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 
 import { OperationFailure } from '../api/api-response';
 import { problemOf, PROBLEM_COPY } from './problem-copy';
-import { LOCK_WORDS, RECEIVING_COPY } from './receiving-copy';
+import { LOCK_WORDS, RECEIVING_COPY, RECEIVING_WORDS } from './receiving-copy';
+
+/** What no floor screen says: the words of the people who built the system (OB-S1-111). */
+const FORBIDDEN =
+  /\b(?:intakes?|adjudicat\w*|itemi[sz]\w*|reconciliation|advisory|locks?\b(?! is)|the server|server)\b/i;
 
 /**
  * The words of the receiving screens of a run (S1.35c), in the one table the Ops Portal keeps. The tests pin that each refused act names its own capability and no key or role, that a conflict which declares a rule
@@ -25,8 +29,6 @@ const OPERATIONS = [
   'addExtraParcel',
   'correctIntakeCount',
   'floor:recordIntakeCondition',
-  'floor:createEvidence',
-  'floor:completeEvidenceUpload',
 ];
 
 describe('the words of the table', () => {
@@ -74,7 +76,7 @@ describe('the words of the refusals of authority', () => {
     ['finishCheckIn', /count the parcels received at a hub/],
     ['addExtraParcel', /count the parcels received at a hub/],
     ['floor:recordIntakeCondition', /count the parcels received at a hub/],
-    ['floor:createEvidence', /count the parcels received at a hub/],
+    ['createEvidence', /count the parcels received at a hub/],
   ])('names the capability of %s and never a key', (operation, words) => {
     const message = problemOf(refused('PERMISSION_DENIED', 403), { operation }).message;
     expect(message).toMatch(words);
@@ -126,7 +128,7 @@ describe('the words of the conflicts', () => {
     ).toMatch(/not stored yet/);
     expect(
       problemOf(refused('EVIDENCE_UPLOAD_EXPIRED', 422), {
-        operation: 'floor:completeEvidenceUpload',
+        operation: 'completeEvidenceUpload',
       }).message,
     ).toMatch(/time to send this photo ran out/);
   });
@@ -135,10 +137,8 @@ describe('the words of the conflicts', () => {
 describe('the voice of the floor', () => {
   // Break caught (OB-S1-111): a word of the system's builders on a floor screen.
   it('has no word the floor does not use, in any rule or in the lock’s words', () => {
-    const forbidden =
-      /\b(?:intakes?|adjudicat\w*|itemi[sz]\w*|reconciliation|advisory|locks?\b(?! is)|the server|server)\b/i;
     for (const rule of RECEIVING_COPY) {
-      expect(rule.text, rule.text).not.toMatch(forbidden);
+      expect(rule.text, rule.text).not.toMatch(FORBIDDEN);
     }
     for (const text of [
       LOCK_WORDS.opened('Ama Owusu', '09:12'),
@@ -146,7 +146,19 @@ describe('the voice of the floor', () => {
       LOCK_WORDS.nobody,
       LOCK_WORDS.cannotCheck,
     ]) {
-      expect(text).not.toMatch(forbidden);
+      expect(text).not.toMatch(FORBIDDEN);
+    }
+  });
+
+  // Break caught: the evidence steps said in the words of the people who built them ("This intake is no longer as you saw it") on a screen of the floor, because their words are the shared table's.
+  it('has the evidence steps, which every screen that takes a photo shares, in the floor’s voice', () => {
+    const evidence = PROBLEM_COPY.filter(
+      (rule) => rule.operation === 'createEvidence' || rule.operation === 'completeEvidenceUpload',
+    );
+    expect(evidence.length).toBeGreaterThan(5);
+    for (const rule of evidence) {
+      expect(rule.text, rule.text).not.toMatch(FORBIDDEN);
+      expect(rule.text, rule.text).not.toMatch(/\bPDF\b/);
     }
   });
 
@@ -181,5 +193,98 @@ describe('the lock’s line', () => {
   it('says when it cannot be checked, and never *Held by you*', () => {
     expect(LOCK_WORDS.cannotCheck).toMatch(/cannot check who else is checking this in right now/);
     expect(LOCK_WORDS.cannotCheck).not.toMatch(/held by you|you opened/i);
+  });
+});
+
+/** Every sentence the words of the screens can say: each string, and each function called at the figures and names a floor meets (none, one, many, a name), so that a branch of a plural is read too. */
+function sentencesOf(value: unknown, path = 'RECEIVING_WORDS'): [string, string][] {
+  if (typeof value === 'string') return [[path, value]];
+  if (typeof value === 'function') {
+    const fn = value as (...args: unknown[]) => unknown;
+    return [0, 1, 12, 'Kente Crafts'].map((sample): [string, string] => {
+      const said = fn(...Array.from({ length: fn.length }, () => sample));
+      // A function of a name and a count given the one sample twice may hand the name back as it is: what it says is read as text all the same.
+      if (typeof said !== 'string' && typeof said !== 'number')
+        throw new Error(`${path} says a ${typeof said}, not a sentence`);
+      return [`${path}(${String(sample)})`, String(said)];
+    });
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).flatMap(([key, inner]) => sentencesOf(inner, `${path}.${key}`));
+  }
+  throw new Error(`${path} is not words`);
+}
+
+describe('the words of the screens', () => {
+  const sentences = sentencesOf(RECEIVING_WORDS);
+
+  it('are many, and each is a sentence', () => {
+    expect(sentences.length).toBeGreaterThan(80);
+    for (const [path, said] of sentences) expect(said.trim(), path).not.toBe('');
+  });
+
+  // Break caught (OB-S1-111): a screen word of the system's builders, which no refusal check reaches because it is not a refusal.
+  it('have no word the floor does not use, whatever the figures', () => {
+    for (const [path, said] of sentences) expect(said, path).not.toMatch(FORBIDDEN);
+  });
+
+  // Break caught (PRODUCT_DESIGN_DIRECTION section 6.5): a sentence that names a key, a role or an administrator; an officer without the decision is told a senior officer decides.
+  it('name no key, no role and no administrator', () => {
+    for (const [path, said] of sentences) {
+      expect(said, path).not.toMatch(
+        /\bhub\.[a-z_.]+|Ops Staff|Platform Admin|Senior Ops|administrator/i,
+      );
+    }
+  });
+
+  // Break caught: a number typed into a sentence, which would be a count the words made up. Every figure in a sentence came in as an argument (12 or 1 or 0 here).
+  it('hold no figure that was not given', () => {
+    for (const [path, said] of sentences) {
+      const figures = said.match(/\d+/g) ?? [];
+      for (const figure of figures) expect(['0', '1', '12'], path).toContain(figure);
+    }
+  });
+
+  // Break caught: the confirmation of "All N here" said another way, so that it is not the statement the officer is asked to make.
+  it('say the confirmation of "All 12 here" as the owner worded it', () => {
+    expect(RECEIVING_WORDS.vendor.allHere(12)).toBe('All 12 here');
+    expect(RECEIVING_WORDS.allHere.title(12, 'Kente Crafts')).toBe(
+      'Confirm 12 parcels from Kente Crafts?',
+    );
+    expect(RECEIVING_WORDS.allHere.body(12)).toBe(
+      'I counted 12 parcels from this vendor on the table.',
+    );
+    expect(RECEIVING_WORDS.allHere.confirm(12)).toBe('Yes, all 12 are here');
+  });
+
+  it('say one parcel as one parcel', () => {
+    expect(RECEIVING_WORDS.allHere.title(1, 'Kente Crafts')).toBe(
+      'Confirm 1 parcel from Kente Crafts?',
+    );
+    expect(RECEIVING_WORDS.allHere.body(1)).toBe(
+      'I counted 1 parcel from this vendor on the table.',
+    );
+    expect(RECEIVING_WORDS.allHere.confirm(1)).toBe('Yes, it is here');
+    expect(RECEIVING_WORDS.vendor.allHere(1)).toBe('The parcel is here');
+  });
+
+  // Break caught: a condition that is not "not checked yet" until it is recorded ("Good condition" from a default).
+  it('say a condition nobody recorded is not checked yet', () => {
+    expect(RECEIVING_WORDS.states.conditionUnchecked).toBe('Condition not checked yet');
+  });
+
+  // Break caught: the rider's number in a sentence about a vendor that was counted blind before the count.
+  it('say nothing of the rider’s number for a vendor not yet counted but that it is shown after', () => {
+    expect(RECEIVING_WORDS.vendor.blind.explain).toMatch(/shown only after you have typed yours/);
+    expect(RECEIVING_WORDS.vendor.blindPhotographed).not.toMatch(/\d/);
+  });
+
+  it('tell an officer a senior officer will decide, and never to ask for access to it', () => {
+    expect(RECEIVING_WORDS.vendor.standing.RECONCILIATION_REQUIRED).toBe(
+      'A senior officer will decide about this vendor.',
+    );
+    expect(RECEIVING_WORDS.summary.decisionFor('Kente Crafts')).toBe(
+      'A senior officer will decide about Kente Crafts.',
+    );
   });
 });

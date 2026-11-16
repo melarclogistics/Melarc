@@ -1,3 +1,5 @@
+import type { IntakeCondition, IntakeState } from '../hub-intake/hub-intake-shape';
+import type { ParcelState } from '../hub-receiving/receiving-shape';
 import { cannotText } from './capability-words';
 import type { CopyRule } from './problem-copy';
 
@@ -9,9 +11,10 @@ import type { CopyRule } from './problem-copy';
  * what to do next, because a refusal shown as a dead end misrepresents the policy. A refusal that declares a `details.rule` is worded by it (`problemOf` reads the rule as the context when the page gave none;
  * the rules are the contract's: errors-and-enums.md section 5.3a).
  *
- * **Two of the operations the run page calls are shared with the blind-count screens** (`recordIntakeCondition`, and the evidence steps `createEvidence` and `completeEvidenceUpload`), whose words in `hub-intake-copy.ts`
- * speak of *an intake*. The floor says the same things in its own voice, so the run page words them under `floor:<operation>`: the name only keys the table, it is no operation, and the stage that reworks the
- * blind-count screens folds the two tables into one.
+ * **One of the operations the run page calls is shared with the blind-count screens** (`recordIntakeCondition`), whose words in `hub-intake-copy.ts` speak of *an intake*
+ * and of one condition for the whole of it. The floor says the same thing for a parcel in its own voice, so the run page words it under `floor:recordIntakeCondition`: the name only keys the table, it is no operation,
+ * and the stage that reworks the blind-count screens folds the two into one. The evidence steps (`createEvidence`, `completeEvidenceUpload`) are worded in the floor's voice in `hub-intake-copy.ts` for every screen that
+ * takes a photo.
  */
 const OTHER_HUB = 'This run was handed over at a hub your account does not work in.';
 const RUN_NOT_FOUND = 'This run could not be found.';
@@ -306,52 +309,6 @@ export const RECEIVING_COPY: readonly CopyRule[] = [
     text: `This vendor changed after you opened it, so the correction was not recorded. ${REFRESH}`,
   },
   { operation: 'correctIntakeCount', code: 'STATE_CONFLICT', text: changed('the correction') },
-
-  // A photo taken at the hub: its declaration, and its confirmation once the file is in the store (the floor's words of the evidence steps).
-  {
-    operation: 'floor:createEvidence',
-    text: 'The photo could not be prepared for sending. Take it again.',
-  },
-  {
-    operation: 'floor:createEvidence',
-    code: 'PERMISSION_DENIED',
-    text: cannotText('hub.intake.count'),
-  },
-  {
-    operation: 'floor:createEvidence',
-    code: 'VALIDATION_FAILED',
-    text: 'This photo was not accepted: its type or its size is not one the platform takes. Take another.',
-  },
-  { operation: 'floor:createEvidence', code: 'NOT_FOUND', text: VENDOR_NOT_FOUND },
-  {
-    operation: 'floor:createEvidence',
-    code: 'STATE_CONFLICT',
-    text: `This vendor is no longer as you saw it, so the photo was not accepted. ${REFRESH}`,
-  },
-  {
-    operation: 'floor:completeEvidenceUpload',
-    text: 'The photo was sent but could not be confirmed. Take it again.',
-  },
-  {
-    operation: 'floor:completeEvidenceUpload',
-    code: 'VALIDATION_FAILED',
-    text: 'The file in the store is not the photo that was taken. Take it again.',
-  },
-  {
-    operation: 'floor:completeEvidenceUpload',
-    code: 'EVIDENCE_UPLOAD_EXPIRED',
-    text: 'The time to send this photo ran out. Take it again.',
-  },
-  {
-    operation: 'floor:completeEvidenceUpload',
-    code: 'NOT_FOUND',
-    text: 'This photo could not be found. Take it again.',
-  },
-  {
-    operation: 'floor:completeEvidenceUpload',
-    code: 'STATE_CONFLICT',
-    text: 'This photo is not in a state that can be confirmed. Take it again.',
-  },
 ];
 
 /**
@@ -368,4 +325,254 @@ export const LOCK_WORDS = {
   nobody: 'No one has started on this vendor yet.',
   cannotCheck:
     'The page cannot check who else is checking this in right now. You can carry on: nothing here is blocked by it.',
+} as const;
+
+/** "1 parcel", "12 parcels". */
+const parcels = (count: number): string => `${String(count)} ${count === 1 ? 'parcel' : 'parcels'}`;
+const vendorsOf = (count: number): string => (count === 1 ? 'vendor' : 'vendors');
+/** The label of the button that says every parcel of a vendor is here. */
+const allHere = (count: number): string =>
+  count === 1 ? 'The parcel is here' : `All ${String(count)} here`;
+
+/**
+ * The words of what the screens of receiving by run **draw**, in the floor's voice and in one place (S1.35c; OB-S1-111): the labels, the sentences, the buttons and the dialogs of the queue and of the run's page.
+ * (The words of a **refusal** are the table above, and the lock's are `LOCK_WORDS`.) **All of them are drafts for the Product Owner to review with the composed screens.** A button is a verb; a state is told in
+ * words, with the tone supporting them and never carrying them; a sentence that holds a count is a function of it, so that **no number is ever typed into a sentence** and nothing here works one out; and nothing
+ * here says *intake*, *adjudicate*, *itemise*, *reconciliation*, *advisory lock* or *the server*, nor tells an officer without the decision to ask an administrator for it (`receiving-copy.test.ts` reads every
+ * string, and every function with sample figures, and fails on one).
+ */
+export const RECEIVING_WORDS = {
+  parcels,
+  vendors: vendorsOf,
+
+  /** The queue by run (`/receiving`). */
+  queue: {
+    title: 'Receiving',
+    description:
+      'The runs handed over at your hubs, oldest first. Open a run to check its parcels in.',
+    viewsLabel: 'Views of the runs',
+    tableLabel: 'Runs',
+    lookupLabel: 'Search by run code or vendor name',
+    views: {
+      waiting: {
+        label: 'Waiting to be checked in',
+        none: 'No run is waiting to be checked in. A run appears here when a rider hands it over at your hub.',
+      },
+      needs_decision: {
+        label: 'Needs a decision',
+        none: 'No run has parcels waiting for a senior officer’s decision.',
+      },
+      all: {
+        label: 'All runs',
+        none: 'A run appears here when a rider hands it over at your hubs.',
+      },
+    },
+    columns: {
+      run: 'Run',
+      rider: 'Rider',
+      vendors: 'Vendors',
+      parcels: 'Parcels',
+      toDo: 'To do',
+      waiting: 'Waiting',
+      checkingIn: 'Checking in now',
+      hub: 'Hub',
+    },
+    countedWithoutPhotos: 'Counted without photos',
+    noOne: 'No one',
+    you: 'You',
+    allCheckedIn: 'Everything is checked in',
+    /** The vendors of a run, by name: the first two and how many more ("Kente Crafts, Shea Naturals +2 more"). */
+    vendorNames: (first: string, more: number): string =>
+      more > 0 ? `${first} +${String(more)} more` : first,
+    stillToCheckIn: (waiting: number, total: number): string =>
+      `${String(waiting)} of ${String(total)} ${vendorsOf(total)} still to check in`,
+    needDecision: (count: number): string =>
+      `${String(count)} ${count === 1 ? 'vendor needs' : 'vendors need'} a decision`,
+    beingSearchedFor: (count: number): string => `${parcels(count)} being searched for`,
+  },
+
+  /** What a state is called: the API's state, said in the floor's words. Each is typed over its whole enumeration, so a value the contract adds is a compile error until someone decides how it reads. */
+  states: {
+    vendor: {
+      AWAITING_COUNT: 'Waiting to be checked in',
+      COUNTED: 'Checked in',
+      RECONCILIATION_REQUIRED: 'Needs a decision',
+      READY_FOR_ITEMIZATION: 'Checked in and cleared',
+      ITEMIZING: 'Orders being listed',
+      CLOSED: 'Closed',
+    } satisfies Record<IntakeState, string>,
+    parcel: {
+      EXPECTED: 'Not checked in',
+      ARRIVED: 'Checked in',
+      MISSING: 'Missing',
+      VOID: 'Taken back',
+    } satisfies Record<ParcelState, string>,
+    condition: {
+      OK: 'Looks fine',
+      DAMAGED: 'Damaged',
+      TAMPERED: 'Tampered with',
+      OTHER: 'Another problem',
+    } satisfies Record<IntakeCondition, string>,
+    /** **Not checked yet until someone has recorded one**: never "Good condition" from a default. */
+    conditionUnchecked: 'Condition not checked yet',
+  },
+
+  /** What a vendor's counts are called, in a line ("11 checked in, 1 missing"): the counts are the API's and nothing here works one out. */
+  counts: {
+    checkedIn: (count: number): string => `${String(count)} checked in`,
+    missing: (count: number): string => `${String(count)} missing`,
+    extra: (count: number): string => `${String(count)} extra`,
+    damaged: (count: number): string => `${String(count)} damaged`,
+  },
+
+  /** The run's page (`/receiving/{run}`). */
+  run: {
+    documentTitle: (code: string): string => `Run ${code}`,
+    notFoundTitle: 'Run not found',
+    receiving: 'Receiving',
+    back: 'Back to receiving',
+    loading: 'Loading the run…',
+    handedOver: (rider: string, at: string): string => `${rider} handed this run over at ${at}.`,
+    lookOnly: (cannot: string): string => `You can look at this run. ${cannot}`,
+    next: (vendor: string): string => `Next: ${vendor}`,
+    goTo: (vendor: string): string => `Go to ${vendor}`,
+  },
+
+  /** One vendor's section. */
+  vendor: {
+    photographed: (count: number): string => `${parcels(count)} photographed`,
+    blindPhotographed: 'No photos at the door: counted, not checked in',
+    gridLabel: (vendor: string): string => `Photos of ${vendor}’s parcels`,
+    overviewHint: (count: number): string =>
+      `Count this vendor’s parcels on the table. If ${count === 1 ? 'it is' : `all ${String(count)} are`} here, choose “${allHere(count)}”. If not, choose “The count is different” and tap each parcel that is here.`,
+    noPhotosHint:
+      'No parcel was photographed for this vendor. If there is a parcel on the table, add it below.',
+    tappingHint:
+      'Tap each parcel that is on the table. A parcel you do not tap is marked missing when you finish this vendor.',
+    /** Where the check-in has got to: the API's counts, said. With an extra the arithmetic is not the page's to do, so the extras are said apart. */
+    tally: (arrived: number, expected: number, extras: number): string =>
+      extras === 0
+        ? `${String(arrived)} of ${String(expected)} checked in`
+        : `${String(arrived)} checked in, ${String(extras)} of them not on the list`,
+    allHere,
+    countDifferent: 'The count is different',
+    finish: 'Finish this vendor',
+    addExtra: 'Add a parcel not on the list',
+    /** A sentence on a vendor that is finished, by where it stands. */
+    standing: {
+      COUNTED: 'This vendor is checked in.',
+      READY_FOR_ITEMIZATION: 'This vendor is checked in. Nothing is missing.',
+      RECONCILIATION_REQUIRED: 'A senior officer will decide about this vendor.',
+      ITEMIZING: 'The orders of this vendor are being listed.',
+      CLOSED: 'This vendor is closed.',
+    },
+    /** A vendor whose parcels are counted and not checked in, because Ops excused the door photos. */
+    blind: {
+      explain:
+        'Count this vendor’s parcels on the table first. The rider’s number is shown only after you have typed yours.',
+      countButton: 'Count the parcels',
+      counted: (count: number): string => `You counted ${parcels(count)}.`,
+      variance: {
+        MATCH: 'That is the same as the rider’s number.',
+        SHORT: 'That is fewer than the rider’s number.',
+        OVER: 'That is more than the rider’s number.',
+      },
+    },
+    /** What the page says once an act is done: where the officer is, and what comes next. */
+    done: {
+      finished: (vendor: string): string => `${vendor} is checked in.`,
+      found: (parcel: string): string => `${parcel} is found and checked in.`,
+      extraAdded: 'The parcel was added. A senior officer will decide about it.',
+      damageRecorded: (parcel: string): string => `The damage to ${parcel} is recorded.`,
+      takenBack: (parcel: string): string => `${parcel} was taken back.`,
+    },
+  },
+
+  /** A parcel: its name, its tile and its dialog. */
+  parcel: {
+    label: (ordinal: number, extra: boolean): string =>
+      extra ? `Extra parcel ${String(ordinal)}` : `Parcel ${String(ordinal)}`,
+    tile: {
+      checkedIn: 'Checked in',
+      checkedInDamaged: 'Checked in, damaged',
+      missing: 'Missing',
+      damaged: 'Damaged',
+      takenBack: 'Taken back',
+    },
+    picture: {
+      loading: 'Loading the photo…',
+      none: 'No photo',
+    },
+    from: (vendor: string): string => `From ${vendor}.`,
+    checkedInBy: (who: string, at: string): string => `Checked in by ${who} at ${at}.`,
+    checkedInAt: (at: string): string => `Checked in at ${at}.`,
+    missingSince: (at: string): string => `Missing since ${at}.`,
+    notCheckedIn: 'Not checked in yet.',
+    takenBack: 'Taken back: this parcel is not counted.',
+    conditionBy: (words: string, who: string, at: string): string =>
+      `${words}. Recorded by ${who} at ${at}.`,
+    note: (note: string): string => `Note: ${note}`,
+    close: 'Close',
+    damaged: 'Damaged',
+    found: 'Found it',
+    takeBack: 'Take this parcel back',
+    checkInFirst: 'Check this parcel in before you record damage on it.',
+  },
+
+  /** "All 12 here": the officer states the number they counted. */
+  allHere: {
+    title: (count: number, vendor: string): string => `Confirm ${parcels(count)} from ${vendor}?`,
+    body: (count: number): string => `I counted ${parcels(count)} from this vendor on the table.`,
+    confirm: (count: number): string =>
+      count === 1 ? 'Yes, it is here' : `Yes, all ${String(count)} are here`,
+  },
+
+  /** Finishing a vendor as tapped: what happens to the parcels that were not tapped. */
+  finish: {
+    title: (vendor: string): string => `Finish ${vendor}?`,
+    untapped: (count: number): string =>
+      count === 0
+        ? 'Every parcel was tapped, so none will be marked missing.'
+        : `${parcels(count)} you did not tap will be marked missing.`,
+    extras: 'A parcel that is not on the list was added.',
+    decision: 'A senior officer will then decide what happens next.',
+    confirm: 'Finish this vendor',
+  },
+
+  /** A parcel on the table that is not on the list. */
+  extra: {
+    title: 'Add a parcel that is not on the list',
+    consequence:
+      'Take a photo of the parcel. It is counted as an extra, and a senior officer will decide about it.',
+    photoLabel: 'Photo of the parcel',
+    photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
+    photoNeeded: 'Take a photo of the parcel.',
+    noteLabel: 'Note (optional)',
+    noteHelp: 'What is it, and who is it from?',
+    confirm: 'Add this parcel',
+  },
+
+  /** Damage on one parcel, on its own photo. */
+  damage: {
+    title: (parcel: string): string => `Record damage on ${parcel}?`,
+    consequence:
+      'Take a photo of the damage and say what you see. Damage is recorded once for each parcel.',
+    photoLabel: 'Photo of the damage',
+    photoHelp: 'Take a photo with the camera. It is sent as soon as you take it.',
+    photoNeeded: 'Take a photo of the damage.',
+    noteLabel: 'What is damaged? (optional)',
+    noteHelp: 'A few words, for example a torn corner or a wet box.',
+    confirm: 'Record the damage',
+  },
+
+  /** The run when every vendor is finished: what came of it, and the next step. */
+  summary: {
+    title: 'Before the rider leaves',
+    lead: 'Check the rider’s bag before they leave.',
+    allIn: 'Everything the rider handed over is checked in.',
+    missingLead: 'These parcels are not here. Show the rider their photos.',
+    missingLabel: 'Photos of the missing parcels',
+    decisionFor: (names: string): string => `A senior officer will decide about ${names}.`,
+    vendorLine: (vendor: string, counts: string): string => `${vendor}: ${counts}`,
+  },
 } as const;
