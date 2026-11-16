@@ -79,7 +79,7 @@ function Facts({
     const view = record.view;
     const comparison = checkInComparison(view, view.count_difference);
     return (
-      <>
+      <div className="receiving-decision__facts">
         <Panel title={WORDS.decision.facts} headingLevel={2} region>
           <DescriptionList
             items={[
@@ -100,13 +100,13 @@ function Facts({
         <Panel title={WORDS.record.found.title} headingLevel={2} region>
           <FindingsList findings={checkInFindings(view)} />
         </Panel>
-      </>
+      </div>
     );
   }
   const intake = record.intake;
   if (intake.count_phase === 'PRE_COUNT') return null;
   return (
-    <>
+    <div className="receiving-decision__facts">
       <Panel title={WORDS.decision.facts} headingLevel={2} region>
         <DescriptionList
           items={[
@@ -122,7 +122,7 @@ function Facts({
       <Panel title={WORDS.record.found.title} headingLevel={2} region>
         <FindingsList findings={blindFindings(intake.condition_findings, principalId)} />
       </Panel>
-    </>
+    </div>
   );
 }
 

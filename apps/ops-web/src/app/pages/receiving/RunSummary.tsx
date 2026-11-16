@@ -58,20 +58,26 @@ export function RunSummary({ vendors, focusOnAppear }: RunSummaryProps) {
   );
   const deciding = vendors.filter((vendor) => vendor.state === 'RECONCILIATION_REQUIRED');
   return (
-    <Panel title={WORDS.summary.title} headingLevel={2} region headingRef={heading}>
-      <p className="receiving-summary__lead">{WORDS.summary.lead}</p>
-      {clean ? <p>{WORDS.summary.allIn}</p> : null}
-      <ul className="receiving-summary__vendors">
-        {vendors.map((vendor) => (
-          <li key={vendor.intake_id}>
-            <p>{WORDS.summary.vendorLine(vendor.vendor_name, countsText(vendor))}</p>
-            <MissingPhotos vendor={vendor} />
-          </li>
-        ))}
-      </ul>
-      {deciding.length === 0 ? null : (
-        <p>{WORDS.summary.decisionFor(deciding.map((vendor) => vendor.vendor_name).join(', '))}</p>
-      )}
-    </Panel>
+    <div className="receiving-summary">
+      <Panel title={WORDS.summary.title} headingLevel={2} region headingRef={heading}>
+        <div className="receiving-summary__body">
+          <p className="receiving-summary__lead">{WORDS.summary.lead}</p>
+          {clean ? <p>{WORDS.summary.allIn}</p> : null}
+          <ul className="receiving-summary__vendors">
+            {vendors.map((vendor) => (
+              <li key={vendor.intake_id}>
+                <p>{WORDS.summary.vendorLine(vendor.vendor_name, countsText(vendor))}</p>
+                <MissingPhotos vendor={vendor} />
+              </li>
+            ))}
+          </ul>
+          {deciding.length === 0 ? null : (
+            <p>
+              {WORDS.summary.decisionFor(deciding.map((vendor) => vendor.vendor_name).join(', '))}
+            </p>
+          )}
+        </div>
+      </Panel>
+    </div>
   );
 }
