@@ -333,13 +333,11 @@
   line-height: var(--text-label-sm-line-height);
 }
 
-/* In the viewer the sample is a photo's box, in the proportions of one. */
-.showcase-photo-sample--large {
-  aspect-ratio: 4 / 3;
-  max-width: 100%;
-  border-radius: var(--radius-md);
-  font-size: var(--text-body-lg-size);
-  line-height: var(--text-body-lg-line-height);
+/* A button of the page's under the picture, as the receiving run draws "Open this parcel" (`.receiving-viewer__act`): it keeps its size, and the picture takes the room that is left. */
+.showcase-photo-act {
+  display: flex;
+  justify-content: center;
+  margin-block-start: var(--space-3);
 }
 
 /* What a tile says when its picture cannot be shown, as the page's picture draws it: an icon and short words. */

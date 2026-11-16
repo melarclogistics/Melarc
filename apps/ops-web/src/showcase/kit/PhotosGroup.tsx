@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+// The sheet of the page's picture (`PhotoPicture`), which the sample of the viewer is drawn with, so that the viewer is measured against the same classes a receiving screen's photo has.
+import '../../app/pages/evidence/photo-picture.css';
 import { Button } from '../../components/ui/button/Button';
 import { Checkbox } from '../../components/ui/checkbox/Checkbox';
 import { ConnectionBanner } from '../../components/ui/connection-banner/ConnectionBanner';
@@ -9,6 +11,7 @@ import { Icon } from '../../components/ui/icon/Icon';
 import { PhotoGrid, type PhotoGridItem } from '../../components/ui/photo-grid/PhotoGrid';
 import { PhotoViewer, type PhotoViewerItem } from '../../components/ui/photo-viewer/PhotoViewer';
 import { RadioGroup } from '../../components/ui/radio/RadioGroup';
+import { ReadState, type ReadQuery } from '../../components/ui/read-state/ReadState';
 import { KitSection, Specimen } from './Section';
 
 const nothing = (): void => undefined;
@@ -34,6 +37,37 @@ function madeUpStore(
 /** What stands for a photo on this page: a box with its number. No photo is read from any store here, and none is made up to look like a parcel. */
 function SamplePicture({ label }: { readonly label: string }) {
   return <span className="showcase-photo-sample">{label}</span>;
+}
+
+/** A read that has finished: how the page's picture hands a photo that is ready to `ReadState` (`PhotoPicture`, size `full`). */
+const READY: ReadQuery<true> = {
+  status: 'success',
+  data: true,
+  error: undefined,
+  refetch: () => Promise.resolve(),
+  isFetching: false,
+};
+
+/**
+ * What the page's picture draws in the viewer for a photo that is ready: an image in the read's own box, with the picture's own classes, so that the viewer is measured against what really made it overflow (a photo
+ * has more pixels than any screen has room for, and is as tall as the screen allows and more) and against the box a receiving screen puts it in. **The image is a file of this site** (the brand's symbol): the strict
+ * policy of the page refuses any other address, and no photo is read from a store or made up to look like a parcel. The symbol has no size of its own, so the size of a photo's pixels is given by the attributes.
+ */
+function SampleFullPicture({ label }: { readonly label: string }) {
+  return (
+    <ReadState query={READY} isEmpty={() => false} empty={null}>
+      {() => (
+        <img
+          className="photo-picture photo-picture--full"
+          src="/favicon.svg"
+          alt={label}
+          width={1600}
+          height={1200}
+          decoding="async"
+        />
+      )}
+    </ReadState>
+  );
 }
 
 const GRID_ITEMS: readonly PhotoGridItem[] = [
@@ -125,7 +159,7 @@ function PhotoViewerSpecimen() {
   return (
     <KitSection
       title="PhotoViewer"
-      note="One photo at a time over the dialog, among the others of its grid: where the person is (3 of 12), two buttons the size of the hub floor, the arrow keys and a swipe of a finger, one neighbour loaded ahead, and Escape to close. It decides nothing: the page draws each picture. Press the button, then try the arrow keys; on a touch screen, swipe across the photo."
+      note="One photo at a time over the dialog, among the others of its grid: where the person is (3 of 12), two buttons the size of the hub floor beside it, the arrow keys and a swipe of a finger, one neighbour loaded ahead, and Escape to close. The viewer is as tall as the screen allows and the photo takes the room that the controls leave, so that the buttons never leave the screen and do not move from one photo to the next. It decides nothing: the page draws each picture. Press the button, then try the arrow keys; on a touch screen, swipe across the photo."
     >
       <div className="showcase-kit-grid">
         <Specimen label="Five sample photos">
@@ -148,10 +182,18 @@ function PhotoViewerSpecimen() {
                 setIndex(null);
               }}
               note="These are samples: no photo is read from a store."
-              renderPicture={(item) => (
-                <div className="showcase-photo-sample showcase-photo-sample--large">
-                  {item.label}
-                </div>
+              // As a receiving screen draws it: the picture in the read's box, and under it a button of the page's, which keeps its size while the picture takes the room that is left.
+              renderPicture={(item, { current }) => (
+                <>
+                  <SampleFullPicture label={item.label} />
+                  {current ? (
+                    <div className="showcase-photo-act">
+                      <Button type="button" variant="secondary" size="lg">
+                        Open the sample parcel
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
               )}
             />
           )}

@@ -3015,4 +3015,141 @@ test.describe('the photo kit in a browser', () => {
       (await box(specimen(page, 'Checkbox, large').locator('.ui-checkbox__label'))).height,
     ).toBeGreaterThanOrEqual(56);
   });
+
+  // Break caught (the pictures of the receiving screens, defects 1 and 11): a viewer as tall as its content, so that at 1280 x 800 the place and the three buttons began below the screen and were reached by
+  // scrolling inside it, and the viewer went back to the top after every Next; a photo that takes the room the controls need; and controls that move between photos (a description of a different height).
+  // The photo is the page's, here as the receiving run draws it: the picture and, under it, a button of the page's own.
+  for (const [width, height] of [
+    [320, 568],
+    [390, 844],
+    [768, 1024],
+    [1280, 800],
+    [1024, 600],
+  ] as const) {
+    test(`keeps every control of the viewer on the screen, and still, at ${String(width)} x ${String(height)}`, async ({
+      page,
+    }) => {
+      await openKit(page, 'photos', { width, height });
+      await page.getByRole('button', { name: 'Open the sample photos' }).click();
+      const dialog = page.getByRole('dialog', { name: /^Sample photo \d$/ });
+      await expect(dialog.getByText('1 of 5')).toBeVisible();
+      const controls = ['Previous photo', 'Next photo', 'Close the photo'].map((name) =>
+        dialog.getByRole('button', { name }),
+      );
+      // The page's own button under its picture is on the screen too, and keeps its size while the picture gives way.
+      const act = dialog.getByRole('button', { name: 'Open the sample parcel' });
+      const place = dialog.locator('.ui-photo-viewer__position');
+
+      /** Every control, the page's button and the place are inside the screen, the buttons are the floor's 56px each way, and the viewer does not scroll, down or across. */
+      const onTheScreen = async (when: string): Promise<void> => {
+        for (const control of [...controls, act, place]) {
+          const found = await box(control);
+          expect(found.y, `${when}: a control starts above the screen`).toBeGreaterThanOrEqual(0);
+          expect(
+            found.y + found.height,
+            `${when}: a control ends below the screen (${String(height)} px high)`,
+          ).toBeLessThanOrEqual(height);
+          expect(found.x, `${when}: a control starts left of the screen`).toBeGreaterThanOrEqual(
+            0,
+          );
+          expect(
+            found.x + found.width,
+            `${when}: a control ends right of the screen (${String(width)} px wide)`,
+          ).toBeLessThanOrEqual(width);
+        }
+        for (const control of [...controls, act]) {
+          const found = await box(control);
+          expect(found.height, `${when}: a button under the floor`).toBeGreaterThanOrEqual(56);
+          expect(found.width, `${when}: a button narrower than the floor`).toBeGreaterThanOrEqual(
+            56,
+          );
+        }
+        const scroll = await dialog.evaluate((element) => ({
+          top: element.scrollTop,
+          beyond: element.scrollHeight - element.clientHeight,
+          across: element.scrollWidth - element.clientWidth,
+        }));
+        expect(
+          scroll.beyond,
+          `${when}: the viewer has ${String(scroll.beyond)} px to scroll`,
+        ).toBeLessThanOrEqual(1);
+        expect(
+          scroll.across,
+          `${when}: the viewer has ${String(scroll.across)} px to scroll across`,
+        ).toBeLessThanOrEqual(1);
+        expect(scroll.top, `${when}: the viewer is scrolled`).toBe(0);
+      };
+      await onTheScreen('first photo');
+
+      // The photo has room: the part of the window the controls leave, and a photo that is bigger than that is made to fit it. (The neighbour that is loaded ahead is drawn too, hidden: the one looked at is the
+      // photo of the stage.) The picture is the page's own, an image that is as tall as the screen allows: it has to be drawn before it is measured.
+      const picture = dialog.locator('.ui-photo-viewer__photo img.photo-picture--full');
+      await expect(picture).toHaveJSProperty('complete', true);
+      const photo = await box(picture);
+      const stage = await box(dialog.locator('.ui-photo-viewer__stage'));
+      expect(photo.height, 'the photo has no room').toBeGreaterThanOrEqual(100);
+      expect(photo.y).toBeGreaterThanOrEqual(stage.y - 1);
+      expect(photo.y + photo.height).toBeLessThanOrEqual(stage.y + stage.height + 1);
+      expect(photo.x + photo.width).toBeLessThanOrEqual(stage.x + stage.width + 1);
+
+      // Next: the controls stay where they are (the second photo has no detail line, the first has one) and the viewer does not move.
+      const next = controls[1];
+      if (next === undefined) throw new Error('no next button');
+      const before = await box(next);
+      await page.keyboard.press('ArrowRight');
+      await expect(dialog.getByText('2 of 5')).toBeVisible();
+      await onTheScreen('second photo');
+      expect((await box(next)).y, 'the next button moved').toBeCloseTo(before.y, 0);
+    });
+  }
+
+  // Break caught (defect 11): on a phone "Previous photo" alone on a row, the place under it, and "Next photo" and "Close the photo" sharing the next: Previous, the place and Next are one row, and Close is apart.
+  test('puts Previous, the place and Next on one row at 390px, and Close apart', async ({
+    page,
+  }) => {
+    await openKit(page, 'photos', { width: 390, height: 844 });
+    await page.getByRole('button', { name: 'Open the sample photos' }).click();
+    const dialog = page.getByRole('dialog', { name: /^Sample photo \d$/ });
+    await expect(dialog.getByText('1 of 5')).toBeVisible();
+
+    const previous = await box(dialog.getByRole('button', { name: 'Previous photo' }));
+    const next = await box(dialog.getByRole('button', { name: 'Next photo' }));
+    const place = await box(dialog.locator('.ui-photo-viewer__position'));
+    const close = await box(dialog.getByRole('button', { name: 'Close the photo' }));
+    const middle = (found: { y: number; height: number }): number => found.y + found.height / 2;
+
+    expect(
+      Math.abs(middle(previous) - middle(next)),
+      'Previous and Next are not on one row',
+    ).toBeLessThan(2);
+    expect(
+      Math.abs(middle(previous) - middle(place)),
+      'the place is not on their row',
+    ).toBeLessThan(2);
+    expect(previous.x + previous.width).toBeLessThanOrEqual(place.x + 1);
+    expect(place.x + place.width).toBeLessThanOrEqual(next.x + 1);
+    expect(close.y, 'Close is not apart from them').toBeGreaterThanOrEqual(
+      previous.y + previous.height - 1,
+    );
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+  });
+
+  // Break caught (defect 7): the buttons of a photo's row in the photo mode (Retake, Leave out, Try again) at the medium size, 44px, in the dialogs of the hub floor, where every button is 56px.
+  test('draws the buttons of a photo’s row in the photo mode at the floor’s 56px', async ({
+    page,
+  }) => {
+    await openKit(page, 'photos', { width: 390, height: 900 });
+    const form = specimen(page, 'A form that waits for its photos');
+    await form
+      .locator('input[capture]')
+      .nth(1)
+      .setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: TINY_PNG });
+    const row = form.getByRole('list', { name: 'Photos of the count: photos added' });
+
+    for (const name of ['Retake photo 1', 'Leave out photo 1']) {
+      expect((await box(row.getByRole('button', { name }))).height, name).toBeGreaterThanOrEqual(
+        56,
+      );
+    }
+  });
 });
