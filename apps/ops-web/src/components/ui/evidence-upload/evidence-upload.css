@@ -21,6 +21,8 @@
   background: var(--color-surface-default);
   color: var(--color-text-primary);
   font: inherit;
+  /* WebKit lets the inside of a file input (its button and the name of the file) run out of the box and counts it in the width of the page: at 320px with the text at 200% the page scrolled sideways (WCAG 1.4.10). The input clips what does not fit; the page lists the files below it. */
+  overflow: hidden;
 }
 
 .ui-evidence-upload__input::file-selector-button {
