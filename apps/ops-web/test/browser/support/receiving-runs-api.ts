@@ -47,6 +47,8 @@ export interface VendorRow {
   blindCounted: number | null;
   /** The rider's number of a blind vendor: planted where the contract never carries it. */
   riderNumber: number;
+  /** What a senior officer decided about the vendor, in the order it was decided (the decisions are findings of the vendor). */
+  decisions?: { id: string; outcome: string; note: string; at: string }[];
 }
 
 export interface RunRow {
@@ -237,6 +239,39 @@ function stateAfterFinish(vendor: VendorRow): VendorState {
     : 'READY_FOR_ITEMIZATION';
 }
 
+/** The findings of a vendor, in the order they were made: the damage recorded on its parcels, then the decisions of a senior officer. */
+function findingsOf(vendor: VendorRow) {
+  const damage = vendor.parcels.flatMap((parcel, index) =>
+    parcel.condition === null
+      ? []
+      : [
+          {
+            id: `f0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+            kind: 'CONDITION',
+            intake_parcel_id: parcel.id,
+            condition: parcel.condition.condition,
+            outcome: null,
+            note: parcel.condition.note,
+            evidence_ids: parcel.condition.evidence_ids,
+            recorded_by_name: parcel.condition.recorded_by_name,
+            recorded_at: parcel.condition.recorded_at,
+          },
+        ],
+  );
+  const decided = (vendor.decisions ?? []).map((decision) => ({
+    id: decision.id,
+    kind: 'ADJUDICATION',
+    intake_parcel_id: null,
+    condition: null,
+    outcome: decision.outcome,
+    note: decision.note,
+    evidence_ids: [],
+    recorded_by_name: 'Synthetic Officer',
+    recorded_at: decision.at,
+  }));
+  return [...damage, ...decided];
+}
+
 /** The vendor's record as the finish answers it (`HubIntakeCheckIn`, the third shape). */
 export function checkInWire(run: RunRow, vendor: VendorRow) {
   const counts = countsOf(vendor);
@@ -263,8 +298,8 @@ export function checkInWire(run: RunRow, vendor: VendorRow) {
     lock: lockWire(vendor),
     parcels: vendor.parcels.map(parcelWire),
     ...counts,
-    condition: 'OK',
-    condition_findings: [],
+    condition: counts.damaged_count > 0 ? 'DAMAGED' : 'OK',
+    condition_findings: findingsOf(vendor),
   };
 }
 
@@ -333,6 +368,130 @@ export async function answerRuns(
     if (!context.holds('hub.read')) return send(error(403, 'PERMISSION_DENIED'));
     const run = context.runs.find((candidate) => candidate.id === runId);
     return send(run === undefined ? error(404, 'NOT_FOUND') : ok(runWire(run, context.leak)));
+  }
+
+  // A vendor's record (the third shape of an intake), with its findings, on its token. A vendor counted blind is the intake page's.
+  const recordId = /^\/api\/v1\/hub-intakes\/([0-9a-f-]{36})$/.exec(path)?.[1];
+  if (method === 'GET' && recordId !== undefined) {
+    const found = vendorOf(recordId);
+    if (found === undefined || found.vendor.mode === 'BLIND_COUNT') return false;
+    if (!context.holds('hub.read')) return send(error(403, 'PERMISSION_DENIED'));
+    return send(ok(checkInWire(found.run, found.vendor), tokenOf(found.vendor)));
+  }
+
+  // The senior officer's decision about a vendor with door photos: on the vendor's token and under no key. Still searching leaves the case open; accepting or writing off closes it; "vendor told" is a record
+  // that follows a write-off, once, and moves no state.
+  const decideId = /^\/api\/v1\/hub-intakes\/([0-9a-f-]{36})\/discrepancy$/.exec(path)?.[1];
+  if (method === 'POST' && decideId !== undefined) {
+    const found = vendorOf(decideId);
+    if (found === undefined || found.vendor.mode === 'BLIND_COUNT') return false;
+    const { run, vendor } = found;
+    if (!context.holds('hub.osd.adjudicate')) return send(error(403, 'PERMISSION_DENIED'));
+    if (call.ifMatch !== tokenOf(vendor)) return send(conflict('stale'));
+    const outcome = String(body.outcome);
+    const decisions = vendor.decisions ?? [];
+    if (outcome === 'VENDOR_NOTIFIED') {
+      if (!decisions.some((decision) => decision.outcome === 'WRITTEN_OFF')) {
+        return send(conflict('not_written_off'));
+      }
+      if (decisions.some((decision) => decision.outcome === 'VENDOR_NOTIFIED')) {
+        return send(conflict('vendor_already_told'));
+      }
+    } else if (vendor.state !== 'RECONCILIATION_REQUIRED') {
+      return send(conflict('not_awaiting_resolution'));
+    }
+    if (typeof body.note !== 'string' || body.note.trim() === '') {
+      return send(error(422, 'REASON_REQUIRED'));
+    }
+    const cited = Array.isArray(body.evidence_ids) ? (body.evidence_ids as string[]) : [];
+    if (!cited.every((evidence) => context.stored(evidence, vendor.id))) {
+      return send(error(422, 'EVIDENCE_NOT_STORED'));
+    }
+    vendor.decisions = [
+      ...decisions,
+      {
+        id: `d0000000-0000-4000-8000-${String(decisions.length + 1).padStart(12, '0')}`,
+        outcome,
+        note: body.note,
+        at: '2026-11-03T09:00:00Z',
+      },
+    ];
+    if (outcome === 'ACCEPTED' || outcome === 'WRITTEN_OFF') vendor.state = 'READY_FOR_ITEMIZATION';
+    vendor.version += 1;
+    return send(ok(checkInWire(run, vendor), tokenOf(vendor)));
+  }
+
+  // A senior officer's correction of a check-in: a reason, and the parcels that change, on the vendor's token and under a key.
+  const correctId = /^\/api\/v1\/hub-intakes\/([0-9a-f-]{36})\/correction$/.exec(path)?.[1];
+  if (method === 'POST' && correctId !== undefined) {
+    const found = vendorOf(correctId);
+    if (found === undefined || found.vendor.mode === 'BLIND_COUNT') return false;
+    const { run, vendor } = found;
+    if (!context.holds('hub.osd.adjudicate')) return send(error(403, 'PERMISSION_DENIED'));
+    if (call.idempotencyKey === undefined) return send(error(400, 'VALIDATION_FAILED'));
+    if (vendor.state === 'ITEMIZING' || vendor.state === 'CLOSED') {
+      return send(conflict('itemization_started'));
+    }
+    if (call.ifMatch !== tokenOf(vendor)) return send(conflict('stale'));
+    if (typeof body.reason !== 'string' || body.reason.trim() === '') {
+      return send(error(422, 'REASON_REQUIRED'));
+    }
+    if (!Array.isArray(body.parcel_changes) || body.parcel_changes.length === 0) {
+      return send(error(400, 'VALIDATION_FAILED'));
+    }
+    for (const change of body.parcel_changes as { parcel_id: string; state: ParcelState }[]) {
+      const parcel = vendor.parcels.find((candidate) => candidate.id === change.parcel_id);
+      if (parcel === undefined) return send(error(404, 'NOT_FOUND'));
+      parcel.state = change.state;
+      if (change.state === 'ARRIVED') {
+        parcel.arrivedBy = 'Synthetic Officer';
+        parcel.arrivedAt = '2026-11-03T08:55:00Z';
+        parcel.missingAt = null;
+      } else if (change.state === 'MISSING') {
+        parcel.arrivedBy = null;
+        parcel.arrivedAt = null;
+        parcel.missingAt = '2026-11-03T08:55:00Z';
+      }
+    }
+    vendor.received = countsOf(vendor).arrived_count;
+    vendor.state = stateAfterFinish(vendor);
+    vendor.version += 1;
+    return send(ok(checkInWire(run, vendor), tokenOf(vendor)));
+  }
+
+  // The parcels being searched for (the missing parcels of a vendor whose case is open), and the written-off ones whose vendor is not yet recorded as told, oldest first.
+  if (method === 'GET' && path === '/api/v1/missing-parcels') {
+    if (!context.holds('hub.read')) return send(error(403, 'PERMISSION_DENIED'));
+    const view = query.get('view') ?? 'searching';
+    const items = context.runs
+      .flatMap((run) =>
+        run.vendors.flatMap((vendor) => {
+          if (vendor.mode !== 'PHOTO_CHECK_IN') return [];
+          const decisions = vendor.decisions ?? [];
+          const writtenOff = decisions.find((decision) => decision.outcome === 'WRITTEN_OFF');
+          const told = decisions.some((decision) => decision.outcome === 'VENDOR_NOTIFIED');
+          const listed =
+            view === 'vendor_to_tell'
+              ? writtenOff !== undefined && !told
+              : vendor.state === 'RECONCILIATION_REQUIRED';
+          if (!listed) return [];
+          return vendor.parcels
+            .filter((parcel) => parcel.state === 'MISSING')
+            .map((parcel) => ({
+              parcel_id: parcel.id,
+              photo_evidence_id: parcel.photo,
+              intake_id: vendor.id,
+              intake_code: vendor.code,
+              run_id: run.id,
+              run_code: run.code,
+              vendor_name: vendor.name,
+              missing_since: parcel.missingAt ?? '2026-11-03T08:20:00Z',
+              written_off_at: writtenOff?.at ?? null,
+            }));
+        }),
+      )
+      .toSorted((a, b) => a.missing_since.localeCompare(b.missing_since));
+    return send(ok({ items, next_page_token: null }));
   }
 
   // The lock of a vendor of a run: taken when free, kept by its holder; it moves no token.

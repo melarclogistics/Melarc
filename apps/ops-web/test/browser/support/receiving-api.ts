@@ -582,6 +582,29 @@ async function answer(route: Route, state: ReceivingApi, call: Call): Promise<vo
     return route.fulfill(ok(intakeWire(w, r), r.version));
   }
 
+  // A senior officer's correction of the number of a vendor counted without photos: a reason and the corrected number, on the token read and under a key.
+  const correctionId = id(/^\/api\/v1\/hub-intakes\/([0-9a-f-]{36})\/correction$/);
+  if (method === 'POST' && correctionId !== undefined) {
+    if (!holds('hub.osd.adjudicate')) return route.fulfill(error(403, 'PERMISSION_DENIED'));
+    const r = w.intakes.find((candidate) => candidate.id === correctionId);
+    if (r === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
+    if (call.idempotencyKey === undefined) return route.fulfill(error(400, 'VALIDATION_FAILED'));
+    if (r.physical === null || call.ifMatch !== `"v${String(r.version)}"`) {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
+    }
+    if (!written(body.reason)) return route.fulfill(error(422, 'REASON_REQUIRED'));
+    if (!Number.isInteger(body.physical_count) || (body.physical_count as number) < 0) {
+      return route.fulfill(error(400, 'VALIDATION_FAILED'));
+    }
+    r.physical = body.physical_count as number;
+    r.state =
+      r.physical === r.declared && r.declared > 0
+        ? 'READY_FOR_ITEMIZATION'
+        : 'RECONCILIATION_REQUIRED';
+    r.version += 1;
+    return route.fulfill(ok(intakeWire(w, r), r.version));
+  }
+
   // Evidence: declare, complete, and the authorization of one stored photo.
   if (method === 'POST' && path === '/api/v1/evidence') {
     if (call.idempotencyKey === undefined) return route.fulfill(error(400, 'VALIDATION_FAILED'));

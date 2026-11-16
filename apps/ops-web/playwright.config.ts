@@ -116,7 +116,7 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *               without them (S1.30), the same two ways, with a stateful stand-in for the API that plants a code, a digest, a phone number and an object key in answers that never carry them.
  *   receiving   the receiving screens (S1.35, S1.35c): the queue by run and the run's page (All N here, a tap on each parcel, the lock, the photos, a parcel that is not on the list, damage, the summary and the
  *               rider's bag, the hub floor's 56 px and the action bar above the keyboard), the blind count (proved from outside: the rider's number in no response and nowhere on the page before the count), the
- *               record, the condition with its photos and the decision, the same two ways, with a stateful stand-in for the API that carries the rider's number only where the contract does and, on demand, everywhere.
+ *               vendor's record, the decision, the correction of a count, the damage of a vendor with no photos and the list of missing parcels, the same two ways, with a stateful stand-in for the API that carries the rider's number only where the contract does and, on demand, everywhere.
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
  *   queue-summary the counts of the queues (task C1), the same two ways: the sidebar's counts, My work's cards, a failed read and the read again on

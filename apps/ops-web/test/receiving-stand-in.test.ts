@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   parseCheckIn,
+  parseMissingPage,
   parseParcelAnswer,
   parseRunListPage,
   parseRunPage,
@@ -141,5 +142,168 @@ describe('what the runs’ handler leaves to the intake pages', () => {
 
   it('leaves what is not its own: a request for an intake that is no vendor of a run', async () => {
     expect(await post('/api/v1/hub-intakes/60a2b153-8fa4-40c1-9243-5e6f708192a3/lock')).toBe(false);
+  });
+});
+
+/** What the handler answered: whether it took the request, and the status and body it gave. */
+interface Given {
+  readonly handled: boolean;
+  readonly status: number;
+  readonly json: unknown;
+}
+async function ask(
+  runs: typeof w.runs,
+  method: string,
+  path: string,
+  body: unknown = {},
+  headers: { ifMatch?: string; idempotencyKey?: string } = {},
+): Promise<Given> {
+  let answer: { status?: number; json?: unknown } = {};
+  // The address of a request names its query; the call the handler reads names the path alone.
+  const [pathname = path] = path.split('?');
+  const route = {
+    request: () => ({ url: () => `http://127.0.0.1${path}` }),
+    fulfill: (given: { status: number; json: unknown }) => {
+      answer = given;
+      return Promise.resolve();
+    },
+  } as unknown as Route;
+  const handled = await answerRuns(
+    route,
+    {
+      method,
+      path: pathname,
+      ifMatch: headers.ifMatch,
+      idempotencyKey: headers.idempotencyKey,
+      body,
+    },
+    { ...context, runs, stored: () => true },
+  );
+  return { handled, status: answer.status ?? 0, json: answer.json };
+}
+
+describe('the vendor’s record, its decision, its correction and the list of missing parcels', () => {
+  // Break caught: a record whose findings are not the judge's (a parcel's damage with no parcel, a decision with a parcel), or one that carries the damage of no parcel.
+  it('has a vendor’s record accepted with the damage of a parcel and the decisions made about it', async () => {
+    const fresh = world();
+    const vendor = held(fresh.runs[1]?.vendors[0], 'vendor of the run that was checked in');
+    const parcel = held(vendor.parcels[0], 'parcel');
+    parcel.condition = {
+      condition: 'DAMAGED',
+      note: 'A torn corner.',
+      evidence_ids: ['0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f'],
+      recorded_by_name: 'Synthetic Officer',
+      recorded_at: '2026-11-03T08:45:00Z',
+    };
+    vendor.decisions = [
+      {
+        id: 'd0000000-0000-4000-8000-000000000001',
+        outcome: 'WRITTEN_OFF',
+        note: 'Not found.',
+        at: '2026-11-03T09:00:00Z',
+      },
+    ];
+    const record = await ask(fresh.runs, 'GET', `/api/v1/hub-intakes/${vendor.id}`);
+    expect(record.handled).toBe(true);
+    const view = parseCheckIn(record.json);
+    expect(view?.condition_findings.map((finding) => finding.kind)).toEqual([
+      'CONDITION',
+      'ADJUDICATION',
+    ]);
+    expect(view?.condition_findings[0]?.intake_parcel_id).toBe(parcel.id);
+  });
+
+  it('has the list of the parcels being searched for accepted, and the written-off ones in their own view', async () => {
+    const fresh = world();
+    const vendor = held(fresh.runs[1]?.vendors[0], 'vendor of the run that was checked in');
+    const searching = await ask(fresh.runs, 'GET', '/api/v1/missing-parcels');
+    const page = parseMissingPage(searching.json);
+    expect(page?.items).toHaveLength(1);
+    expect(page?.items[0]?.vendor_name).toBe(vendor.name);
+    expect(page?.items[0]?.written_off_at).toBeNull();
+
+    vendor.decisions = [
+      {
+        id: 'd0000000-0000-4000-8000-000000000001',
+        outcome: 'WRITTEN_OFF',
+        note: 'Not found.',
+        at: '2026-11-03T09:00:00Z',
+      },
+    ];
+    vendor.state = 'READY_FOR_ITEMIZATION';
+    const none = await ask(fresh.runs, 'GET', '/api/v1/missing-parcels');
+    expect(parseMissingPage(none.json)?.items).toHaveLength(0);
+    const toTell = await ask(fresh.runs, 'GET', '/api/v1/missing-parcels?view=vendor_to_tell');
+    expect(parseMissingPage(toTell.json)?.items[0]?.written_off_at).toBe('2026-11-03T09:00:00Z');
+  });
+
+  // Break caught: a decision the API would refuse (a vendor told before a write-off, or twice) accepted by the stand-in, so that a browser test proves a flow the API forbids.
+  it('keeps the rules of the decision: vendor told only after a write-off and once, on the token read', async () => {
+    const fresh = world();
+    const vendor = held(fresh.runs[1]?.vendors[0], 'vendor of the run that was checked in');
+    const decide = (outcome: string) =>
+      ask(
+        fresh.runs,
+        'POST',
+        `/api/v1/hub-intakes/${vendor.id}/discrepancy`,
+        { outcome, note: 'A reason.' },
+        { ifMatch: `"r${String(vendor.version)}"` },
+      );
+
+    expect((await decide('VENDOR_NOTIFIED')).status).toBe(409);
+    const stale = await ask(
+      fresh.runs,
+      'POST',
+      `/api/v1/hub-intakes/${vendor.id}/discrepancy`,
+      {
+        outcome: 'WRITTEN_OFF',
+        note: 'A reason.',
+      },
+      { ifMatch: '"r0"' },
+    );
+    expect(stale.status).toBe(409);
+    const written = await decide('WRITTEN_OFF');
+    expect(written.status).toBe(200);
+    expect(parseCheckIn(written.json)?.state).toBe('READY_FOR_ITEMIZATION');
+    expect((await decide('VENDOR_NOTIFIED')).status).toBe(200);
+    expect((await decide('VENDOR_NOTIFIED')).status).toBe(409);
+  });
+
+  it('has a correction change the parcels it names, derive the counts again, and leave a vendor counted blind to the intake’s own handler', async () => {
+    const fresh = world();
+    const vendor = held(fresh.runs[1]?.vendors[0], 'vendor of the run that was checked in');
+    const missing = held(
+      vendor.parcels.find((parcel) => parcel.state === 'MISSING'),
+      'missing parcel',
+    );
+    const corrected = await ask(
+      fresh.runs,
+      'POST',
+      `/api/v1/hub-intakes/${vendor.id}/correction`,
+      {
+        reason: 'It was on the table.',
+        parcel_changes: [{ parcel_id: missing.id, state: 'ARRIVED' }],
+      },
+      { ifMatch: `"r${String(vendor.version)}"`, idempotencyKey: 'a key' },
+    );
+    expect(corrected.status).toBe(200);
+    const view = parseCheckIn(corrected.json);
+    expect(view?.arrived_count).toBe(2);
+    expect(view?.missing_count).toBe(0);
+    expect(view?.state).toBe('READY_FOR_ITEMIZATION');
+
+    const blindVendor = held(
+      fresh.runs[0]?.vendors.find((candidate) => candidate.mode === 'BLIND_COUNT'),
+      'vendor counted blind',
+    );
+    expect((await ask(fresh.runs, 'GET', `/api/v1/hub-intakes/${blindVendor.id}`)).handled).toBe(
+      false,
+    );
+    expect(
+      (await ask(fresh.runs, 'POST', `/api/v1/hub-intakes/${blindVendor.id}/correction`)).handled,
+    ).toBe(false);
+    expect(
+      (await ask(fresh.runs, 'POST', `/api/v1/hub-intakes/${blindVendor.id}/discrepancy`)).handled,
+    ).toBe(false);
   });
 });
