@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
 import {
@@ -1693,13 +1693,13 @@ test.describe('the photo tiles of the run’s page: the state is an icon and one
     readonly across: number;
   }
 
-  /** The strip of every tile in sight that has one: its words, how they lie, and the box it makes. Read from the page as it stands. */
-  function stripsOf(page: Page): Promise<Strip[]> {
-    return page.evaluate(() => {
+  /** The strip of every tile in sight inside a box that has one: its words, how they lie, and the box it makes. Read from the page as it stands. */
+  function stripsOf(scope: Locator): Promise<Strip[]> {
+    return scope.evaluate((root) => {
       const found: Strip[] = [];
       const linesOf = (range: Range): number =>
         new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
-      for (const tile of document.querySelectorAll<HTMLElement>('button.ui-photo-tile')) {
+      for (const tile of root.querySelectorAll<HTMLElement>('button.ui-photo-tile')) {
         const mark = tile.querySelector<HTMLElement>('.ui-photo-tile__mark');
         const text = [...(mark?.childNodes ?? [])].find((node) => node.nodeType === Node.TEXT_NODE);
         if (mark === null || text === undefined || tile.getClientRects().length === 0) continue;
@@ -1746,7 +1746,7 @@ test.describe('the photo tiles of the run’s page: the state is an icon and one
       await expect(yaw.getByRole('button', { name: 'Parcel 3, Damaged' })).toBeVisible();
       await expect(yaw.getByRole('button', { name: 'Parcel 4, Taken back' })).toBeVisible();
 
-      const strips = await stripsOf(page);
+      const strips = await stripsOf(page.locator('body'));
       expect(strips.map((strip) => strip.words)).toEqual(
         expect.arrayContaining(['Checked in', 'Damaged', 'Missing', 'Taken back']),
       );
@@ -1787,4 +1787,35 @@ test.describe('the photo tiles of the run’s page: the state is an icon and one
       expect(await overflowOf(page)).toBeLessThanOrEqual(0);
     });
   }
+
+  // Break caught: a strip that holds its words in the tiles that the three widths happen to make (100, 94 and 95px: wider than the least) and not in the least tile there can be, 96px, where a label size or a padding that does not
+  // leave the icon, its gap and "Checked in" their 84.3px of the 92px inside the border takes two lines. The viewport is narrowed to the room of exactly three tiles of 96px and two gaps of 12px.
+  test('keeps the words of a state on one line in the narrowest tile the grid makes, 96px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open(page, runPath(RUNS.decision), { runs: everyState() });
+    const list = page
+      .getByRole('region', { name: 'Yaw Textiles' })
+      .getByRole('list', { name: 'Photos of Yaw Textiles’s parcels' });
+    await expect(list.getByRole('button')).toHaveCount(6);
+    const wanted = 3 * 96 + 2 * 12;
+    const room = (await list.boundingBox())?.width ?? 0;
+    await page.setViewportSize({ width: Math.round(390 - (room - wanted)), height: 844 });
+    await expect.poll(async () => Math.round((await list.boundingBox())?.width ?? 0)).toBe(wanted);
+
+    // The tiles of the vendor's own grid, whose room is the one narrowed (the summary above it lays its list of missing parcels out in a room of its own).
+    const strips = await stripsOf(list);
+    expect(strips.map((strip) => strip.words)).toEqual(
+      expect.arrayContaining(['Checked in', 'Damaged', 'Missing', 'Taken back']),
+    );
+    for (const strip of strips) {
+      const said = `${strip.name}: "${strip.words}" is on ${String(strip.lines)} line(s) in a tile of ${String(strip.tileWidth)}px, in a strip ${String(Math.round(strip.height))}px high, with ${String(strip.split.length)} word(s) broken (${strip.split.join(', ')}) and ${String(Math.round(strip.across))}px cut off`;
+      expect(strip.tileWidth, said).toBeCloseTo(96, 0);
+      expect(strip.lines, said).toBe(1);
+      expect(strip.split, said).toEqual([]);
+      expect(strip.across, said).toBeLessThanOrEqual(0);
+      expect(strip.height, said).toBeLessThanOrEqual(28);
+    }
+  });
 });
