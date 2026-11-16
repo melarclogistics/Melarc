@@ -25,7 +25,7 @@ import { isIdempotencyKey } from '../idempotency/idempotency-scope.js';
 import { primaryHubOfStaff } from '../lookup/primary-hub.js';
 import { SettingMissingError, type SettingsReader } from '../settings/settings-reader.js';
 import { contentTypeOf, judgeStoredObject } from './evidence-judgement.js';
-import { actsReadBy, actsWrittenBy, ownerActOf, type OwnerAct } from './evidence-owners.js';
+import { actsReadBy, actsWrittenBy, ownerActsOf, type OwnerAct } from './evidence-owners.js';
 import {
   EVIDENCE_COLUMNS,
   evidenceEtagOf,
@@ -193,10 +193,20 @@ export class EvidenceService {
     },
   ): Promise<{ readonly ticket: EvidenceTicket; readonly etag: string }> {
     const { body } = request;
-    // The permission comes first and costs the database nothing: a caller without the act's key learns nothing of the schema.
-    const act = ownerActOf(body.owner_type, body.purpose);
-    if (act === undefined) throw denied();
-    const decision = this.#grantFor(authorized, 'write', act);
+    // The permission comes first and costs the database nothing: a caller without the key of any act the purpose has learns nothing of the schema. A purpose has one act, or two when two keys write it (an
+    // intake's `OSD`: the adjudication's evidence and the photo of an extra parcel): the session is judged by the first act whose key it holds.
+    let act: OwnerAct | undefined;
+    let decision: AuthorizedRequest | undefined;
+    for (const candidate of ownerActsOf(body.owner_type, body.purpose)) {
+      if (authorized.session.principalType !== candidate.write.principal) continue;
+      const held = authorizationForKey(authorized, candidate.write.key);
+      if (held !== undefined) {
+        act = candidate;
+        decision = held;
+        break;
+      }
+    }
+    if (act === undefined || decision === undefined) throw denied();
     if (!isIdempotencyKey(request.idempotencyKey)) {
       throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
         violations: [{ in: 'header', pointer: 'Idempotency-Key', rule: 'format' }],
@@ -320,7 +330,7 @@ export class EvidenceService {
     act: OwnerAct,
     ownerId: string,
   ): Promise<string | null> {
-    if (act.ownerType === 'PICKUP_INTAKE') return this.#requireIntakeReady(tx, ownerId);
+    if (act.ownerType === 'PICKUP_INTAKE') return this.#requireIntakeReady(tx, act, ownerId);
     if (act.ownerType !== 'PICKUP_STOP') throw denied();
     if (!isUuid(ownerId)) throw notFound();
     const found = await tx.execute(sql`
@@ -351,6 +361,7 @@ export class EvidenceService {
    */
   async #requireIntakeReady(
     tx: ReturnType<typeof transactionOf>,
+    act: OwnerAct,
     ownerId: string,
   ): Promise<string> {
     if (!isUuid(ownerId)) throw notFound();
@@ -360,6 +371,21 @@ export class EvidenceService {
     const row = found.rows[0] as unknown as
       { state: string; responsible_hub_id: string; receiving_mode: string } | undefined;
     if (row === undefined) throw notFound();
+    // The photo of an extra parcel is for an intake that is checked in against door photos: for a blind-count intake the receiver has no such act (as a session without the key has none), and it is
+    // declared while the vendor or the case is open, as `addExtraParcel` takes the parcel (the database holds the same for every writer): a photo that no parcel could take is not declared.
+    if (act.photoIntakeOnly === true) {
+      if (row.receiving_mode !== 'PHOTO_CHECK_IN') throw denied();
+      if (row.state === 'ITEMIZING' || row.state === 'CLOSED') {
+        throw ApiException.of(ErrorCode.StateConflict, 'Itemizing has started', {
+          rule: 'itemization_started',
+        });
+      }
+      if (row.state !== 'AWAITING_COUNT' && row.state !== 'RECONCILIATION_REQUIRED') {
+        throw ApiException.of(ErrorCode.StateConflict, 'The vendor’s case was resolved', {
+          rule: 'check_in_finished',
+        });
+      }
+    }
     // A blind-count intake takes its evidence after its count. A PHOTO intake's receiver takes the photos of a damaged parcel while the vendor's check-in is open and the photo of an extra while the
     // vendor or the case is open (Run D, D-D2; migration 0104 holds the purpose and the state for every writer), so such an intake is not refused here for waiting.
     if (row.state === 'AWAITING_COUNT' && row.receiving_mode !== 'PHOTO_CHECK_IN') {
