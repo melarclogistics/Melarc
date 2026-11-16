@@ -32,8 +32,9 @@
   flex-wrap: wrap;
 }
 
-/* A text field (the count of the parcels, a queue's lookup). */
-.ui-hub-floor .ui-input {
+/* A text field: the count of the parcels (the kit's Input), and a queue's lookup (the primitive's, which the filter bar draws and which has no class of the kit's Input). */
+.ui-hub-floor .ui-input,
+.ui-hub-floor .ui-filter-bar__search .ui-filter-bar__search-field {
   min-height: var(--control-height-lg);
 }
 
