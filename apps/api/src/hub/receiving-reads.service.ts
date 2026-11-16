@@ -322,6 +322,8 @@ export class ReceivingReads {
           [run.hub_id],
           'getReceivingRun',
         );
+        // The vendors are in the order the handover opened them (the contract's order): every intake of a run has the moment the run completed, so the identifier orders them, and the handover draws the
+        // identifiers in the order of its rows (`orderedUUIDv7`). A total order, the same at every read.
         const intakes = (
           await tx.execute(sql`
             select ${RECEIVING_INTAKE_COLUMNS} from pickup_intake where pickup_manifest_id = ${manifestId}::uuid order by handed_over_at, id`)
