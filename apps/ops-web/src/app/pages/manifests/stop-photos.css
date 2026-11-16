@@ -2,6 +2,11 @@
  * The photos of a stop (S1.30): the progress, a tile for each photo and the photo opened. A tile holds no picture (no small copy of a photo is made), so a stop of two hundred photos is a grid of
  * short blocks of text, and the picture is only in the dialog that is open. Layout only: every colour, size and space comes from tokens.css.
  */
+/* How current the progress is and the way to read it again, above the progress: the freshness line of the page header, drawn in the panel. */
+.stop-photos__freshness {
+  margin-block-end: var(--space-3);
+}
+
 .stop-photos__progress {
   margin: 0 0 var(--space-4);
   color: var(--color-text-primary);
