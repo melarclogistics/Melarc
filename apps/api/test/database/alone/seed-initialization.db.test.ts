@@ -731,6 +731,10 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.correct_intake_count',
       // Run D, S1.35b (migration 0106): the display names of the vendor, the rider and the officers of the intakes the caller may see.
       'melarc.receiving_names',
+      // Run D, S1.35b (migration 0107): the queue by run, the missing parcels and the codes of runs.
+      'melarc.receiving_runs',
+      'melarc.missing_parcels',
+      'melarc.receiving_run_codes',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

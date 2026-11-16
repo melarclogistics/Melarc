@@ -305,6 +305,10 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.correct_intake_count',
       // Run D, S1.35b (migration 0106): the display names of the vendor, the rider and the officers of the intakes the caller may see.
       'melarc.receiving_names',
+      // Run D, S1.35b (migration 0107): the queue by run, the missing parcels and the codes of runs.
+      'melarc.receiving_runs',
+      'melarc.missing_parcels',
+      'melarc.receiving_run_codes',
     ]);
   });
 

@@ -207,6 +207,11 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // under one of the three keys that read intakes and nobody else, never a phone number. It reads the identity tables under the capability `receiving_names`, as the owner, for the one statement that
     // does, and every policy that admits the capability names the owner too, so the login can read no identity itself.
     'melarc.receiving_names',
+    // And the three reads of the receiving side that need a manifest's code, a vendor's name and the parcels of an open case (migration 0107, Run D, S1.35b): the queue by run and its count (one function), the
+    // missing parcels and their count (one function) and the codes of the runs an answer names. Each is for staff under one of the three keys that read intakes and nobody else.
+    'melarc.receiving_runs',
+    'melarc.missing_parcels',
+    'melarc.receiving_run_codes',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification
