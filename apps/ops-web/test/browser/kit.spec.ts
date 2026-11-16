@@ -64,6 +64,21 @@ async function box(locator: Locator) {
   return found;
 }
 
+/**
+ * Waits until nothing in the element is moving. A dialog zooms in for 200ms, and a box measured on the way is a few hundredths of a pixel smaller than the one it ends as (a button of 56px read 55.85 on the
+ * runner), and boxes measured one after another on the way are not on one line (the place of a photo read 2.13px off its buttons). What never ends (a spinner) is not waited for.
+ */
+async function atRest(locator: Locator): Promise<void> {
+  await locator.evaluate((element) =>
+    Promise.allSettled(
+      element
+        .getAnimations({ subtree: true })
+        .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime ?? 0))
+        .map((animation) => animation.finished),
+    ),
+  );
+}
+
 /** The colour a design token resolves to in this page, as the browser writes it. */
 function resolvedColour(
   page: Page,
@@ -3039,6 +3054,7 @@ test.describe('the photo kit in a browser', () => {
       await page.getByRole('button', { name: 'Open the sample photos' }).click();
       const dialog = page.getByRole('dialog', { name: /^Sample photo \d$/ });
       await expect(dialog.getByText('1 of 5')).toBeVisible();
+      await atRest(dialog);
       const controls = ['Previous photo', 'Next photo', 'Close the photo'].map((name) =>
         dialog.getByRole('button', { name }),
       );
@@ -3120,6 +3136,7 @@ test.describe('the photo kit in a browser', () => {
     await page.getByRole('button', { name: 'Open the sample photos' }).click();
     const dialog = page.getByRole('dialog', { name: /^Sample photo \d$/ });
     await expect(dialog.getByText('1 of 5')).toBeVisible();
+    await atRest(dialog);
 
     const previous = await box(dialog.getByRole('button', { name: 'Previous photo' }));
     const next = await box(dialog.getByRole('button', { name: 'Next photo' }));

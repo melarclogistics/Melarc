@@ -474,14 +474,19 @@ describe('initiateHandshake and verifyHandshake: the primary rung, a vendor’s 
   it('counts each wrong code, ends at the fifth, and refuses the right code afterwards; the stop stays ARRIVED', async () => {
     const { rider, stop } = await counted();
     const code = ((await initiate(rider, stop.id)).json() as Handshake).display_code ?? '';
+    // Five codes that are wrong whatever the code that was drawn (six are named and the right one, if it is among them, is dropped): the code is derived from the stop, so a fixed "0001" was the right one for one stop in ten thousand.
+    const wrong = ['0001', '0002', '0003', '0004', '0005', '0006'].filter((one) => one !== code);
     for (let n = 1; n <= 4; n += 1) {
-      expect(outcome(await verifyAsVendor(stop.id, `000${String(n)}`))).toEqual([
+      expect(outcome(await verifyAsVendor(stop.id, wrong[n - 1] ?? ''))).toEqual([
         422,
         'CODE_INVALID',
       ]);
       expect((await handshakeRow(stop.id))?.attempts).toBe(n);
     }
-    expect(outcome(await verifyAsVendor(stop.id, '0005'))).toEqual([422, 'ATTEMPTS_EXHAUSTED']);
+    expect(outcome(await verifyAsVendor(stop.id, wrong[4] ?? ''))).toEqual([
+      422,
+      'ATTEMPTS_EXHAUSTED',
+    ]);
     expect(await handshakeRow(stop.id)).toMatchObject({ state: 'EXHAUSTED', attempts: 5 });
     expect(outcome(await verifyAsVendor(stop.id, code))).toEqual([422, 'ATTEMPTS_EXHAUSTED']);
     expect(await stopState(stop.id)).toBe('ARRIVED');
@@ -638,8 +643,12 @@ describe('an individual sender’s handshake: the code goes by SMS and the rider
     expect(Object.keys(body)).not.toContain('display_code');
     expect(await envelopesOf(request.id)).toEqual([{ payload: { generation: 1 } }]);
     expect(outcome(await verifyAsVendor(stop.id, codeOf1(stop.id)))).toEqual([404, 'NOT_FOUND']);
-    expect(outcome(await verifyAsRider(rider, stop.id, '0000'))).toEqual([422, 'CODE_INVALID']);
-    const entered = await verifyAsRider(rider, stop.id, codeOf1(stop.id));
+    // A code that is not the one that was texted, whatever that was: it is derived from the stop, so a fixed "0000" is the right one for one stop in ten thousand.
+    const texted = codeOf1(stop.id);
+    expect(
+      outcome(await verifyAsRider(rider, stop.id, texted === '0000' ? '0001' : '0000')),
+    ).toEqual([422, 'CODE_INVALID']);
+    const entered = await verifyAsRider(rider, stop.id, texted);
     expect(entered.status).toBe(200);
     expect(entered.json()).toMatchObject({ state: 'VERIFIED', channel: 'PORTAL', attempts: 1 });
     expect(await stopState(stop.id)).toBe('COLLECTED');

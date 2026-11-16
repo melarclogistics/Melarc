@@ -592,6 +592,10 @@ describe('the machine of a parcel: what the database holds for every writer (mig
   it('lets each key make its own moves while the vendor is being checked in, and no other', async () => {
     const photo = await photoIntake(3);
     const [one, two] = photo.parcels;
+    // Another photo of the stop, never the parcel's own: the handover reports the photos in the order they were taken, the parcels take them in the order of the database
+    // (the moment, then the evidence id), so the third photo of the one list can be the second parcel's own, and putting a photo where it already is changes nothing.
+    const anotherPhoto = photo.photos.find((id) => id !== two?.door_photo_evidence_id) ?? '';
+    expect(anotherPhoto).not.toBe('');
     expect(rowsOf(await attempt(staff(COUNT), tap(one?.id ?? '', true)))).toHaveLength(1);
     const cases: [string, SecurityContext, readonly string[], string][] = [
       ['the receiver taps', staff(COUNT), [moveTo(two?.id ?? '', 'ARRIVED')], 'ran:1'],
@@ -639,7 +643,7 @@ describe('the machine of a parcel: what the database holds for every writer (mig
         'the door photo of a parcel',
         staff(COUNT),
         [
-          `update intake_parcel set door_photo_evidence_id = '${photo.photos[2] ?? ''}' where id = '${two?.id ?? ''}'`,
+          `update intake_parcel set door_photo_evidence_id = '${anotherPhoto}' where id = '${two?.id ?? ''}'`,
         ],
         '23514',
       ],
