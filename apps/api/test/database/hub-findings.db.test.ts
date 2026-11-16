@@ -562,11 +562,12 @@ describe('adjudicateDiscrepancy (AC-SLICE-001-42, -76)', () => {
       ),
     ).toEqual([422, 'EVIDENCE_NOT_STORED']);
     expect((await rowOf(id))?.state).toBe('RECONCILIATION_REQUIRED');
+    // (It was VENDOR_NOTIFIED before Run D made "Vendor told" a record that follows a write-off and sets no condition: the resolution here is the count accepted.)
     const done = await adjudicate(senior, id, {
-      outcome: 'VENDOR_NOTIFIED',
+      outcome: 'ACCEPTED',
       condition: 'DAMAGED',
       evidence_ids: [receiverPhoto, ownPhoto],
-      note: 'The vendor will be told',
+      note: 'The count is accepted with the damage',
     });
     expect(done.status).toBe(200);
     expect(done.json()).toMatchObject({
@@ -577,7 +578,7 @@ describe('adjudicateDiscrepancy (AC-SLICE-001-42, -76)', () => {
     expect((done.json() as Found).condition_findings?.[0]).toMatchObject({
       evidence_ids: [receiverPhoto, ownPhoto],
       condition: 'DAMAGED',
-      outcome: 'VENDOR_NOTIFIED',
+      outcome: 'ACCEPTED',
     });
     // The evidence of the adjudication is the adjudicator's act: Ops Staff do not hold its key.
     expect(outcome(await declareIntakeEvidence(receiver, intakeEvidenceBody(id, 'OSD')))).toEqual([

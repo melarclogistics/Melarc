@@ -1985,12 +1985,12 @@ describe('the receiver’s condition (S1.34): what the database holds for every 
 });
 
 describe('the adjudication (S1.34): what the database holds for every writer', () => {
-  // Break caught: an adjudication that rewrites a count (the declared count, the hub count and the variance survive it unchanged), that does not clear the case (ACCEPTED, WRITTEN_OFF, VENDOR_NOTIFIED),
+  // Break caught: an adjudication that rewrites a count (the declared count, the hub count and the variance survive it unchanged), that does not clear the case (ACCEPTED, WRITTEN_OFF),
   // that clears one it should only record (ESCALATED), or that leaves no finding with its reason and its author. AC-SLICE-001-76: a zero declaration is resolved by Senior Ops with a reason.
+  // ("Vendor told", VENDOR_NOTIFIED, is a record that follows a write-off and clears nothing since Run D, D-D4: hub-parcels.db.test.ts holds it.)
   it.each([
     ['ACCEPTED', 'READY_FOR_ITEMIZATION'],
     ['WRITTEN_OFF', 'READY_FOR_ITEMIZATION'],
-    ['VENDOR_NOTIFIED', 'READY_FOR_ITEMIZATION'],
     ['ESCALATED', 'RECONCILIATION_REQUIRED'],
   ] as const)(
     'adjudicates with the outcome %s: finding appended, counts unchanged, the case %s',
