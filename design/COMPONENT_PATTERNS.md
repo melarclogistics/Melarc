@@ -261,7 +261,9 @@ Do not:
 A link drawn as a button, for going somewhere that is the main thing a surface offers ("Add a staff profile", "Reset authenticator"). It is
 an anchor with an address, so it can be followed in a new tab and is announced as a link; an act that changes something is a Button, and
 navigation that is not the point of a surface is a Link. It has the Primary and Secondary recipes and the same size and focus ring, and no
-Danger, because a link never does harm.
+Danger, because a link never does harm. **It takes the hub floor's size as the Button does** (`size="lg"`, 56px by `--control-height-lg`, asked for by the screen and never by the
+component): the run's page sends an officer to the blind count with it (S1.35c). The foot of a confirmation dialog (`CommandOutcomeActions`, and the page helper `ActDialog` over it)
+takes the same `size` and gives it to every button it draws, the ways out of an unknown outcome and of a conflict included, so that no button of a dialog on the floor is smaller than its neighbour.
 
 ---
 
