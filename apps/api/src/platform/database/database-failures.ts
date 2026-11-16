@@ -112,6 +112,24 @@ export function guardReasonIn(error: unknown): string | undefined {
 }
 
 /**
+ * The `details.rule` a guard or an operation of the database gave its refusal (Run D, migrations 0103 to 0106): SQLSTATE 23514 with the HINT `rule=<word>`, which the receiving operations state
+ * beside the reason of the DETAIL (`reason=STATE_CONFLICT`, `rule=check_in_finished`) so that the application answers the rule the contract names and does not have to read the row again to
+ * guess it. The same discipline as `guardReasonIn`: `undefined` for every other failure (a check violation without that hint, another SQLSTATE, a lost or rolled-back commit, anything that is not the
+ * server's error), and a caller that gets `undefined` rethrows what it caught.
+ */
+export function guardRuleIn(error: unknown): string | undefined {
+  if (error instanceof CommitOutcomeUnknownError || error instanceof TransactionRolledBackError) {
+    return undefined;
+  }
+  const server = serverErrorIn(error);
+  if (server?.code !== '23514') return undefined;
+  const { hint } = server;
+  return typeof hint === 'string' && /^rule=[a-z_]+$/.test(hint)
+    ? hint.slice('rule='.length)
+    : undefined;
+}
+
+/**
  * The refusal of a finished request inside what was thrown: drizzle wraps whatever the connection object rejected a statement
  * with, so the caller is given the refusal itself and not the failed query that carries it.
  */
