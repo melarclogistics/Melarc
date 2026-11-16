@@ -489,3 +489,19 @@ describe('Dialog: accessibility', () => {
     expect(await wcagViolations(container)).toEqual([]);
   });
 });
+
+describe('Dialog: its size', () => {
+  const bare = (size?: DialogProps['size']) =>
+    render(
+      <Dialog open title="A photo" {...(size === undefined ? {} : { size })}>
+        <p>Content</p>
+      </Dialog>,
+    ).container.querySelector('dialog');
+
+  // Break caught: a size that is asked for and never reaches the markup, so that a photo shown whole is drawn in the 32rem of a question.
+  it('is the width of a question unless the page asks for the wide one, which is for what is shown whole', () => {
+    expect(bare()).not.toHaveClass('ui-dialog--wide');
+    expect(bare('default')).not.toHaveClass('ui-dialog--wide');
+    expect(bare('wide')).toHaveClass('ui-dialog--wide');
+  });
+});
