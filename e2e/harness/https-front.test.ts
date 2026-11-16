@@ -11,9 +11,11 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { contentSecurityPolicy } from '../../apps/ops-web/config/content-security-policy.ts';
 import {
   CONTENT_SECURITY_POLICY,
   EDGE_HEADERS,
+  edgeHeaders,
   startHttpsFront,
   type HttpsFront,
   type TlsServerOptions,
@@ -308,17 +310,101 @@ describe('the origin it is opened at, and the TLS it is given', () => {
 describe('the policy the front sends and the policy the shell is held to', () => {
   // Break caught: two copies of one policy that drift: the shell and the date field are proved to work under STRICT_POLICY, and the HTTPS run
   // sends CONTENT_SECURITY_POLICY. If they differ, "works under the strict policy" no longer says that it works under the one the edge sends.
-  it('are the same directives', () => {
-    const text = readFileSync(
-      resolve(import.meta.dirname, '../../apps/ops-web/test/browser/support/strict-policy.ts'),
-      'utf8',
-    );
-    const start = text.indexOf('export const STRICT_POLICY = [');
-    const end = text.indexOf('].join', start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    const baseline = [...text.slice(start, end).matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  // Since Run D (OB-S1-107) both are built by one builder, and neither writes a directive of its own.
+  it('are built by the one builder, and neither writes a directive of its own', () => {
+    for (const path of [
+      './https-front.ts',
+      '../../apps/ops-web/test/browser/support/strict-policy.ts',
+    ]) {
+      const text = readFileSync(resolve(import.meta.dirname, path), 'utf8');
 
-    expect(baseline.length).toBeGreaterThan(5);
-    expect(CONTENT_SECURITY_POLICY.split('; ')).toEqual(baseline);
+      expect(text, path).toMatch(
+        /import \{[^}]*\bcontentSecurityPolicy\b[^}]*\} from '[^']*config\/content-security-policy(?:\.ts)?'/,
+      );
+      expect(text, path).toContain('contentSecurityPolicy(');
+      // A directive written out as a line of an array, as the two copies used to be: a comment that names a directive is not one.
+      expect(text, path).not.toMatch(/^\s*"(?:default|script|style|img|font|connect)-src /m);
+    }
+  });
+});
+
+describe('the evidence store in the policy the front sends (OB-S1-107)', () => {
+  const STORE = 'https://evidence.example';
+
+  // Break caught: a front that cannot be given the store's origin, so that the HTTPS run cannot show a photo drawn from another origin, or one that gives it to every directive.
+  it('names the store in connect-src and img-src, and in no other directive, when it is given one', () => {
+    const headers = edgeHeaders(STORE);
+
+    expect(headers['content-security-policy']).toBe(
+      contentSecurityPolicy({ evidenceOrigin: STORE }),
+    );
+    expect(
+      headers['content-security-policy']
+        ?.split('; ')
+        .filter((directive) => directive.includes(STORE)),
+    ).toEqual([`img-src 'self' ${STORE}`, `connect-src 'self' ${STORE}`]);
+    // Every other header is the front's, whatever the store.
+    expect({ ...headers, 'content-security-policy': '' }).toEqual({
+      ...EDGE_HEADERS,
+      'content-security-policy': '',
+    });
+  });
+
+  // Break caught: a front that is given no store and still names one.
+  it('is the strict policy when it is given none', () => {
+    expect(edgeHeaders()).toEqual(EDGE_HEADERS);
+    expect(edgeHeaders()['content-security-policy']).toBe(CONTENT_SECURITY_POLICY);
+    expect(CONTENT_SECURITY_POLICY).toContain("connect-src 'self';");
+    expect(CONTENT_SECURITY_POLICY).toContain("img-src 'self';");
+  });
+
+  // Break caught: a front that sends the policy of the store it was given on some responses and the strict one on others, or that forgets it on an upstream failure.
+  it.each([200, 404, 502])('sends that policy on a %s', async (status) => {
+    reply = () => ({ status, headers: {}, body: 'x' });
+    const started = await front({ evidenceOrigin: STORE });
+
+    const response = await get(started, '/anything');
+
+    expect(response.headers.get('content-security-policy')).toBe(
+      contentSecurityPolicy({ evidenceOrigin: STORE }),
+    );
+  });
+
+  // Break caught: an upstream that sets its own policy, which would win over the edge's.
+  it('replaces a policy the upstream sent with its own', async () => {
+    reply = () => ({
+      status: 200,
+      headers: { 'Content-Security-Policy': "default-src *; script-src 'unsafe-inline'" },
+      body: 'x',
+    });
+    const started = await front({ evidenceOrigin: STORE });
+
+    const response = await get(started, '/');
+
+    expect(response.headers.get('content-security-policy')).toBe(
+      contentSecurityPolicy({ evidenceOrigin: STORE }),
+    );
+  });
+
+  // Break caught: an answer of the front's own (the upstream is not there) that carries the strict policy and not the one it was configured with, so that the page it shows cannot draw a photo either.
+  it('sends that policy on the answer of its own when the upstream is not there', async () => {
+    const started = await front({ upstream: 'http://127.0.0.1:1', evidenceOrigin: STORE });
+
+    const response = await get(started, '/');
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get('content-security-policy')).toBe(
+      contentSecurityPolicy({ evidenceOrigin: STORE }),
+    );
+  });
+
+  // Break caught: an origin that is not an origin taken as one, which would put what was typed into the policy the edge sends.
+  it('does not start when the origin is not an https origin, and says so', async () => {
+    await expect(front({ evidenceOrigin: 'http://evidence.example' })).rejects.toThrow(
+      /https origin/,
+    );
+    await expect(
+      front({ evidenceOrigin: 'https://evidence.example;script-src *' }),
+    ).rejects.toThrow(/https origin/);
   });
 });
