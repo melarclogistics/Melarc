@@ -97,13 +97,28 @@ describe('the photo grid’s stylesheet', () => {
   });
 
   // Break caught: the whole tile faded for a dimmed photo, which fades the words that say why and fails their contrast; only the picture is dimmed.
-  it('dims the picture of a dimmed tile and never its words or the tile', () => {
-    expect(ruleOf(GRID, '.ui-photo-tile--dimmed .ui-photo-tile__picture')).toMatch(
-      /opacity:\s*0?\.\d+\s*;/,
-    );
+  it('never fades the strip of a tile or the tile itself', () => {
     expect(ruleOf(GRID, '.ui-photo-tile--dimmed') ?? '').not.toMatch(/opacity/);
     expect(ruleOf(GRID, '.ui-photo-tile__mark') ?? '').not.toMatch(/opacity/);
   });
+
+  // Break caught (CI run 43884891843, axe `color-contrast` on the dimmed tile of the showcase): the picture's box faded as a whole for a photo that is set apart (dimmed) or cannot be pressed (disabled). A box can
+  // hold words as well as a photo (the placeholder's, "Photo not available", the sample's label), and half the opacity takes them below the contrast they need, in both themes. The box is greyed and only
+  // what is a picture in it is faded.
+  it.each(['.ui-photo-tile--dimmed', '.ui-photo-tile:disabled'])(
+    'greys the picture box of %s and fades the pictures in it, never the words',
+    (tile) => {
+      const box = ruleOf(GRID, `${tile} .ui-photo-tile__picture`);
+
+      expect(box).toMatch(/filter:\s*grayscale\(1\)\s*;/);
+      expect(box).not.toMatch(/opacity/);
+      for (const picture of ['img', 'canvas', 'video', 'svg']) {
+        expect(ruleOf(GRID, `${tile} .ui-photo-tile__picture ${picture}`), picture).toMatch(
+          /opacity:\s*0?\.\d+\s*;/,
+        );
+      }
+    },
+  );
 
   // Break caught: a badge with no surface of its own, which cannot be read on a bright picture.
   it('puts the badge on a surface of its own', () => {

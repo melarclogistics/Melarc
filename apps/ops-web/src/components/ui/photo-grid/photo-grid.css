@@ -91,8 +91,24 @@
   color: var(--color-status-warning-foreground);
 }
 
-/* A dimmed photo is set apart: its picture is faded, never the words that say why, which keep their contrast. */
-.ui-photo-tile--dimmed .ui-photo-tile__picture {
+/*
+ * A dimmed photo is set apart, and so is one that cannot be pressed: **the box is greyed and only the pictures in it are faded**, never the box as a whole. A box holds words as well as a photo (the placeholder's, "Photo not
+ * available", a label), and half the opacity of the box takes those words below the contrast they need in both themes (CI run 43884891843, axe `color-contrast`); a grey keeps the contrast of a grey. The words that say
+ * why a tile is set apart are in its strip, which is never faded either.
+ */
+.ui-photo-tile--dimmed .ui-photo-tile__picture,
+.ui-photo-tile:disabled .ui-photo-tile__picture {
+  filter: grayscale(1);
+}
+
+.ui-photo-tile--dimmed .ui-photo-tile__picture img,
+.ui-photo-tile--dimmed .ui-photo-tile__picture canvas,
+.ui-photo-tile--dimmed .ui-photo-tile__picture video,
+.ui-photo-tile--dimmed .ui-photo-tile__picture svg,
+.ui-photo-tile:disabled .ui-photo-tile__picture img,
+.ui-photo-tile:disabled .ui-photo-tile__picture canvas,
+.ui-photo-tile:disabled .ui-photo-tile__picture video,
+.ui-photo-tile:disabled .ui-photo-tile__picture svg {
   opacity: 0.5;
 }
 
@@ -123,10 +139,6 @@
 .ui-photo-tile:disabled {
   border-color: var(--color-border-disabled);
   cursor: not-allowed;
-}
-
-.ui-photo-tile:disabled .ui-photo-tile__picture {
-  opacity: 0.5;
 }
 
 @media (prefers-reduced-motion: reduce) {
