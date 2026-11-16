@@ -929,6 +929,32 @@ describe('submitBlindCount: a blind count is for a blind-count intake alone', ()
   });
 });
 
+describe('getReceivingRun: the vendors of a run are in the order the handover opened them', () => {
+  // Break caught: a page whose vendors come in an order that changes from one read to the next, or that is not the handover's (every intake of a run has the moment the run completed, and two UUIDv7 made in the same
+  // millisecond are not ordered: the page was ordered by the moment and then the identifier, and a test of two vendors failed one run in two on the first CI run of the branch): six stops handed over in one transaction
+  // are six vendors in the order of the rows, every read, whatever has been done to them since.
+  it('lists six vendors in the order of the handover, every read, and after one of them is counted', async () => {
+    const done = await handOver(routes, vendor, days, { collected: [3, 3, 3, 3, 3, 3] });
+    const manifest = done.run.manifest.id;
+    const opened = done.intakes.map((intake) => intake.id);
+    const vendorsOf = async (): Promise<string[]> => {
+      const page = await receiver.client.get(`${RUNS}/${manifest}`);
+      expect(page.status).toBe(200);
+      return (page.json() as { vendors: { intake_id: string }[] }).vendors.map(
+        (each) => each.intake_id,
+      );
+    };
+
+    expect(await vendorsOf()).toEqual(opened);
+    expect(await vendorsOf()).toEqual(opened);
+    // A count changes the intake's state and its version, and moves nothing in the order.
+    expect((await countIntake(receiver, opened[2] ?? '', 3)).status).toBe(200);
+    expect(await vendorsOf()).toEqual(opened);
+    // The identifiers are the order: the queue of the intakes pages by them.
+    expect(opened).toEqual(opened.toSorted());
+  });
+});
+
 /** The identifier of the intake a parcel belongs to. */
 async function intakeOfParcel(parcel: string): Promise<string> {
   return (
