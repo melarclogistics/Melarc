@@ -489,16 +489,24 @@ describe('the evidence of a stop is listed in the order it became visible (findi
     const arranged = await newRun();
     const stop = stopOf(arranged);
     const model = (await photoOf(routes, arranged.rider, stop, { purpose: 'PARCEL_PHOTO' })).id;
-    const chosen = randomUUID();
 
-    // The administrator's statement names a position in the year 2000: the guard writes its own.
-    await routes.admin.query(copyOf(`'2000-01-01T00:00:00Z'::timestamptz`), [model, chosen]);
-    const [made] = await routes.rows<{ recent: boolean }>(
-      `select listed_at > now() - interval '1 minute' and listed_at <= clock_timestamp() as recent from evidence where id = $1`,
-      [chosen],
-    );
-    expect(made?.recent).toBe(true);
-    expect(await listed(stop)).toEqual([model, chosen]);
+    // The administrator's statements name a position in the year 2000 and one in the year 2100, the one that would put a record first and the one that would put it last: the guard writes its own.
+    const made: string[] = [];
+    for (const position of [
+      `'2000-01-01T00:00:00Z'::timestamptz`,
+      `'2100-01-01T00:00:00Z'::timestamptz`,
+    ]) {
+      const chosen = randomUUID();
+      await routes.admin.query(copyOf(position), [model, chosen]);
+      const [row] = await routes.rows<{ recent: boolean }>(
+        `select listed_at > now() - interval '1 minute' and listed_at <= clock_timestamp() as recent from evidence where id = $1`,
+        [chosen],
+      );
+      expect(row?.recent, position).toBe(true);
+      made.push(chosen);
+    }
+    expect(await listed(stop)).toEqual([model, ...made]);
+    const chosen = made[0] ?? '';
 
     // No statement changes it afterwards, the owner's included: the guard keeps what was declared of a record.
     const refused = await routes.admin

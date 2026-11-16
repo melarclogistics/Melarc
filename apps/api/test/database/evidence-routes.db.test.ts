@@ -978,9 +978,10 @@ describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; mig
 
       expect(await writtenAs(context, eventSql({ evidence: first, rider, stop }))).toBeNull();
       expect(await writtenAs(context, eventSql({ evidence: first, rider, stop }))).toBe('23505');
-      // The administrator's statement meets the same index: the ledger is not a place where a login with more rights may write a second.
+      // The administrator's statement meets the same index, though it names another actor: one event for the record, not one for the record and its actor, and the ledger is not a place
+      // where a login with more rights may write a second.
       const administrator = await routes.admin
-        .query(eventSql({ evidence: first, rider, stop }))
+        .query(eventSql({ evidence: first, rider, stop, actor: randomUUID() }))
         .then(() => null)
         .catch((error: unknown) => serverErrorIn(error)?.code ?? 'other');
       expect(administrator).toBe('23505');
