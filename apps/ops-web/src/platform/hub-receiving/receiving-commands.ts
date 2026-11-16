@@ -68,7 +68,7 @@ export interface CheckInWithVersion {
 }
 
 /** How a vendor is finished: "All N here" (the number the officer counted, a statement and never a default) or as tapped (every parcel not tapped is missing). */
-export type CheckInFinish =
+export type FinishChoice =
   { readonly allArrived: true; readonly confirmedCount: number } | { readonly allArrived: false };
 
 /**
@@ -78,7 +78,7 @@ export type CheckInFinish =
 export async function finishCheckIn(
   client: ApiClient,
   intakeId: string,
-  finish: CheckInFinish,
+  finish: FinishChoice,
   version: string,
   idempotencyKey: string,
 ): Promise<CheckInWithVersion> {
@@ -186,7 +186,7 @@ export async function recordParcelCondition(
 }
 
 /** What a senior officer corrects: a reason and, by the intake's mode, the parcels' new states (photo mode) or the corrected count (blind-count mode). */
-export type IntakeCorrection =
+export type CorrectionRequest =
   | {
       readonly reason: string;
       readonly parcelChanges: readonly {
@@ -212,7 +212,7 @@ export type CorrectedIntake =
 export async function correctIntakeCount(
   client: ApiClient,
   intakeId: string,
-  correction: IntakeCorrection,
+  correction: CorrectionRequest,
   version: string,
   idempotencyKey: string,
 ): Promise<CorrectedIntake> {

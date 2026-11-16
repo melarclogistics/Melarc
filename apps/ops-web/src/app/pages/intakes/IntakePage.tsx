@@ -209,7 +209,7 @@ function Intake({ record }: { readonly record: IntakeRecord }) {
 
   return (
     <RecordPage
-      breadcrumb={[{ label: 'Receiving', to: '/intakes' }]}
+      breadcrumb={[{ label: 'Receiving', to: '/receiving' }]}
       header={{
         code: intake.code,
         status: <StatusBadge status={intake.state} map={INTAKE_STATE_MAP} />,
@@ -278,7 +278,7 @@ export function IntakePage() {
         title: record === undefined ? 'Intake' : record.intake.code,
         documentTitle: record === undefined ? 'Intake' : `Intake ${record.intake.code}`,
       })}
-      breadcrumb={() => [{ label: 'Receiving', to: '/intakes' }]}
+      breadcrumb={() => [{ label: 'Receiving', to: '/receiving' }]}
     >
       {(record) => <Intake record={record} />}
     </WithIntake>

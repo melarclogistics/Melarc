@@ -23,7 +23,7 @@ import {
  * - **A person is a name and nothing else**: a display name is short text with no control character, and **one that reads as a telephone number is refused** (no phone number is ever drawn: OB-S1-106).
  * - **A picture is an evidence identifier**: no key, no address, no path is in any answer, and none is accepted.
  */
-export type ReceivingMode = components['schemas']['ReceivingMode'];
+export type VendorMode = components['schemas']['ReceivingMode'];
 export type ParcelState = components['schemas']['IntakeParcelState'];
 export type ParcelOrigin = components['schemas']['IntakeParcelOrigin'];
 
@@ -307,7 +307,7 @@ export interface VendorView extends CountsView {
   readonly intake_code: string;
   /** The vendor's `ETag`: the `If-Match` of its acts. It does not move with the lock, a tap, an untap or an extra added before the vendor is finished. */
   readonly intake_etag: string;
-  readonly receiving_mode: ReceivingMode;
+  readonly receiving_mode: VendorMode;
   readonly state: IntakeState;
   readonly vendor_name: string;
   readonly lock: LockView | null;

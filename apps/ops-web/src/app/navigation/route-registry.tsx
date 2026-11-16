@@ -1,12 +1,12 @@
 import type { ReactElement } from 'react';
-import type { RouteObject } from 'react-router';
+import { Navigate, type RouteObject } from 'react-router';
 
 import { RequirePermission } from '../../platform/session/RequirePermission';
 import { IntakeConditionPage } from '../pages/intakes/IntakeConditionPage';
 import { IntakeCountPage } from '../pages/intakes/IntakeCountPage';
 import { IntakeDiscrepancyPage } from '../pages/intakes/IntakeDiscrepancyPage';
 import { IntakePage } from '../pages/intakes/IntakePage';
-import { IntakeQueuePage } from '../pages/intakes/IntakeQueuePage';
+import { ReceivingQueuePage } from '../pages/receiving/ReceivingQueuePage';
 import { MyWorkPage } from '../pages/my-work/MyWorkPage';
 import { TrustedBrowsersPage } from '../pages/account/TrustedBrowsersPage';
 import { ManifestBuilderPage } from '../pages/manifests/ManifestBuilderPage';
@@ -140,12 +140,13 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
         'Settle the handshakes whose code could not be entered, by an override or by hand.',
     },
   },
-  // Receiving at a hub (S1.35): the queue of intakes, one intake's record, the blind count, the condition and the adjudication. Each is behind the key of the operation that is its point, and never a role: the
-  // queue and the record open for the read, the count and the condition for the key of the count, the adjudication for the key Ops Staff do not hold. The queue is the one entry, in the Hub group, and draws no
-  // count: `getQueueSummary` states none for intakes. Itemising and closing are later work and have no route.
+  // Receiving at a hub (S1.35c; D-D2): the queue BY RUN, and, from the intakes' side, one vendor's record, the blind count, the condition and the decision. Each is behind the key of the operation that is its
+  // point, and never a role: the queue and the records open for the read, the count and the condition for the key of the count, the decision for the key Ops Staff do not hold. The queue is the one entry, in the
+  // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING`, which the generated client does not carry until S1.35b-2, so no badge is registered yet. `/intakes` was the queue of S1.35 and is a
+  // redirect now, so that a link made before it goes to the queue by run. Itemising and closing are later work and have no route.
   {
-    path: '/intakes',
-    element: <IntakeQueuePage />,
+    path: '/receiving',
+    element: <ReceivingQueuePage />,
     access: { permission: 'hub.read' },
     menu: {
       place: 'sidebar',
@@ -153,8 +154,15 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
       label: 'Receiving',
       icon: 'receiving',
       order: 0,
-      description: 'Count the parcels a rider handed over at your hub, and decide what is found.',
+      description:
+        'Check in the parcels a rider handed over at your hub, run by run, and decide what is found.',
     },
+  },
+  {
+    path: '/intakes',
+    element: <Navigate to="/receiving" replace />,
+    access: { permission: 'hub.read' },
+    menu: null,
   },
   {
     path: '/intakes/:id',

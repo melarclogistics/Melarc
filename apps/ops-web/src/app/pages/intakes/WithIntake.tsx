@@ -33,7 +33,7 @@ export function BackToReceiving() {
   const me = useSignedInSession();
   return me?.holds('hub.read') === true ? (
     <p className="pickup-back">
-      <Link to="/intakes">Back to receiving</Link>
+      <Link to="/receiving">Back to receiving</Link>
     </p>
   ) : null;
 }
@@ -138,7 +138,7 @@ export function actBreadcrumb(
   id: string,
 ): readonly BreadcrumbEntry[] {
   return [
-    { label: 'Receiving', to: '/intakes' },
+    { label: 'Receiving', to: '/receiving' },
     { label: record === undefined ? 'The intake' : record.intake.code, to: intakePath(id) },
   ];
 }

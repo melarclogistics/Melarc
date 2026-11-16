@@ -51,6 +51,11 @@ export interface WorkListParams {
    * the door and the failure ignore it.
    */
   readonly view?: string;
+  /**
+   * What the person searched for, as the address holds it (a list that has a lookup, `WorkListProps.lookup`): the lookup the list's own hook sends when it is long enough for the server to take. A list that has
+   * no lookup is never given one, and the lists of the door and the failure ignore it.
+   */
+  readonly q?: string;
   readonly enabled?: boolean;
 }
 

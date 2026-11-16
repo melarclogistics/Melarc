@@ -74,6 +74,17 @@ export interface WorkListProps<Item> {
    * empty list is never said to be empty "at" the hub chosen, because that would say what the server did not do (the receiving queue lists the hubs of the grant, and each row names its hub).
    */
   readonly hubFilter?: boolean;
+  /**
+   * The lookup of the list: a search field that is always in the bar (a run's code, a vendor's name). The text is in the address as `q`, a new text starts the list again at the first page, and the list's own
+   * hook is given it as `WorkListParams.q` once it is as long as the server takes. **The server finds; the page filters nothing.** Left out, the list has no lookup.
+   */
+  readonly lookup?: {
+    /** What the field searches, which is also its name ("Search by run code or vendor name"). */
+    readonly label: string;
+    /** The shortest text the server takes: a shorter text is not applied, and the field keeps what was typed. */
+    readonly minLength: number;
+    readonly maxLength: number;
+  };
   /** A refusal of the list, in the words of the screen: what the account cannot do, or the hub it does not work in. */
   readonly refusal: (problem: Problem) => string;
   readonly useList: (params: WorkListParams) => UseQueryResult<WorkListPageView<Item>>;
@@ -104,6 +115,7 @@ export function WorkList<Item>({
   tableLabel,
   refusal,
   hubFilter = true,
+  lookup,
   useList,
   rowId,
   table,
@@ -114,16 +126,20 @@ export function WorkList<Item>({
   const [params, setParams] = useSearchParams();
   const [first] = views;
   const current = views.find((view) => view.id === params.get('view')) ?? first;
+  // The lookup the address holds, if the list has one and the text is long enough for the server to take: a shorter text in the address is no search.
+  const typed = lookup === undefined ? '' : (params.get('q') ?? '').trim();
+  const q = lookup !== undefined && typed.length >= lookup.minLength ? typed : '';
   // The hub the switcher chose (task C3) is a filter of the list like the view: another hub or another view starts again at the first page.
   const chosenHub = useActiveHub();
   const hubId = hubFilter ? chosenHub : undefined;
   const { hub: chosen, showAllHubs } = useHubScope();
   const hub = hubFilter ? chosen : undefined;
-  const signature = `${name}|${current.id}|${hubId ?? ''}`;
+  const signature = `${name}|${current.id}|${hubId ?? ''}|${q}`;
   const paging = useQueuePaging(signature);
   const list = useList({
     ...(current.open === undefined ? {} : { open: current.open }),
     view: current.id,
+    ...(q === '' ? {} : { q }),
     ...(hubId === undefined ? {} : { hubId }),
     ...(paging.pageToken === undefined ? {} : { pageToken: paging.pageToken }),
     enabled: me !== undefined,
@@ -183,9 +199,22 @@ export function WorkList<Item>({
 
   function changeView(id: string): void {
     setNotice(undefined);
-    setParams(id === first.id ? new URLSearchParams() : new URLSearchParams({ view: id }), {
-      replace: true,
-    });
+    const next = new URLSearchParams();
+    if (id !== first.id) next.set('view', id);
+    // The search is a filter like the view: another view keeps it.
+    if (q !== '') next.set('q', q);
+    setParams(next, { replace: true });
+  }
+
+  /** Applies what was typed in the lookup (Enter, or the button): empty takes the search off, and a text shorter than the server takes is not applied. */
+  function applyLookup(text: string): void {
+    if (lookup === undefined) return;
+    if (text !== '' && text.length < lookup.minLength) return;
+    setNotice(undefined);
+    const next = new URLSearchParams(params);
+    if (text === '') next.delete('q');
+    else next.set('q', text);
+    setParams(next, { replace: true });
   }
 
   const cursorRefused = refusedParameter(list.error, 'page_token');
@@ -247,9 +276,22 @@ export function WorkList<Item>({
     return { status: 'ready', rows };
   })();
 
+  // A search that finds nothing is a filter that hides everything: it says so, with the way to take it off, and never "No runs yet" as if nothing existed.
+  const searched =
+    q === ''
+      ? {}
+      : {
+          filtered: true as const,
+          onClearFilters: () => {
+            applyLookup('');
+          },
+          clearLabel: 'Clear the search',
+          filteredText: `Nothing matches “${q}”. Clear the search to see every ${noun.one} again.`,
+        };
   const empty: QueueEmptiness = {
     noun: noun.plural,
     none: current.none,
+    ...searched,
     // A page after the first can hold nothing without the list being empty (the rows move between reads): the template says so, as every list does.
     laterPage: { page: paging.page, onFirstPage: firstPage },
     // A chosen hub is a filter too: the list is empty at this hub, which says nothing of the others.
@@ -305,6 +347,23 @@ export function WorkList<Item>({
           onValueChange: changeView,
           tabs: views.map((view) => ({ id: view.id, label: view.label })),
         }}
+        {...(lookup === undefined
+          ? {}
+          : {
+              filters: {
+                label: 'Search',
+                search: {
+                  label: lookup.label,
+                  value: q,
+                  onSearch: applyLookup,
+                  maxLength: lookup.maxLength,
+                },
+                chips: q === '' ? [] : [{ id: 'q', label: `Search: ${q}` }],
+                onRemove: () => {
+                  applyLookup('');
+                },
+              },
+            })}
         {...(banner === undefined ? {} : { notice: banner })}
         result={result}
         empty={empty}
