@@ -747,6 +747,12 @@ describe('the guard of an intake: what the database holds of a count for every w
     ]);
     const waitingPhoto = await photoIntake(2);
     const waitingBlind = await blindIntake(3);
+    // A blind count with a variance, on which the receiver then found damage: the numbers can be made to match, and only the condition says the senior's still to decide.
+    const damaged = await blindIntake(3);
+    const recorder = staff(COUNT);
+    rowsOf(await attempt(recorder, blindCount(damaged.id, 1)));
+    const damage = await intakeEvidence(damaged.id, recorder.principalId, 'CONDITION');
+    rowsOf(await attempt(recorder, condition(damaged.id, null, 'DAMAGED', [damage])));
     expect(await intakeOf(photo.id)).toMatchObject({
       state: 'RECONCILIATION_REQUIRED',
       physical_count: 2,
@@ -814,6 +820,18 @@ describe('the guard of an intake: what the database holds of a count for every w
         '23514',
       ],
       [
+        'a correction that clears an intake whose condition stands',
+        staff(OSD),
+        [countUpdate(damaged.id, 3, 0, 'MATCH', 'READY_FOR_ITEMIZATION')],
+        '23514',
+      ],
+      [
+        'a correction that leaves it in reconciliation',
+        staff(OSD),
+        [countUpdate(damaged.id, 3, 0, 'MATCH')],
+        'ran:1',
+      ],
+      [
         'a blind count that moves its moment',
         staff(OSD),
         [`update pickup_intake set counted_at = now() where id = '${blindRecon.id}'`],
@@ -870,6 +888,78 @@ describe('the guard of an intake: what the database holds of a count for every w
     }
   });
 });
+
+describe('the System’s move after a count is one rule, held for every writer (migration 0103)', () => {
+  const counted = (id: string, physical: number, variance: string, difference: number): string =>
+    `update pickup_intake set state = 'COUNTED', physical_count = ${String(physical)}, counted_at = now(), counted_by = gen_random_uuid(), count_variance = '${variance}', count_difference = ${String(difference)} where id = '${id}'`;
+  const moveIntake = (id: string, state: string): string =>
+    `update pickup_intake set state = '${state}' where id = '${id}'`;
+
+  // Break caught: a count that clears an intake while a parcel is missing and an extra stands (the numbers match, so only the parcels say), one that sends a clean count to the senior, one that
+  // clears a count the System should have sent; the rule judged for the writer that has no operation (the owner's statements here), not only for the operations that make the move.
+  it('clears a photo intake only when nothing is missing and no extra stands, and sends every other to reconciliation', async () => {
+    const photo = await photoIntake(3);
+    const officer = staff(COUNT);
+    const [one, two, three] = photo.parcels;
+    rowsOf(await attempt(officer, tap(one?.id ?? '', true)));
+    rowsOf(await attempt(officer, tap(two?.id ?? '', true)));
+    const extraPhoto = await intakeEvidence(photo.id, officer.principalId, 'OSD');
+    rowsOf(await attempt(officer, addExtra(photo.id, randomUUID(), extraPhoto)));
+    const missing = `update intake_parcel set state = 'MISSING' where id = '${three?.id ?? ''}'`;
+    // Two arrived and an extra against three expected: the count matches, a parcel is missing and an extra stands.
+    expect(
+      await asOwner(officer, [
+        missing,
+        counted(photo.id, 3, 'MATCH', 0),
+        moveIntake(photo.id, 'READY_FOR_ITEMIZATION'),
+      ]),
+      'cleared with a missing parcel and an extra',
+    ).toBe('23514');
+    expect(
+      await asOwner(officer, [
+        missing,
+        counted(photo.id, 3, 'MATCH', 0),
+        moveIntake(photo.id, 'RECONCILIATION_REQUIRED'),
+      ]),
+      'sent to the senior',
+    ).toBe('ran:1');
+
+    const clean = await photoIntake(2);
+    for (const parcel of clean.parcels) rowsOf(await attempt(officer, tap(parcel.id, true)));
+    expect(
+      await asOwner(officer, [
+        counted(clean.id, 2, 'MATCH', 0),
+        moveIntake(clean.id, 'RECONCILIATION_REQUIRED'),
+      ]),
+      'a clean count sent to the senior',
+    ).toBe('23514');
+    expect(
+      await asOwner(officer, [
+        counted(clean.id, 2, 'MATCH', 0),
+        moveIntake(clean.id, 'READY_FOR_ITEMIZATION'),
+      ]),
+      'a clean count cleared',
+    ).toBe('ran:1');
+    // A damaged parcel stands in the rule too: the condition found while the vendor was checked in keeps a clean count from being cleared.
+    const damaged = await photoIntake(2);
+    for (const parcel of damaged.parcels) rowsOf(await attempt(officer, tap(parcel.id, true)));
+    const evidence = await intakeEvidence(damaged.id, officer.principalId, 'CONDITION');
+    rowsOf(
+      await attempt(
+        officer,
+        condition(damaged.id, damaged.parcels[0]?.id ?? '', 'DAMAGED', [evidence]),
+      ),
+    );
+    expect(
+      await asOwner(officer, [
+        counted(damaged.id, 2, 'MATCH', 0),
+        moveIntake(damaged.id, 'READY_FOR_ITEMIZATION'),
+      ]),
+      'cleared with a condition that is not OK',
+    ).toBe('23514');
+  });
+});
+
 describe('recordParcelArrival: the tap, the untap, the void of an extra and the find (migration 0104)', () => {
   // Break caught: a tap that does not check the parcel in with the officer and the moment of the database, that moves the intake's version (a finish would be refused for the taps that led to it),
   // that is not idempotent (the same tap twice writes twice), an untap that leaves who and when behind.
@@ -1494,6 +1584,101 @@ describe('correctIntakeCount: a senior officer’s correction (migration 0104; D
     ).toEqual(['23514', 'STATE_CONFLICT', 'intake_not_counted']);
   });
 
+  // Break caught: a correction that clears an intake whose condition stands (the numbers match, so only the condition says): the senior's correction explains nothing away, and a damaged parcel is still
+  // the senior's to decide.
+  it('keeps a corrected intake with a condition that is not OK in reconciliation, though its count now matches', async () => {
+    const photo = await photoIntake(3);
+    const officer = staff(COUNT);
+    const [one, two, three] = photo.parcels;
+    rowsOf(await attempt(officer, tap(one?.id ?? '', true)));
+    rowsOf(await attempt(officer, tap(two?.id ?? '', true)));
+    const evidence = await intakeEvidence(photo.id, officer.principalId, 'CONDITION');
+    rowsOf(await attempt(officer, condition(photo.id, one?.id ?? '', 'DAMAGED', [evidence])));
+    rowsOf(await attempt(officer, finish(photo.id, false)));
+    const corrected = await attempt(
+      staff(OSD),
+      correct(
+        photo.id,
+        'it was found behind the door',
+        [{ parcel_id: three?.id ?? '', state: 'ARRIVED' }],
+        null,
+      ),
+    );
+    expect(rowsOf(corrected)[0]).toMatchObject({
+      previous_state: 'RECONCILIATION_REQUIRED',
+      resulting_state: 'RECONCILIATION_REQUIRED',
+      old_received: 2,
+      new_received: 3,
+      old_variance: 'SHORT',
+      new_variance: 'MATCH',
+    });
+    expect(await intakeOf(photo.id)).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      physical_count: 3,
+      count_variance: 'MATCH',
+      condition: 'DAMAGED',
+    });
+  });
+
+  // Break caught: a correction that clears an intake because the numbers now match while a parcel is still missing and an extra still stands (the rule of the System is one rule: a missing parcel
+  // and an extra of equal number are reconciled too), here made by the senior taking an extra out.
+  it('keeps an intake in reconciliation when a correction makes the numbers match while a parcel is missing and an extra stands', async () => {
+    const photo = await photoIntake(3);
+    const officer = staff(COUNT);
+    const [one, two] = photo.parcels;
+    rowsOf(await attempt(officer, tap(one?.id ?? '', true)));
+    rowsOf(await attempt(officer, tap(two?.id ?? '', true)));
+    const first = randomUUID();
+    const second = randomUUID();
+    rowsOf(
+      await attempt(
+        officer,
+        addExtra(photo.id, first, await intakeEvidence(photo.id, officer.principalId, 'OSD')),
+      ),
+    );
+    rowsOf(
+      await attempt(
+        officer,
+        addExtra(photo.id, second, await intakeEvidence(photo.id, officer.principalId, 'OSD')),
+      ),
+    );
+    // Two parcels and two extras arrived against three expected: over by one, with the third parcel missing.
+    expect(rowsOf(await attempt(officer, finish(photo.id, false)))[0]).toMatchObject({
+      resulting_state: 'RECONCILIATION_REQUIRED',
+      received_count: 4,
+      missing_count: 1,
+      extra_count: 2,
+      resulting_variance: 'OVER',
+    });
+    expect(
+      rowsOf(
+        await attempt(
+          staff(OSD),
+          correct(
+            photo.id,
+            'an extra added by mistake',
+            [{ parcel_id: second, state: 'VOID' }],
+            null,
+          ),
+        ),
+      )[0],
+    ).toMatchObject({
+      previous_state: 'RECONCILIATION_REQUIRED',
+      resulting_state: 'RECONCILIATION_REQUIRED',
+      old_received: 4,
+      new_received: 3,
+      old_variance: 'OVER',
+      new_variance: 'MATCH',
+    });
+    expect(await intakeOf(photo.id)).toMatchObject({
+      state: 'RECONCILIATION_REQUIRED',
+      physical_count: 3,
+      count_variance: 'MATCH',
+    });
+    expect((await parcelOf(second)).state).toBe('VOID');
+    expect((await parcelOf(first)).state).toBe('ARRIVED');
+  });
+
   // Break caught: a photo intake that can be counted blind (the officer would be given nothing to check against and the parcels' states would not hold the count).
   it('refuses to count a photo intake blind, and counts a blind-count one', async () => {
     const photo = await photoIntake(2);
@@ -1890,5 +2075,11 @@ describe('the names of the receiving side (migration 0106)', () => {
     expect(
       refusal(await attempt(staff(READ), `select * from melarc.receiving_names(null)`))[0],
     ).toBe('22023');
+    // The context is put back when the function returns: the next statement of the same transaction is the officer's again, and sees the parcels the officer may see.
+    const restored = await attemptAll(staff(READ), [
+      `select count(*) from melarc.receiving_names(array['${photo.id}']::uuid[])`,
+      `select count(*)::int as n from intake_parcel where pickup_intake_id = '${photo.id}'`,
+    ]);
+    expect(rowsOf(restored)).toEqual([{ n: 2 }]);
   });
 });
