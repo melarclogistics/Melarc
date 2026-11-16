@@ -60,10 +60,15 @@ describe('the photo grid’s stylesheet', () => {
     const column = Number(minimum?.[1]);
     const gap = rem('--space-3');
 
-    // A 390 px phone less 16 px of the page on each side and 16 px of a panel on each side leaves 326 px: three tiles fit in it...
-    expect(3 * column + 2 * gap).toBeLessThanOrEqual((390 - 64) / 16);
-    // ...and four do not fit in the 358 px that the page's own gutter leaves, so that it is three and not four.
-    expect(4 * column + 3 * gap).toBeGreaterThan((390 - 32) / 16);
+    // The room a grid really has on a phone (CI run 43884891843: the showcase's list at 390 px was 292 px wide, and the minimum of 6rem, 312 px for three, gave two to a row). In a receiving screen the page keeps
+    // 16 px on each side and a vendor's section 17 (its padding and its border): 66 px in all. The showcase is framed twice (the neutral frame's 16 and its own 16, and a specimen's 17): 98 px.
+    const RECEIVING = 66;
+    const SHOWCASE = 98;
+    // Three tiles fit in the narrowest room a phone gives them: a 360 px phone in a receiving screen (294 px) and a 390 px phone in the showcase (292 px)...
+    const narrowest = Math.min(360 - RECEIVING, 390 - SHOWCASE) / 16;
+    expect(3 * column + 2 * gap).toBeLessThanOrEqual(narrowest);
+    // ...and four do not fit in the widest (a 430 px phone in a receiving screen, 364 px), so that a phone has three to a row and not four.
+    expect(4 * column + 3 * gap).toBeGreaterThan((430 - RECEIVING) / 16);
     expect(column).toBeGreaterThanOrEqual(rem('--control-height-lg'));
   });
 

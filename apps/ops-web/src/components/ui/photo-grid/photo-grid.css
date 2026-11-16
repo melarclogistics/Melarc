@@ -1,11 +1,13 @@
 /*
  * The photo grid (design/COMPONENT_PATTERNS.md, PhotoGrid). Tiles of one shape whatever the picture is: a square whose box is made by the grid and the ratio and by nothing inside it, so that the grid never
- * jumps while pictures arrive, fail or differ in shape. Three tiles to a row on a 390px phone (the column minimum is the number that makes it so, held by test/photo-grid-style.test.ts) and as many as fit on a
- * desk; the tile is a button of at least the hub floor's 56px on a side. Every colour, size and space comes from tokens.css.
+ * jumps while pictures arrive, fail or differ in shape. **Three tiles to a row on a phone**, from a 360px one to a 430px one: the column minimum is 5.5rem (88px), the number that makes it so in the room a grid
+ * really has there (a receiving screen's 294px at 360px and 364px at 430px; the showcase's 292px at 390px, because it is framed twice), held by test/photo-grid-style.test.ts and measured in a browser by the
+ * kit's spec; it was 6rem, which is three only from a 312px room and gave two to a row at 390px in the showcase (CI run 43884891843) and at 360px and 375px in a receiving screen. As many as fit on a desk;
+ * the tile is a button of at least the hub floor's 56px on a side. Every colour, size and space comes from tokens.css.
  */
 .ui-photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 6rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 5.5rem), 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;
