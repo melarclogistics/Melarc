@@ -148,7 +148,7 @@ async function seedWithGrants(database: TestDatabase, grants: readonly GrantSeed
       payload: {
         ...plan.payload,
         reason_code: (plan.payload.reason_code ?? []).filter((reason) =>
-          known.has(String(reason['domain'])),
+          known.has(String(reason.domain)),
         ),
         role_bundle_grant: grants.map(seedRow),
       },

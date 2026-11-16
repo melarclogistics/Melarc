@@ -131,19 +131,6 @@ export class EvidenceService {
     this.#options = options;
   }
 
-  /** The session's grant of the key of an act, or a refusal: the permission every operation of this service rests on. */
-  #grantFor(
-    authorized: AuthorizedRequest,
-    side: 'write' | 'read',
-    act: OwnerAct,
-  ): AuthorizedRequest {
-    const who = act[side];
-    if (authorized.session.principalType !== who.principal) throw denied();
-    const decision = authorizationForKey(authorized, who.key);
-    if (decision === undefined) throw denied();
-    return decision;
-  }
-
   /** The acts the session could be acting for, each with the decision of its key: the session's, in the order of the acts. */
   #decisionsOf(
     authorized: AuthorizedRequest,

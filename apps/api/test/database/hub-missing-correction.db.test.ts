@@ -453,8 +453,8 @@ describe('adjudicateDiscrepancy: searching, writing off and "Vendor told"', () =
     );
     expect(
       decisions.map((decision) => [
-        decision.detail['outcome'],
-        decision.detail['resolved'],
+        decision.detail.outcome,
+        decision.detail.resolved,
         decision.enhanced,
       ]),
     ).toEqual([

@@ -390,7 +390,7 @@ export class HubIntakeFindings {
     const photo = loaded.checkIns.get(id);
     if (photo !== undefined) return { row, answer: { intake: photo.view, etag: photo.etag } };
     const blind = loaded.blind.get(id);
-    if (blind === undefined || blind.view.count_phase !== 'POST_COUNT') {
+    if (blind?.view.count_phase !== 'POST_COUNT') {
       throw new Error('An intake that was found is counted');
     }
     return { row, answer: { intake: blind.view, etag: blind.etag } };

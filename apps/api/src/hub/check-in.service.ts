@@ -455,9 +455,9 @@ export class HubCheckIns {
             ? {}
             : {
                 parcels: changed.map((each) => ({
-                  parcel_id: String(each['parcel_id']),
-                  from: String(each['from']),
-                  to: String(each['to']),
+                  parcel_id: String(each.parcel_id),
+                  from: String(each.from),
+                  to: String(each.to),
                 })),
               }),
         },

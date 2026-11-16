@@ -455,7 +455,7 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
     for (const bad of [`W/${etag}`, other.etag, '"not-a-token"']) {
       expect(
         outcome(await finish(receiver, id, { all_arrived: false }, { etag: bad })),
-        String(bad),
+        bad,
       ).toEqual([409, 'STATE_CONFLICT', 'stale']);
     }
     const done = await finish(receiver, id, { all_arrived: false }, { etag });
@@ -558,7 +558,7 @@ describe('finishCheckIn: "All N here" and as tapped', () => {
         [id],
       )
     )[0]?.pickup_manifest_id;
-    const page = (await receiver.client.get(`${RUNS}/${manifest}`)).json() as {
+    const page = (await receiver.client.get(`${RUNS}/${manifest ?? ''}`)).json() as {
       vendors: {
         intake_id: string;
         state: string;

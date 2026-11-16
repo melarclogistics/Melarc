@@ -257,12 +257,11 @@ export class ReceivingReads {
           const own = intakes.filter((intake) => intake.pickup_manifest_id === row.run_id);
           const holders = [
             ...new Set(
-              own
-                .filter(
-                  (intake) =>
-                    intake.state === 'AWAITING_COUNT' && intake.active_receiver_id !== null,
-                )
-                .map((intake) => intake.active_receiver_id as string),
+              own.flatMap((intake) =>
+                intake.state === 'AWAITING_COUNT' && intake.active_receiver_id !== null
+                  ? [intake.active_receiver_id]
+                  : [],
+              ),
             ),
           ];
           return {
