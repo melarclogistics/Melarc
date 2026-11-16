@@ -39,6 +39,17 @@ export function parseEvidenceLimits(body: unknown): EvidenceLimitsView | undefin
   return { allowedTypes: types.map((type: string) => type.toLowerCase()), maxBytes: size };
 }
 
+/**
+ * The same limits for a photo and never a document: the platform's types that are images (the photo mode of the evidence upload takes no PDF, whatever the platform takes for other evidence) and its size
+ * limit as it is. A platform that takes no image type leaves none, and every file is then refused for its type, which is the platform's own answer.
+ */
+export function imagesOnly(limits: EvidenceLimitsView): EvidenceLimitsView {
+  return {
+    allowedTypes: limits.allowedTypes.filter((type) => type.startsWith('image/')),
+    maxBytes: limits.maxBytes,
+  };
+}
+
 /** A media type as a comparison sees it: its case and its parameters are not part of the type. */
 function mediaTypeOf(type: string): string {
   return (type.split(';')[0] ?? '').trim().toLowerCase();

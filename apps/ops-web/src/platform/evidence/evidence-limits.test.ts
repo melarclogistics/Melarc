@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseEvidenceLimits, refusalOfFile } from './evidence-limits';
+import { imagesOnly, parseEvidenceLimits, refusalOfFile } from './evidence-limits';
 
 /**
  * The platform's limits on a file of evidence (`getEvidenceLimits`; OB-S1-110), so that a screen can refuse a file above the size limit **before it reads the file whole** (the checksum reads every byte). They are
@@ -71,6 +71,50 @@ describe('the judgement of a file against the limits, before it is read', () => 
 
   it('judges the type before the size', () => {
     expect(refusalOfFile({ type: 'text/plain', size: LIMITS.maxBytes + 1 }, LIMITS)).toMatchObject({
+      kind: 'type_not_allowed',
+    });
+  });
+});
+
+describe('the limits for a photo', () => {
+  const WITH_DOCUMENTS = {
+    allowedTypes: ['image/jpeg', 'application/pdf', 'image/png', 'text/plain'],
+    maxBytes: 5_000_000,
+  } as const;
+
+  // Break caught: a photo mode that takes a PDF because the platform takes one for other evidence: the photo mode is for images and never a document.
+  it('keeps the platform’s image types and drops every other, and the size limit as it is', () => {
+    expect(imagesOnly(WITH_DOCUMENTS)).toEqual({
+      allowedTypes: ['image/jpeg', 'image/png'],
+      maxBytes: 5_000_000,
+    });
+  });
+
+  // Break caught: the platform's own limits changed by the helper (a list that is edited in place), which the next reader of them would see.
+  it('leaves the limits it was given as they were', () => {
+    const before = structuredClone(WITH_DOCUMENTS);
+
+    imagesOnly(WITH_DOCUMENTS);
+
+    expect(WITH_DOCUMENTS).toEqual(before);
+  });
+
+  // Break caught: a document refused for the wrong reason, or let through: judged by the same function as every file, with the photo limits.
+  it('refuses a document for its type and takes an image, by the same judgement as any file', () => {
+    const limits = imagesOnly(WITH_DOCUMENTS);
+
+    expect(refusalOfFile({ type: 'application/pdf', size: 10 }, limits)).toMatchObject({
+      kind: 'type_not_allowed',
+    });
+    expect(refusalOfFile({ type: 'image/png', size: 10 }, limits)).toBeUndefined();
+  });
+
+  // Break caught: a platform with no image type that leaves the photo mode taking a document, or throwing.
+  it('leaves no type, and so refuses every file, where the platform takes no image', () => {
+    const limits = imagesOnly({ allowedTypes: ['application/pdf'], maxBytes: 10 });
+
+    expect(limits.allowedTypes).toEqual([]);
+    expect(refusalOfFile({ type: 'image/jpeg', size: 1 }, limits)).toMatchObject({
       kind: 'type_not_allowed',
     });
   });

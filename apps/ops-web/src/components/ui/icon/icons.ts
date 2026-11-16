@@ -4,6 +4,7 @@ import {
   ArrowUpDown,
   Bike,
   Calendar,
+  Camera,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,6 +24,7 @@ import {
   Handshake,
   Image,
   ImageOff,
+  Images,
   Info,
   LaptopMinimalCheck,
   ListChecks,
@@ -37,6 +39,7 @@ import {
   Package,
   PackagePlus,
   Plus,
+  RotateCcw,
   Scale,
   Search,
   Store,
@@ -124,6 +127,10 @@ export const ICONS = {
   // The photo kit (Run D, S1.35c-0): a photo that is on its way, and one that cannot be shown (the words say which: the icon never does alone).
   photo: Image,
   'photo-unavailable': ImageOff,
+  // The evidence upload's photo mode (Run D, S1.35c-0): take a photo with the camera, choose one from the gallery, take a photo again (each with words beside it).
+  camera: Camera,
+  gallery: Images,
+  retake: RotateCcw,
   // The connection banner (Run D, S1.35c-0): the connection is gone and what a person does now is not saved (the words say so: the icon never does alone).
   offline: WifiOff,
 } as const satisfies Record<string, LucideIcon>;
