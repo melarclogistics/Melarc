@@ -201,6 +201,15 @@ describe('the form: the facts first, then the decision', () => {
     expect(group.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // Break caught (the pictures' review, defect 7): the three outcome rows drawn at the working height (46px, the circle 20px) on a page of the hub floor, where the whole row is the target at 56px.
+  it('draws the outcomes as rows of the hub floor, in the floor’s scope', async () => {
+    open();
+    const group = await screen.findByRole('group', { name: /What do you decide\?/ });
+
+    expect(group).toHaveClass('ui-radio-group--lg');
+    expect(document.querySelector('.ui-hub-floor')).not.toBeNull();
+  });
+
   // Break caught: the heading of the page said twice ("Decide", and "Your decision" under it).
   it('has one heading for the page, and no second one that says the same', async () => {
     open();

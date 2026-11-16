@@ -3,6 +3,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 
 import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
@@ -140,24 +141,26 @@ function Reading({
   return (
     <>
       <title>{`${named.documentTitle} · Melarc Ops Portal`}</title>
-      {loaded ? null : (
-        <PageHeader
-          title={named.title}
-          {...(named.description === undefined ? {} : { description: named.description })}
-          {...(trail === undefined ? {} : { breadcrumb: trail })}
-        />
-      )}
-      <ReadState<IntakeRecordView>
-        query={query}
-        isEmpty={() => false}
-        empty={null}
-        loadingLabel={WORDS.record.loading}
-        skeleton={<Skeleton lines={4} />}
-        permission="hub.read"
-        operation="getHubIntake"
-      >
-        {(record) => children(record, query)}
-      </ReadState>
+      <HubFloor>
+        {loaded ? null : (
+          <PageHeader
+            title={named.title}
+            {...(named.description === undefined ? {} : { description: named.description })}
+            {...(trail === undefined ? {} : { breadcrumb: trail })}
+          />
+        )}
+        <ReadState<IntakeRecordView>
+          query={query}
+          isEmpty={() => false}
+          empty={null}
+          loadingLabel={WORDS.record.loading}
+          skeleton={<Skeleton lines={4} />}
+          permission="hub.read"
+          operation="getHubIntake"
+        >
+          {(record) => children(record, query)}
+        </ReadState>
+      </HubFloor>
     </>
   );
 }

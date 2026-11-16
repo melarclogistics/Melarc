@@ -5,6 +5,7 @@ import { useLocation, useParams } from 'react-router';
 import { PageHeading } from '../../../components/PageHeading';
 import { ConnectionBanner } from '../../../components/ui/connection-banner/ConnectionBanner';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
@@ -114,7 +115,7 @@ function Run({
     problemOf(query.error, { operation: 'getReceivingRun' }).kind === 'unavailable';
 
   return (
-    <>
+    <HubFloor>
       <title>{`${WORDS.run.documentTitle(page.run.code)} · Melarc Ops Portal`}</title>
       <PageHeader
         title={page.run.code}
@@ -156,7 +157,7 @@ function Run({
           readAgain={query.refetch}
         />
       ))}
-    </>
+    </HubFloor>
   );
 }
 

@@ -428,6 +428,7 @@ export function EvidenceUpload({
                       <Button
                         type="button"
                         variant="secondary"
+                        size={photos ? 'lg' : 'md'}
                         aria-label={`Try ${named} again`}
                         onClick={() => {
                           send(entry.key, entry.file);
@@ -440,6 +441,7 @@ export function EvidenceUpload({
                       <Button
                         type="button"
                         variant="secondary"
+                        size="lg"
                         disabled={disabled}
                         aria-label={`Retake ${named}`}
                         onClick={() => {
@@ -454,6 +456,7 @@ export function EvidenceUpload({
                     <Button
                       type="button"
                       variant="secondary"
+                      size={photos ? 'lg' : 'md'}
                       aria-label={`Leave out ${named}`}
                       onClick={() => {
                         remove(entry.key);

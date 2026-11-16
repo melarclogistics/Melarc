@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -379,6 +379,36 @@ describe('EvidenceUpload: the photos taken', () => {
     await user.click(screen.getByRole('button', { name: 'Try photo 1 again' }));
 
     expect(pending).toHaveLength(2);
+  });
+
+  // Break caught (the pictures' review, defect 7): the buttons of a photo that was taken (Retake, Leave out, Try again) drawn at the working height, 44px, among the 56px buttons that took it: a thumb's miss
+  // on the act that undoes it. In the file mode, which is not the floor's, they keep the working height.
+  it('draws the buttons of each photo at the hub floor’s size, and the file mode’s at the working size', async () => {
+    const { take, pending } = photos();
+    take(photo());
+    await act(async () => {
+      pending[0]?.reject(new Error('refused'));
+      await Promise.resolve();
+    });
+
+    for (const name of ['Retake photo 1', 'Leave out photo 1', 'Try photo 1 again']) {
+      expect(await screen.findByRole('button', { name })).toHaveClass('ui-button--lg');
+    }
+    cleanup();
+
+    const user = userEvent.setup();
+    render(
+      <EvidenceUpload
+        label="Photos of what you found"
+        upload={() => new Promise<string>(() => undefined)}
+        failureText={() => 'The photo could not be sent.'}
+        onChange={() => undefined}
+      />,
+    );
+    await user.upload(screen.getByLabelText('Photos of what you found'), photo());
+    expect(await screen.findByRole('button', { name: 'Leave out image.jpg' })).not.toHaveClass(
+      'ui-button--lg',
+    );
   });
 
   // Break caught: the identifiers of the stored photos not handed to the page, in the order the photos were taken.

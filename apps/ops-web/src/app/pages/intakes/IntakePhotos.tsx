@@ -32,6 +32,7 @@ export function IntakePhotos({
             <Button
               type="button"
               variant="secondary"
+              size="lg"
               aria-label={`Open ${noun} ${String(index + 1)}`}
               onClick={() => {
                 setOpened(index);

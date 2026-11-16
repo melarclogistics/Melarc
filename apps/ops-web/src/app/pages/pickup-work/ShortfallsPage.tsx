@@ -6,6 +6,7 @@ import {
   RowTitle,
   type DataColumn,
 } from '../../../components/ui/data-table/DataTable';
+import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { ShortfallView } from '../../../platform/pickup-work/pickup-work-shape';
@@ -144,34 +145,36 @@ export function ShortfallsPage() {
   ];
 
   return (
-    <WorkList<ShortfallView>
-      name="shortfalls"
-      operation="listCollectionShortfalls"
-      title="Count differences"
-      description="Counts where a rider collected fewer or more parcels than were booked at your hubs, oldest first."
-      viewsLabel="Views of the count differences"
-      views={VIEWS}
-      noun={{
-        plural: 'count differences',
-        one: 'count difference',
-        other: 'count differences',
-      }}
-      tableLabel="Count differences"
-      refusal={refusalWords}
-      choice={KINDS}
-      useList={useCollectionShortfalls}
-      rowId={(item) => item.id}
-      table={{
-        columns,
-        density: 'two-line',
-        opens: 'record',
-        card: (item) => <ShortfallCard item={item} hubs={hubs} />,
-        cardTitle: (item) => (
-          <Link to={stopOf(item)}>
-            <OperationalCode>{item.request_code}</OperationalCode>
-          </Link>
-        ),
-      }}
-    />
+    <HubFloor>
+      <WorkList<ShortfallView>
+        name="shortfalls"
+        operation="listCollectionShortfalls"
+        title="Count differences"
+        description="Counts where a rider collected fewer or more parcels than were booked at your hubs, oldest first."
+        viewsLabel="Views of the count differences"
+        views={VIEWS}
+        noun={{
+          plural: 'count differences',
+          one: 'count difference',
+          other: 'count differences',
+        }}
+        tableLabel="Count differences"
+        refusal={refusalWords}
+        choice={KINDS}
+        useList={useCollectionShortfalls}
+        rowId={(item) => item.id}
+        table={{
+          columns,
+          density: 'touch',
+          opens: 'record',
+          card: (item) => <ShortfallCard item={item} hubs={hubs} />,
+          cardTitle: (item) => (
+            <Link to={stopOf(item)}>
+              <OperationalCode>{item.request_code}</OperationalCode>
+            </Link>
+          ),
+        }}
+      />
+    </HubFloor>
   );
 }

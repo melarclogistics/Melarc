@@ -200,6 +200,7 @@ function Form({
             <RadioGroup
               legend={WORDS.decision.outcomeLegend}
               name="outcome"
+              size="lg"
               required
               value={outcome}
               options={offered.map((value) => ({
