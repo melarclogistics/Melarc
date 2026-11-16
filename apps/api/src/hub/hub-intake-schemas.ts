@@ -94,30 +94,10 @@ export const BLIND_COUNT_BODY = described({
   },
 });
 
-/** An intake as `getHubIntake` and `acquireIntakeLock` answer it: the shape the intake's phase calls for, told apart by `count_phase`. */
-export const HUB_INTAKE_VIEW_SCHEMA = described({
-  oneOf: [HUB_INTAKE_PRE_COUNT_SCHEMA, HUB_INTAKE_POST_COUNT_SCHEMA],
-  // The values on the wire, mapped to the two shapes (contract 5.107.0): without a mapping a generator takes the schemas' own names as the values, which `count_phase` never carries.
-  discriminator: {
-    propertyName: 'count_phase',
-    mapping: {
-      PRE_COUNT: '#/components/schemas/HubIntakePreCount',
-      POST_COUNT: '#/components/schemas/HubIntakePostCount',
-    },
-  },
-});
-
-/** The page of `listHubIntakes`. */
-export const HUB_INTAKE_PAGE_SCHEMA = described({
-  type: 'object',
-  required: ['items', 'next_page_token'],
-  properties: {
-    items: { type: 'array', items: HUB_INTAKE_VIEW_SCHEMA },
-    next_page_token: { type: ['string', 'null'] },
-  },
-});
-
-/** The body of `recordIntakeCondition` (the contract's `IntakeConditionRecord`): the receiver's recording of a condition, independent of the count. DAMAGED and TAMPERED carry stored evidence. */
+/**
+ * The body of `recordIntakeCondition` (the contract's `IntakeConditionRecord`): the receiver's recording of a condition, independent of the count. DAMAGED and TAMPERED carry stored evidence. `parcel_id` is the
+ * parcel the condition is a finding of (Run D): required for a photo intake and not allowed for a blind-count one, which the service judges.
+ */
 export const INTAKE_CONDITION_BODY = described({
   type: 'object',
   required: ['condition'],
@@ -126,6 +106,7 @@ export const INTAKE_CONDITION_BODY = described({
     condition: { type: 'string', enum: ['OK', 'DAMAGED', 'TAMPERED', 'OTHER'] },
     note: { type: 'string' },
     evidence_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+    parcel_id: { type: 'string', format: 'uuid' },
   },
 });
 

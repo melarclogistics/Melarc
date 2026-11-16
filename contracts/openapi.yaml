@@ -2381,11 +2381,13 @@ paths:
                       oneOf:
                         - $ref: '#/components/schemas/HubIntakePreCount'
                         - $ref: '#/components/schemas/HubIntakePostCount'
+                        - $ref: '#/components/schemas/HubIntakeCheckIn'
                       discriminator:
                         propertyName: count_phase
                         mapping:
                           PRE_COUNT: '#/components/schemas/HubIntakePreCount'
                           POST_COUNT: '#/components/schemas/HubIntakePostCount'
+                          CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
                   next_page_token: { type: [string, 'null'] }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
@@ -2454,11 +2456,13 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/HubIntakePreCount'
                   - $ref: '#/components/schemas/HubIntakePostCount'
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
                 discriminator:
                   propertyName: count_phase
                   mapping:
                     PRE_COUNT: '#/components/schemas/HubIntakePreCount'
                     POST_COUNT: '#/components/schemas/HubIntakePostCount'
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2515,11 +2519,13 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/HubIntakePreCount'
                   - $ref: '#/components/schemas/HubIntakePostCount'
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
                 discriminator:
                   propertyName: count_phase
                   mapping:
                     PRE_COUNT: '#/components/schemas/HubIntakePreCount'
                     POST_COUNT: '#/components/schemas/HubIntakePostCount'
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2689,7 +2695,15 @@ paths:
             ETag: { $ref: '#/components/headers/ETag' }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HubIntakePostCount' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
+                  - $ref: '#/components/schemas/HubIntakePostCount'
+                discriminator:
+                  propertyName: count_phase
+                  mapping:
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -4635,7 +4649,6 @@ paths:
           CSRF_VALIDATION_FAILED,
           EVIDENCE_NOT_STORED,
           HUB_SCOPE_VIOLATION,
-          INSUFFICIENT_AUTHORITY,
           NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
@@ -4703,7 +4716,15 @@ paths:
             ETag: { $ref: '#/components/headers/ETag' }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HubIntakePostCount' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
+                  - $ref: '#/components/schemas/HubIntakePostCount'
+                discriminator:
+                  propertyName: count_phase
+                  mapping:
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -15142,6 +15163,12 @@ components:
           description: >-
             Required for DAMAGED and TAMPERED (REASON_REQUIRED when absent); each id must name a STORED
             record (EVIDENCE_NOT_STORED otherwise).
+        parcel_id:
+          type: string
+          format: uuid
+          description: >-
+            Run D (5.108.0). The parcel the condition is a finding of: **required for a photo intake** (`VALIDATION_FAILED`, rule `parcel_required`, when absent), not allowed for a blind-count
+            intake. A condition is recorded once for each parcel (`condition_already_recorded`).
       description: >-
         The receiver's recording of a condition (22.5), independent of the count: it may be recorded
         on a count that matches, and DAMAGED or TAMPERED routes the case to Senior Ops adjudication.

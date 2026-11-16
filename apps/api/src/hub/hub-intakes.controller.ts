@@ -26,14 +26,15 @@ import { currentRequestContext } from '../platform/logging/request-context.js';
 import { DescribeErrors } from '../platform/openapi/described-errors.js';
 import { DescribeSecurity } from '../platform/openapi/operation-statements.js';
 import { RequiresPermission } from '../platform/routes/access-declaration.js';
-import {
-  INTAKE_STATES,
-  HUB_INTAKE_PAGE_SCHEMA,
-  HUB_INTAKE_VIEW_SCHEMA,
-} from './hub-intake-schemas.js';
-import type { HubIntakeView } from './hub-intake-view.js';
+import { INTAKE_STATES } from './hub-intake-schemas.js';
+import { HUB_INTAKE_PAGE_SCHEMA, HUB_INTAKE_VIEW_SCHEMA } from './receiving-schemas.js';
 import { HUB_INTAKES } from './hub-providers.js';
-import type { HubIntakeFilter, HubIntakePage, HubIntakes } from './hub-intakes.service.js';
+import type {
+  HubIntakeFilter,
+  HubIntakePage,
+  HubIntakeShape,
+  HubIntakes,
+} from './hub-intakes.service.js';
 
 const correlation = (): string => currentRequestContext()?.requestId ?? randomUUID();
 
@@ -123,7 +124,7 @@ export class HubIntakesController {
     @Authorized() authorized: AuthorizedRequest,
     @Param('id') id: string,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<HubIntakeView> {
+  ): Promise<HubIntakeShape> {
     if (this.intakes === undefined) throw new OperationUnavailableError('getHubIntake');
     const read = await this.intakes.get(authorized, correlation(), id);
     response.setHeader('ETag', read.etag);
@@ -151,7 +152,7 @@ export class HubIntakesController {
   acquireLock(
     @Authorized() authorized: AuthorizedRequest,
     @Param('id') id: string,
-  ): Promise<HubIntakeView> {
+  ): Promise<HubIntakeShape> {
     if (this.intakes === undefined) {
       return Promise.reject(new OperationUnavailableError('acquireIntakeLock'));
     }

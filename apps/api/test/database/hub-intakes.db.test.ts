@@ -555,27 +555,64 @@ describe('acquireIntakeLock: the advisory receive lock (AC-SLICE-001-43, first h
   });
 });
 
-describe('the parcel photos of the collection stay out of the receiving reads (AC-SLICE-001-89; D-A10, OB-S1-81)', () => {
-  // Break caught: a read of the receiving side that carries a photo of the collection, its identifier or their number (the number of photos is the rider's count): the queue, the intake, the
-  // lock. The photos exist (stored, real ones, for the stop of each intake); no answer names one, and no member of any answer is a count of photos.
-  it('carries no photo, no identifier of one and no number of them in the queue, the intake or the lock, before the count commits', async () => {
+/** What a read of a photo intake carries that this file reads: the third shape of an intake (S1.35b). */
+interface PhotoIntake {
+  readonly id: string;
+  readonly count_phase: string;
+  readonly receiving_mode: string;
+  readonly rider_declared_count: number;
+  readonly parcels: readonly {
+    readonly origin: string;
+    readonly state: string;
+    readonly photo_evidence_id: string | null;
+  }[];
+}
+
+describe('the door photos on the receiving reads (AC-SLICE-001-92; D-D1 reverses AC-SLICE-001-89 and OB-S1-81 for a photo intake)', () => {
+  // Break caught: a photo intake read in the blind-count shape as before D-D1 (its door photos hidden, its declaration withheld, no parcels), or a read that names a photo of another stop: the queue, the
+  // intake and the lock show each parcel of the stop with its own door photo, from the handover on, and the rider's number beside them (the officer counts against the photos, not blind).
+  it('shows the stop’s door photos as the parcels of its intake, in the queue, the intake and the lock, from the handover on', async () => {
     const ops = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
     const done = await handOver(routes, vendor, days, { collected: [2, 3], photos: true });
     expect(done.photoIds).toHaveLength(5);
-    const id = done.intakes[0]?.id ?? '';
-    const answers = [
-      await ops.client.get(`${INTAKES}?state=AWAITING_COUNT&page_size=100`),
-      await ops.client.get(ONE(id)),
-      await take(ops, id),
-    ];
-    for (const answer of answers) {
-      expect(answer.status).toBe(200);
-      expectNoDeclaration(answer);
-      for (const photo of done.photoIds) expect(answer.text).not.toContain(photo);
-      expect(keysOf(answer.json()).filter((key) => /photo|evidence/i.test(key))).toEqual([]);
+    const [first, second] = done.intakes;
+    const id = first?.id ?? '';
+    const queue = await ops.client.get(`${INTAKES}?state=AWAITING_COUNT&page_size=100`);
+    const one = await ops.client.get(ONE(id));
+    const locked = await take(ops, id);
+    expect([queue.status, one.status, locked.status]).toEqual([200, 200, 200]);
+
+    const listed = (queue.json() as { items: PhotoIntake[] }).items;
+    const ofFirst = [listed.find((item) => item.id === id), one.json(), locked.json()] as PhotoIntake[];
+    for (const shown of ofFirst) {
+      expect(shown.count_phase).toBe('CHECK_IN');
+      expect(shown.receiving_mode).toBe('PHOTO_CHECK_IN');
+      expect(shown.rider_declared_count).toBe(done.declared[0]);
+      expect(shown.parcels.map((parcel) => [parcel.origin, parcel.state])).toEqual([
+        ['DOOR_PHOTO', 'EXPECTED'],
+        ['DOOR_PHOTO', 'EXPECTED'],
+      ]);
+      expect(shown.parcels.map((parcel) => parcel.photo_evidence_id).toSorted()).toEqual(
+        done.photoIds.slice(0, 2).toSorted(),
+      );
     }
-    // The intake read has the members of the contract's shape, and none more.
-    expect(Object.keys(answers[1]?.json() as object).toSorted()).toEqual(PRE_COUNT_KEYS);
+    // The second stop's intake is the same in the queue, with its own three photos and none of the first's.
+    const other = listed.find((item) => item.id === second?.id);
+    expect(other?.parcels.map((parcel) => parcel.photo_evidence_id).toSorted()).toEqual(
+      done.photoIds.slice(2).toSorted(),
+    );
+  });
+
+  // Break caught: the narrow rule that D-D1 leaves lost: a stop with no photos is counted blind (D-D3), and its intake still shows no declaration, no parcel and nothing about a photo before the count.
+  it('keeps the narrow rule for a blind-count intake: a stop with no photos has none to show, and its declaration stays withheld before the count', async () => {
+    const ops = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
+    const done = await handOver(routes, vendor, days, { collected: [3] });
+    const id = done.intakes[0]?.id ?? '';
+    const read = await ops.client.get(ONE(id));
+    expect(read.status).toBe(200);
+    expectNoDeclaration(read);
+    expect(Object.keys(read.json() as object).toSorted()).toEqual(PRE_COUNT_KEYS);
+    expect(keysOf(read.json()).filter((key) => /photo|evidence|parcel/i.test(key))).toEqual([]);
   });
 });
 

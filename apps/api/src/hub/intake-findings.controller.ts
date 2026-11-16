@@ -29,26 +29,24 @@ import { fingerprintOfRequest } from '../platform/http/request-fingerprint-input
 import { currentRequestContext } from '../platform/logging/request-context.js';
 import { DescribeErrors } from '../platform/openapi/described-errors.js';
 import { RequiresPermission } from '../platform/routes/access-declaration.js';
-import {
-  DISCREPANCY_ADJUDICATION_BODY,
-  HUB_INTAKE_POST_COUNT_SCHEMA,
-  INTAKE_CONDITION_BODY,
-} from './hub-intake-schemas.js';
-import type { HubIntakePostCountView } from './hub-intake-view.js';
+import { DISCREPANCY_ADJUDICATION_BODY, INTAKE_CONDITION_BODY } from './hub-intake-schemas.js';
 import { HUB_INTAKE_FINDINGS } from './hub-providers.js';
 import type {
   DiscrepancyBody,
+  FoundIntake,
   HubIntakeFindings,
   IntakeConditionBody,
 } from './intake-findings.service.js';
+import { INTAKE_AFTER_COUNT_SCHEMA } from './receiving-schemas.js';
 
 const correlation = (): string => currentRequestContext()?.requestId ?? randomUUID();
 
 /**
  * What is found at an intake after its blind count (S1.34, `SLICE-001`): `POST /hub-intakes/{id}/condition` (the receiver records a condition and its evidence, under `hub.intake.count`) and
  * `POST /hub-intakes/{id}/discrepancy` (Senior Ops adjudicates, under `hub.osd.adjudicate`, which Ops Staff do not hold: `PERMISSION_DENIED` at the guard, before the body is read). Both are for the
- * Ops Portal's staff alone, by the hubs of the session's grant, take the `ETag` of the intake's read as `If-Match`, and answer `200` with `HubIntakePostCount`, its `condition_findings`
- * and the new `ETag`. The condition takes an `Idempotency-Key`; the adjudication, as the contract has it, takes none.
+ * Ops Portal's staff alone, by the hubs of the session's grant, take the `ETag` of the intake's read as `If-Match`, and answer `200` with the intake in the shape its mode calls for (`HubIntakeCheckIn` for a
+ * photo intake, whose condition is a parcel's; `HubIntakePostCount` for a blind-count one), its `condition_findings` and the new `ETag`. The condition takes an `Idempotency-Key`; the adjudication, as the
+ * contract has it, takes none.
  */
 @Controller('hub-intakes')
 export class IntakeFindingsController {
@@ -65,7 +63,7 @@ export class IntakeFindingsController {
   @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
   @ApiHeader({ name: 'If-Match', required: true, schema: IF_MATCH_SCHEMA })
   @ApiBody({ schema: INTAKE_CONDITION_BODY })
-  @ApiResponse({ status: 200, schema: HUB_INTAKE_POST_COUNT_SCHEMA, headers: ETAG_HEADERS })
+  @ApiResponse({ status: 200, schema: INTAKE_AFTER_COUNT_SCHEMA, headers: ETAG_HEADERS })
   @DescribeErrors(
     ErrorCode.CsrfValidationFailed,
     ErrorCode.EvidenceNotStored,
@@ -91,7 +89,7 @@ export class IntakeFindingsController {
     @Headers('idempotency-key') idempotencyKey: string,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<HubIntakePostCountView> {
+  ): Promise<FoundIntake['intake']> {
     if (this.findings === undefined) throw new OperationUnavailableError('recordIntakeCondition');
     const found = await this.findings.recordCondition(authorized, correlation(), id, {
       body,
@@ -109,12 +107,11 @@ export class IntakeFindingsController {
   @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
   @ApiHeader({ name: 'If-Match', required: true, schema: IF_MATCH_SCHEMA })
   @ApiBody({ schema: DISCREPANCY_ADJUDICATION_BODY })
-  @ApiResponse({ status: 200, schema: HUB_INTAKE_POST_COUNT_SCHEMA, headers: ETAG_HEADERS })
+  @ApiResponse({ status: 200, schema: INTAKE_AFTER_COUNT_SCHEMA, headers: ETAG_HEADERS })
   @DescribeErrors(
     ErrorCode.CsrfValidationFailed,
     ErrorCode.EvidenceNotStored,
     ErrorCode.HubScopeViolation,
-    ErrorCode.InsufficientAuthority,
     ErrorCode.NotFound,
     ErrorCode.PermissionDenied,
     ErrorCode.ReasonRequired,
@@ -133,7 +130,7 @@ export class IntakeFindingsController {
     @Body() body: DiscrepancyBody,
     @Headers('if-match') ifMatch: string | undefined,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<HubIntakePostCountView> {
+  ): Promise<FoundIntake['intake']> {
     if (this.findings === undefined) throw new OperationUnavailableError('adjudicateDiscrepancy');
     const found = await this.findings.adjudicate(authorized, correlation(), id, { body, ifMatch });
     response.setHeader('ETag', found.etag);

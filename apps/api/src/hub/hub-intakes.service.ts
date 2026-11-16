@@ -9,16 +9,16 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { decodePageToken, encodePageToken } from '../platform/http/page-token.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import { primaryHubOfStaff } from '../platform/lookup/primary-hub.js';
-import { afterCountsOf } from './hub-after-count.js';
 import { noteHubCrossing } from './hub-crossing.js';
-import { hubIntakeEtagOf } from './hub-intake-etag.js';
 import { INTAKE_STATES } from './hub-intake-schemas.js';
+import type { HubIntakeView } from './hub-intake-view.js';
 import {
-  HUB_INTAKE_READ_COLUMNS,
-  hubIntakeViewOf,
-  type HubIntakeRow,
-  type HubIntakeView,
-} from './hub-intake-view.js';
+  RECEIVING_INTAKE_COLUMNS,
+  loadIntakes,
+  type HubIntakeCheckInView,
+  type LoadedIntakes,
+  type ReceivingIntakeRow,
+} from './receiving-views.js';
 
 export interface HubIntakesOptions {
   readonly runner: Pick<OperationRunner, 'read' | 'mutate'>;
@@ -32,8 +32,11 @@ export interface HubIntakeFilter {
   readonly pageToken?: string;
 }
 
+/** An intake as a read answers it: a photo intake is `HubIntakeCheckIn` (the door photos are the receiving officer's reference, D-D1), a blind-count intake `HubIntakePreCount` and then `HubIntakePostCount`. */
+export type HubIntakeShape = HubIntakeView | HubIntakeCheckInView;
+
 export interface HubIntakePage {
-  readonly items: readonly HubIntakeView[];
+  readonly items: readonly HubIntakeShape[];
   readonly next_page_token: string | null;
 }
 
@@ -55,15 +58,28 @@ function refuseNotStaff(authorized: AuthorizedRequest): void {
   }
 }
 
-interface ListedRow extends HubIntakeRow {
+interface ListedRow extends ReceivingIntakeRow {
   /** The moment the list is ordered by, as text, so that no precision is lost in the position of the next page. */
   readonly position_text: string;
 }
 
 /** What the lock statement answers: the intake, and whether the caller may take the lock now. */
-interface LockableRow extends HubIntakeRow {
+interface LockableRow extends ReceivingIntakeRow {
   readonly lockable: boolean;
 }
+
+/** The shape one intake is answered in, from what `loadIntakes` loaded for it: its third shape for a photo intake, its own two for a blind-count one. */
+function shapeOf(loaded: LoadedIntakes, row: ReceivingIntakeRow): HubIntakeShape {
+  const shape = loaded.checkIns.get(row.id)?.view ?? loaded.blind.get(row.id)?.view;
+  if (shape === undefined) throw new Error('An intake is loaded in one of its shapes');
+  return shape;
+}
+
+const etagOf = (loaded: LoadedIntakes, row: ReceivingIntakeRow): string => {
+  const etag = loaded.checkIns.get(row.id)?.etag ?? loaded.blind.get(row.id)?.etag;
+  if (etag === undefined) throw new Error('An intake is loaded in one of its shapes');
+  return etag;
+};
 
 /**
  * `listHubIntakes`, `getHubIntake` and `acquireIntakeLock` (S1.32; `hub.read`, `hub.read` and `hub.intake.count`; `AC-SLICE-001-37`, `-43` and `-77`; features/hub/hub-intake.md section 5.1
@@ -122,7 +138,7 @@ export class HubIntakes {
       async (handle) => {
         const tx = transactionOf(handle);
         const result = await tx.execute(sql`
-          select ${HUB_INTAKE_READ_COLUMNS}, handed_over_at::text as position_text
+          select ${RECEIVING_INTAKE_COLUMNS}, handed_over_at::text as position_text
             from pickup_intake
            where (${state}::text is null or state = ${state}::text)
              and (${afterMoment}::timestamptz is null or (handed_over_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
@@ -146,10 +162,10 @@ export class HubIntakes {
             relatedIds: { operation_id: 'listHubIntakes' },
           });
         }
-        const after = await afterCountsOf(tx, page);
+        const loaded = await loadIntakes(tx, page, authorized.session.principalId.toLowerCase());
         const last = page.at(-1);
         return {
-          items: page.map((row) => hubIntakeViewOf(row, after.get(row.id))),
+          items: page.map((row) => shapeOf(loaded, row)),
           next_page_token:
             read.length > size && last !== undefined
               ? encodePageToken({ createdAt: last.position_text, id: last.id })
@@ -164,7 +180,7 @@ export class HubIntakes {
     authorized: AuthorizedRequest,
     correlationId: string,
     id: string,
-  ): Promise<{ readonly intake: HubIntakeView; readonly etag: string }> {
+  ): Promise<{ readonly intake: HubIntakeShape; readonly etag: string }> {
     refuseNotStaff(authorized);
     return this.#options.runner.read(
       authorized,
@@ -172,14 +188,13 @@ export class HubIntakes {
       async (handle) => {
         const tx = transactionOf(handle);
         const found = await tx.execute(
-          sql`select ${HUB_INTAKE_READ_COLUMNS} from pickup_intake where id = ${id}::uuid`,
+          sql`select ${RECEIVING_INTAKE_COLUMNS} from pickup_intake where id = ${id}::uuid`,
         );
-        const row = found.rows[0] as unknown as HubIntakeRow | undefined;
+        const row = found.rows[0] as unknown as ReceivingIntakeRow | undefined;
         if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
         await noteHubCrossing(this.#options.audit, handle, authorized, row);
-        const after = await afterCountsOf(tx, [row]);
-        const intake = hubIntakeViewOf(row, after.get(row.id));
-        return { intake, etag: hubIntakeEtagOf(intake, row.version) };
+        const loaded = await loadIntakes(tx, [row], authorized.session.principalId.toLowerCase());
+        return { intake: shapeOf(loaded, row), etag: etagOf(loaded, row) };
       },
       ONE_SNAPSHOT,
     );
@@ -189,7 +204,7 @@ export class HubIntakes {
     authorized: AuthorizedRequest,
     correlationId: string,
     id: string,
-  ): Promise<HubIntakeView> {
+  ): Promise<HubIntakeShape> {
     refuseNotStaff(authorized);
     const receiver = authorized.session.principalId.toLowerCase();
     return this.#options.runner.mutate(authorized, correlationId, async (handle) => {
@@ -197,7 +212,7 @@ export class HubIntakes {
       // The intake under its lock, and the database's judgement of whether this caller may take the lock now: free, its own, or held past the hub's idle time on the database's clock (the
       // same reading the guard of the table makes for every writer, from the same setting). The row lock orders two receivers who ask at once: the second is judged against the first's.
       const found = await tx.execute(sql`
-        select ${HUB_INTAKE_READ_COLUMNS},
+        select ${RECEIVING_INTAKE_COLUMNS},
                (i.active_receiver_id is null
                 or i.active_receiver_id = ${receiver}::uuid
                 or (t.minutes is not null and i.lock_acquired_at <= pg_catalog.clock_timestamp() - pg_catalog.make_interval(mins => t.minutes))) as lockable
@@ -213,13 +228,13 @@ export class HubIntakes {
           update pickup_intake
              set active_receiver_id = ${receiver}::uuid, lock_acquired_at = pg_catalog.clock_timestamp()
            where id = ${id}::uuid
-          returning ${HUB_INTAKE_READ_COLUMNS}`);
-        const updated = taken.rows[0] as unknown as HubIntakeRow | undefined;
+          returning ${RECEIVING_INTAKE_COLUMNS}`);
+        const updated = taken.rows[0] as unknown as ReceivingIntakeRow | undefined;
         if (updated === undefined) throw new Error('The lock of an intake could not be taken');
         row = { ...updated, lockable: true };
       }
-      const after = await afterCountsOf(tx, [row]);
-      return hubIntakeViewOf(row, after.get(row.id));
+      const loaded = await loadIntakes(tx, [row], receiver);
+      return shapeOf(loaded, row);
     });
   }
 }

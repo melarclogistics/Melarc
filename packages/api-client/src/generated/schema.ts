@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.108.0
- *   SHA-256 14246c2f2f9ca71108e6c61b0ab6b70a551ef0a204c77dd18105a915af26017a (of the contract, line endings normalized to LF)
+ *   SHA-256 aac54b3dc55062e4a7ab8a84ef78a626790d6257f795c8e3f82f6b8c6c3ba2cd (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -9718,6 +9718,11 @@ export interface components {
             note?: string;
             /** @description Required for DAMAGED and TAMPERED (REASON_REQUIRED when absent); each id must name a STORED record (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
+            /**
+             * Format: uuid
+             * @description Run D (5.108.0). The parcel the condition is a finding of: **required for a photo intake** (`VALIDATION_FAILED`, rule `parcel_required`, when absent), not allowed for a blind-count intake. A condition is recorded once for each parcel (`condition_already_recorded`).
+             */
+            parcel_id?: string;
         };
         /** @description The vendor-facing intake-completed and order summary (22.9, 23.10) and nothing else: no blind count, no declaration, no discrepancy, evidence or adjudication. The omission is the guard. */
         IntakeSummary: {
@@ -15823,7 +15828,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        items: (components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"])[];
+                        items: (components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"] | components["schemas"]["HubIntakeCheckIn"])[];
                         next_page_token: string | null;
                     };
                 };
@@ -15853,7 +15858,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"] | components["schemas"]["HubIntakeCheckIn"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -15881,7 +15886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"] | components["schemas"]["HubIntakeCheckIn"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -16033,7 +16038,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakeCheckIn"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -17728,7 +17733,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakeCheckIn"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
             400: components["responses"]["ValidationFailed"];

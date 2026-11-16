@@ -1,5 +1,9 @@
 import { described } from '../platform/openapi/described-schema.js';
-import { HUB_INTAKE_POST_COUNT_SCHEMA, INTAKE_STATES } from './hub-intake-schemas.js';
+import {
+  HUB_INTAKE_POST_COUNT_SCHEMA,
+  HUB_INTAKE_PRE_COUNT_SCHEMA,
+  INTAKE_STATES,
+} from './hub-intake-schemas.js';
 
 /**
  * The shapes of receiving by run as the application describes them (Run D, contract 5.108.0; S1.35b): the contract's `ReceivingMode`, `IntakeParcel`, `IntakeFinding`, `ReceivingLock`,
@@ -415,5 +419,35 @@ export const INTAKE_CORRECTED_SCHEMA = described({
       CHECK_IN: '#/components/schemas/HubIntakeCheckIn',
       POST_COUNT: '#/components/schemas/HubIntakePostCount',
     },
+  },
+});
+
+/** The answer of a finding and of an adjudication, as of a correction: the intake in the shape its mode calls for. */
+export const INTAKE_AFTER_COUNT_SCHEMA = INTAKE_CORRECTED_SCHEMA;
+
+/**
+ * An intake as `getHubIntake` and `acquireIntakeLock` answer it and as `listHubIntakes` lists it: the shape the intake's mode and phase call for, told apart by `count_phase`. A blind-count intake is
+ * `HubIntakePreCount` until its count and `HubIntakePostCount` after; a photo intake is `HubIntakeCheckIn` throughout (Run D, D-D1).
+ */
+export const HUB_INTAKE_VIEW_SCHEMA = described({
+  oneOf: [HUB_INTAKE_PRE_COUNT_SCHEMA, HUB_INTAKE_POST_COUNT_SCHEMA, HUB_INTAKE_CHECK_IN_SCHEMA],
+  // The values on the wire, mapped to the shapes (contract 5.107.0, and 5.108.0 for the third): without a mapping a generator takes the schemas' own names as the values, which `count_phase` never carries.
+  discriminator: {
+    propertyName: 'count_phase',
+    mapping: {
+      PRE_COUNT: '#/components/schemas/HubIntakePreCount',
+      POST_COUNT: '#/components/schemas/HubIntakePostCount',
+      CHECK_IN: '#/components/schemas/HubIntakeCheckIn',
+    },
+  },
+});
+
+/** The page of `listHubIntakes`. */
+export const HUB_INTAKE_PAGE_SCHEMA = described({
+  type: 'object',
+  required: ['items', 'next_page_token'],
+  properties: {
+    items: { type: 'array', items: HUB_INTAKE_VIEW_SCHEMA },
+    next_page_token: { type: ['string', 'null'] },
   },
 });
