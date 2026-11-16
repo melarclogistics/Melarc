@@ -22,6 +22,15 @@
     border-color var(--motion-fast);
 }
 
+/*
+ * The hub floor's size (DESIGN_SYSTEM sections 11 and 12): a 56 px target for the tablet-first receiving screens. The number is the token, so a change of the token is a change here, and the height is
+ * still a minimum, so enlarged text grows the button.
+ */
+.ui-button--lg {
+  min-height: var(--control-height-lg);
+  padding: var(--space-3) var(--space-6);
+}
+
 /* A link drawn as a button (ButtonLink) is an anchor: it is not underlined, which is what marks a text link. */
 a.ui-button {
   text-decoration: none;

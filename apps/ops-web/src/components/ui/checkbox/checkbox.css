@@ -39,6 +39,20 @@
   line-height: var(--text-body-sm-line-height);
 }
 
+/* The hub floor's row (DESIGN_SYSTEM sections 11 and 12): the label is the target, at least the touch row high, with a larger box centred on it. */
+.ui-checkbox--lg .ui-checkbox__label {
+  display: flex;
+  align-items: center;
+  min-height: var(--density-row-touch);
+}
+
+.ui-checkbox--lg .ui-checkbox__input {
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  align-self: center;
+  margin: 0;
+}
+
 .ui-checkbox__input:disabled {
   cursor: not-allowed;
 }
