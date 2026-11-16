@@ -8,10 +8,14 @@ export const KEYBOARD_INSET_PROPERTY = '--keyboard-inset';
  * (and moved by how far the page is scrolled inside it). A browser with no visual viewport, or one whose keyboard resizes the page itself, reports no inset: nothing covers the page that the page does not already
  * know. It is never negative.
  */
+/** The visual viewport, or nothing: a browser that has none says `null`, and a test document or an old browser has no such property at all. */
+function visualViewportOf(): VisualViewport | null {
+  return (window as { visualViewport?: VisualViewport | null }).visualViewport ?? null;
+}
+
 export function keyboardInset(): number {
-  // A browser with no visual viewport has none (`null`), and a test document has none to ask for (`undefined`).
-  const viewport: VisualViewport | null | undefined = window.visualViewport;
-  if (viewport === null || viewport === undefined) return 0;
+  const viewport = visualViewportOf();
+  if (viewport === null) return 0;
   return Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
 }
 
@@ -22,8 +26,8 @@ export function keyboardInset(): number {
  */
 export function useKeyboardInset(): void {
   useEffect(() => {
-    const viewport: VisualViewport | null | undefined = window.visualViewport;
-    if (viewport === null || viewport === undefined) return;
+    const viewport = visualViewportOf();
+    if (viewport === null) return;
     const root = document.documentElement;
     const write = (): void => {
       root.style.setProperty(KEYBOARD_INSET_PROPERTY, `${String(keyboardInset())}px`);
