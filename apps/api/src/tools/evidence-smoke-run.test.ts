@@ -6,12 +6,18 @@ import { EICAR_TEST_FILE } from '../platform/evidence/eicar-test-file.js';
 import { EvidenceStoreError } from '../platform/evidence/evidence-store-error.js';
 import { InProcessContentScanner } from '../platform/evidence/in-process.content-scanner.adapter.js';
 import { InProcessEvidenceStore } from '../platform/evidence/in-process.evidence-store.adapter.js';
+import {
+  DAEMON_DEFAULT_MAX_RECURSION,
+  NESTED_ARCHIVE_DEPTH,
+  archiveNestingOf,
+} from '../platform/evidence/nested-archive-test-file.js';
 import { runEvidenceSmoke, type SmokeWorld } from './evidence-smoke-run.js';
 
 /**
  * The owner's `evidence:smoke` command (Run A2; the plan's section 7.5), against the in-process stand-ins and against stores and scanners that misbehave. What these prove: the command
- * puts a clean file and the EICAR test file through the platform's own judgement and tells the difference; it notices a store that accepts an upload that is not the one signed and a
- * scanner that does not flag the test virus; it fails closed when a scanner or a store cannot answer; and **it prints no key, address, signed address or credential, whatever happens**.
+ * puts a clean file, the EICAR test file, an encrypted PDF and a file that crosses a limit of the daemon (Run D, finding F3) through the platform's own judgement and tells the difference;
+ * it notices a store that accepts an upload that is not the one signed and a scanner that does not flag the test virus; it fails closed when a scanner or a store cannot answer; and
+ * **it prints no key, address, signed address or credential, whatever happens**.
  */
 const NOW = new Date('2026-11-12T09:00:00.000Z');
 
@@ -85,6 +91,27 @@ const defaults: ContentScanner = {
 };
 
 /**
+ * A daemon told to alert on an encrypted document (`AlertEncrypted yes`) and not on a limit it crossed (`AlertExceedsMax no`, ClamAV's default; Run D, finding F3): it flags the EICAR test
+ * file and the encrypted PDF, and says OK to an archive nested deeper than it unpacks, which it stopped reading. The nesting is read from the headers, as the daemon meets them.
+ */
+const alertsOnEncryptedOnly: ContentScanner = {
+  scan: async (object) => {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of object) chunks.push(chunk);
+    const bytes = Buffer.concat(chunks);
+    const eicar = bytes.subarray(0, EICAR_TEST_FILE.length).toString('latin1') === EICAR_TEST_FILE;
+    const encrypted =
+      bytes.subarray(0, 5).toString('latin1') === '%PDF-' && bytes.includes('/Encrypt');
+    return {
+      verdict: eicar || encrypted ? 'FLAGGED' : 'CLEAN',
+      scanner: 'clamav',
+      signatureVersion: 'ClamAV 1.4.2/27836/Wed Nov 12 08:05:44 2026',
+      ...(eicar || encrypted ? { signature: 'Eicar-Test-Signature' } : {}),
+    } satisfies ScanVerdict;
+  },
+};
+
+/**
  * Nothing that could name where the store or the scanner is, or what was signed: no object key, no address, no part of a signed address (its query names: `X-Amz-Signature`,
  * `X-Amz-Credential` and the rest), no long hex run (a key, a hash of a secret). The name of the checksum header the command asks the store about is not one of these.
  */
@@ -125,6 +152,11 @@ describe('evidence:smoke', () => {
       "An encrypted PDF: the platform's check REFUSED it as malicious content.",
     );
     expect(text).toContain('An encrypted PDF: its object was removed from the store.');
+    // Run D, finding F3: a file that crosses a limit of the daemon is one it stops reading unless AlertExceedsMax is yes.
+    expect(text).toContain(
+      "A nested archive: the platform's check REFUSED it as malicious content.",
+    );
+    expect(text).toContain('A nested archive: its object was removed from the store.');
     expect(text).toContain('An upload longer than the length signed: the store refused it');
     expect(text).toContain(
       'An upload of the signed length that hashes otherwise: the store refused it',
@@ -146,7 +178,8 @@ describe('evidence:smoke', () => {
     };
     const { code } = await run(world);
     expect(code).toBe(0);
-    expect(keys.length).toBeGreaterThanOrEqual(3);
+    // Four files and the one the half-made uploads were signed for.
+    expect(keys.length).toBeGreaterThanOrEqual(5);
     for (const key of keys) expect(world.store.has(key), 'an object was left').toBe(false);
   });
 
@@ -181,8 +214,8 @@ describe('evidence:smoke', () => {
       {
         upload: (capability, body) => {
           uploads += 1;
-          // The first two uploads are the files; the next two are the wrong ones, which this store accepts.
-          return uploads > 2 ? Promise.resolve(200) : base.upload(capability, body);
+          // The first four uploads are the files; the next two are the wrong ones, which this store accepts.
+          return uploads > 4 ? Promise.resolve(200) : base.upload(capability, body);
         },
       },
       base.store,
@@ -251,6 +284,49 @@ describe('evidence:smoke', () => {
       "The EICAR test file: the platform's check REFUSED it as malicious content.",
     );
     clean(lines);
+  });
+
+  // Break caught (Run D, finding F3; fails before it: there is no such check, so AlertExceedsMax was proven nowhere): a daemon with the default AlertExceedsMax no, which says OK to an
+  // archive it stopped reading, read as a daemon that works. The test file is deeper than the daemon's default limit, so that a daemon with its defaults stops short of its end.
+  it('fails, naming the setting and the limits, when the scanner does not flag a file that crosses a limit', async () => {
+    expect(NESTED_ARCHIVE_DEPTH).toBeGreaterThan(DAEMON_DEFAULT_MAX_RECURSION);
+    const { code, lines } = await run(standInWorld({ scanner: alertsOnEncryptedOnly }));
+    expect(code).toBe(1);
+    const failed = lines.filter((line) => line.startsWith('FAIL A nested archive'));
+    expect(failed.length).toBeGreaterThanOrEqual(1);
+    expect(failed.join(' ')).toContain('AlertExceedsMax');
+    expect(failed.join(' ')).toContain('MaxRecursion');
+    // Only the nested archive is missed: the test virus and the encrypted document are found.
+    expect(
+      lines
+        .filter((line) => line.startsWith('FAIL'))
+        .every((line) => line.startsWith('FAIL A nested archive')),
+    ).toBe(true);
+    expect(lines.join(' ')).toContain(
+      "An encrypted PDF: the platform's check REFUSED it as malicious content.",
+    );
+    expect(lines.join(' ')).toContain(
+      "The EICAR test file: the platform's check REFUSED it as malicious content.",
+    );
+    clean(lines);
+  });
+
+  // Break caught (Run D, finding F3): a fixture that is not an archive nested past the limit (a file the daemon reads to its end, so that the setting is never asked), or one whose depth the
+  // command no longer says. The file the command uploads is the one this reads: it is the platform's own, so the command and the stand-in agree on what crosses the limit.
+  it('puts through a file that is nested deeper than the daemon’s default limit', async () => {
+    const world = standInWorld();
+    const uploaded: Uint8Array[] = [];
+    const upload = world.upload;
+    const { code } = await run({
+      ...world,
+      upload: (capability, body) => {
+        uploaded.push(body);
+        return upload(capability, body);
+      },
+    });
+    expect(code).toBe(0);
+    const depths = uploaded.map((body) => archiveNestingOf(body));
+    expect(Math.max(...depths)).toBeGreaterThan(DAEMON_DEFAULT_MAX_RECURSION);
   });
 
   // Break caught (fails on 7cb3bb1): objects the command made left in the owner's bucket when the scanner could not be reached, because the removal sat after the call that threw.

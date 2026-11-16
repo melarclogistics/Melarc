@@ -7,6 +7,12 @@ import {
   InProcessContentScanner,
   STAND_IN_SIGNATURE_VERSION,
 } from './in-process.content-scanner.adapter.js';
+import {
+  ARCHIVE_LIMIT_SIGNATURE,
+  DAEMON_DEFAULT_MAX_RECURSION,
+  NESTED_ARCHIVE_TEST_FILE,
+  nestedArchiveOf,
+} from './nested-archive-test-file.js';
 
 /**
  * The in-process stand-in of the content scanner (Run A2; D-A6): it flags the EICAR test file, the way ClamAV's own signature for it is anchored, and calls everything else clean,
@@ -87,6 +93,41 @@ describe('the stand-in content scanner', () => {
     for (const frames of [[plain], ['JFIF /Encrypt ' + plain], ['%PDF-1.4\n%%EOF\n']]) {
       expect((await scanner.scan(framesOf(...frames))).verdict).toBe('CLEAN');
     }
+  });
+
+  // Break caught (Run D, finding F3): a stand-in that calls an archive nested deeper than the daemon's limit clean, so that a dry run of the smoke command would not ask the question the
+  // real daemon is asked about `AlertExceedsMax`.
+  it('flags an archive nested deeper than the daemon’s default limit, whole or split across frames, as a daemon configured for the release gate does', async () => {
+    for (const frames of [
+      [NESTED_ARCHIVE_TEST_FILE],
+      [
+        NESTED_ARCHIVE_TEST_FILE.subarray(0, 100),
+        NESTED_ARCHIVE_TEST_FILE.subarray(100, 700),
+        NESTED_ARCHIVE_TEST_FILE.subarray(700),
+      ],
+    ]) {
+      expect(await scanner.scan(framesOf(...frames))).toEqual({
+        verdict: 'FLAGGED',
+        scanner: 'stand-in',
+        signatureVersion: STAND_IN_SIGNATURE_VERSION,
+        signature: ARCHIVE_LIMIT_SIGNATURE,
+      });
+    }
+  });
+
+  // Break caught: a stand-in that flags every archive, or one nested exactly to the limit, which the daemon reads to its end.
+  it('calls an archive within the limit clean, and a file that only begins like an archive', async () => {
+    for (const frames of [
+      [nestedArchiveOf(2)],
+      [nestedArchiveOf(DAEMON_DEFAULT_MAX_RECURSION)],
+      [Buffer.from('504b0304', 'hex')],
+      [Buffer.from('PK plus any text of a note')],
+    ]) {
+      expect((await scanner.scan(framesOf(...frames))).verdict).toBe('CLEAN');
+    }
+    expect(
+      (await scanner.scan(framesOf(nestedArchiveOf(DAEMON_DEFAULT_MAX_RECURSION + 1)))).verdict,
+    ).toBe('FLAGGED');
   });
 
   it('reads the stream to its end, whatever it finds', async () => {

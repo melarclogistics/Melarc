@@ -10,12 +10,17 @@ import { EICAR_TEST_FILE } from '../platform/evidence/eicar-test-file.js';
 import { ENCRYPTED_PDF_TEST_FILE } from '../platform/evidence/encrypted-pdf-test-file.js';
 import { judgeStoredObject } from '../platform/evidence/evidence-judgement.js';
 import { EvidenceStoreError } from '../platform/evidence/evidence-store-error.js';
+import {
+  DAEMON_DEFAULT_MAX_RECURSION,
+  NESTED_ARCHIVE_DEPTH,
+  NESTED_ARCHIVE_TEST_FILE,
+} from '../platform/evidence/nested-archive-test-file.js';
 
 /**
  * The logic of `pnpm --filter @melarc/api run evidence:smoke` (Run A2; the Product Owner's decision D-A6, the plan's section 7.5): the owner's first contact with a bucket and a scanner,
  * as a command they run and read. It composes the **same store and the same scanner the API is composed with** (`EVIDENCE_STORE`, `EVIDENCE_SCANNER`, read from `apps/api/.env` as the API
  * reads them), and puts through the platform's own judgement of a stored object (`judgeStoredObject`, the one function `completeEvidenceUpload` calls to decide whether a record may be
- * stored) four things:
+ * stored) five things:
  *
  * 1. **A clean JPEG** (a JFIF header of a few bytes): uploaded to the bucket with the capability the platform makes, then judged. Expected: ACCEPTED, with the scanner's name and the
  *    version of its signatures.
@@ -23,7 +28,11 @@ import { EvidenceStoreError } from '../platform/evidence/evidence-store-error.js
  * 3. **An encrypted PDF** (a small document with a security handler nobody can open; Run B, item 3 of the review of Run A2): uploaded the same way. Expected: REFUSED as malicious content.
  *    ClamAV does not look into an encrypted document unless `AlertEncrypted yes` is set, and with its default it says `stream: OK` for a file it did not read; the command fails, **naming
  *    the setting**, when the scanner does not flag it.
- * 4. **An upload that is not the one signed**, twice: a body longer than the length signed into the address, and a body of the right length that hashes otherwise. Expected: the store
+ * 4. **A nested archive** (a chain of stored ZIP archives deeper than the daemon's default `MaxRecursion`, holding one harmless byte; Run D, finding F3 of the review of Run B): uploaded the
+ *    same way. Expected: REFUSED as malicious content. ClamAV stops scanning a file at one of its limits (`MaxRecursion`, `MaxFiles`, `MaxFileSize`, `MaxScanSize`) and, with the default
+ *    `AlertExceedsMax no`, says `stream: OK` for a file it did not finish reading; the command fails, **naming the setting and the limits**, when the scanner does not flag it. A daemon
+ *    configured with a limit deeper than this file is not asked the question, and the line says so.
+ * 5. **An upload that is not the one signed**, twice: a body longer than the length signed into the address, and a body of the right length that hashes otherwise. Expected: the store
  *    itself refuses each, and nothing is stored (the plan's section 7.5, item 2).
  *
  * It also says whether the store kept the SHA-256 that was signed (a `HEAD` must return it: the platform reads it back).
@@ -106,7 +115,7 @@ export async function runEvidenceSmoke(
   };
 
   try {
-    // 1, 2 and 3: a clean file, the test virus and an encrypted document, through the platform's own judgement.
+    // 1 to 4: a clean file, the test virus, an encrypted document and an archive nested past the daemon's limit, through the platform's own judgement.
     for (const file of [
       {
         label: 'A clean JPEG',
@@ -130,6 +139,16 @@ export async function runEvidenceSmoke(
         // ClamAV looks into no encrypted document unless it is told to alert on one, and then answers `stream: OK` for a file it did not read.
         setting:
           'The daemon does not look into an encrypted document unless AlertEncrypted is yes in clamd.conf (restart it after the change).',
+      },
+      {
+        label: 'A nested archive',
+        bytes: NESTED_ARCHIVE_TEST_FILE,
+        // Declared as a photograph, as the EICAR file is: the scan comes before the signature check, so a scanner that flags it refuses it as malicious content, and one that does not is
+        // found by the signature check that follows (a file that is not a JPEG), which the line below tells apart.
+        contentType: 'image/jpeg',
+        expected: 'refused' as const,
+        // ClamAV stops scanning a file at one of its limits and, with the default, says `stream: OK` for a file it did not finish reading.
+        setting: `The daemon stops reading a file that crosses one of its limits (MaxRecursion, MaxFiles, MaxFileSize, MaxScanSize) and says OK to the rest unless AlertExceedsMax is yes in clamd.conf (restart it after the change). This file is ${String(NESTED_ARCHIVE_DEPTH)} archives deep, past the default MaxRecursion of ${String(DAEMON_DEFAULT_MAX_RECURSION)}; a daemon configured with a deeper MaxRecursion is not asked the question.`,
       },
     ]) {
       const storageRef = key();
@@ -195,7 +214,7 @@ export async function runEvidenceSmoke(
       }
     }
 
-    // 4: the store must refuse an upload that is not the one signed.
+    // 5: the store must refuse an upload that is not the one signed.
     const signed = key();
     const capability = world.store.presignUpload({
       key: signed,
