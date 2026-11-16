@@ -1,3 +1,4 @@
+import type { InfiniteData } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
@@ -18,7 +19,10 @@ import type { StopRecord } from '../../../platform/manifest/manifest-commands';
 import { useManifest, useStop } from '../../../platform/manifest/use-manifest-queries';
 import { usePickupRequest } from '../../../platform/pickup/use-pickup-queries';
 import { authoriseParcelPhotoException } from '../../../platform/pickup-work/pickup-work-commands';
-import type { ParcelPhotoExceptionView } from '../../../platform/pickup-work/pickup-work-shape';
+import type {
+  ParcelPhotoExceptionView,
+  StopEvidencePageView,
+} from '../../../platform/pickup-work/pickup-work-shape';
 import { useStopEvidence } from '../../../platform/pickup-work/use-pickup-work-queries';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -230,7 +234,6 @@ function Exception({
   }
 
   const code = stop?.pickup_summary?.reference ?? request.data?.request.code;
-  const existing = evidence.data?.pages.at(-1)?.parcel_photo_exception;
   return (
     <>
       <title>Let a count through without photos · Melarc Ops Portal</title>
@@ -269,14 +272,33 @@ function Exception({
                 cannot be let through without photos now.
               </span>
             </p>
-          ) : existing !== undefined && existing !== null ? (
-            <p className="pickup-status">
-              <span>
-                This stop has already been let through without photos. It is on the stop’s page.
-              </span>
-            </p>
           ) : (
-            <Form manifestId={manifestId} record={record} code={code} />
+            // The form is for a stop that was not let through already, and that is on the stop's evidence: it is drawn once the check has been read, and never while the check is loading or after it
+            // failed (the review of Run B, finding 6). A check that failed is told in its own words, with a way to try again.
+            <ReadState<InfiniteData<StopEvidencePageView, string | undefined>>
+              query={evidence}
+              isEmpty={() => false}
+              empty={null}
+              loadingLabel="Checking whether this stop was let through already…"
+              skeleton={<Skeleton lines={3} />}
+              permission="pickup.read"
+              capability="see pickup runs"
+              operation="listPickupStopEvidence"
+              context="exception"
+            >
+              {(checked) =>
+                (checked.pages.at(-1)?.parcel_photo_exception ?? null) === null ? (
+                  <Form manifestId={manifestId} record={record} code={code} />
+                ) : (
+                  <p className="pickup-status">
+                    <span>
+                      This stop has already been let through without photos. It is on the stop’s
+                      page.
+                    </span>
+                  </p>
+                )
+              }
+            </ReadState>
           )
         }
       </ReadState>

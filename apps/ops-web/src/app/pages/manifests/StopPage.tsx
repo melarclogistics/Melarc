@@ -16,6 +16,7 @@ import { RecordPage } from '../../../components/ui/templates/RecordPage';
 import type { StopRecord } from '../../../platform/manifest/manifest-commands';
 import { useManifest, useStop } from '../../../platform/manifest/use-manifest-queries';
 import { usePickupRequest } from '../../../platform/pickup/use-pickup-queries';
+import type { ParcelPhotoProgressView } from '../../../platform/pickup-work/pickup-work-shape';
 import { useStopEvidence } from '../../../platform/pickup-work/use-pickup-work-queries';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -36,6 +37,15 @@ import './manifests-pages.css';
 export interface LetThroughState {
   readonly letThrough?: true;
 }
+
+/**
+ * Whether every parcel photo the rider made is uploaded: some were made, none still waits and none was lost. Then the photos made the count possible and the rider counts with them (or has counted),
+ * so there is nothing to let through without photos, and the exception, which the server refuses once a count is recorded (`STATE_CONFLICT`, rule `collection_recorded`), is not offered (the review of
+ * Run B, finding 6). **No read of the stop says whether a count is recorded**, and the progress cannot: this is the one case it can tell apart. Where some photos never came, or still wait, the act is
+ * offered and the server judges the rest, in words.
+ */
+const everyParcelPhotoIsIn = (progress: ParcelPhotoProgressView): boolean =>
+  progress.declared > 0 && progress.pending === 0 && progress.expired === 0;
 
 function BackToRun({ manifestId }: { readonly manifestId: string }) {
   return (
@@ -87,14 +97,18 @@ function Stop({
   if (me === undefined) return null;
   const { stop } = record;
   const status = stopStatusOf(stop);
-  const exception = evidence.data?.pages.at(-1)?.parcel_photo_exception;
+  const freshest = evidence.data?.pages.at(-1);
+  const exception = freshest?.parcel_photo_exception;
   const skipLine = skipReasonText(stop, undefined);
-  // The act is offered to a holder of its key, for a stop the rider has arrived at, that has not been let through: the server judges the rest (a count already recorded is refused in words).
+  // The act is offered to a holder of its key, for a stop the rider has arrived at, that has not been let through and whose photos have not all made it: the server judges the rest (a count already
+  // recorded is refused in words).
   const mayLetThrough =
     me.holds('pickup.handshake.override') &&
     stop.state === 'ARRIVED' &&
     evidence.status === 'success' &&
-    exception === null;
+    exception === null &&
+    freshest !== undefined &&
+    !everyParcelPhotoIsIn(freshest.parcel_photos);
   const label = `Stop ${String(stop.sequence)}`;
 
   return (

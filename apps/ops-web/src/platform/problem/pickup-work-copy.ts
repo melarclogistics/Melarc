@@ -63,6 +63,12 @@ export const PICKUP_WORK_COPY: readonly CopyRule[] = [
 
   // The photos of a stop.
   { operation: 'listPickupStopEvidence', text: 'The photos of this stop could not be loaded.' },
+  // The same read as the check of the exception form (whether the stop was let through already is on its evidence): the form is not shown on a check that failed, and says why in its own words.
+  {
+    operation: 'listPickupStopEvidence',
+    context: 'exception',
+    text: 'Whether this stop was let through already could not be checked, so the form is not shown yet.',
+  },
   {
     operation: 'listPickupStopEvidence',
     code: 'PERMISSION_DENIED',

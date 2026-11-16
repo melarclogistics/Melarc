@@ -671,10 +671,34 @@ describe('the exception that let a count through without photos', () => {
     expect(screen.queryByRole('link', { name: 'Let the count through without photos' })).toBeNull();
   });
 
-  it('offers the act to a holder of its key for a stop the rider has arrived at, and to nobody else', async () => {
-    open(undefined, OFFICER);
+  it('offers the act to a holder of its key for a stop the rider has arrived at, whose camera failed, and to nobody else', async () => {
+    // The stop the exception is for: no photo made it, so nothing was counted with photos and the server would take the exception.
+    open(() => json(200, evidenceListFixture({ items: [], parcel_photos: progress(0) })), OFFICER);
     const act = await screen.findByRole('link', { name: 'Let the count through without photos' });
     expect(act).toHaveAttribute('href', `${PATH}/photo-exception`);
+  });
+
+  // Break caught (the review of Run B, finding 6): the act offered, as the page's primary act, for a stop whose every photo is uploaded, when the rider has counted with them or is about to, and the
+  // server refuses a stop that has a count (`collection_recorded`).
+  it('offers no act once every parcel photo the rider made is uploaded: the count may be recorded already', async () => {
+    open(undefined, OFFICER);
+
+    expect(await screen.findByText('1 of 1 parcel photos uploaded.')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Let the count through without photos' })).toBeNull();
+  });
+
+  // The progress cannot say whether a count is recorded: it offers the act where the photos did not all make it, and the server judges the rest (a stop that has a count is refused in words).
+  it.each([
+    ['no photo at all', progress(0)],
+    ['photos that are still waiting to upload', progress(1, 1)],
+    ['photos whose upload window ran out', progress(0, 0, 2)],
+    ['some photos that never came, and the rest uploaded', progress(2, 0, 1)],
+  ])('offers the act for a stop with %s', async (_name, counts) => {
+    open(() => json(200, evidenceListFixture({ items: [], parcel_photos: counts })), OFFICER);
+
+    expect(
+      await screen.findByRole('link', { name: 'Let the count through without photos' }),
+    ).toBeVisible();
   });
 
   it('offers no act to a session without the key, or for a stop that has not been arrived at', async () => {

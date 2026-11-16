@@ -229,6 +229,61 @@ describe('a stop the form is not for', () => {
   });
 });
 
+describe('the check that the stop was not let through already', () => {
+  const NONE = { declared: 0, stored: 0, pending: 0, expired: 0 };
+
+  // Break caught (the review of Run B, finding 6): the form was drawn while the check was still loading, so an officer could write a note for a stop the check was about to say had been let
+  // through already.
+  it('shows no form while the check is under way, and says what it waits for', async () => {
+    open({}, OFFICER, undefined, () => new Promise<Response>(() => undefined));
+
+    expect(
+      await screen.findByText('Checking whether this stop was let through already…'),
+    ).toBeVisible();
+    expect(screen.queryByRole('textbox', { name: /Note/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Let the count through' })).toBeNull();
+  });
+
+  // Break caught (the review of Run B, finding 6): a check that failed drawn as a check that found nothing, so the form was offered for a stop that may have been let through.
+  it('shows no form when the check failed, says so, and the form comes with a check that worked', async () => {
+    let attempts = 0;
+    const { user } = open({}, OFFICER, undefined, () => {
+      attempts += 1;
+      return attempts === 1
+        ? refusal(503, 'SERVICE_UNAVAILABLE')
+        : json(200, evidenceListFixture({ items: [], parcel_photos: NONE }));
+    });
+
+    await alertSaying(/Whether this stop was let through already could not be checked/);
+    expect(screen.queryByRole('textbox', { name: /Note/ })).toBeNull();
+    expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByRole('textbox', { name: /Note/ })).toBeVisible();
+  });
+
+  it('tells a refusal of the check in the words of what the account cannot do, and shows no form', async () => {
+    open({}, OFFICER, undefined, () => refusal(403, 'PERMISSION_DENIED'));
+
+    await alertSaying('Your account can’t see pickup runs. Ask an administrator for access.');
+    expect(screen.queryByRole('textbox', { name: /Note/ })).toBeNull();
+  });
+
+  // Break caught: a stop that is not arrived at waiting for a check it does not need, so that the plain words of why it cannot be let through are held back.
+  it('does not wait for the check to tell a stop the rider has not arrived at', async () => {
+    open(
+      {},
+      OFFICER,
+      () => stopAnswer({ state: 'COLLECTED' }),
+      () => new Promise<Response>(() => undefined),
+    );
+
+    expect(
+      await screen.findByText(/has not arrived at this stop, or the stop is already closed/),
+    ).toBeVisible();
+  });
+});
+
 describeInterfaceStates('the photo exception form', {
   loading: {
     test: async () => {
