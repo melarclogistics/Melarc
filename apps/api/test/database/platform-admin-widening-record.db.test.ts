@@ -30,7 +30,12 @@ import { insertSessionRow, OPS_STAFF_SNAPSHOT, sessionRow } from './support/iden
 import { observe, type Observer } from './support/observe.js';
 import { seedReferenceData } from './support/seeded.js';
 import { buildService } from './support/service.js';
-import { clientFor, createTestDatabase, type TestDatabase } from './support/test-database.js';
+import {
+  clientFor,
+  createTestDatabase,
+  withClient,
+  type TestDatabase,
+} from './support/test-database.js';
 
 /**
  * Audit finding A3 (7 November 2026; `AC-SLICE-001-84`, `AC-SLICE-001-85`; migration 0078): the widening of the Platform Admin's grants by
@@ -115,14 +120,38 @@ const seedRow = (grant: GrantSeed) => ({
   tier: grant.tier,
 });
 
-/** A seed of a build between the decisions of the release: the current reference data, with the grants as that build wrote them (only the grants matter to 0078). */
+/**
+ * The reason domains the database's own constraint allows (`reason_code_domain_closed`, read as the database states it): a build of the time seeded the domains it knew, and a domain that came after the history
+ * this database was built through (the over-count of the door, `PICKUP_OVER_COUNT`, migration 0099) is not in the constraint it has. Read and not listed, so that the next domain added does not break this test again.
+ */
+async function reasonDomainsOf(database: TestDatabase): Promise<ReadonlySet<string>> {
+  const definition = await withClient(database.urlFor('postgres'), async (client) => {
+    const found = await client.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition from pg_constraint where conname = 'reason_code_domain_closed' and conrelid = 'public.reason_code'::regclass`,
+    );
+    return found.rows[0]?.definition ?? '';
+  });
+  return new Set([...definition.matchAll(/'([A-Z_]+)'::text/g)].map((match) => match[1] ?? ''));
+}
+
+/**
+ * A seed of a build between the decisions of the release: the current reference data, with the grants as that build wrote them (only the grants matter to 0078) and the reasons of the domains the database
+ * knows.
+ */
 async function seedWithGrants(database: TestDatabase, grants: readonly GrantSeed[]): Promise<void> {
+  const known = await reasonDomainsOf(database);
   const { service, close } = buildService(database, { login: PROVISIONING_ROLE });
   try {
     const plan = referenceSeedPlan();
     await runSeed(service, {
       ...plan,
-      payload: { ...plan.payload, role_bundle_grant: grants.map(seedRow) },
+      payload: {
+        ...plan.payload,
+        reason_code: (plan.payload.reason_code ?? []).filter((reason) =>
+          known.has(String(reason['domain'])),
+        ),
+        role_bundle_grant: grants.map(seedRow),
+      },
     });
   } finally {
     await close();
