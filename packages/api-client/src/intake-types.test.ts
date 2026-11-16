@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { components, operations } from './index.ts';
 
 /**
- * The two shapes of an intake are satisfiable, and a client can tell them apart (the audit of 15 November 2026, point 2).
+ * The shapes of an intake are satisfiable, and a client can tell them apart (the audit of 15 November 2026, point 2; the third shape, `CHECK_IN`, with contract 5.108.0 and S1.35b).
  *
  * `api-client:check` proves only that the generated file matches the contract. Until contract 5.107.0 the generated `HubIntakePreCount` intersected `"PRE_COUNT" | "POST_COUNT"`, `"PRE_COUNT"` and
  * `"HubIntakePreCount"` for the one property `count_phase`, which is `never`: nothing could be assigned to it, and the Ops Portal's own parsing worked around a type it could not use. The discriminators of
@@ -13,6 +13,7 @@ import type { components, operations } from './index.ts';
  */
 type PreCount = components['schemas']['HubIntakePreCount'];
 type PostCount = components['schemas']['HubIntakePostCount'];
+type CheckIn = components['schemas']['HubIntakeCheckIn'];
 
 type Answer<Name extends keyof operations> = operations[Name] extends {
   responses: { 200: { content: { 'application/json': infer Body } } };
@@ -50,12 +51,12 @@ const post = {
   condition: 'OK',
 } satisfies PostCount;
 
-/** What a client does with an answer: it branches on the phase and reads the declaration only where the type has one. */
-function declaredCount(intake: PreCount | PostCount): number | undefined {
-  return intake.count_phase === 'POST_COUNT' ? intake.rider_declared_count : undefined;
+/** What a client does with an answer: it branches on the phase and reads the declaration only where the type has one (a blind-count intake's after its count, a photo intake's from the start). */
+function declaredCount(intake: PreCount | PostCount | CheckIn): number | undefined {
+  return intake.count_phase === 'PRE_COUNT' ? undefined : intake.rider_declared_count;
 }
 
-describe('the generated intake shapes (contract 5.107.0)', () => {
+describe('the generated intake shapes (contract 5.107.0, and 5.108.0 for the third)', () => {
   it('can be satisfied: a representative response is assignable to each shape, and each shape is not never', () => {
     expectTypeOf(pre).toExtend<PreCount>();
     expectTypeOf(post).toExtend<PostCount>();
@@ -74,28 +75,38 @@ describe('the generated intake shapes (contract 5.107.0)', () => {
   });
 
   it('is told apart by count_phase in every answer that carries one: the list, the read and the lock', () => {
-    expectTypeOf<Listed>().toEqualTypeOf<PreCount | PostCount>();
-    expectTypeOf<Read>().toEqualTypeOf<PreCount | PostCount>();
-    expectTypeOf<Locked>().toEqualTypeOf<PreCount | PostCount>();
-    // A value of each operation's answer is taken by the one function that narrows on the phase.
+    expectTypeOf<Listed>().toEqualTypeOf<PreCount | PostCount | CheckIn>();
+    expectTypeOf<Read>().toEqualTypeOf<PreCount | PostCount | CheckIn>();
+    expectTypeOf<Locked>().toEqualTypeOf<PreCount | PostCount | CheckIn>();
+    // A value of each operation's answer is taken by the one function that narrows on the phase: a photo intake is the third member, and it too carries the declaration.
     const listed: Listed = post;
     const read: Read = pre;
     const locked: Locked = post;
-    expect([declaredCount(listed), declaredCount(read), declaredCount(locked)]).toEqual([
-      3,
-      undefined,
-      3,
-    ]);
+    const photo: Read = checkIn;
+    expect([
+      declaredCount(listed),
+      declaredCount(read),
+      declaredCount(locked),
+      declaredCount(photo),
+    ]).toEqual([3, undefined, 3, 1]);
+  });
+
+  it('answers a condition and an adjudication in the shape of the intake’s mode, and a condition names the parcel it is about', () => {
+    expectTypeOf<Answer<'recordIntakeCondition'>>().toEqualTypeOf<CheckIn | PostCount>();
+    expectTypeOf<Answer<'adjudicateDiscrepancy'>>().toEqualTypeOf<CheckIn | PostCount>();
+    expectTypeOf<components['schemas']['IntakeConditionRecord']>().toHaveProperty('parcel_id');
+    expectTypeOf<components['schemas']['IntakeConditionRecord']['parcel_id']>().toEqualTypeOf<
+      string | undefined
+    >();
   });
 });
 
 /**
  * The receiving shapes of Run D (contract 5.108.0, declared by S1.35b-0): the third shape of an intake, a vendor's section, a run's page and what the acts answer. The same compile-time check as above
- * (`pnpm run typecheck` runs it): a representative value is assignable to each generated type, each operation answers the shape the contract names, and the guarantees that live in a type stand there. **The
- * third member of the intake read of `getHubIntake`, `listHubIntakes` and `acquireIntakeLock` is the application's to add** (S1.35b: the conformance check holds an implemented operation to the
- * application), so those three answers are still `PreCount | PostCount` here, and the narrowing of the three-member union is checked then; `correctIntakeCount` (new) already answers both.
+ * (`pnpm run typecheck` runs it): a representative value is assignable to each generated type, each operation answers the shape the contract names, and the guarantees that live in a type stand there. The
+ * third member of the intake read of `getHubIntake`, `listHubIntakes` and `acquireIntakeLock` was added with the application (S1.35b: the conformance check holds an implemented operation to the application),
+ * and the narrowing of the three-member union is checked above.
  */
-type CheckIn = components['schemas']['HubIntakeCheckIn'];
 type Parcel = components['schemas']['IntakeParcel'];
 type Vendor = components['schemas']['ReceivingVendor'];
 type Run = components['schemas']['ReceivingRun'];

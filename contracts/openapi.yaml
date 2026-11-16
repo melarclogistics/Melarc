@@ -2381,11 +2381,13 @@ paths:
                       oneOf:
                         - $ref: '#/components/schemas/HubIntakePreCount'
                         - $ref: '#/components/schemas/HubIntakePostCount'
+                        - $ref: '#/components/schemas/HubIntakeCheckIn'
                       discriminator:
                         propertyName: count_phase
                         mapping:
                           PRE_COUNT: '#/components/schemas/HubIntakePreCount'
                           POST_COUNT: '#/components/schemas/HubIntakePostCount'
+                          CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
                   next_page_token: { type: [string, 'null'] }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
@@ -2454,11 +2456,13 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/HubIntakePreCount'
                   - $ref: '#/components/schemas/HubIntakePostCount'
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
                 discriminator:
                   propertyName: count_phase
                   mapping:
                     PRE_COUNT: '#/components/schemas/HubIntakePreCount'
                     POST_COUNT: '#/components/schemas/HubIntakePostCount'
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2515,11 +2519,13 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/HubIntakePreCount'
                   - $ref: '#/components/schemas/HubIntakePostCount'
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
                 discriminator:
                   propertyName: count_phase
                   mapping:
                     PRE_COUNT: '#/components/schemas/HubIntakePreCount'
                     POST_COUNT: '#/components/schemas/HubIntakePostCount'
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2674,6 +2680,11 @@ paths:
         `VALIDATION_FAILED` (rule `parcel_required`). A **blind-count** intake records one condition for
         the intake, after the count, as above (the unique index of migration `0097` becomes two partial
         ones, in a new migration). The response of a photo intake is its third shape (see `getHubIntake`).
+
+        **The `STATE_CONFLICT` rules** (`details.rule`), each held by the database for every writer: `stale` (the `ETag` is not the intake's current one),
+        `intake_not_counted` (a blind-count intake still waiting for its count), `itemization_started`, `condition_already_recorded` (once for a blind-count
+        intake, once for each parcel of a photo one) and, in photo mode, `parcel_not_arrived`. `VALIDATION_FAILED` names `parcel_required` (photo mode, no parcel) and
+        a `parcel_id` given for a blind-count intake or for a parcel that is not this intake's.
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -2689,7 +2700,15 @@ paths:
             ETag: { $ref: '#/components/headers/ETag' }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HubIntakePostCount' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
+                  - $ref: '#/components/schemas/HubIntakePostCount'
+                discriminator:
+                  propertyName: count_phase
+                  mapping:
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -2846,7 +2865,8 @@ paths:
         officer and the Platform Admin, never Ops Staff** (`PERMISSION_DENIED` before the body is read); for staff of the Ops Portal alone, by the hubs of
         the grant. The safety net for a mistaken count or check-in now that an intake has no cap on its parcels. **A reason in words is mandatory** (blank is
         `REASON_REQUIRED`; there is no catalogue) and the correction is allowed **before itemizing starts only** (`STATE_CONFLICT`, rule
-        `itemization_started`, after). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
+        `itemization_started`, after) **and after the count has been made** (`STATE_CONFLICT`, rule `intake_not_counted`: a vendor still being checked in, or a blind-count
+        intake waiting for its count). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
 
         **The body follows the intake's mode and names the correction exactly once** (`VALIDATION_FAILED`, rule `mode_mismatch`, for the other mode's
         member, for both and for neither). A **photo** intake takes `parcel_changes`, each naming a parcel of this intake and the state it is to have: a
@@ -4635,7 +4655,6 @@ paths:
           CSRF_VALIDATION_FAILED,
           EVIDENCE_NOT_STORED,
           HUB_SCOPE_VIOLATION,
-          INSUFFICIENT_AUTHORITY,
           NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
@@ -4690,6 +4709,10 @@ paths:
         intake and once (`STATE_CONFLICT`, `details.rule` `not_written_off`, `vendor_already_told`), it may
         be recorded when the intake is past reconciliation, and it moves no state. A count or a
         check-in is corrected by `correctIntakeCount` (D-D8), never by an adjudication.
+
+        **The `STATE_CONFLICT` rules** (`details.rule`): `stale` (the `ETag`), `not_awaiting_resolution` (the intake is not in reconciliation: resolved already, waiting for
+        its count or being itemized; *Vendor told* is not asked this), and, for *Vendor told* alone, `not_written_off` and `vendor_already_told`. A condition given with *Vendor told*
+        is `VALIDATION_FAILED`: it records what was said to the vendor and sets nothing.
       parameters: [{ $ref: '#/components/parameters/IfMatch' }]
       requestBody:
         required: true
@@ -4703,7 +4726,15 @@ paths:
             ETag: { $ref: '#/components/headers/ETag' }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/HubIntakePostCount' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HubIntakeCheckIn'
+                  - $ref: '#/components/schemas/HubIntakePostCount'
+                discriminator:
+                  propertyName: count_phase
+                  mapping:
+                    CHECK_IN: '#/components/schemas/HubIntakeCheckIn'
+                    POST_COUNT: '#/components/schemas/HubIntakePostCount'
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -4984,6 +5015,8 @@ paths:
         | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
         | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
         | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+        | `HUB_RECEIVING_RUNS_WAITING` | runs waiting to be checked in at the hub (runs, never vendors or intakes) | `listReceivingRuns` with `view=waiting` | `hub.read` | `handed_over_at` of the run's intakes that still wait |
+        | `HUB_MISSING_PARCELS_SEARCHING` | parcels missing from a vendor whose case a senior officer has yet to close (parcels, never vendors) | `listMissingParcels` with `view=searching` | `hub.read` | `missing_marked_at` of the parcel |
 
         **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
         breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
@@ -15140,6 +15173,12 @@ components:
           description: >-
             Required for DAMAGED and TAMPERED (REASON_REQUIRED when absent); each id must name a STORED
             record (EVIDENCE_NOT_STORED otherwise).
+        parcel_id:
+          type: string
+          format: uuid
+          description: >-
+            Run D (5.108.0). The parcel the condition is a finding of: **required for a photo intake** (`VALIDATION_FAILED`, rule `parcel_required`, when absent), not allowed for a blind-count
+            intake. A condition is recorded once for each parcel (`condition_already_recorded`).
       description: >-
         The receiver's recording of a condition (22.5), independent of the count: it may be recorded
         on a count that matches, and DAMAGED or TAMPERED routes the case to Senior Ops adjudication.
@@ -16944,6 +16983,8 @@ components:
         - PICKUP_UNMANIFESTED_POOL
         - PICKUP_RUNS_IN_PROGRESS
         - STAFF_AWAITING_APPROVAL
+        - HUB_RECEIVING_RUNS_WAITING
+        - HUB_MISSING_PARCELS_SEARCHING
       description: |
         A queue of the Ops Portal that has a count (reporting data dictionary, section 5.5). **A closed list: a value is never renamed or
         reused**, and a queue that is built later is added here with its own entry in the dictionary. `getQueueSummary` lists, for each,

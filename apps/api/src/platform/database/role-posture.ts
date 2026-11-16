@@ -190,6 +190,28 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // the finding and of the intake that admit the write name the owner, so the login can write neither.
     'melarc.record_intake_condition',
     'melarc.adjudicate_discrepancy',
+    // And the operation that opens a photo intake's parcels with the hub handover (migration 0103, Run D, S1.35b): the rider that hands the run over, under the key of the handover alone, for an
+    // intake of its own that its transaction opened, one parcel for each door photo of the stop in the order the photos were attached. The policy that admits the write names the owner, so the
+    // login can write no parcel itself, and the set is judged again at the end of the transaction.
+    'melarc.open_intake_parcels',
+    // And the four acts of the check-in of a photo intake's parcels and of the senior's correction (migration 0104, Run D, S1.35b): the tap, the untap, the voiding of an extra and the finding of a
+    // missing parcel (`melarc.record_parcel_arrival`), the finishing of a vendor (`melarc.finish_check_in`) and the extra at the hub (`melarc.add_extra_parcel`), each for staff under `hub.intake.count`
+    // alone, and the correction of a count or a check-in (`melarc.correct_intake_count`) for staff under `hub.osd.adjudicate` alone. Each takes the intake's lock first, writes the parcels and the count
+    // as the owner, in the one change, and answers what the application writes its events from; the policies of the parcel and of the intake that admit the write name the owner, and the guards of
+    // both hold the machine for every writer, so the login can write neither.
+    'melarc.record_parcel_arrival',
+    'melarc.finish_check_in',
+    'melarc.add_extra_parcel',
+    'melarc.correct_intake_count',
+    // And the one read of the names of the receiving side (migration 0106, Run D, S1.35b, OB-S1-106): the display names of the vendor, the rider and the officers of the intakes the caller may see, for staff
+    // under one of the three keys that read intakes and nobody else, never a phone number. It reads the identity tables under the capability `receiving_names`, as the owner, for the one statement that
+    // does, and every policy that admits the capability names the owner too, so the login can read no identity itself.
+    'melarc.receiving_names',
+    // And the three reads of the receiving side that need a manifest's code, a vendor's name and the parcels of an open case (migration 0107, Run D, S1.35b): the queue by run and its count (one function), the
+    // missing parcels and their count (one function) and the codes of the runs an answer names. Each is for staff under one of the three keys that read intakes and nobody else.
+    'melarc.receiving_runs',
+    'melarc.missing_parcels',
+    'melarc.receiving_run_codes',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

@@ -243,11 +243,24 @@ describe('what an authenticated route must state (S0.26)', () => {
       )?.authenticated?.record,
     ).toEqual({ entity: 'staff_identity', param: 'id' });
 
+    // A path parameter the contract names with an underscore is kept as it is (Run D: `parcel_id`, `manifest_id`).
+    expect(
+      detailOf(
+        RequiresPermission('hub.intake.count', {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'intake_parcel', param: 'parcel_id' },
+        }),
+      )?.authenticated?.record,
+    ).toEqual({ entity: 'intake_parcel', param: 'parcel_id' });
+
     for (const record of [
       { entity: 'Staff', param: 'id' },
       { entity: 'staff-identity', param: 'id' },
       { entity: 'staff_identity', param: 'the id' },
       { entity: 'staff_identity', param: '' },
+      { entity: 'staff_identity', param: '_id' },
+      { entity: 'staff_identity', param: 'id; drop' },
       { entity: 1, param: 'id' },
       'staff_identity',
       null,

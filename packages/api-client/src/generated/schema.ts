@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.108.0
- *   SHA-256 858a7634d6a707f975ab0296f1b46c71f8f4c49c40f0537a4070972b08ec7270 (of the contract, line endings normalized to LF)
+ *   SHA-256 dcc2f0b056dbc0487779f9c7203238b296f8dfc684daf81e760324b9317d5a9c (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1572,6 +1572,11 @@ export interface paths {
          *     `VALIDATION_FAILED` (rule `parcel_required`). A **blind-count** intake records one condition for
          *     the intake, after the count, as above (the unique index of migration `0097` becomes two partial
          *     ones, in a new migration). The response of a photo intake is its third shape (see `getHubIntake`).
+         *
+         *     **The `STATE_CONFLICT` rules** (`details.rule`), each held by the database for every writer: `stale` (the `ETag` is not the intake's current one),
+         *     `intake_not_counted` (a blind-count intake still waiting for its count), `itemization_started`, `condition_already_recorded` (once for a blind-count
+         *     intake, once for each parcel of a photo one) and, in photo mode, `parcel_not_arrived`. `VALIDATION_FAILED` names `parcel_required` (photo mode, no parcel) and
+         *     a `parcel_id` given for a blind-count intake or for a parcel that is not this intake's.
          */
         post: operations["recordIntakeCondition"];
         delete?: never;
@@ -1680,7 +1685,8 @@ export interface paths {
          *     officer and the Platform Admin, never Ops Staff** (`PERMISSION_DENIED` before the body is read); for staff of the Ops Portal alone, by the hubs of
          *     the grant. The safety net for a mistaken count or check-in now that an intake has no cap on its parcels. **A reason in words is mandatory** (blank is
          *     `REASON_REQUIRED`; there is no catalogue) and the correction is allowed **before itemizing starts only** (`STATE_CONFLICT`, rule
-         *     `itemization_started`, after). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
+         *     `itemization_started`, after) **and after the count has been made** (`STATE_CONFLICT`, rule `intake_not_counted`: a vendor still being checked in, or a blind-count
+         *     intake waiting for its count). `If-Match` is the intake's `ETag` (`stale`), and the same key and body replay the original answer.
          *
          *     **The body follows the intake's mode and names the correction exactly once** (`VALIDATION_FAILED`, rule `mode_mismatch`, for the other mode's
          *     member, for both and for neither). A **photo** intake takes `parcel_changes`, each naming a parcel of this intake and the state it is to have: a
@@ -2898,6 +2904,10 @@ export interface paths {
          *     intake and once (`STATE_CONFLICT`, `details.rule` `not_written_off`, `vendor_already_told`), it may
          *     be recorded when the intake is past reconciliation, and it moves no state. A count or a
          *     check-in is corrected by `correctIntakeCount` (D-D8), never by an adjudication.
+         *
+         *     **The `STATE_CONFLICT` rules** (`details.rule`): `stale` (the `ETag`), `not_awaiting_resolution` (the intake is not in reconciliation: resolved already, waiting for
+         *     its count or being itemized; *Vendor told* is not asked this), and, for *Vendor told* alone, `not_written_off` and `vendor_already_told`. A condition given with *Vendor told*
+         *     is `VALIDATION_FAILED`: it records what was said to the vendor and sets nothing.
          */
         post: operations["adjudicateDiscrepancy"];
         delete?: never;
@@ -3097,6 +3107,8 @@ export interface paths {
          *     | `PICKUP_UNMANIFESTED_POOL` | confirmed pickups not yet on a run | `listPickupRequests` with `state=CONFIRMED` and `manifested=false` | `pickup.read` | `confirmed_at` of the request |
          *     | `PICKUP_RUNS_IN_PROGRESS` | pickup runs in progress | `listPickupManifests` with `state=IN_PROGRESS` | `pickup.read` | `started_at` of the run |
          *     | `STAFF_AWAITING_APPROVAL` | staff profiles waiting for approval | `listStaffIdentities` with `status=PENDING_APPROVAL` | `staff.read` and `staff.identity.approve` | `created_at` of the profile |
+         *     | `HUB_RECEIVING_RUNS_WAITING` | runs waiting to be checked in at the hub (runs, never vendors or intakes) | `listReceivingRuns` with `view=waiting` | `hub.read` | `handed_over_at` of the run's intakes that still wait |
+         *     | `HUB_MISSING_PARCELS_SEARCHING` | parcels missing from a vendor whose case a senior officer has yet to close (parcels, never vendors) | `listMissingParcels` with `view=searching` | `hub.read` | `missing_marked_at` of the parcel |
          *
          *     **An entry is `queue`, `count` and, when the count is not 0, `oldest_at`, and nothing else**: no record, code, name, hub, vendor or
          *     breakdown. `oldest_at` is the moment the oldest record entered the queue; it is absent when `count` is 0. A count is `0` only when
@@ -9716,6 +9728,11 @@ export interface components {
             note?: string;
             /** @description Required for DAMAGED and TAMPERED (REASON_REQUIRED when absent); each id must name a STORED record (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
+            /**
+             * Format: uuid
+             * @description Run D (5.108.0). The parcel the condition is a finding of: **required for a photo intake** (`VALIDATION_FAILED`, rule `parcel_required`, when absent), not allowed for a blind-count intake. A condition is recorded once for each parcel (`condition_already_recorded`).
+             */
+            parcel_id?: string;
         };
         /** @description The vendor-facing intake-completed and order summary (22.9, 23.10) and nothing else: no blind count, no declaration, no discrepancy, evidence or adjudication. The omission is the guard. */
         IntakeSummary: {
@@ -11040,7 +11057,7 @@ export interface components {
          *     the records it counts and the keys that admit it.
          * @enum {string}
          */
-        QueueId: "PICKUP_AWAITING_CONFIRMATION" | "PICKUP_CUTOFF_REVIEW" | "PICKUP_EXCEPTION_APPROVAL" | "PICKUP_UNMANIFESTED_POOL" | "PICKUP_RUNS_IN_PROGRESS" | "STAFF_AWAITING_APPROVAL";
+        QueueId: "PICKUP_AWAITING_CONFIRMATION" | "PICKUP_CUTOFF_REVIEW" | "PICKUP_EXCEPTION_APPROVAL" | "PICKUP_UNMANIFESTED_POOL" | "PICKUP_RUNS_IN_PROGRESS" | "STAFF_AWAITING_APPROVAL" | "HUB_RECEIVING_RUNS_WAITING" | "HUB_MISSING_PARCELS_SEARCHING";
         /** @description One queue's count and the moment its oldest record entered it, and nothing else: no record, code, name, hub, vendor or breakdown. */
         QueueSummaryEntry: {
             queue: components["schemas"]["QueueId"];
@@ -15821,7 +15838,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        items: (components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"])[];
+                        items: (components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"] | components["schemas"]["HubIntakeCheckIn"])[];
                         next_page_token: string | null;
                     };
                 };
@@ -15851,7 +15868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"] | components["schemas"]["HubIntakeCheckIn"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -15879,7 +15896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakePreCount"] | components["schemas"]["HubIntakePostCount"] | components["schemas"]["HubIntakeCheckIn"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -16031,7 +16048,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakeCheckIn"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -17726,7 +17743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakeCheckIn"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
             400: components["responses"]["ValidationFailed"];

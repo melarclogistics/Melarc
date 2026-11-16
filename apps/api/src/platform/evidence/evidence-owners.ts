@@ -15,7 +15,8 @@ import type {
  * photo of each parcel the rider counts at the door (`PARCEL_PHOTO`), which belongs to the count and is written under `pickup.collection.confirm`, so the rider's permission to declare a
  * photo is the count's and not the failure's (the policies of migration 0088 pair each purpose with its key). **The second owner is a pickup intake** (S1.34, migration 0095), whose
  * evidence is declared by staff: the photos of a condition (`CONDITION`) are the receiver's act, written under `hub.intake.count`, and the photos of an adjudication (`OSD`) are Senior
- * Ops's, written under `hub.osd.adjudicate`; the staff of the intake's hub holding `hub.read` read both. A later owner (S1.36's itemisation) adds its row and its arms in the migration
+ * Ops's, written under `hub.osd.adjudicate` (and the photo of an extra parcel, Run D, is the receiver's, the same purpose written under `hub.intake.count` for a photo intake); the staff of the intake's hub
+ * holding `hub.read` read all of it. A later owner (S1.36's itemisation) adds its row and its arms in the migration
  * that builds it.
  */
 export interface OwnerAct {
@@ -29,6 +30,11 @@ export interface OwnerAct {
   readonly write: { readonly principal: 'RIDER' | 'STAFF' | 'VENDOR'; readonly key: string };
   /** Who is given a way to read a stored record, and the key of the read of the subject. */
   readonly read: { readonly principal: 'RIDER' | 'STAFF' | 'VENDOR'; readonly key: string };
+  /**
+   * The act is done for an intake that is checked in against door photos and for no other (the photo of an extra parcel, `addExtraParcel`, Run D): the intake of any other kind is no place for it, and a
+   * declaration for one is `PERMISSION_DENIED` as it is for a session that does not hold the key.
+   */
+  readonly photoIntakeOnly?: boolean;
 }
 
 export const OWNER_ACTS: readonly OwnerAct[] = Object.freeze([
@@ -64,6 +70,18 @@ export const OWNER_ACTS: readonly OwnerAct[] = Object.freeze([
     write: Object.freeze({ principal: 'STAFF', key: 'hub.osd.adjudicate' } as const),
     read: Object.freeze({ principal: 'STAFF', key: 'hub.read' } as const),
   }),
+  // Run D (S1.35b, `addExtraParcel`): the photo of a parcel on the table that has no door photo is the receiver's own act (`hub.intake.count`), declared with the purpose the contract and the database name for it,
+  // `OSD` (an overage; the policies of migration 0104 let the key write it). It is a second act for the purpose: a session is asked for the key of the first act it holds (`ownerActsOf`), and a receiver without the
+  // key of the adjudication declares it for an intake checked in against door photos and for no other.
+  Object.freeze({
+    ownerType: 'PICKUP_INTAKE',
+    purposes: Object.freeze(['OSD'] as const),
+    accessRule: 'SUBJECT_READERS',
+    retentionPolicy: 'PICKUP_INTAKE_EVIDENCE',
+    write: Object.freeze({ principal: 'STAFF', key: 'hub.intake.count' } as const),
+    read: Object.freeze({ principal: 'STAFF', key: 'hub.read' } as const),
+    photoIntakeOnly: true,
+  }),
 ]);
 
 /**
@@ -77,6 +95,19 @@ export function ownerActOf(ownerType: string, purpose?: string): OwnerAct | unde
       ? undefined
       : acts.find((act) => (act.purposes as readonly string[]).includes(purpose));
   return forPurpose ?? acts[0];
+}
+
+/**
+ * Every act an owner type and a purpose belong to, in the order of the registry: a purpose has one act, or more when two keys write it (an intake's `OSD`: the adjudication's evidence under
+ * `hub.osd.adjudicate`, the photo of an extra parcel under `hub.intake.count`). A purpose the owner has no act for is answered with the owner's first act alone, as `ownerActOf` answers it.
+ */
+export function ownerActsOf(ownerType: string, purpose?: string): readonly OwnerAct[] {
+  const acts = OWNER_ACTS.filter((act) => act.ownerType === ownerType);
+  const forPurpose =
+    purpose === undefined
+      ? []
+      : acts.filter((act) => (act.purposes as readonly string[]).includes(purpose));
+  return forPurpose.length > 0 ? forPurpose : acts.slice(0, 1);
 }
 
 /**

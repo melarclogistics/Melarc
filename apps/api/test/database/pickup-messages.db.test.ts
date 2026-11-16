@@ -6,7 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SystemClock } from '../../src/platform/auth/clock/system.clock.adapter.js';
 import { guardReasonIn, serverErrorIn } from '../../src/platform/database/database-failures.js';
 import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles.js';
-import type { SecurityContext } from '../../src/platform/database/transaction-context.js';
+import {
+  toContextSettings,
+  type SecurityContext,
+} from '../../src/platform/database/transaction-context.js';
 import {
   CaptureTextMessageSender,
   type TextCaptureEntry,
@@ -1167,5 +1170,129 @@ describe('melarc.over_count_envelope: the one operation that writes the envelope
     );
     expect(await envelopesOf(arranged.requestId)).toEqual([]);
     expect(await envelopesOf(other.requestId)).toEqual([]);
+  });
+
+  /**
+   * One transaction, always rolled back, in which each step runs as the role it names (the runtime login, or the owner that the functions run as) under the context it names: the SQLSTATE
+   * and the message of the first refusal, or `ran`. The two layers that refuse an envelope, **the function's own checks and the outbox's policy**, both answer 42501, so a test that reads the
+   * code alone cannot tell which of them refused; the message can: the function's begins `the envelope of an over count is written for`, the policy's names the row-level security of
+   * the table (Run D, the break check of the over-count envelope: seven of its rules were held by one layer and had no test that noticed the other layer alone gone).
+   */
+  async function stepsAs(
+    plan: readonly {
+      role: 'melarc_api_runtime' | 'melarc_owner' | 'administrator';
+      context: SecurityContext;
+      text: string;
+    }[],
+  ): Promise<{ code: string; message: string }> {
+    await routes.admin.query('begin');
+    try {
+      for (const step of plan) {
+        await routes.admin.query(
+          step.role === 'administrator' ? 'reset role' : `set local role ${step.role}`,
+        );
+        for (const [name, value] of toContextSettings(step.context)) {
+          await routes.admin.query('select set_config($1, $2, true)', [name, value]);
+        }
+        await routes.admin.query(step.text);
+      }
+      return { code: 'ran', message: '' };
+    } catch (error) {
+      const failure = serverErrorIn(error);
+      return { code: failure?.code ?? 'other', message: failure?.message ?? '' };
+    } finally {
+      await routes.admin.query('rollback');
+    }
+  }
+  const RUNTIME = 'melarc_api_runtime';
+  const OWNER = 'melarc_owner';
+  const FUNCTION_REFUSAL = 'the envelope of an over count is written for';
+
+  // Break caught (the break check of 0099: E1, E2, E3 and E5 survived, each held by the function and by the outbox's policy alike): a rule of the function taken out, with the policy's
+  // copy of it still refusing, so that the code is the same and the function says nothing of the rule. Each case below is the function's own refusal.
+  it('refuses by its own check, before the policy of the outbox is asked: a count that is short, another rider’s count, a count of an earlier transaction and another key', async () => {
+    const arranged = await vendorStop();
+    const context = rider(arranged.rider.id, COUNTING);
+    const call = (as: SecurityContext) =>
+      ({ role: RUNTIME, context: as, text: overCountEnvelopeSql(arranged.stopId) }) as const;
+    const record = (collected: number) =>
+      ({ role: RUNTIME, context, text: countSql(arranged, { collected }) }) as const;
+
+    // A short count: the function names no count over the booking.
+    const short = await stepsAs([record(2), call(context)]);
+    expect(short.code).toBe('42501');
+    expect(short.message, 'a short count').toContain(FUNCTION_REFUSAL);
+
+    // Another rider's count: the record is the first rider's, the call is another's (and holds the same key).
+    const otherRider = (await vendorStop()).rider.id;
+    const another = await stepsAs([record(5), call(rider(otherRider, COUNTING))]);
+    expect(another.code).toBe('42501');
+    expect(another.message, 'another rider').toContain(FUNCTION_REFUSAL);
+
+    // Another key: the same rider, with the key of its failure reports.
+    const key = await stepsAs([record(5), call(rider(arranged.rider.id, FAILURE))]);
+    expect(key.code).toBe('42501');
+    expect(key.message, 'another key').toContain(FUNCTION_REFUSAL);
+
+    // A count of an earlier transaction: made and committed, and the call is the next transaction's.
+    const earlier = await vendorStop();
+    expect(
+      (await attemptAll(rider(earlier.rider.id, COUNTING), [countSql(earlier, { collected: 5 })]))
+        .code,
+    ).toBeUndefined();
+    const past = await stepsAs([
+      {
+        role: RUNTIME,
+        context: rider(earlier.rider.id, COUNTING),
+        text: overCountEnvelopeSql(earlier.stopId),
+      },
+    ]);
+    expect(past.code).toBe('42501');
+    expect(past.message, 'an earlier transaction').toContain(FUNCTION_REFUSAL);
+
+    // And the same call after the right count, in the right transaction, is the function's to write: the refusals above are its own and not a failure of the set-up.
+    const right = await stepsAs([record(5), call(context)]);
+    expect(right, 'the control').toEqual({ code: 'ran', message: '' });
+  });
+
+  // Break caught (the break check of 0099: O1, O2 and O3 survived): the outbox's arm for the envelope of an over count widened beyond what the function writes. The arm is asked **alone**
+  // here: as the owner, which is what the function runs as (O1, O2), and as the runtime login given the privilege to insert (O3: without the privilege the login is refused before the policy is asked,
+  // so the policy's own refusal of the login was never the one that answered). Everything but the one condition under test is right, and the control is admitted.
+  it('admits to the outbox, through its arm for an over count, the owner’s own row for an over count of this transaction and nothing else', async () => {
+    const arranged = await vendorStop();
+    const context = rider(arranged.rider.id, COUNTING);
+    const row = (event = 'pickup.collection.over_count_flagged'): string =>
+      `insert into outbox (id, event_type, aggregate_type, aggregate_id, responsible_hub_id, vendor_organization_id, originating_principal_type,
+                           originating_principal_id, operation_id, correlation_id, payload)
+       values ('${randomUUID()}', '${event}', 'PICKUP_REQUEST', '${arranged.requestId}', '${HUB_A}', '${vendorA.row.organizationId}', 'RIDER',
+               '${arranged.rider.id}', 'recordCollection', 'over-count-arm', '{"stop":"${arranged.stopId}","reason":"VENDOR_ADDED_PARCELS","n":"2"}'::jsonb)`;
+    const record = (collected: number) =>
+      ({ role: RUNTIME, context, text: countSql(arranged, { collected }) }) as const;
+    const asOwner = (text: string) => ({ role: OWNER, context, text }) as const;
+
+    // The control: an over count of this transaction, the owner's statement, the event of the arm.
+    expect(await stepsAs([record(5), asOwner(row())]), 'the control').toEqual({
+      code: 'ran',
+      message: '',
+    });
+
+    const refused = (result: { code: string; message: string }, what: string): void => {
+      expect(result.code, what).toBe('42501');
+      expect(result.message, what).toContain('row-level security');
+    };
+    // O1: a count that is short is not one the arm admits the event of an over count for.
+    refused(await stepsAs([record(2), asOwner(row())]), 'a short count');
+    // O2: no other event type goes through the arm (the short count's own is another arm's, for a short count).
+    refused(
+      await stepsAs([record(5), asOwner(row('pickup.collection.shortfall_flagged'))]),
+      'another event',
+    );
+    // O3: the login's own statement is not the owner's. **A layered pair, answered by another layer:** the login holds the privilege to insert (0055) and every condition of the arm but the owner's
+    // statement holds, and the row is refused all the same, by the outbox's insert guard (0055: an envelope names an aggregate its writer can read, and the rider cannot read the request under the
+    // counting key) with the table's check violation, before the policy is asked. The policy's clause is the second layer; the break check mutated both (the clause and the guard's aggregate
+    // check) and the pair was killed by this case.
+    const own = await stepsAs([record(5), { role: RUNTIME, context, text: row() }]);
+    expect(own.code, 'the runtime login').toBe('23514');
+    expect(own.message, 'the runtime login').toContain('an envelope');
   });
 });

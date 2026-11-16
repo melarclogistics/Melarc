@@ -280,6 +280,9 @@ export class HubHandovers {
           made = inserted.rows[0] as unknown as HubIntakePreCountRow | undefined;
         }
         if (made === undefined) throw new Error('No unused operational code could be drawn');
+        // A photo intake's parcels are opened with it, in this transaction (Run D, migration 0103): one for each door photo of the stop, in the order the photos were attached. The database fixed the
+        // intake's receiving mode from the stop; a blind-count intake opens none, and the set is judged again at the end of the transaction for every writer. The answer is the intake as it was, whatever its mode.
+        await tx.execute(sql`select melarc.open_intake_parcels(${made.id}::uuid)`);
         opened.push(made);
       }
 

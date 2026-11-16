@@ -296,6 +296,19 @@ describe('who can reach the bootstrap, and by what', () => {
       // S1.34 (migration 0096): the receiver's condition and Senior Ops's adjudication, each written with the move of the intake.
       'melarc.record_intake_condition',
       'melarc.adjudicate_discrepancy',
+      // Run D, S1.35b (migration 0103): the handover's opening of a photo intake's parcels.
+      'melarc.open_intake_parcels',
+      // Run D, S1.35b (migration 0104): the check-in of a photo intake's parcels (the tap and the find, the finish, the extra) and a senior's correction of a count or a check-in.
+      'melarc.record_parcel_arrival',
+      'melarc.finish_check_in',
+      'melarc.add_extra_parcel',
+      'melarc.correct_intake_count',
+      // Run D, S1.35b (migration 0106): the display names of the vendor, the rider and the officers of the intakes the caller may see.
+      'melarc.receiving_names',
+      // Run D, S1.35b (migration 0107): the queue by run, the missing parcels and the codes of runs.
+      'melarc.receiving_runs',
+      'melarc.missing_parcels',
+      'melarc.receiving_run_codes',
     ]);
   });
 

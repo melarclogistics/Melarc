@@ -110,6 +110,8 @@ const SELF_SERVES: Readonly<Record<string, readonly ('STAFF' | 'VENDOR' | 'RIDER
   createEvidence: ['RIDER', 'STAFF'],
   completeEvidenceUpload: ['RIDER', 'STAFF'],
   createEvidenceRetrievalAuthorization: ['STAFF'],
+  // S1.35b: the limits the evidence store holds a photo to, read by the receiving screens before they offer one; a session of the Ops Portal and no other.
+  getEvidenceLimits: ['STAFF'],
 };
 
 /** The keys a bundle holds, as the seed grants them. */
@@ -220,6 +222,23 @@ beforeAll(async () => {
     [HUB_A, requestE.id, manifestE.id, riderB.id],
   );
 
+  // A parcel of that intake (S1.35b; `recordParcelArrival` is addressed by one): arranged with the triggers off, as the other tests of the receiving side arrange what a writer cannot (the intake is
+  // the one the handover would have opened without photos, so that the parcel is not a door photo's: the sweep asks whether a record is another party's and never what is in it).
+  await routes.admin.query('begin');
+  let parcelE: { rows: { id: string }[] };
+  try {
+    await routes.admin.query('set local session_replication_role = replica');
+    parcelE = await routes.admin.query<{ id: string }>(
+      `insert into intake_parcel (id, pickup_intake_id, responsible_hub_id, ordinal, origin, hub_photo_evidence_id, state, arrived_by, arrived_at)
+       values (gen_random_uuid(), $1, $2, 1, 'HUB_EXTRA', gen_random_uuid(), 'ARRIVED', gen_random_uuid(), now()) returning id`,
+      [intakeE.rows[0]?.id, HUB_A],
+    );
+    await routes.admin.query('commit');
+  } catch (error) {
+    await routes.admin.query('rollback').catch(() => undefined);
+    throw error;
+  }
+
   // A piece of evidence another rider captured for that stop (S1.11): "another party's" record, which the officer of that hub may be given a way to read and neither a Vendor nor an
   // unrelated Rider may reach.
   const evidenceB = await routes.admin.query<{ id: string }>(
@@ -292,6 +311,8 @@ beforeAll(async () => {
     pickupStop: stopB.id,
     runCustodyHandover: handoverD.rows[0]?.id ?? '',
     pickupIntake: intakeE.rows[0]?.id ?? '',
+    receivingRun: manifestE.id,
+    intakeParcel: parcelE.rows[0]?.id ?? '',
     vendorOrganization: vendorC.organizationId,
     evidence: evidenceB.rows[0]?.id ?? '',
   };
@@ -313,6 +334,9 @@ function kindOf(operation: Operation): string {
   if (operation.path.startsWith('/pickup-stops/')) return 'pickupStop';
   if (operation.path.startsWith('/run-custody-handovers/')) return 'runCustodyHandover';
   if (operation.path.startsWith('/hub-intakes/')) return 'pickupIntake';
+  // S1.35b: a run's receiving page is the run (a manifest the hub has opened intakes for), and a parcel is a photo intake's.
+  if (operation.path.startsWith('/receiving-runs/')) return 'receivingRun';
+  if (operation.path.startsWith('/intake-parcels/')) return 'intakeParcel';
   if (operation.path.startsWith('/vendor-organizations/')) return 'vendorOrganization';
   if (operation.path.startsWith('/evidence/')) return 'evidence';
   return 'staff';
@@ -481,6 +505,8 @@ const TABLE_OF: Readonly<Record<string, string>> = {
   pickupStop: 'pickup_stop',
   runCustodyHandover: 'run_custody_handover',
   pickupIntake: 'pickup_intake',
+  receivingRun: 'pickup_manifest',
+  intakeParcel: 'intake_parcel',
   vendorOrganization: 'vendor_organization',
   evidence: 'evidence',
 };
@@ -505,6 +531,7 @@ describe('the existence rule is asked about records that are real (the control o
       approveOnePackageException: 'pickupRequest',
       acceptRunCustodyHandover: 'pickupManifest',
       acquireIntakeLock: 'pickupIntake',
+      addExtraParcel: 'pickupIntake',
       adjudicateDiscrepancy: 'pickupIntake',
       approveStaffIdentity: 'staff',
       arriveAtPickupStop: 'pickupStop',
@@ -515,16 +542,19 @@ describe('the existence rule is asked about records that are real (the control o
       cancelPickupRequest: 'pickupRequest',
       completeEvidenceUpload: 'evidence',
       confirmPickupRequest: 'pickupRequest',
+      correctIntakeCount: 'pickupIntake',
       createEvidenceRetrievalAuthorization: 'evidence',
       dispatchManifest: 'pickupManifest',
       disputeCollection: 'pickupStop',
       escalatePickupRequest: 'pickupRequest',
       extendPickupAttempts: 'pickupRequest',
       failRunCustodyHandover: 'pickupManifest',
+      finishCheckIn: 'pickupIntake',
       getHubIntake: 'pickupIntake',
       getPickupManifest: 'pickupManifest',
       getPickupRequest: 'pickupRequest',
       getPickupStop: 'pickupStop',
+      getReceivingRun: 'receivingRun',
       getRider: 'rider',
       getRunCustodyHandover: 'runCustodyHandover',
       initiateRunCustodyHandover: 'pickupManifest',
@@ -537,6 +567,7 @@ describe('the existence rule is asked about records that are real (the control o
       recoverStaffCredential: 'staff',
       recordCollection: 'pickupStop',
       recordIntakeCondition: 'pickupIntake',
+      recordParcelArrival: 'intakeParcel',
       recoverVendorCredential: 'vendor',
       registerRiderDevice: 'rider',
       reportPickupFailure: 'pickupStop',
@@ -580,6 +611,7 @@ describe('the existence rule is asked about records that are real (the control o
           'pickupManifest',
           'pickupStop',
           'pickupIntake',
+          'receivingRun',
           'runCustodyHandover',
           'vendorOrganization',
         ].includes(kindOf(operation))

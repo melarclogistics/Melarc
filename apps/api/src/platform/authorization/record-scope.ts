@@ -119,6 +119,13 @@ export const RECORD_ENTITIES: RecordEntities = Object.freeze({
     table: 'pickup_intake',
     hubScoped: true,
   },
+  // A parcel of an intake (Run D, S1.35b, `recordParcelArrival`): hub-scoped by its intake's hub for staff under the keys that read or count intakes, with the probe policy beside its read policy
+  // (migration 0103). A staff member's miss on another hub's parcel is HUB_SCOPE_VIOLATION; an id that matches nothing is NOT_FOUND.
+  intake_parcel: {
+    schema: 'public',
+    table: 'intake_parcel',
+    hubScoped: true,
+  },
   // A vendor organisation (S1.14, `listVendorPickupLocations`): hub-scoped by its responsible hub, with the probe policy beside its read
   // policy (migration 0049). A vendor sees its own and another's is answered as an id that matches nothing.
   vendor_organization: {

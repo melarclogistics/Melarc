@@ -495,38 +495,28 @@ describe('submitBlindCount: who may count, and what it audits', () => {
   });
 });
 
-describe('the parcel photos are readable from the count on (AC-SLICE-001-89; D-A10, OB-S1-81)', () => {
-  // Break caught: a count whose response leaves out the photos of the parcels counted at the door (the receiver could not compare them with what it counted), serves another stop's, serves
-  // them in another order than they were attached, or gives a stop let through without photos a member that says none. The photos were in no read before (the intake tests hold that).
-  it('answers with the stop’s photos, in the order they were attached, from the response to the count on', async () => {
+describe('a photo intake is checked in, never counted blind (D-D1, D-D3; migration 0104)', () => {
+  // Break caught: the blind count of an intake whose stop carries door photos (it is checked in against them: a blind count would hide what the receiver is given and the parcels' states would
+  // not hold the count), or one that leaves the intake counted. The reads of such an intake, and the screens, are S1.35b's API part: this holds the database's side. The test this replaces
+  // (AC-SLICE-001-89, "the parcel photos are readable from the count on") counted photo stops blind, which Run D no longer allows; the blind-count intake's own count is held by the tests above.
+  it('refuses the blind count of an intake whose stop has door photos, and leaves it waiting to be checked in', async () => {
     const ops = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
     const done = await handOver(routes, vendor, days, {
-      collected: [2, 3],
-      declared: [2, 3],
+      collected: [2],
+      declared: [2],
       photos: true,
     });
-    const [first, second] = done.intakes;
-    const response = await count(ops, first?.id ?? '', { physical_count: 2 });
-    expect(response.status).toBe(200);
-    // The first stop's photos are the first two the rider made, the second stop's the three after them.
-    expect((response.json() as Counted).parcel_photo_ids).toEqual(done.photoIds.slice(0, 2));
-    // The other intake is still waiting: nothing of its photos is in any read.
-    const waiting = await ops.client.get(ONE(second?.id ?? ''));
-    for (const photo of done.photoIds) expect(waiting.text).not.toContain(photo);
-    expect(await count(ops, second?.id ?? '', { physical_count: 3 })).toMatchObject({
-      status: 200,
-    });
-    const read = await ops.client.get(ONE(second?.id ?? ''));
-    expect((read.json() as Counted).parcel_photo_ids).toEqual(done.photoIds.slice(2, 5));
-    // The queue, unfiltered, shows both counted intakes with theirs; the photos of an intake are never another's.
-    const all = await ops.client.get(`${INTAKES}?page_size=100`);
-    const listed = new Map(
-      (all.json() as { items: Counted[] }).items.map((item) => [item.id, item.parcel_photo_ids]),
-    );
-    expect(listed.get(first?.id ?? '')).toEqual(done.photoIds.slice(0, 2));
-    expect(listed.get(second?.id ?? '')).toEqual(done.photoIds.slice(2, 5));
-    // And no event carries one.
-    const written = await events('hub.intake.counted', first?.id ?? '');
-    for (const photo of done.photoIds) expect(JSON.stringify(written)).not.toContain(photo);
+    const id = done.intakes[0]?.id ?? '';
+    const response = await count(ops, id, { physical_count: 2 });
+    expect([response.status, codeOf(response)]).toEqual([409, 'STATE_CONFLICT']);
+    expect(
+      await routes.rows(
+        `select state, physical_count, receiving_mode from pickup_intake where id = $1`,
+        [id],
+      ),
+    ).toEqual([
+      { state: 'AWAITING_COUNT', physical_count: null, receiving_mode: 'PHOTO_CHECK_IN' },
+    ]);
+    expect((await events('hub.intake.counted', id)).length).toBe(0);
   });
 });

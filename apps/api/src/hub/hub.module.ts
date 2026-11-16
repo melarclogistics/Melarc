@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 
 import { BlindCountController } from './blind-count.controller.js';
+import { CheckInController } from './check-in.controller.js';
 import { HubHandoverController } from './hub-handover.controller.js';
 import { HubIntakesController } from './hub-intakes.controller.js';
 import { IntakeFindingsController } from './intake-findings.controller.js';
 import { hubProviders } from './hub-providers.js';
+import { ReceivingController } from './receiving.controller.js';
 
 /**
  * The `hub` permission domain (S1.31, `SLICE-001`): the custody boundary between the rider on the road and the hub's controlled inventory (hub-intake.md). It holds the keys of the
@@ -19,6 +21,8 @@ import { hubProviders } from './hub-providers.js';
     HubIntakesController,
     BlindCountController,
     IntakeFindingsController,
+    ReceivingController,
+    CheckInController,
   ],
   providers: [...hubProviders],
 })

@@ -107,4 +107,13 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'submitHubHandover',
   'vendorSignIn',
   'waiveCancellationCharge',
+  // Run D, S1.35b: receiving by run (the queue, the run's page, the missing list, the check-in acts, a senior's correction) and the limits of a file of evidence.
+  'addExtraParcel',
+  'correctIntakeCount',
+  'finishCheckIn',
+  'getEvidenceLimits',
+  'getReceivingRun',
+  'listMissingParcels',
+  'listReceivingRuns',
+  'recordParcelArrival',
 ];

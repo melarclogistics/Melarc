@@ -75,6 +75,7 @@ const PORT_NAMES = [
 const ALLOWED_PORT_IMPLEMENTATIONS: readonly string[] = [
   'dispatch/rider-record-lookup.adapter.ts',
   'fleet/fleet-run-custody.adapter.ts',
+  'hub/hub-queue-counters.adapter.ts',
   'pickup/pickup-queue-counters.adapter.ts',
   'pickup/pickup-record-lookup.adapter.ts',
   'pickup/pickup-run-access.adapter.ts',
@@ -154,6 +155,7 @@ const DOMAIN_ADAPTERS: readonly string[] = [
   // S1.24: each domain's side of the port the other uses (`platform/domain-ports/`), which is not one of the platform's seventeen.
   'fleet/fleet-run-custody.adapter.ts',
   // Task C1: each domain's side of the port that counts the work waiting in a queue (`platform/domain-ports/queue-counter.port.ts`).
+  'hub/hub-queue-counters.adapter.ts',
   'pickup/pickup-queue-counters.adapter.ts',
   'pickup/pickup-run-access.adapter.ts',
   // Task C2: each domain's side of the port that finds a record for the global lookup (`platform/domain-ports/record-lookup.port.ts`).
@@ -1713,6 +1715,7 @@ describe('pickup and fleet meet only through ports', () => {
       'platform/domain-ports/run-access.port.ts',
       'platform/domain-ports/run-custody.port.ts',
       // Task C1: the counters of the queues are called with the caller's handle, under the context of the list's key, and open none of their own.
+      'hub/hub-queue-counters.adapter.ts',
       'pickup/pickup-queue-counters.adapter.ts',
       'staff/staff-queue-counter.adapter.ts',
       'platform/domain-ports/queue-counter.port.ts',

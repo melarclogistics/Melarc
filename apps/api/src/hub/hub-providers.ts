@@ -12,8 +12,10 @@ import { RUN_ACCESS, type RunAccess } from '../platform/domain-ports/run-access.
 import { RUN_CUSTODY, type RunCustody } from '../platform/domain-ports/run-custody.port.js';
 import { HubBlindCounts } from './blind-count.service.js';
 import { HubHandovers } from './hub-handover.service.js';
+import { HubCheckIns } from './check-in.service.js';
 import { HubIntakes } from './hub-intakes.service.js';
 import { HubIntakeFindings } from './intake-findings.service.js';
+import { ReceivingReads } from './receiving-reads.service.js';
 
 /** The injection token of the service of the hub handover (S1.31), which its controller asks for. */
 export const HUB_HANDOVERS = Symbol('HUB_HANDOVERS');
@@ -26,6 +28,12 @@ export const HUB_BLIND_COUNTS = Symbol('HUB_BLIND_COUNTS');
 
 /** The injection token of the service of the condition and the adjudication (S1.34), which its controller asks for. */
 export const HUB_INTAKE_FINDINGS = Symbol('HUB_INTAKE_FINDINGS');
+
+/** The injection token of the service of the receiving side's reads by run (Run D, S1.35b), which its controller asks for. */
+export const HUB_RECEIVING_READS = Symbol('HUB_RECEIVING_READS');
+
+/** The injection token of the service of the acts of the check-in (Run D, S1.35b), which its controller asks for. */
+export const HUB_CHECK_INS = Symbol('HUB_CHECK_INS');
 
 const optional = (token: symbol) => ({ token, optional: true });
 
@@ -97,6 +105,36 @@ export const hubProviders: readonly FactoryProvider[] = [
       clock === undefined
         ? undefined
         : new HubIntakeFindings({ runner, audit, idempotency, clock }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+    ],
+  },
+  {
+    provide: HUB_RECEIVING_READS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+    ): ReceivingReads | undefined =>
+      runner === undefined || audit === undefined ? undefined : new ReceivingReads({ runner, audit }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_CHECK_INS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+    ): HubCheckIns | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined
+        ? undefined
+        : new HubCheckIns({ runner, audit, idempotency, clock }),
     inject: [
       optional(OPERATION_RUNNER),
       optional(AUDIT_WRITER),

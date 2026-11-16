@@ -28,6 +28,12 @@ export const PICKUP_INTAKE_STATES = [
 ] as const;
 export const COUNT_VARIANCES = ['MATCH', 'SHORT', 'OVER'] as const;
 export const INTAKE_CONDITIONS = ['OK', 'DAMAGED', 'TAMPERED', 'OTHER'] as const;
+/**
+ * How an intake is received (Run D, D-D2 and D-D3; domain-model.md section 6.6): `PHOTO_CHECK_IN` when the stop's count carries door photos (the intake is checked in parcel by parcel against
+ * them), `BLIND_COUNT` when Ops let the count through without photos (the receiver types the count before the rider's number is shown). **Fixed by the handover from the stop** (the guard of the
+ * table derives it, whatever a writer gives) and never changed; every intake that existed before Run D is `BLIND_COUNT`.
+ */
+export const RECEIVING_MODES = ['PHOTO_CHECK_IN', 'BLIND_COUNT'] as const;
 
 const quoted = (values: readonly string[]): string =>
   values.map((value) => `'${value}'`).join(', ');
@@ -84,7 +90,16 @@ export const pickupIntake = pgTable(
     /** `OK` until a condition is recorded (S1.34): the column is never null (domain-model.md section 6.6). */
     condition: text('condition').notNull().default('OK'),
     activeReceiverId: uuid('active_receiver_id'),
+    /** The last refresh of the advisory lock: the holder's "last seen", given by the guard from the database's clock. */
     lockAcquiredAt: timestamp('lock_acquired_at', { withTimezone: true }),
+    /**
+     * The moment the CURRENT holder first took the lock (Run D, S1.35b: "Ama Owusu opened this check-in at 09:12"): the guard sets it when the lock is taken from free or taken over by another
+     * receiver and keeps it through the holder's own refreshes; a writer's value is not kept. Null where the lock is free (and for a lock that was held before the column existed, which the guard
+     * dates from its last refresh at the holder's next one).
+     */
+    lockOpenedAt: timestamp('lock_opened_at', { withTimezone: true }),
+    /** `PHOTO_CHECK_IN` or `BLIND_COUNT` (`RECEIVING_MODES`): derived by the guard at the handover from the stop's door photos, and frozen. */
+    receivingMode: text('receiving_mode').notNull().default('BLIND_COUNT'),
     version: integer('version').notNull().default(1),
   },
   (table): PgTableExtraConfigValue[] => [
@@ -109,6 +124,8 @@ export const pickupIntake = pgTable(
       foreignColumns: [riderIdentity.id],
     }).onDelete('restrict'),
     uniqueIndex('pickup_intake_code_key').on(table.code),
+    // The key a parcel's composite foreign key names (Run D): a parcel can never name another hub than its intake's.
+    uniqueIndex('pickup_intake_id_hub_key').on(table.id, table.responsibleHubId),
     // One intake for each collected request of a run: a second one for the same request, a double click or a replay that was not caught, finds this index.
     uniqueIndex('pickup_intake_one_per_request').on(table.pickupManifestId, table.pickupRequestId),
     index('pickup_intake_hub_idx').on(table.responsibleHubId, table.state, table.handedOverAt),
@@ -126,6 +143,10 @@ export const pickupIntake = pgTable(
     check(
       'pickup_intake_condition_closed',
       sql.raw(`"pickup_intake"."condition" IN (${quoted(INTAKE_CONDITIONS)})`),
+    ),
+    check(
+      'pickup_intake_receiving_mode_closed',
+      sql.raw(`"pickup_intake"."receiving_mode" IN (${quoted(RECEIVING_MODES)})`),
     ),
     check(
       'pickup_intake_counts_nonnegative',

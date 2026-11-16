@@ -184,6 +184,8 @@ describe('the generated description of the real application', () => {
         ['post'],
         ['createEvidenceRetrievalAuthorization'],
       ],
+      // S1.35b: the limits the evidence store holds a photo to, read by the page before it offers one.
+      ['/evidence-limits', ['get'], ['getEvidenceLimits']],
       // S0.53a: the rider roster, the first routes of the `dispatch` module.
       ['/ops/riders', ['get'], ['listRiders']],
       ['/ops/riders/{riderId}', ['get'], ['getRider']],
@@ -204,6 +206,14 @@ describe('the generated description of the real application', () => {
       // S1.34: what is found at an intake after its count, and Senior Ops's adjudication.
       ['/hub-intakes/{id}/condition', ['post'], ['recordIntakeCondition']],
       ['/hub-intakes/{id}/discrepancy', ['post'], ['adjudicateDiscrepancy']],
+      // S1.35b: receiving by run: the runs waiting at the hub, one run, the parcels being searched for, the photo check-in's acts and the senior officer's correction.
+      ['/receiving-runs', ['get'], ['listReceivingRuns']],
+      ['/receiving-runs/{manifest_id}', ['get'], ['getReceivingRun']],
+      ['/missing-parcels', ['get'], ['listMissingParcels']],
+      ['/intake-parcels/{parcel_id}/arrival', ['put'], ['recordParcelArrival']],
+      ['/hub-intakes/{id}/check-in', ['post'], ['finishCheckIn']],
+      ['/hub-intakes/{id}/extra-parcels', ['post'], ['addExtraParcel']],
+      ['/hub-intakes/{id}/correction', ['post'], ['correctIntakeCount']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.

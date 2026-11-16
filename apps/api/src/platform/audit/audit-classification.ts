@@ -40,6 +40,7 @@ export const ENHANCED_CODES = [
   'pickup.request.single_package_fee_posted',
   'pickup.request.single_package_approved',
   'hub.osd.resolved',
+  'hub.intake.corrected',
   'hub.intake.closed_exception',
   'hub.intake.reopened',
   'dispatch.run.dispatched',

@@ -508,13 +508,18 @@ describe('the evidence of a stop is listed in the order it became visible (findi
     expect(await listed(stop)).toEqual([model, ...made]);
     const chosen = made[0] ?? '';
 
-    // No statement changes it afterwards, the owner's included: the guard keeps what was declared of a record.
+    // No statement changes it afterwards, the owner's included: the guard keeps what was declared of a record. The rule that a record changes only by being stored or by expiring refuses an update
+    // of the position alone as well (the same SQLSTATE), so the message says which rule answered: the one that keeps what was declared (the break check of 0102: L3 survived the code alone).
     const refused = await routes.admin
       .query(`update evidence set listed_at = now() where id = $1`, [chosen])
       .then(
         () => null,
-        (error: unknown) => serverErrorIn(error)?.code ?? 'other',
+        (error: unknown) => ({
+          code: serverErrorIn(error)?.code ?? 'other',
+          message: serverErrorIn(error)?.message ?? '',
+        }),
       );
-    expect(refused).toBe('23514');
+    expect(refused?.code).toBe('23514');
+    expect(refused?.message).toContain('keeps its owner');
   });
 });
