@@ -36,7 +36,7 @@ const CAPABILITY = {
   'fleet.custody.initiate': 'start a custody handover',
   'fleet.custody.accept': 'accept a custody handover',
   // Receiving at a hub: the intakes, the blind count and the adjudication of what is found.
-  'hub.read': 'see hub intakes',
+  'hub.read': 'see what has been handed over at a hub',
   'hub.intake.count': 'count the parcels received at a hub',
   'hub.osd.adjudicate': 'decide a discrepancy found at receiving',
   // The message log and the reasons a screen reads.

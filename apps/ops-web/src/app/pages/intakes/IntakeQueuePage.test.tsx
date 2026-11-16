@@ -289,7 +289,7 @@ describeInterfaceStates('the receiving queue', {
   'permission-restricted': {
     test: async () => {
       open(() => refusal(403, 'PERMISSION_DENIED'));
-      await alertSaying('Your account can’t see hub intakes. Ask an administrator for access.');
+      await alertSaying('Your account can’t see what has been handed over at a hub. Ask an administrator for access.');
     },
   },
 });

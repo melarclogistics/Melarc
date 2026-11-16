@@ -67,8 +67,8 @@ describe('the words of the table', () => {
 describe('the words of the refusals of authority', () => {
   // Break caught (PRODUCT_DESIGN_DIRECTION section 6.5): a refusal that names a key, or the wrong act, so that an administrator is asked to grant the wrong access.
   it.each([
-    ['listHubIntakes', /see hub intakes/],
-    ['getHubIntake', /see hub intakes/],
+    ['listHubIntakes', /see what has been handed over at a hub/],
+    ['getHubIntake', /see what has been handed over at a hub/],
     ['acquireIntakeLock', /count the parcels received at a hub/],
     ['submitBlindCount', /count the parcels received at a hub/],
     ['recordIntakeCondition', /count the parcels received at a hub/],
@@ -94,7 +94,7 @@ describe('the words of the refusals of authority', () => {
         operation: 'createEvidenceRetrievalAuthorization',
         context: 'intake',
       }).message,
-    ).toBe('Your account can’t see hub intakes. Ask an administrator for access.');
+    ).toBe('Your account can’t see what has been handed over at a hub. Ask an administrator for access.');
     expect(
       problemOf(refused('PERMISSION_DENIED', 403), {
         operation: 'createEvidenceRetrievalAuthorization',

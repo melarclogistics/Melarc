@@ -265,7 +265,7 @@ describe('an intake that has been counted', () => {
 
     expect(
       await screen.findByText(
-        'Your account can’t see hub intakes. Ask an administrator for access.',
+        'Your account can’t see what has been handed over at a hub. Ask an administrator for access.',
       ),
     ).toBeVisible();
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
@@ -515,7 +515,7 @@ describeInterfaceStates('the intake record', {
       open(preCountFixture(), RECEIVER, { [GET]: () => refusal(403, 'PERMISSION_DENIED') });
       expect(
         await screen.findByText(
-          'Your account can’t see hub intakes. Ask an administrator for access.',
+          'Your account can’t see what has been handed over at a hub. Ask an administrator for access.',
         ),
       ).toBeVisible();
     },
