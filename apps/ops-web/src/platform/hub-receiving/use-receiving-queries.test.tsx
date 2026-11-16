@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { installFakeApi, json, type FakeApi } from '../../test-support/fake-api';
 import {
-  EVIDENCE_LIMITS,
   OTHER_RUN_ID,
   PLANTED_BLIND_NUMBER,
   RUN_ID,
@@ -18,7 +17,6 @@ import {
 import { renderWithProviders } from '../../test-support/render-providers';
 import {
   LOOKUP_MIN,
-  useEvidenceLimits,
   useMissingParcels,
   useReceivingRun,
   useReceivingRuns,
@@ -180,40 +178,5 @@ describe('the missing list and the limits of evidence', () => {
     });
     expect(queryOf('/missing-parcels').get('view')).toBe('vendor_to_tell');
     expect(queryOf('/missing-parcels').get('hub_id')).toBe('hub-1');
-  });
-
-  // Break caught: the limits read again for every upload: they are configuration, read once for the page, and a failed read is not a guessed limit.
-  it('reads the limits once for the page and keeps them', async () => {
-    api = installFakeApi({ 'GET /evidence-limits': () => json(200, EVIDENCE_LIMITS) });
-    let results: ReturnType<typeof useEvidenceLimits>[] = [];
-    function Twice() {
-      results = [useEvidenceLimits(), useEvidenceLimits()];
-      return null;
-    }
-    renderWithProviders(<Twice />, { signedIn: true });
-    await waitFor(() => {
-      expect(results[0]?.data?.max_byte_size).toBe(EVIDENCE_LIMITS.max_byte_size);
-    });
-    expect(requestsTo('/evidence-limits')).toHaveLength(1);
-  });
-
-  it('fails, and guesses no limit, when the answer is not the limits', async () => {
-    api = installFakeApi({
-      'GET /evidence-limits': () => json(200, { allowed_content_types: [] }),
-    });
-    let result: ReturnType<typeof useEvidenceLimits> | undefined;
-    renderWithProviders(
-      <Probe
-        use={() => useEvidenceLimits()}
-        into={(value) => {
-          result = value;
-        }}
-      />,
-      { signedIn: true },
-    );
-    await waitFor(() => {
-      expect(result?.isError).toBe(true);
-    });
-    expect(result?.data).toBeUndefined();
   });
 });

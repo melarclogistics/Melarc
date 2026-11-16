@@ -44,9 +44,6 @@ const MAX_VENDORS = 500;
 const MAX_PARCELS_OF_A_VENDOR = 5000;
 const MAX_EVIDENCE = 100;
 const MAX_FINDINGS = 200;
-const MAX_CONTENT_TYPES = 50;
-/** The largest file the platform could hold: a bound of representation. */
-const MAX_BYTES = 9_007_199_254_740_991;
 
 /**
  * A display name: one line of text, bounded, with no control character, and **never a number that could be dialled**. A name is told by what the screens draw of a person, and a telephone number
@@ -829,30 +826,6 @@ export function parseCheckIn(body: unknown): CheckInView | undefined {
   return view;
 }
 
-/** The platform's limits on a file of evidence (`getEvidenceLimits`): the types and the largest size, so that a file above the size is refused before it is read. */
-export interface EvidenceLimitsView {
-  readonly allowed_content_types: readonly string[];
-  readonly max_byte_size: number;
-}
-
-export function parseEvidenceLimits(body: unknown): EvidenceLimitsView | undefined {
-  if (!isRecord(body) || !Array.isArray(body.allowed_content_types)) return undefined;
-  const size = whole(body.max_byte_size, 1, MAX_BYTES);
-  if (
-    size === undefined ||
-    body.allowed_content_types.length < 1 ||
-    body.allowed_content_types.length > MAX_CONTENT_TYPES
-  ) {
-    return undefined;
-  }
-  const types: string[] = [];
-  for (const entry of body.allowed_content_types as unknown[]) {
-    if (typeof entry !== 'string' || !/^[a-z]+\/[a-z0-9.+-]+$/i.test(entry)) return undefined;
-    types.push(entry);
-  }
-  return { allowed_content_types: types, max_byte_size: size };
-}
-
 /** The fields each guard reads, held to the contract by `test/hub-receiving-contract.test.ts`. */
 export const RECEIVING_FIELDS = {
   IntakeParcelCondition: {
@@ -998,5 +971,4 @@ export const RECEIVING_FIELDS = {
     ],
     enums: { state: INTAKE_STATES, condition: INTAKE_CONDITIONS, count_variance: COUNT_VARIANCES },
   },
-  EvidenceLimits: { required: ['allowed_content_types', 'max_byte_size'], enums: {} },
 } as const;

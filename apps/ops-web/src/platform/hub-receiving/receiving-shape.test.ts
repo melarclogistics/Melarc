@@ -18,7 +18,6 @@ import {
 import {
   nameOf,
   parseCheckIn,
-  parseEvidenceLimits,
   parseMissingPage,
   parseParcel,
   parseParcelAnswer,
@@ -307,18 +306,5 @@ describe('the answers of the acts', () => {
     expect(parseCheckIn({ ...record, count_phase: 'POST_COUNT' })).toBeUndefined();
     expect(parseCheckIn({ ...record, receiving_mode: 'BLIND_COUNT' })).toBeUndefined();
     expect(parseCheckIn({ ...record, missing_count: 0 })).toBeUndefined();
-  });
-
-  it('reads the limits of a file of evidence and refuses an empty list of types or no size', () => {
-    expect(
-      parseEvidenceLimits({ allowed_content_types: ['image/jpeg'], max_byte_size: 1048576 }),
-    ).toEqual({ allowed_content_types: ['image/jpeg'], max_byte_size: 1048576 });
-    expect(
-      parseEvidenceLimits({ allowed_content_types: [], max_byte_size: 1048576 }),
-    ).toBeUndefined();
-    expect(parseEvidenceLimits({ allowed_content_types: ['image/jpeg'] })).toBeUndefined();
-    expect(
-      parseEvidenceLimits({ allowed_content_types: ['not a type'], max_byte_size: 10 }),
-    ).toBeUndefined();
   });
 });

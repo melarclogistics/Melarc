@@ -3,11 +3,9 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
 import {
-  parseEvidenceLimits,
   parseMissingPage,
   parseRunListPage,
   parseRunPage,
-  type EvidenceLimitsView,
   type MissingPageView,
   type MissingView,
   type RunListPageView,
@@ -146,28 +144,6 @@ export function useMissingParcels(params: MissingParcelsParams): UseQueryResult<
       const page = parseMissingPage(answer.data);
       if (page === undefined) throw unexpectedResponse(answer.status);
       return page;
-    },
-  });
-}
-
-/**
- * `getEvidenceLimits` (any signed-in session; OB-S1-110): the types and the largest size of a file of evidence, so that a file above the size is refused **before it is read**. Configuration only; it is
- * read once for the page that needs it and kept for the session's use of it. A failed read is not a guessed limit: the page that wanted it says the file could not be checked.
- */
-export function useEvidenceLimits(enabled = true): UseQueryResult<EvidenceLimitsView> {
-  const client = useApiClient();
-  return useQuery({
-    queryKey: ['hub-receiving', 'evidence-limits'] as const,
-    enabled,
-    retry: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    staleTime: Number.POSITIVE_INFINITY,
-    queryFn: async () => {
-      const answer = answerOf(await client.GET('/evidence-limits'));
-      const limits = parseEvidenceLimits(answer.data);
-      if (limits === undefined) throw unexpectedResponse(answer.status);
-      return limits;
     },
   });
 }
