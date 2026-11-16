@@ -303,6 +303,33 @@ describe('the action bar of a vendor', () => {
     expect(barOf(await kente(), 'Look at the photos')).not.toHaveClass(STICKY);
     expect(barOf(await kente(), 'Finish this vendor')).toHaveClass(STICKY);
   });
+
+  // Break caught (the second review, defect 3 again): the bar of the vendor in work kept at the foot of the screen within its whole card, which holds its name: a vendor that BECAME the one in work (the one
+  // above it was finished) had its bar drawn over its own name wherever its card began at the foot of the screen. The bar lives in the part of the card that holds the photos, which is the bar's own
+  // containing block: it can be drawn nowhere above that part, so it can never be over the name.
+  it('keeps the bar in the part of its card that holds the photos, and never in the part that holds its name', async () => {
+    open({ run: runFixture([photoVendorFixture(3), sheaVendor(2)]) });
+    const card = await kente();
+    const work = barOf(card, 'All 3 here').closest('.receiving-vendor__work');
+
+    expect(work).not.toBeNull();
+    expect(work).toContainElement(
+      within(card).getByRole('list', { name: `Photos of ${KENTE}’s parcels` }),
+    );
+    expect(work).not.toContainElement(within(card).getByRole('heading', { level: 2, name: KENTE }));
+  });
+
+  // Break caught: the bar of a vendor counted without photos kept at the foot of the screen, within a card of three lines whose name it can cover and which has no photos to scroll through.
+  it('does not keep at the foot of the screen the bar of a vendor counted without photos', async () => {
+    open({ run: runFixture([blindVendorFixture()]) });
+    const card = await section(BLIND_VENDOR);
+    const bar = within(card)
+      .getByText('Count the parcels')
+      .closest<HTMLElement>('.receiving-actions');
+
+    expect(bar).not.toBeNull();
+    expect(bar).not.toHaveClass(STICKY);
+  });
 });
 
 describe('the lock’s line', () => {

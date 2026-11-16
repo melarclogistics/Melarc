@@ -117,6 +117,9 @@ function Notice({
 /**
  * The bar of a vendor's acts. **Only the bar of the vendor in work is kept at the foot of the screen** (the first vendor that waits, and any vendor the officer is checking in): a bar kept there for every vendor is
  * drawn over the top of its own card, over the vendor's name, whenever the card begins at the foot of the screen. The bar of every other vendor stands at the end of its card, where the officer meets it.
+ * **And the bar is kept within the part of its card that holds the photos** (`receiving-vendor__work`, which is the bar's containing block), never within the whole card: a bar is kept at the foot of the screen
+ * down to the top of its containing block, so a bar that is the card's would be drawn over the card's own name wherever the card begins at the foot of the screen, which it does when the vendor above it
+ * has just been finished and the vendor becomes the one in work (the second review of the pictures).
  */
 const barClass = (inWork: boolean): string =>
   inWork ? 'receiving-actions receiving-actions--sticky' : 'receiving-actions';
@@ -125,18 +128,16 @@ const barClass = (inWork: boolean): string =>
 function BlindVendor({
   vendor,
   mayCount,
-  firstToCheck,
 }: {
   readonly vendor: VendorView;
   readonly mayCount: boolean;
-  readonly firstToCheck: boolean;
 }) {
   if (vendor.state === 'AWAITING_COUNT') {
     return (
       <>
         <p>{WORDS.vendor.blind.explain}</p>
         {mayCount ? (
-          <div className={barClass(firstToCheck)}>
+          <div className={barClass(false)}>
             <ButtonLink to={countPath(vendor.intake_id)} size="lg">
               {WORDS.vendor.blind.countButton}
             </ButtonLink>
@@ -245,77 +246,79 @@ function PhotoVendor({
           <p>{problem.message}</p>
         </Alert>
       )}
-      <ParcelGrid
-        label={gridLabel}
-        parcels={vendor.parcels}
-        tapping={tapping}
-        onPress={(parcel) => {
-          void press(parcel);
-        }}
-      />
-      {tapping && vendor.parcels.length > 0 ? (
-        <div className="receiving-actions">
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            onClick={() => {
-              setViewId(vendor.parcels[0]?.id);
-            }}
-          >
-            {WORDS.viewer.lookAt}
-          </Button>
-        </div>
-      ) : null}
-      {mayAddExtra ? (
-        <div className={barClass(tapping || firstToCheck)}>
-          {waiting && tapping ? (
-            <Button
-              type="button"
-              size="lg"
-              onClick={() => {
-                setDialog('finish');
-              }}
-            >
-              {WORDS.vendor.finish}
-            </Button>
-          ) : null}
-          {waiting && !hasExtras && expected > 0 ? (
-            <Button
-              type="button"
-              size="lg"
-              variant={tapping ? 'secondary' : 'primary'}
-              onClick={() => {
-                setDialog('all');
-              }}
-            >
-              {WORDS.vendor.allHere(expected)}
-            </Button>
-          ) : null}
-          {waiting && !tapping ? (
+      <div className="receiving-vendor__work">
+        <ParcelGrid
+          label={gridLabel}
+          parcels={vendor.parcels}
+          tapping={tapping}
+          onPress={(parcel) => {
+            void press(parcel);
+          }}
+        />
+        {tapping && vendor.parcels.length > 0 ? (
+          <div className="receiving-actions">
             <Button
               type="button"
               size="lg"
               variant="secondary"
               onClick={() => {
-                setChosen(true);
+                setViewId(vendor.parcels[0]?.id);
               }}
             >
-              {WORDS.vendor.countDifferent}
+              {WORDS.viewer.lookAt}
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            onClick={() => {
-              setDialog('extra');
-            }}
-          >
-            {WORDS.vendor.addExtra}
-          </Button>
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+        {mayAddExtra ? (
+          <div className={barClass(tapping || firstToCheck)}>
+            {waiting && tapping ? (
+              <Button
+                type="button"
+                size="lg"
+                onClick={() => {
+                  setDialog('finish');
+                }}
+              >
+                {WORDS.vendor.finish}
+              </Button>
+            ) : null}
+            {waiting && !hasExtras && expected > 0 ? (
+              <Button
+                type="button"
+                size="lg"
+                variant={tapping ? 'secondary' : 'primary'}
+                onClick={() => {
+                  setDialog('all');
+                }}
+              >
+                {WORDS.vendor.allHere(expected)}
+              </Button>
+            ) : null}
+            {waiting && !tapping ? (
+              <Button
+                type="button"
+                size="lg"
+                variant="secondary"
+                onClick={() => {
+                  setChosen(true);
+                }}
+              >
+                {WORDS.vendor.countDifferent}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              onClick={() => {
+                setDialog('extra');
+              }}
+            >
+              {WORDS.vendor.addExtra}
+            </Button>
+          </div>
+        ) : null}
+      </div>
 
       {dialog === 'all' ? (
         <AllHereDialog
@@ -455,7 +458,7 @@ export function VendorSection({
         onGoTo={onGoTo}
       />
       {vendor.receiving_mode === 'BLIND_COUNT' ? (
-        <BlindVendor vendor={vendor} mayCount={mayCount} firstToCheck={firstToCheck} />
+        <BlindVendor vendor={vendor} mayCount={mayCount} />
       ) : (
         <PhotoVendor
           vendor={vendor}

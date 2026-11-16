@@ -15,6 +15,7 @@ import {
   type ReceivingApi,
   type World,
 } from './support/receiving-api';
+import { parcelRow, type RunRow, type VendorRow } from './support/receiving-runs-api';
 import { watchPage, wcagViolations } from './support/page';
 import { menuEntry } from './support/shell';
 import { expectNoTableScrollsSideways } from './support/tables';
@@ -740,6 +741,107 @@ test.describe('the hub floor on the receiving screens, measured (the review of t
     const lead = await size(summary.getByText('Check the rider’s bag before they leave.'));
     expect(heading).toBeGreaterThanOrEqual(lead);
   });
+});
+
+test.describe('what the pictures showed again, from the fixed build (the second review)', () => {
+  const range = (count: number): number[] => Array.from({ length: count }, (_, index) => index + 1);
+  const vendor = (
+    over: Partial<VendorRow> & Pick<VendorRow, 'id' | 'code' | 'name' | 'parcels'>,
+  ): VendorRow => ({
+    mode: 'PHOTO_CHECK_IN',
+    state: 'AWAITING_COUNT',
+    version: 1,
+    lock: null,
+    received: null,
+    blindCounted: null,
+    riderNumber: 0,
+    ...over,
+  });
+  /** The run of the review's pictures: Kente Crafts with twelve parcels, Shea Naturals with three, and a vendor counted without photos. */
+  const tallRun = (): RunRow => ({
+    id: RUNS.waiting,
+    code: 'ACC-MF-7KQ2MZ',
+    riderName: 'Kofi Boateng',
+    handedOverAt: '2026-11-03T07:00:00Z',
+    hubId: IDS.hub,
+    hubName: 'Accra Central',
+    vendors: [
+      vendor({
+        id: RUNS.kente,
+        code: 'ACC-IN-3HN7WD',
+        name: 'Kente Crafts',
+        parcels: range(12).map((n) => parcelRow(1, n)),
+      }),
+      vendor({
+        id: RUNS.shea,
+        code: 'ACC-IN-9BC2KE',
+        name: 'Shea Naturals',
+        parcels: range(3).map((n) => parcelRow(2, n)),
+      }),
+      vendor({
+        id: IDS.waiting,
+        code: 'ACC-IN-7KQ2MZ',
+        name: 'Adwoa Stalls',
+        mode: 'BLIND_COUNT',
+        riderNumber: DECLARED,
+        parcels: [],
+      }),
+    ],
+  });
+  /** The names (level-two headings of the page) that are on the screen with something of the page drawn over their middle. The bar at the top of the window is not the page's: only what is inside `main` counts. */
+  const namesCovered = (): string[] => {
+    const main = document.querySelector('main');
+    return [...document.querySelectorAll<HTMLElement>('main h2')]
+      .filter((heading) => {
+        const box = heading.getBoundingClientRect();
+        if (box.bottom <= 0 || box.top >= window.innerHeight) return false;
+        const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return top !== null && main?.contains(top) === true && !heading.contains(top);
+      })
+      .map((heading) => heading.textContent);
+  };
+
+  for (const size of [
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+  ] as const) {
+    // Break caught (defect 3 again): the vendor that BECOMES the one in work (the one above it is finished) had its bar, kept at the foot of the screen, drawn over its own name wherever its card began at the
+    // foot of the screen. The first fix looked at the first screen of the run before anything was done. This is the review's step 4: the first vendor is checked in as tapped, and every position of the page is read.
+    test(`the vendor that becomes the one in work keeps its name on the screen at every scroll position, at ${String(size.width)} by ${String(size.height)}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await open(page, runPath(RUNS.waiting), { runs: [tallRun()] });
+      const kente = page.getByRole('region', { name: 'Kente Crafts' });
+      await kente.getByRole('button', { name: 'The count is different' }).click();
+      for (let n = 1; n <= 10; n += 1) {
+        await kente.getByRole('button', { name: `Parcel ${String(n)}`, exact: true }).click();
+      }
+      await kente.getByRole('button', { name: 'Finish this vendor' }).click();
+      await page
+        .getByRole('alertdialog')
+        .getByRole('button', { name: 'Finish this vendor' })
+        .click();
+      await expect(
+        kente.getByText('A senior officer will decide about this vendor.'),
+      ).toBeVisible();
+      // Shea Naturals is now the first vendor that waits: its bar is the one kept at the foot of the screen.
+      await expect(
+        page.getByRole('region', { name: 'Shea Naturals' }).locator('.receiving-actions--sticky'),
+      ).toHaveCount(1);
+
+      const height = await page.evaluate(() => document.documentElement.scrollHeight);
+      const covered: string[] = [];
+      for (let at = 0; at <= height; at += 40) {
+        await page.evaluate((y) => {
+          window.scrollTo(0, y);
+        }, at);
+        const names = await page.evaluate(namesCovered);
+        if (names.length > 0) covered.push(`at ${String(at)} px: ${names.join(', ')}`);
+      }
+      expect(covered).toEqual([]);
+    });
+  }
 });
 
 test.describe('the blind count', () => {
