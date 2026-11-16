@@ -2169,6 +2169,16 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `INTAKE_CONDITION` | `DAMAGED` | danger | Damaged |
 | `INTAKE_CONDITION` | `TAMPERED` | danger | Tampered with |
 | `INTAKE_CONDITION` | `OTHER` | waiting | Another problem |
+| `RECEIVING_VENDOR` | `AWAITING_COUNT` | waiting | Waiting to be checked in |
+| `RECEIVING_VENDOR` | `COUNTED` | info | Checked in |
+| `RECEIVING_VENDOR` | `RECONCILIATION_REQUIRED` | waiting | Needs a decision |
+| `RECEIVING_VENDOR` | `READY_FOR_ITEMIZATION` | success | Checked in and cleared |
+| `RECEIVING_VENDOR` | `ITEMIZING` | info | Orders being listed |
+| `RECEIVING_VENDOR` | `CLOSED` | neutral | Closed |
+| `RECEIVING_PARCEL` | `EXPECTED` | neutral | Not checked in |
+| `RECEIVING_PARCEL` | `ARRIVED` | success | Checked in |
+| `RECEIVING_PARCEL` | `MISSING` | danger | Missing |
+| `RECEIVING_PARCEL` | `VOID` | neutral | Taken back |
 
 
 The same state name in two domains (`PENDING`, `ACTIVE`, `CANCELLED`) is two different states of two different records. The words are sentence case and plain, with no raw value and no full stop.

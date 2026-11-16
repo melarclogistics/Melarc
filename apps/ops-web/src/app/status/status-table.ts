@@ -21,6 +21,7 @@ import {
   EVIDENCE_STATE_MAP,
   HANDSHAKE_STATE_MAP,
 } from '../pages/pickup-work/pickup-work-presentation';
+import { PARCEL_STATE_MAP, VENDOR_STATE_MAP } from '../pages/receiving/receiving-presentation';
 import { RIDER_DEVICE_STATUS_MAP, RIDER_STATUS_MAP } from '../pages/riders/rider-presentation';
 import { STAFF_STATUS_MAP } from '../pages/staff/staff-presentation';
 import { DEVICE_STATUS_MAP, VENDOR_STATUS_MAP } from '../pages/vendors/vendor-presentation';
@@ -53,6 +54,9 @@ export const STATUS_TABLE = {
   HUB_INTAKE: INTAKE_STATE_MAP,
   INTAKE_COUNT: VARIANCE_MAP,
   INTAKE_CONDITION: CONDITION_MAP,
+  // Receiving by run (S1.35c; Run D): where a vendor stands and where a parcel stands, in the words of the floor (the same states as above, told as the floor tells them).
+  RECEIVING_VENDOR: VENDOR_STATE_MAP,
+  RECEIVING_PARCEL: PARCEL_STATE_MAP,
 } as const satisfies Readonly<Record<string, StatusMap<string>>>;
 
 export type StatusDomain = keyof typeof STATUS_TABLE;
