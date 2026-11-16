@@ -28,6 +28,8 @@ export interface RadioGroupProps {
   readonly required?: boolean;
   /** No choice can be changed now, for example while what was chosen is being sent. */
   readonly disabled?: boolean;
+  /** `lg` is the hub floor's choice rows (each at least the 56 px touch row, by the token): the whole row is the target, not the circle. */
+  readonly size?: 'md' | 'lg';
 }
 
 const present = (text: string | undefined): text is string => text !== undefined && text !== '';
@@ -50,6 +52,7 @@ export function RadioGroup({
   error,
   required = false,
   disabled = false,
+  size = 'md',
 }: RadioGroupProps) {
   const id = useId();
   const helpId = `${id}-help`;
@@ -66,7 +69,13 @@ export function RadioGroup({
 
   return (
     <fieldset
-      className={hasError ? 'ui-radio-group ui-radio-group--invalid' : 'ui-radio-group'}
+      className={[
+        'ui-radio-group',
+        hasError ? 'ui-radio-group--invalid' : '',
+        size === 'lg' ? 'ui-radio-group--lg' : '',
+      ]
+        .filter((name) => name !== '')
+        .join(' ')}
       disabled={disabled}
     >
       <legend className="ui-radio-group__legend">

@@ -4,6 +4,8 @@ import { Spinner } from '../loading/Spinner';
 import './button.css';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger';
+/** `md` is the working height; `lg` is the hub floor's 56 px (DESIGN_SYSTEM sections 11 and 12): the size of the tablet-first receiving screens, asked for by the screen and never by the component. */
+export type ButtonSize = 'md' | 'lg';
 
 export interface ButtonProps extends Omit<
   ComponentPropsWithoutRef<'button'>,
@@ -18,6 +20,8 @@ export interface ButtonProps extends Omit<
    * an outline in the danger colour, never a fill, whose label names the consequence. The confirmation dialog uses it to confirm.
    */
   readonly variant?: ButtonVariant;
+  /** `lg` for a hub-floor task (a 56 px target, by the token): a tablet's thumb, a glove, a hurry. It changes the size and nothing else. */
+  readonly size?: ButtonSize;
   /**
    * An action is under way. The button stays focusable and keeps its label, but it ignores activation, so the work is
    * not started twice. Do not show success while this is true (COMPONENT_PATTERNS section 4.9).
@@ -32,6 +36,7 @@ export interface ButtonProps extends Omit<
 export function Button({
   type,
   variant = 'primary',
+  size = 'md',
   loading = false,
   onClick,
   children,
@@ -43,7 +48,7 @@ export function Button({
     <button
       {...rest}
       type={type}
-      className={`ui-button ui-button--${variant}`}
+      className={`ui-button ui-button--${variant}${size === 'lg' ? ' ui-button--lg' : ''}`}
       // While loading the button says it is busy and inert, whatever the caller set; otherwise the caller's state stands.
       aria-busy={loading ? true : ariaBusy}
       // Not the native `disabled`: that would take the button out of the keyboard order while it is busy.
