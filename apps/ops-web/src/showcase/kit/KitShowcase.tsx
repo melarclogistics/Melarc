@@ -12,6 +12,7 @@ import { ListsGroup } from './ListsGroup';
 import { MenusGroup } from './MenusGroup';
 import { OverlaysGroup } from './OverlaysGroup';
 import { PanelsGroup } from './PanelsGroup';
+import { PhotosGroup } from './PhotosGroup';
 import { StatesGroup } from './StatesGroup';
 import {
   BuilderExample,
@@ -79,6 +80,13 @@ export const KIT_GROUPS: readonly Group[] = [
     title: 'Tooltips, popovers and dialogs',
     summary: 'Tooltip, Popover and Dialog',
     page: () => <OverlaysGroup />,
+  },
+  {
+    id: 'photos',
+    title: 'Photos and the hub floor',
+    summary:
+      'PhotoGrid, PhotoViewer, the photo mode of EvidenceUpload, ConnectionBanner and the sizes of the hub floor',
+    page: () => <PhotosGroup />,
   },
   {
     id: 'example-queue',
