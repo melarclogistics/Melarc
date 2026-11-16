@@ -64,7 +64,6 @@ function CheckInCame({ view }: { readonly view: CheckInView }) {
   const comparison = comparisonText(view.count_variance, view.count_difference);
   return (
     <>
-      {waiting ? <p>{WORDS.record.waiting}</p> : null}
       <DescriptionList
         items={[
           {
