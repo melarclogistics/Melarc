@@ -87,6 +87,12 @@ function settingKeyIn(error: unknown): string | undefined {
   return typeof message === 'string' ? /the setting ([a-z_]+) /.exec(message)?.[1] : undefined;
 }
 
+/** The unique violation of the ledger's one flagged-upload event for a record (Run D, finding F1; migration 0101), and no other failure. */
+function isRepeatedFlaggedEvent(error: unknown): boolean {
+  const failure = serverErrorIn(error);
+  return failure?.code === '23505' && failure.constraint === 'audit_event_flagged_upload_once';
+}
+
 const denied = (): ApiException => ApiException.of(ErrorCode.PermissionDenied, 'Permission denied');
 const notFound = (): ApiException => ApiException.of(ErrorCode.NotFound, 'Not found');
 const invalid = (pointer: string, rule: string): ApiException =>
@@ -428,10 +434,8 @@ export class EvidenceService {
       // names the record, the rider, the stop and the signature, and never the object's key.
       if (judged.flagged !== undefined) {
         const flagged = judged.flagged;
-        const raised = await this.#options.runner.mutate(
-          decision,
-          correlationId,
-          async (handle) => {
+        const raised = await this.#options.runner
+          .mutate(decision, correlationId, async (handle) => {
             await this.#options.audit.write(handle, {
               code: 'pickup.evidence.flagged',
               enhanced: true,
@@ -456,8 +460,13 @@ export class EvidenceService {
               detail: { threat: flagged.signature, object_removed: flagged.removed },
             });
             return refusal;
-          },
-        );
+          })
+          .catch((error: unknown) => {
+            // The ledger holds one such event for a record (finding F1, migration 0101): this record's was written by an earlier completion, or by one at the same time, and nothing is written
+            // twice (the transaction is undone as a whole). The refusal is answered all the same; any other failure is not hidden.
+            if (isRepeatedFlaggedEvent(error)) return refusal;
+            throw error;
+          });
         throw raised;
       }
       throw refusal;

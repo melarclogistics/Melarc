@@ -8,6 +8,7 @@ import {
   smallint,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -86,6 +87,11 @@ export const auditEvent = pgTable(
     // The scan a checkpoint makes for the events it has not yet claimed (audit.md §2.1), and the timeline of one object.
     index('audit_event_recorded_idx').on(table.recordedAt, table.id),
     index('audit_event_object_idx').on(table.objectType, table.objectId, table.occurredAt),
+    // One flagged-upload event for a record, for every writer (Run D, finding F1; migration 0101): a rider who sends a flagged file again to the address it was given, or two completions at
+    // once, write the event once. The application answers the refusal all the same; the database holds the count.
+    uniqueIndex('audit_event_flagged_upload_once')
+      .on(table.objectId)
+      .where(sql`${table.eventCode} = 'pickup.evidence.flagged'`),
     check(
       'audit_event_code_grammar',
       sql`${table.eventCode} ~ '^[a-z]+\\.[a-z0-9_]+\\.[a-z0-9_]+$'`,

@@ -771,6 +771,44 @@ describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; mig
     expect(await flaggedEventsOf(ticket.evidence.id)).toHaveLength(1);
   });
 
+  // Break caught (Run D, finding F1; fails before it: each flagged completion of a record wrote another event, so a rider who sent the file again to the address it was given, which lives for
+  // its window, wrote one for every try): the ledger holds one such event for a record, and the second flagged completion is refused as the first was, writing nothing.
+  it('writes no second event when the same record is flagged again, and refuses it as it did the first time', async () => {
+    const arranged = await run();
+    const eicar = new TextEncoder().encode(EICAR_TEST_FILE);
+    const { ticket, etag } = await uploaded(arranged, eicar);
+    const first = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(outcome(first)).toEqual([400, 'VALIDATION_FAILED']);
+    expect(ruleOf(first)).toBe('malicious_content');
+    // The capability lives for its window: the file is sent again to the same address, and the completion is asked for again.
+    expect(upload(ticket, eicar).status).toBe(200);
+    const again = await complete(arranged.rider, ticket.evidence.id, etag);
+    expect(outcome(again)).toEqual([400, 'VALIDATION_FAILED']);
+    expect(ruleOf(again)).toBe('malicious_content');
+    const events = await flaggedEventsOf(ticket.evidence.id);
+    expect(events).toHaveLength(1);
+    // The one event is the first one's, with the facts of the first.
+    expect(events[0]?.detail).toEqual({ threat: 'Eicar-Test-Signature', object_removed: true });
+    expect((await scanOf(ticket.evidence.id))?.state).toBe('PENDING_UPLOAD');
+  });
+
+  // Break caught: two completions of one record at once, both flagged, that write an event each, or one of them answered with a server error because the ledger refused the second.
+  it('writes one event when two completions of the same record are flagged at once, and answers both with the refusal', async () => {
+    const arranged = await run();
+    const eicar = new TextEncoder().encode(EICAR_TEST_FILE);
+    const { ticket, etag } = await uploaded(arranged, eicar);
+    const answers = await Promise.all([
+      complete(arranged.rider, ticket.evidence.id, etag),
+      complete(arranged.rider, ticket.evidence.id, etag),
+    ]);
+    // Whichever of the two the store served first, the other finds the object flagged (the ledger already holds its event) or gone: a refusal, never a server error.
+    expect(answers.map(outcome)).toEqual([
+      [400, 'VALIDATION_FAILED'],
+      [400, 'VALIDATION_FAILED'],
+    ]);
+    expect(await flaggedEventsOf(ticket.evidence.id)).toHaveLength(1);
+  });
+
   // Break caught: the event left out, or saying the object is gone, when the store could not remove it (what the alert for a failed removal pairs with).
   it('says in the event that the object could not be removed when it could not', async () => {
     const arranged = await run();
@@ -926,6 +964,30 @@ describe('completeEvidenceUpload: the malicious-content check (Run A2, D-A6; mig
       ).toBeNull();
       expect(await flaggedEventsOf(proof)).toHaveLength(1);
       expect(await flaggedEventsOf(parcelId)).toHaveLength(1);
+    });
+
+    // Break caught (Run D, finding F1; fails before it: the ledger admitted as many of these events as the rider wrote for a record of its own, and the administrator's statement as well): the
+    // database holds one event for a record, for every writer, and says so with the unique violation. Another record is not touched by it.
+    it('holds one event for a record: a second is refused for the rider’s login and for the administrator, and another record’s is taken', async () => {
+      const arranged = await run({ stops: 2, stopStates: ['ARRIVED', 'ARRIVED'] });
+      const rider = arranged.rider.id;
+      const stop = stopId(arranged);
+      const first = (await uploaded(arranged)).ticket.evidence.id;
+      const second = (await uploaded(arranged)).ticket.evidence.id;
+      const context = contextOf(rider, 'pickup.failure.report');
+
+      expect(await writtenAs(context, eventSql({ evidence: first, rider, stop }))).toBeNull();
+      expect(await writtenAs(context, eventSql({ evidence: first, rider, stop }))).toBe('23505');
+      // The administrator's statement meets the same index: the ledger is not a place where a login with more rights may write a second.
+      const administrator = await routes.admin
+        .query(eventSql({ evidence: first, rider, stop }))
+        .then(() => null)
+        .catch((error: unknown) => serverErrorIn(error)?.code ?? 'other');
+      expect(administrator).toBe('23505');
+      expect(await flaggedEventsOf(first)).toHaveLength(1);
+      // Another record of the same rider and stop has its own.
+      expect(await writtenAs(context, eventSql({ evidence: second, rider, stop }))).toBeNull();
+      expect(await flaggedEventsOf(second)).toHaveLength(1);
     });
   });
 
