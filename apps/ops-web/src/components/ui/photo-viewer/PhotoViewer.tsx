@@ -52,10 +52,14 @@ type Way = 'next' | 'previous';
 
 /**
  * The photo viewer (COMPONENT_PATTERNS, *PhotoViewer*): one photo at a time in a wide dialog, among the others of its grid. **It is generic and decides nothing**: it draws the picture the page gives it, says where
- * the person is ("3 of 12") in a polite status, moves by two buttons the size of the hub floor, by ArrowLeft and ArrowRight and by a swipe of a finger or a pen (a drag across by at least 48px that is clearly
+ * the person is ("3 of 12") in a polite status, moves by two buttons the size of the hub floor beside it, by ArrowLeft and ArrowRight and by a swipe of a finger or a pen (a drag across by at least 48px that is clearly
  * more across than down, so that a vertical scroll is left alone), and never goes past either end. It loads **one** neighbour ahead, in the way the person is going, drawn hidden. **Focus, the trap and the
  * return of focus are the dialog's** (a native modal, the control that opened it gets focus back), and Escape asks the page to close. A button that reaches its end and is disabled hands focus to the other, so that
  * a person at the keyboard is never dropped out of the dialog. Under reduced motion the change of photo does not animate.
+ *
+ * **The window is as tall as the screen allows (`fill`), the controls are the last thing in it and the photo is what gives way**: a photo is given the room that the heading and the controls leave (the stage, and the page's
+ * picture is told how much it has, `--ui-photo-room`), so that a button never leaves the screen and does not move from one photo to the next, whatever the photo's size or the length of its description. Previous, the place
+ * and Next are one row that does not break, and Close is apart from it.
  */
 export function PhotoViewer({
   items,
@@ -140,7 +144,14 @@ export function PhotoViewer({
     );
 
   return (
-    <Dialog open size="wide" title={item.label} description={description} onRequestClose={onClose}>
+    <Dialog
+      open
+      size="wide"
+      fill
+      title={item.label}
+      description={description}
+      onRequestClose={onClose}
+    >
       {/* The arrow keys are heard anywhere in the dialog: the keyboard events of a control inside it reach this box. */}
       <div className="ui-photo-viewer" ref={root} onKeyDown={onKeyDown}>
         <div
@@ -160,20 +171,16 @@ export function PhotoViewer({
             {renderPicture(ahead, { current: false })}
           </div>
         )}
-        {items.length > 1 ? (
-          <p className="ui-photo-viewer__position" role="status" aria-live="polite">
-            <VisuallyHidden>{`${item.label}, `}</VisuallyHidden>
-            {`${String(index + 1)} of ${String(items.length)}`}
-          </p>
-        ) : null}
-        <div className="ui-photo-viewer__actions">
+        <div className="ui-photo-viewer__controls">
           {items.length > 1 ? (
-            <>
+            <div className="ui-photo-viewer__nav">
+              {/* Named in full for a screen reader and drawn shortly, so that the row fits a phone; the name holds the words that are drawn (the label in the name). */}
               <Button
                 type="button"
                 variant="secondary"
                 size="lg"
                 data-viewer-act="previous"
+                aria-label="Previous photo"
                 disabled={index === 0}
                 onClick={() => {
                   pressed.current = 'previous';
@@ -181,23 +188,28 @@ export function PhotoViewer({
                 }}
               >
                 <Icon name="previous" />
-                Previous photo
+                <span className="ui-photo-viewer__label">Previous</span>
               </Button>
+              <p className="ui-photo-viewer__position" role="status" aria-live="polite">
+                <VisuallyHidden>{`${item.label}, `}</VisuallyHidden>
+                {`${String(index + 1)} of ${String(items.length)}`}
+              </p>
               <Button
                 type="button"
                 variant="secondary"
                 size="lg"
                 data-viewer-act="next"
+                aria-label="Next photo"
                 disabled={index === last}
                 onClick={() => {
                   pressed.current = 'next';
                   go('next');
                 }}
               >
-                Next photo
+                <span className="ui-photo-viewer__label">Next</span>
                 <Icon name="next" />
               </Button>
-            </>
+            </div>
           ) : null}
           <Button type="button" variant="secondary" size="lg" data-initial-focus onClick={onClose}>
             Close the photo

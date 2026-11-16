@@ -418,3 +418,117 @@ describe('PhotoViewer: moving by a swipe', () => {
     expect(screen.getByText('1 of 4')).toBeVisible();
   });
 });
+
+/**
+ * Where the controls are (the pictures of the receiving screens, 16 November 2026, defects 1 and 11): the viewer is a window as tall as the screen lets it be, **the controls are the last thing in it and the photo is
+ * the thing that gives way**, so that a button never leaves the screen and does not move from one photo to the next; and **Previous, the place and Next are one row, with Close apart**, as they were not on a phone
+ * (Previous alone on a row, the place under it, Next and Close sharing the next). The pixels are measured in a browser (`test/browser/kit.spec.ts`); this is the markup they depend on.
+ */
+describe('PhotoViewer: where the controls are', () => {
+  const part = (selector: string): HTMLElement => {
+    const found = document.querySelector<HTMLElement>(selector);
+    if (found === null) throw new Error(`There is no ${selector} in the viewer.`);
+    return found;
+  };
+
+  // Break caught: a viewer that is as tall as its content, so that its controls start below a short screen and are reached by scrolling inside it.
+  it('is a window that fills the screen’s height, which the photo gives way in', () => {
+    open();
+
+    expect(screen.getByRole('dialog')).toHaveClass('ui-dialog--wide', 'ui-dialog--fill');
+  });
+
+  // Break caught: Previous alone on a row with the place under it (a phone), or the place somewhere else than between the two buttons it counts for.
+  it('puts previous, the place and next in one row, in that order', () => {
+    open();
+
+    const row = [...part('.ui-photo-viewer__nav').children].map(
+      (child) => child.getAttribute('data-viewer-act') ?? child.getAttribute('role'),
+    );
+    expect(row).toEqual(['previous', 'status', 'next']);
+  });
+
+  // Break caught: the place under a name that the stylesheet does not style (a place that does not take the room between the buttons, or is not centred and in the secondary text).
+  it('draws the place as the element the stylesheet styles', () => {
+    open();
+
+    expect(within(part('.ui-photo-viewer__nav')).getByRole('status')).toHaveClass(
+      'ui-photo-viewer__position',
+    );
+  });
+
+  // Break caught: Close in the row of the two buttons that move (a button of another kind where a thumb moves), or somewhere that is not the last of the controls.
+  it('puts close apart from that row, in the same controls', () => {
+    open();
+
+    const close = button('Close the photo');
+    const nav = part('.ui-photo-viewer__nav');
+    expect(nav.contains(close)).toBe(false);
+    expect(close.closest('.ui-photo-viewer__controls')).toBe(part('.ui-photo-viewer__controls'));
+    expect(nav.closest('.ui-photo-viewer__controls')).toBe(part('.ui-photo-viewer__controls'));
+    expect(part('.ui-photo-viewer__controls').lastElementChild).toBe(close);
+  });
+
+  // Break caught: the controls above the photo (or between its parts), so that the photo pushes them off the screen.
+  it('has the controls after the photo, last in the viewer', () => {
+    open();
+
+    const root = part('.ui-photo-viewer');
+    expect(root.lastElementChild).toBe(part('.ui-photo-viewer__controls'));
+    expect(part('.ui-photo-viewer__stage').nextElementSibling).toBe(
+      part('.ui-photo-viewer__ahead'),
+    );
+  });
+
+  // Break caught: a viewer with no neighbour to load (the last photo, after the person went back) that has no controls in the same place: the controls are the same wherever the person is.
+  it('has its controls in the same place whatever the photo', async () => {
+    const { user } = open();
+    const where = (): string[] =>
+      [...part('.ui-photo-viewer__controls').querySelectorAll('button')].map(
+        (each) => each.getAttribute('aria-label') ?? each.textContent,
+      );
+    const first = where();
+
+    await user.click(button('Next photo'));
+    await user.click(button('Next photo'));
+
+    expect(where()).toEqual(first);
+  });
+
+  // Break caught: two buttons that say "Previous photo" and "Next photo" in full beside the place on a phone (they do not fit in 326 px with it) with no name of their own in full: they say "Previous" and "Next",
+  // and are named in full for a screen reader, which the label in the name rule allows because the name holds the words that are drawn.
+  it('says previous and next shortly where it can be seen, and in full where it is heard', () => {
+    open();
+
+    const previous = button('Previous photo');
+    const next = button('Next photo');
+    expect(previous).toHaveTextContent(/^Previous$/);
+    expect(next).toHaveTextContent(/^Next$/);
+    expect(previous).toHaveAccessibleName('Previous photo');
+    expect(next).toHaveAccessibleName('Next photo');
+    expect(previous).toHaveClass('ui-button--lg');
+    expect(next).toHaveClass('ui-button--lg');
+  });
+
+  // Break caught: the drawn words in an element that the narrowest phone's rule does not hide (a row that does not fit 320px, with the words of two buttons that are named in full without them).
+  it('draws the words of the two buttons in the element that a narrow screen hides', () => {
+    open();
+
+    expect(within(button('Previous photo')).getByText('Previous')).toHaveClass(
+      'ui-photo-viewer__label',
+    );
+    expect(within(button('Next photo')).getByText('Next')).toHaveClass('ui-photo-viewer__label');
+  });
+
+  // Break caught: a single photo with a row of two buttons and a place that count nothing.
+  it('has nothing to move by for a single photo, only close', () => {
+    open({ items: ITEMS.slice(0, 1) });
+
+    expect(document.querySelector('.ui-photo-viewer__nav')).toBeNull();
+    expect(
+      [...part('.ui-photo-viewer__controls').querySelectorAll('button')].map(
+        (each) => each.textContent,
+      ),
+    ).toEqual(['Close the photo']);
+  });
+});
