@@ -50,8 +50,9 @@ describe('the photo grid’s stylesheet', () => {
     expect(picture).toMatch(/inset:\s*0\s*;/);
   });
 
-  // Break caught: a column minimum so wide that a phone gets two tiles to a row, one so narrow that a tile is under the floor, or a grid that is not filled by as many columns as fit.
-  it('puts three tiles to a row on a 390 px phone, never a tile under the floor, and as many as fit on a desk', () => {
+  // Break caught: a column minimum so wide that a 390 px phone gets two tiles to a row, one so narrow that the words of a state do not fit the tile (the second look at the pictures: at 5.5rem "Checked in" took two lines in every
+  // checked tile and "Damaged" was broken in two), a tile under the floor, or a grid that is not filled by as many columns as fit.
+  it('puts three tiles to a row on a 390 px phone, none narrower than its state’s words need, never a tile under the floor, and as many as fit on a desk', () => {
     expect(grid).toMatch(/display:\s*grid\s*;/);
     expect(grid).toMatch(/grid-template-columns:\s*repeat\(auto-fill,/);
     expect(grid).toMatch(/gap:\s*var\(--space-3\)\s*;/);
@@ -60,16 +61,28 @@ describe('the photo grid’s stylesheet', () => {
     const column = Number(minimum?.[1]);
     const gap = rem('--space-3');
 
-    // The room a grid really has on a phone (CI run 43884891843: the showcase's list at 390 px was 292 px wide, and the minimum of 6rem, 312 px for three, gave two to a row). In a receiving screen the page keeps
-    // 16 px on each side and a vendor's section 17 (its padding and its border): 66 px in all. The showcase is framed twice (the neutral frame's 16 and its own 16, and a specimen's 17): 98 px.
+    // The room a grid really has on a phone is the receiving screen's: the page keeps 16 px on each side and a vendor's section 17 (its padding and its border), 66 px in all. (The kit's showcase is framed more, and
+    // its specimens of the grid are given the same room: the spec measures it.)
     const RECEIVING = 66;
-    const SHOWCASE = 98;
-    // Three tiles fit in the narrowest room a phone gives them: a 360 px phone in a receiving screen (294 px) and a 390 px phone in the showcase (292 px)...
-    const narrowest = Math.min(360 - RECEIVING, 390 - SHOWCASE) / 16;
-    expect(3 * column + 2 * gap).toBeLessThanOrEqual(narrowest);
-    // ...and four do not fit in the widest (a 430 px phone in a receiving screen, 364 px), so that a phone has three to a row and not four.
+    // Three tiles fit in the room a 390 px phone has in a receiving screen (324 px)...
+    expect(3 * column + 2 * gap).toBeLessThanOrEqual((390 - RECEIVING) / 16);
+    // ...and four do not fit in the widest phone's (430 px, 364 px), so that a phone has three to a row and not four.
     expect(4 * column + 3 * gap).toBeGreaterThan((430 - RECEIVING) / 16);
+    // A tile is 6rem at least, which is what a state's icon and "Checked in" need (84.3 px of the 92 px inside a tile of 96 px): the page's own grid is measured in a browser.
+    expect(column).toBeGreaterThanOrEqual(6);
     expect(column).toBeGreaterThanOrEqual(rem('--control-height-lg'));
+  });
+
+  // Break caught (the second look at the pictures, new defects 1 and 2): a strip with padding at its sides, which leaves the icon and "Checked in" less than the 84.3 px they need in a tile of 96 px, so that the words
+  // take two lines in every checked tile and a word such as "Damaged" is broken in two.
+  it('gives the strip of a state no padding at its sides, so that the icon and the words are one line in a tile of 96 px', () => {
+    const mark = ruleOf(GRID, '.ui-photo-tile__mark');
+
+    expect(mark).toMatch(/padding:\s*var\(--space-1\) var\(--space-0\)\s*;/);
+    expect(mark).toMatch(/display:\s*flex\s*;/);
+    expect(mark).toMatch(/gap:\s*var\(--space-1\)\s*;/);
+    // The words are the label size, in the face of the portal: the one line that is measured in the browser.
+    expect(mark).toMatch(/font-size:\s*var\(--text-label-sm-size\)\s*;/);
   });
 
   // Break caught: a state told in a colour that the status tokens do not own, or drawn without a background of its own, so that its words cannot be read on a picture.

@@ -1,13 +1,15 @@
 /*
  * The photo grid (design/COMPONENT_PATTERNS.md, PhotoGrid). Tiles of one shape whatever the picture is: a square whose box is made by the grid and the ratio and by nothing inside it, so that the grid never
- * jumps while pictures arrive, fail or differ in shape. **Three tiles to a row on a phone**, from a 360px one to a 430px one: the column minimum is 5.5rem (88px), the number that makes it so in the room a grid
- * really has there (a receiving screen's 294px at 360px and 364px at 430px; the showcase's 292px at 390px, because it is framed twice), held by test/photo-grid-style.test.ts and measured in a browser by the
- * kit's spec; it was 6rem, which is three only from a 312px room and gave two to a row at 390px in the showcase (CI run 43884891843) and at 360px and 375px in a receiving screen. As many as fit on a desk;
- * the tile is a button of at least the hub floor's 56px on a side. Every colour, size and space comes from tokens.css.
+ * jumps while pictures arrive, fail or differ in shape. **Three tiles to a row on a 390px phone**: the column minimum is 6rem (96px), which is three from a room of 312px, and a receiving screen leaves a 390px
+ * phone 324px (the page's 16px on each side and a vendor's section's 17px); a 360px phone has 294px and gets two. **It is not narrower, because the words of a state need the tile**: a state is an icon and
+ * one line of words in a strip along the tile's foot, and the icon, its gap and "Checked in" are 84px of the 92px a tile of 96px has inside its border. At 5.5rem (88px, commit 7d59331, made so that the kit's
+ * showcase, which is framed twice and had 292px, showed three to a row) "Checked in" took two lines in every checked tile and "Damaged" was broken in two (the second look at the pictures, 16 November 2026).
+ * Held by test/photo-grid-style.test.ts and measured on the receiving page's own grid by test/browser/receiving.spec.ts. As many as fit on a desk; the tile is a button of at least the hub floor's 56px
+ * on a side. Every colour, size and space comes from tokens.css.
  */
 .ui-photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 5.5rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 6rem), 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;
@@ -55,7 +57,9 @@
 
 /*
  * A state, told in an icon and words in a strip along the foot of the tile, on a background of its own that is never a picture's, so that it reads on any picture; the tile's border takes the same colour
- * as a second sign. The state is never the colour alone.
+ * as a second sign. The state is never the colour alone. **The words are one line**: the strip has no padding at its sides, because the tile it must hold them in is 96px and 92px inside its border, and the
+ * icon (16px), its gap (4px) and "Checked in" (64.3px in the face of the portal) are 84.3px, where a padding of 4px at each side leaves 84px. A state wraps at its spaces where it is longer (the tapped
+ * "Checked in, damaged"); a word is broken only where a line of large text cannot hold it, by the frame's `overflow-wrap`, which is better than a word cut off.
  */
 .ui-photo-tile__mark {
   position: absolute;
@@ -65,7 +69,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-0);
   border-top: 1px solid transparent;
   font-size: var(--text-label-sm-size);
   font-weight: var(--text-label-sm-weight);
