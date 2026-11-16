@@ -31,9 +31,24 @@ const later = shortfallFixture({
   sender_name: 'Kente Traders',
   declared_count: 8,
   collected_count: 7,
-  shortfall_count: 1,
+  variance: 'SHORT',
+  difference_count: 1,
   note: null,
   run_state: 'COMPLETED',
+});
+// Run D, D-D5: the list holds the counts over the booking too: a rider at the door counted more parcels than were booked.
+const over = shortfallFixture({
+  id: '8c9d0e1f-2a3b-4c4d-8e5f-6a7b8c9d0e1f',
+  pickup_stop_id: '9d0e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a',
+  request_code: 'ACC-PR-4HT8WE',
+  sender_name: 'Osei Wholesale',
+  declared_count: 4,
+  collected_count: 6,
+  variance: 'OVER',
+  difference_count: 2,
+  reason: { code: 'VENDOR_ADDED_PARCELS', label: 'Vendor added parcels', attribution: 'CUSTOMER' },
+  note: null,
+  stop_state: 'COLLECTED',
 });
 
 const page = (items: unknown[], next: string | null = null): Response =>
@@ -95,6 +110,21 @@ describe('the short counts: what the list shows', () => {
     const other = within((await screen.findByText('ACC-PR-9XM4TQ')).closest('tr') as HTMLElement);
     expect(other.getByText('The rider left no note.')).toBeVisible();
     expect(other.getByText('Completed')).toBeVisible();
+  });
+
+  // Break caught (Run D, D-D5; fails before it: the page says `Short by` of every row, whichever side of the booking the count is on): a count over the booking drawn as a short one.
+  it('says an over count is over, and by how many, as the server stated it', async () => {
+    open(() => page([over, flagged]));
+
+    const row = within((await screen.findByText('ACC-PR-4HT8WE')).closest('tr') as HTMLElement);
+    expect(row.getByText('6 counted of 4 declared')).toBeVisible();
+    expect(row.getByText('Over by 2')).toBeVisible();
+    expect(row.queryByText(/Short by/)).toBeNull();
+    expect(row.getByText('Vendor added parcels')).toBeVisible();
+    // A short count in the same list is still a short one.
+    const short = within((await screen.findByText('ACC-PR-7KQ2MZ')).closest('tr') as HTMLElement);
+    expect(short.getByText('Short by 2')).toBeVisible();
+    expect(short.queryByText(/Over by/)).toBeNull();
   });
 
   // Break caught: a row that opens nothing (a short count whose stop cannot be reached from it).

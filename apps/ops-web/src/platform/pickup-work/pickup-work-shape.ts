@@ -33,6 +33,7 @@ export type StopState = HandshakeBody['stop_state'];
 export type RunState = ShortfallBody['run_state'];
 export type DisputeState = DisputeBody['state'];
 export type CountVariance = DisputeBody['variance'];
+export type CountDifference = ShortfallBody['variance'];
 export type EvidencePurpose = EvidenceItemBody['purpose'];
 export type EvidenceState = EvidenceItemBody['state'];
 
@@ -67,7 +68,9 @@ export const ROUTED_BECAUSE = [
 ] as const;
 export const HANDSHAKE_CHANNELS = ['PORTAL', 'SMS_FALLBACK', 'OPS_OVERRIDE'] as const;
 export const DISPUTE_STATES = ['OPEN', 'RESOLVED'] as const;
-export const COUNT_VARIANCES = ['MATCH', 'SHORT'] as const;
+export const COUNT_VARIANCES = ['MATCH', 'SHORT', 'OVER'] as const;
+/** The kinds of count the office is flagged on: a count that matches the booking is no difference. */
+export const COUNT_DIFFERENCES = ['SHORT', 'OVER'] as const;
 export const EVIDENCE_PURPOSES = ['PARCEL_PHOTO', 'COLLECTION_PROOF'] as const;
 export const EVIDENCE_STATES = ['PENDING_UPLOAD', 'STORED', 'EXPIRED'] as const;
 
@@ -353,7 +356,8 @@ export const PICKUP_WORK_FIELDS = {
       'sender_name',
       'declared_count',
       'collected_count',
-      'shortfall_count',
+      'variance',
+      'difference_count',
       'reason',
       'note',
       'office_notified_at',
@@ -363,7 +367,7 @@ export const PICKUP_WORK_FIELDS = {
       'run_state',
     ],
     optional: [],
-    enums: { stop_state: STOP_STATES, run_state: MANIFEST_STATES },
+    enums: { variance: COUNT_DIFFERENCES, stop_state: STOP_STATES, run_state: MANIFEST_STATES },
   },
   CollectionDisputeListItem: {
     required: [
@@ -595,7 +599,10 @@ export interface ShortfallView extends PickupContextView {
   readonly id: string;
   readonly declared_count: number;
   readonly collected_count: number;
-  readonly shortfall_count: number;
+  /** Which side of the booking the count is on: fewer parcels than were booked, or (D-D5) more. */
+  readonly variance: CountDifference;
+  /** By how many, whichever side: the booked count and the counted one, apart. */
+  readonly difference_count: number;
   readonly reason: ReasonView;
   readonly note: string | null;
   readonly office_notified_at: string;
@@ -611,7 +618,7 @@ export function parseShortfall(body: unknown): ShortfallView | undefined {
   const id = uuidOf(body.id);
   const declared = wholeAtLeast(body.declared_count, 1);
   const collected = wholeAtLeast(body.collected_count, 1);
-  const shortfall = wholeAtLeast(body.shortfall_count, 1);
+  const difference = wholeAtLeast(body.difference_count, 1);
   const reason = parseReason(body.reason);
   const note = optional(body.note, noteTextOf);
   const notified = instantOf(body.office_notified_at);
@@ -622,25 +629,28 @@ export function parseShortfall(body: unknown): ShortfallView | undefined {
     id === undefined ||
     declared === undefined ||
     collected === undefined ||
-    shortfall === undefined ||
+    difference === undefined ||
     reason === undefined ||
     note === undefined ||
     notified === undefined ||
     recorded === undefined ||
     by === undefined ||
+    !isOneOf(COUNT_DIFFERENCES, body.variance) ||
     !isOneOf(STOP_STATES, body.stop_state) ||
     !isOneOf(MANIFEST_STATES, body.run_state)
   ) {
     return undefined;
   }
-  // What the contract states of the three figures: the shortfall is the declared count less the counted one.
-  if (declared - collected !== shortfall) return undefined;
+  // What the contract states of the figures: the difference is the booked count and the counted one apart, and the variance says which side of the booking the count is on.
+  if (Math.abs(declared - collected) !== difference) return undefined;
+  if ((body.variance === 'SHORT') !== collected < declared) return undefined;
   return {
     ...context,
     id,
     declared_count: declared,
     collected_count: collected,
-    shortfall_count: shortfall,
+    variance: body.variance,
+    difference_count: difference,
     reason,
     note,
     office_notified_at: notified,
@@ -695,9 +705,10 @@ export function parseDispute(body: unknown): DisputeView | undefined {
   ) {
     return undefined;
   }
-  // A dispute is resolved exactly when it has the moment of its resolution, and a count says what it was: short exactly when it is below the declared one.
+  // A dispute is resolved exactly when it has the moment of its resolution, and a count says what it was: short exactly when it is below the declared one, over exactly when it is above.
   if ((body.state === 'RESOLVED') !== (resolved !== null)) return undefined;
-  if ((body.variance === 'SHORT') !== collected < declared) return undefined;
+  const side = collected === declared ? 'MATCH' : collected < declared ? 'SHORT' : 'OVER';
+  if (body.variance !== side) return undefined;
   return {
     ...context,
     id,

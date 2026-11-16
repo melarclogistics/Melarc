@@ -1,6 +1,7 @@
 import type { StatusMap } from '../../../components/ui/status-badge/StatusBadge';
 import type {
   ContactMethod,
+  CountDifference,
   CountVariance,
   DisputeState,
   EscalationView,
@@ -168,10 +169,16 @@ export const EVIDENCE_STATE_MAP: StatusMap<EvidenceState> = {
 export const countText = (count: number, one: string, other: string): string =>
   `${String(count)} ${count === 1 ? one : other}`;
 
-/** The figures of a count, as the server stated them: what was declared, what was counted, and by how many it fell short. */
+/** The figures of a count, as the server stated them: what was declared and what was counted. */
 export function shortCountText(declared: number, collected: number): string {
   return `${String(collected)} counted of ${String(declared)} declared`;
 }
+
+/** By how many a count differs from the booking and on which side, as the server stated it (D-D5): the page works out nothing. The words are provisional until the screen of the count differences is redone. */
+export const countDifferenceLabel = (variance: CountDifference): string =>
+  variance === 'SHORT' ? 'Short by' : 'Over by';
+export const countDifferenceText = (variance: CountDifference, difference: number): string =>
+  `${countDifferenceLabel(variance)} ${String(difference)}`;
 
 /** What a dispute a vendor raised is called. No operation resolves one in this slice, so every item is open until the reconciliation workflow exists. */
 export const DISPUTE_STATE_MAP: StatusMap<DisputeState> = {
@@ -183,6 +190,7 @@ export const DISPUTE_STATE_MAP: StatusMap<DisputeState> = {
 export const VARIANCE_WORDS: Readonly<Record<CountVariance, string>> = {
   MATCH: 'The count matched what was declared.',
   SHORT: 'The count was short of what was declared.',
+  OVER: 'The count was over what was declared.',
 };
 
 /** The way to a stop's own page, where its photos open one at a time. */

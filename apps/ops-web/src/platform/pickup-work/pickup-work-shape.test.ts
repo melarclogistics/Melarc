@@ -346,7 +346,8 @@ describe('a short count', () => {
     expect(parseShortfall(shortfallFixture())).toMatchObject({
       declared_count: 5,
       collected_count: 3,
-      shortfall_count: 2,
+      variance: 'SHORT',
+      difference_count: 2,
       reason: { code: 'PARCELS_NOT_READY', attribution: 'VENDOR' },
       stop_state: 'PARTIALLY_COLLECTED',
       run_state: 'IN_PROGRESS',
@@ -354,11 +355,40 @@ describe('a short count', () => {
     });
   });
 
-  // Break caught: a shortfall that does not add up, shown with the figures as sent (the page works out none of it, and a sum that is not the API's is refused).
+  // Break caught (Run D, D-D5; fails before it: the list held short counts only, and `shortfall_count` is gone): a count over the booking read as a short one, or refused.
+  it('is read, when it is over the booking, with the side it is on and by how many', () => {
+    expect(
+      parseShortfall(
+        shortfallFixture({
+          collected_count: 7,
+          variance: 'OVER',
+          difference_count: 2,
+          stop_state: 'COLLECTED',
+        }),
+      ),
+    ).toMatchObject({
+      declared_count: 5,
+      collected_count: 7,
+      variance: 'OVER',
+      difference_count: 2,
+      stop_state: 'COLLECTED',
+    });
+  });
+
+  // Break caught: a count difference that does not add up, shown with the figures as sent (the page works out none of it, and a sum that is not the API's is refused), or on the wrong side of the booking.
   it.each([
-    ['a shortfall that is not the declared count less the counted one', { shortfall_count: 1 }],
-    ['a declared count of zero', { declared_count: 0, collected_count: 0, shortfall_count: 0 }],
-    ['a counted figure of zero', { collected_count: 0, shortfall_count: 5 }],
+    [
+      'a difference that is not the booked count and the counted one apart',
+      { difference_count: 1 },
+    ],
+    ['a declared count of zero', { declared_count: 0, collected_count: 0, difference_count: 0 }],
+    ['a counted figure of zero', { collected_count: 0, difference_count: 5 }],
+    ['a short count marked as over', { variance: 'OVER' as const }],
+    [
+      'an over count marked as short',
+      { collected_count: 7, difference_count: 2, variance: 'SHORT' as const },
+    ],
+    ['a variance the contract does not have', { variance: 'MATCH' as never }],
     ['a recorder that is not an identifier', { recorded_by: 'rider' }],
     ['a run state the contract does not have', { run_state: 'LOST' as never }],
     ['a notice moment that is not an instant', { office_notified_at: '9am' }],
@@ -402,7 +432,13 @@ describe('a collection dispute', () => {
     ['a resolved dispute with no moment of its resolution', { state: 'RESOLVED' as const }],
     ['a moment of resolution on an open dispute', { resolved_at: '2026-11-05T09:00:00Z' }],
     ['a short count that is not below the declared one', { collected_count: 5 }],
+    ['a short count that is above the declared one', { collected_count: 7 }],
+    ['an over count that is not above the declared one', { variance: 'OVER' as const }],
     ['a match that is below the declared count', { variance: 'MATCH' as const }],
+    [
+      'a match that is above the declared count',
+      { collected_count: 7, variance: 'MATCH' as const },
+    ],
     ['a note that is blank', { note: '   ' }],
     ['a note that is too long', { note: 'x'.repeat(1001) }],
     ['a vendor that is not an identifier', { vendor_organization_id: 'v' }],
@@ -415,6 +451,15 @@ describe('a collection dispute', () => {
     expect(
       parseDispute(disputeFixture({ state: 'RESOLVED', resolved_at: '2026-11-05T09:00:00Z' })),
     ).toMatchObject({ state: 'RESOLVED', resolved_at: '2026-11-05T09:00:00Z' });
+  });
+
+  // Break caught (Run D, D-D5; fails before it: the list of variances had no OVER): a dispute about a count above the booking, which the vendor can raise as well, refused as unreadable.
+  it('is read when the count was over the declared one', () => {
+    expect(parseDispute(disputeFixture({ collected_count: 7, variance: 'OVER' }))).toMatchObject({
+      declared_count: 5,
+      collected_count: 7,
+      variance: 'OVER',
+    });
   });
 
   it('reads a page and refuses one that lists a dispute twice', () => {

@@ -16,7 +16,12 @@ import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { MANIFEST_STATE_MAP } from '../manifests/manifest-presentation';
 import { hubNameOf } from '../staff/staff-presentation';
-import { shortCountText, stopPathOf } from './pickup-work-presentation';
+import {
+  countDifferenceLabel,
+  countDifferenceText,
+  shortCountText,
+  stopPathOf,
+} from './pickup-work-presentation';
 import { WorkList, type WorkView } from './WorkList';
 
 const VIEWS: readonly [WorkView, ...WorkView[]] = [
@@ -55,7 +60,7 @@ function ShortfallCard({ item, hubs }: { readonly item: ShortfallView; readonly 
       lead={item.sender_name}
       facts={[
         { label: 'Counted', value: shortCountText(item.declared_count, item.collected_count) },
-        { label: 'Short by', value: String(item.shortfall_count) },
+        { label: countDifferenceLabel(item.variance), value: String(item.difference_count) },
         { label: 'Reason', value: item.reason.label },
         ...(item.note === null ? [] : [{ label: 'Rider’s note', value: item.note }]),
         { label: 'Office told', value: formatInstant(item.office_notified_at) ?? '' },
@@ -92,7 +97,7 @@ export function ShortfallsPage() {
       cell: (item) => (
         <CellLines
           first={shortCountText(item.declared_count, item.collected_count)}
-          second={`Short by ${String(item.shortfall_count)}`}
+          second={countDifferenceText(item.variance, item.difference_count)}
         />
       ),
     },

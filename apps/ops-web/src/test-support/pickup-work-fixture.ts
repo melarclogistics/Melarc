@@ -99,7 +99,8 @@ export function shortfallFixture(overrides: Partial<ShortfallBody> = {}): Shortf
     id: WORK_ROW_ID,
     declared_count: 5,
     collected_count: 3,
-    shortfall_count: 2,
+    variance: 'SHORT',
+    difference_count: 2,
     reason: {
       code: 'PARCELS_NOT_READY',
       label: 'Some parcels were not ready',
