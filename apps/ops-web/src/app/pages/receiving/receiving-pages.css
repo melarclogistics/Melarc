@@ -98,6 +98,23 @@
 }
 
 /*
+ * On a phone (under 30rem) three buttons one under the other took a quarter of the screen (the second review of the pictures, steps 2, 4, 5 and 13). The first button of the bar, the act the officer is
+ * most likely to make ("All 12 here", "Finish this vendor"), takes the row, and the others share the next while two of them fit it (9rem each and the gap of a thumb: 300px, and a phone's card holds 324px);
+ * where they do not fit, at 320px or with enlarged text (the rem is the text's), they stand one under the other as before. Their words wrap in two lines, and a button is still the floor's 56px at least
+ * (the height is a minimum), with a little less room at its sides for its words.
+ */
+@media (max-width: 30rem) {
+  .receiving-actions > :first-child {
+    flex: 1 1 100%;
+  }
+
+  .receiving-actions > :not(:first-child) {
+    flex: 1 1 9rem;
+    padding-inline: var(--space-3);
+  }
+}
+
+/*
  * **The bar of the vendor in work only** (the first vendor that waits, and any vendor the officer is checking in; the page says which) is kept at the foot of the visible screen, above the on-screen keyboard and
  * clear of the home indicator, so that "All 12 here" is under the thumb whether the officer has scrolled through the photos or not. A bar kept there for every vendor was drawn over the top of its own card,
  * over the vendor's name, wherever the card began at the foot of the screen (the review of the pictures, defect 3).

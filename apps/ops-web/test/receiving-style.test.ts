@@ -73,6 +73,17 @@ describe('the receiving screens’ stylesheet', () => {
     expect(ruleOf(SHEET, '.receiving-actions > *')).toMatch(/flex:\s*1\s+1\s+14rem\s*;/);
   });
 
+  // Break caught (the second review of the pictures, steps 2, 4, 5 and 13): the three buttons of the bar one under the other on a phone, a quarter of the screen: the first takes the row, and the others share
+  // the next while they fit (and stand one under the other where they do not).
+  it('gives the first button of the bar the row on a phone, and lets the others share the next while they fit', () => {
+    const phone = /@media \(max-width: 30rem\) \{([\s\S]*?)\n\}/.exec(SHEET)?.[1] ?? '';
+
+    expect(ruleOf(phone, '.receiving-actions > :first-child')).toMatch(/flex:\s*1\s+1\s+100%\s*;/);
+    expect(ruleOf(phone, '.receiving-actions > :not(:first-child)')).toMatch(
+      /flex:\s*1\s+1\s+9rem\s*;/,
+    );
+  });
+
   // Break caught: a section whose long vendor name or sentence runs past the box on a 320 px phone.
   it('lets a name or a sentence of a vendor break, so that nothing runs past its box', () => {
     expect(ruleOf(SHEET, '.receiving-vendor p')).toMatch(/overflow-wrap:\s*anywhere\s*;/);
@@ -88,7 +99,8 @@ describe('the receiving screens’ stylesheet', () => {
     const lengths = [...clean.matchAll(/(?<![\w-])(\d+(?:\.\d+)?)(px|rem)\b/g)].map(
       (match) => `${match[1] ?? ''}${match[2] ?? ''}`,
     );
-    // The outline of a focused notice (2px, a line and not a size of the page), the width of a button of the bar (14rem) and the zero of the safe area.
-    expect(new Set(lengths)).toEqual(new Set(['2px', '1px', '14rem', '0px']));
+    // The outline of a focused notice (2px, a line and not a size of the page), the width of a button of the bar (14rem, and 9rem on a phone, where the bar starts to share its rows at 30rem) and the zero
+    // of the safe area.
+    expect(new Set(lengths)).toEqual(new Set(['2px', '1px', '14rem', '9rem', '30rem', '0px']));
   });
 });
