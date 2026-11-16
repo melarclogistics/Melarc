@@ -1,30 +1,18 @@
-import { deflateSync } from 'node:zlib';
+import { crc32, deflateSync } from 'node:zlib';
 
 /**
  * A photo that a browser can really decode and draw, made without a file on disk: a PNG of one opaque pixel. The photo kit's browser specs hand it to a file input (`setInputFiles`), because a preview that is drawn
- * on a canvas from the file can only be proved with a file that decodes: a made-up byte string would be refused by the decoder, and the proof would be that nothing was drawn.
+ * on a canvas from the file can only be proved with a file that decodes: a made-up byte string would be refused by the decoder, and the proof would be that nothing was drawn. **The check of each chunk is the
+ * platform's own CRC-32** (`zlib.crc32`), and `test/browser-support-png.test.ts` reads the bytes the way a decoder does: the first version computed the CRC by a table of its own and got it wrong, which a browser
+ * answers by refusing the file (CI run 43884891843: the preview stayed blank).
  */
-const CRC_TABLE = Array.from({ length: 256 }, (_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) {
-    value = value % 2 === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  }
-  return value >>> 0;
-});
-
-function crc32(bytes: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) crc = (CRC_TABLE[(crc ^ byte) & 0xff] ?? 0) ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
 function chunk(type: string, data: Buffer): Buffer {
   const length = Buffer.alloc(4);
   length.writeUInt32BE(data.length, 0);
   const name = Buffer.from(type, 'latin1');
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(Buffer.concat([name, data])), 0);
-  return Buffer.concat([length, name, data, crc]);
+  const check = Buffer.alloc(4);
+  check.writeUInt32BE(crc32(Buffer.concat([name, data])), 0);
+  return Buffer.concat([length, name, data, check]);
 }
 
 /** The bytes of a 1 x 1 PNG whose one pixel is opaque and has the colour given (red, green, blue: 0 to 255). */
