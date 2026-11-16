@@ -14,6 +14,17 @@ const OTHER_HUB_STOP = 'This stop belongs to a hub your account does not work in
 const STALE_LIST =
   'That page of the list could not be opened: its place in the list was not accepted. Go back to the first page to start again.';
 
+/**
+ * The words of a picture that would not load, which no answer of the API says (the browser tells a page that an image failed, and nothing more): they are drawn where a photo is opened
+ * (`EvidencePhotoDialog`), on the stop's pages and the receiving side's alike. **The two are told apart on purpose.** A picture that fails after a new link was asked for is a store that
+ * did not answer or a connection that is down, and the officer is told to try again; a picture the browser's own policy blocked would fail the same way for ever, and said as a lost link it would
+ * send the officer back to a button that cannot help, so it is told as blocked and as the portal's setting (a thing for whoever looks after the portal, and never the photo's or the connection's).
+ */
+export const PHOTO_UNREACHABLE =
+  'The photo could not be shown, even with a new link. Check the connection and open it again in a moment.';
+export const PHOTO_BLOCKED =
+  'The browser blocked this photo. The portal’s settings do not allow it to show pictures from the photo store, so the photo itself is not at fault. Tell the person who looks after the portal.';
+
 /** The four lists share a refusal of a filter or a place that the server would not take, which is a contract that moved and not something the person did. */
 const LISTS = [
   [

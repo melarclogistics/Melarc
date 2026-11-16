@@ -70,7 +70,8 @@ const grant =
       {
         method: 'GET',
         url: `https://photos.example/${name}?sig=one`,
-        expires_at: '2026-11-14T10:05:00Z',
+        // A link with its five minutes left, counted from the moment it is asked for: a link of a fixed day that has gone by would be replaced before it is drawn (EvidencePhotoDialog).
+        expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
       },
       { 'Cache-Control': 'no-store' },
     );

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, type BoundFunctions, type queries } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -51,10 +51,12 @@ const progress = (stored: number, pending = 0, expired = 0) => ({
   expired,
 });
 
-const authorization = (n: number) => ({
+/** The five minutes a link lives (`createEvidenceRetrievalAuthorization`), counted from the moment the test asks: a link with time left, and not one of a fixed day that has since gone by. */
+const FIVE_MINUTES = 5 * 60_000;
+const authorization = (n: number, lifeMs = FIVE_MINUTES) => ({
   method: 'GET',
   url: `https://store.example/evidence/photo-${String(n)}?token=t${String(n)}`,
-  expires_at: '2026-11-04T09:36:00Z',
+  expires_at: new Date(Date.now() + lifeMs).toISOString(),
 });
 
 let api: FakeApi;
@@ -286,19 +288,170 @@ describe('a photo opened', () => {
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
   });
 
-  it('tells an image that would not load, and what to do', async () => {
-    const { user } = open(
+  /**
+   * A link lives five minutes and the picture is a request of its own. These tests open photo 1 and make its picture fail the way the browser does (the `error` event of the image), and a
+   * link the store would answer for is the one the page asked for last: each opening, and the one renewal, asks for a link of its own (`authorization(n)`: the nth link issued).
+   */
+  const asking = (answer: (issued: number) => Response) => {
+    let issued = 0;
+    return {
+      issued: () => issued,
+      handlers: {
+        [`POST /evidence/${idOf(1)}/retrieval-authorization`]: () => {
+          issued += 1;
+          return answer(issued);
+        },
+      },
+    };
+  };
+  const openPhotoOne = (answer: (issued: number) => Response) => {
+    const links = asking(answer);
+    const page = open(
       () => json(200, evidenceListFixture({ items: [photo(1)], parcel_photos: progress(1) })),
       READER,
-      { [`POST /evidence/${idOf(1)}/retrieval-authorization`]: () => json(200, authorization(1)) },
+      links.handlers,
+    );
+    return { ...page, links };
+  };
+  const pictureOf = async (
+    dialog: BoundFunctions<typeof queries>,
+    link: number,
+  ): Promise<HTMLElement> =>
+    waitFor(() => {
+      const picture = dialog.getByRole('img');
+      expect(picture).toHaveAttribute('src', authorization(link).url);
+      return picture;
+    });
+
+  // Break caught (the review of Run B, finding 4): a picture that would not load, because its link ran out, was shown as broken and never asked for again, so the officer had to close the photo and open it again.
+  it('asks for a new link once when the picture would not load, and draws the photo with it', async () => {
+    const { user, links } = openPhotoOne((issued) => json(200, authorization(issued)));
+
+    const dialog = within(await openPhoto(user, 1));
+    (await pictureOf(dialog, 1)).dispatchEvent(new Event('error'));
+
+    const again = await pictureOf(dialog, 2);
+    expect(again).toBeVisible();
+    expect(links.issued()).toBe(2);
+    expect(authorizations()).toHaveLength(2);
+    expect(dialog.queryByText(/could not be shown/)).toBeNull();
+  });
+
+  // Break caught: a renewal that is asked for again and again (a loop of requests for a photo that cannot be shown), or one that says nothing when it fails too.
+  it('says plainly that the photo could not be shown when the new link fails too, and asks no third time', async () => {
+    const { user, links } = openPhotoOne((issued) => json(200, authorization(issued)));
+
+    const dialog = within(await openPhoto(user, 1));
+    (await pictureOf(dialog, 1)).dispatchEvent(new Event('error'));
+    (await pictureOf(dialog, 2)).dispatchEvent(new Event('error'));
+
+    expect(
+      await dialog.findByText(/The photo could not be shown, even with a new link/),
+    ).toBeVisible();
+    expect(dialog.queryByRole('img')).toBeNull();
+    expect(links.issued()).toBe(2);
+    expect(authorizations()).toHaveLength(2);
+  });
+
+  // Break caught: a link about to run out drawn as it came, so that the picture fails a moment later for a reason the page could have seen.
+  it('asks for a new link before it draws one that is about to run out, and for no more than one', async () => {
+    const { user, links } = openPhotoOne((issued) =>
+      json(200, authorization(issued, issued === 1 ? 5_000 : FIVE_MINUTES)),
     );
 
     const dialog = within(await openPhoto(user, 1));
-    const image = await dialog.findByRole('img');
-    image.dispatchEvent(new Event('error'));
 
-    expect(await dialog.findByText(/The photo could not be shown/)).toBeVisible();
+    await pictureOf(dialog, 2);
+    expect(links.issued()).toBe(2);
+    expect(authorizations()).toHaveLength(2);
+  });
+
+  it('draws a link with time left as it came, and asks for no other', async () => {
+    const { user, links } = openPhotoOne((issued) => json(200, authorization(issued)));
+
+    const dialog = within(await openPhoto(user, 1));
+
+    await pictureOf(dialog, 1);
+    expect(links.issued()).toBe(1);
+  });
+
+  // Break caught (the review of Run B, finding 4): a picture that the browser's own policy blocked was told as a link that may have run out or a store that did not answer, so the officer retried what cannot work.
+  it('tells a photo that the browser blocked as blocked, and blames neither the link nor the connection', async () => {
+    const { user, links } = openPhotoOne((issued) => json(200, authorization(issued)));
+
+    const dialog = within(await openPhoto(user, 1));
+    const picture = await pictureOf(dialog, 1);
+    // The browser says so before the picture fails: a `securitypolicyviolation` of the image directive, for the address the picture was asked at.
+    window.dispatchEvent(
+      Object.assign(new Event('securitypolicyviolation'), {
+        effectiveDirective: 'img-src',
+        violatedDirective: 'img-src',
+        blockedURI: 'https://store.example',
+      }),
+    );
+    picture.dispatchEvent(new Event('error'));
+
+    expect(await dialog.findByText(/The browser blocked this photo/)).toBeVisible();
+    expect(dialog.queryByText(/ran out|run out|did not answer|new link/)).toBeNull();
     expect(dialog.queryByRole('img')).toBeNull();
+    // A new link cannot get past a policy: none is asked for.
+    expect(links.issued()).toBe(1);
+  });
+
+  // Break caught: a violation of another directive, or of another address, taken for the picture's own and told as a block.
+  it('does not take another violation of the browser’s policy for the photo’s own', async () => {
+    const { user } = openPhotoOne((issued) => json(200, authorization(issued)));
+
+    const dialog = within(await openPhoto(user, 1));
+    const picture = await pictureOf(dialog, 1);
+    window.dispatchEvent(
+      Object.assign(new Event('securitypolicyviolation'), {
+        effectiveDirective: 'script-src',
+        violatedDirective: 'script-src',
+        blockedURI: 'https://store.example',
+      }),
+    );
+    window.dispatchEvent(
+      Object.assign(new Event('securitypolicyviolation'), {
+        effectiveDirective: 'img-src',
+        violatedDirective: 'img-src',
+        blockedURI: 'https://elsewhere.example',
+      }),
+    );
+    picture.dispatchEvent(new Event('error'));
+
+    await pictureOf(dialog, 2);
+    expect(dialog.queryByText(/blocked/)).toBeNull();
+  });
+
+  // Break caught: a renewal that failed left the broken picture on the screen, or was told as the first failure was.
+  it('says so in words when a new link cannot be asked for', async () => {
+    const { user } = openPhotoOne((issued) =>
+      issued === 1 ? json(200, authorization(1)) : refusal(503, 'SERVICE_UNAVAILABLE'),
+    );
+
+    const dialog = within(await openPhoto(user, 1));
+    (await pictureOf(dialog, 1)).dispatchEvent(new Event('error'));
+
+    expect(
+      await dialog.findByText('This photo could not be opened. Close it and try again.'),
+    ).toBeVisible();
+    expect(dialog.queryByRole('img')).toBeNull();
+  });
+
+  it('asks for a link again each time the photo is opened, and the one renewal is each opening’s own', async () => {
+    const { user, links } = openPhotoOne((issued) => json(200, authorization(issued)));
+
+    const first = within(await openPhoto(user, 1));
+    (await pictureOf(first, 1)).dispatchEvent(new Event('error'));
+    (await pictureOf(first, 2)).dispatchEvent(new Event('error'));
+    await first.findByText(/even with a new link/);
+    await user.click(first.getByRole('button', { name: 'Close the photo' }));
+
+    const second = within(await openPhoto(user, 1));
+    (await pictureOf(second, 3)).dispatchEvent(new Event('error'));
+    await pictureOf(second, 4);
+    expect(links.issued()).toBe(4);
   });
 });
 
