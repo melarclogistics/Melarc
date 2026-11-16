@@ -515,6 +515,12 @@ describe('the manifest of a run, as the keys that read intakes see it (migration
     expect(await seenBy('hub.read', [])).toEqual([]);
     // The draft run of the first hub, which no hub has been handed, is in none of them.
     expect(await seenBy('hub.read', [HUB_A, HUB_B])).not.toContain(draft.id);
+    // The policy is for the application's login and the owner's functions and for no other role: its check reads `pickup_intake`, and a role that reads manifests without the right to read intakes (the delivery
+    // worker's lane, which relays the envelope of a dispatched run) would be refused for it (42501) if the policy applied to it (the first CI run of the branch: the lane relayed nothing).
+    const [policy] = await routes.rows<{ roles: string[] }>(
+      `select roles::text[] as roles from pg_policies where tablename = 'pickup_manifest' and policyname = 'pickup_manifest_receiving_read'`,
+    );
+    expect(policy?.roles.toSorted()).toEqual(['melarc_api_runtime', 'melarc_owner']);
   });
 });
 
