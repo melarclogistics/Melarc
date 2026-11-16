@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Panel } from '../../../components/ui/panel/Panel';
 import type { VendorView } from '../../../platform/hub-receiving/receiving-shape';
 import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
 import { ParcelGrid } from './ParcelGrid';
+import { ParcelViewer } from './ParcelViewer';
 import { countsText } from './receiving-presentation';
 import './receiving-pages.css';
 
@@ -13,10 +14,38 @@ export interface RunSummaryProps {
   readonly focusOnAppear: boolean;
 }
 
+/** The parcels of a vendor that are missing, as photos the rider can be shown: a tile opens the photo in the viewer, among the others that are missing. */
+function MissingPhotos({ vendor }: { readonly vendor: VendorView }) {
+  const [viewId, setViewId] = useState<string | undefined>(undefined);
+  const missing = vendor.parcels.filter((parcel) => parcel.state === 'MISSING');
+  if (missing.length === 0) return null;
+  return (
+    <>
+      <p>{WORDS.summary.missingLead}</p>
+      <ParcelGrid
+        label={WORDS.summary.missingLabel(vendor.vendor_name)}
+        parcels={missing}
+        onPress={(parcel) => {
+          setViewId(parcel.id);
+        }}
+      />
+      {viewId === undefined ? null : (
+        <ParcelViewer
+          parcels={missing}
+          startId={viewId}
+          onClose={() => {
+            setViewId(undefined);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 /**
  * The run when every vendor is finished (D-D2): **what came of it, and the next step.** *Check the rider's bag before they leave* leads, because a missing parcel may be in it; each vendor says what it came to
- * (checked in, missing, extra, damaged, which are the API's counts), the pictures of the parcels that are missing are shown **so that the rider can be shown them**, and a vendor that needs a decision says that a
- * senior officer will decide. The page adds nothing up: a count is told for each vendor, as the API gave it.
+ * (checked in, missing, extra, damaged, which are the API's counts), the pictures of the parcels that are missing are shown **so that the rider can be shown them** (each opens in the viewer), and a vendor
+ * that needs a decision says that a senior officer will decide. The page adds nothing up: a count is told for each vendor, as the API gave it.
  */
 export function RunSummary({ vendors, focusOnAppear }: RunSummaryProps) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -33,23 +62,12 @@ export function RunSummary({ vendors, focusOnAppear }: RunSummaryProps) {
       <p className="receiving-summary__lead">{WORDS.summary.lead}</p>
       {clean ? <p>{WORDS.summary.allIn}</p> : null}
       <ul className="receiving-summary__vendors">
-        {vendors.map((vendor) => {
-          const missing = vendor.parcels.filter((parcel) => parcel.state === 'MISSING');
-          return (
-            <li key={vendor.intake_id}>
-              <p>{WORDS.summary.vendorLine(vendor.vendor_name, countsText(vendor))}</p>
-              {missing.length === 0 ? null : (
-                <>
-                  <p>{WORDS.summary.missingLead}</p>
-                  <ParcelGrid
-                    label={WORDS.summary.missingLabel(vendor.vendor_name)}
-                    parcels={missing}
-                  />
-                </>
-              )}
-            </li>
-          );
-        })}
+        {vendors.map((vendor) => (
+          <li key={vendor.intake_id}>
+            <p>{WORDS.summary.vendorLine(vendor.vendor_name, countsText(vendor))}</p>
+            <MissingPhotos vendor={vendor} />
+          </li>
+        ))}
       </ul>
       {deciding.length === 0 ? null : (
         <p>{WORDS.summary.decisionFor(deciding.map((vendor) => vendor.vendor_name).join(', '))}</p>

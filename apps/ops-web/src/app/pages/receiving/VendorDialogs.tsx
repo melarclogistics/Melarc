@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { useUploadGate, UploadGateNotice } from '../../../components/ui/evidence-upload/UploadGate';
 import { Field } from '../../../components/ui/field/Field';
 import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { useApiClient } from '../../../platform/api/api-client';
@@ -157,7 +158,7 @@ export function ExtraParcelDialog({
 }: ExtraParcelDialogProps) {
   const client = useApiClient();
   const [photos, setPhotos] = useState<readonly string[]>([]);
-  const [busy, setBusy] = useState(false);
+  const gate = useUploadGate();
   const [photoError, setPhotoError] = useState<string | undefined>(undefined);
   const [note, setNote] = useState('');
   return (
@@ -171,10 +172,11 @@ export function ExtraParcelDialog({
       operation="addExtraParcel"
       retryable
       build={() => {
+        // A photo on its way is told by the gate's own line beside the field, which is on the screen already: nothing is sent until it is stored.
+        if (gate.busy) return undefined;
         const [photo] = photos;
-        const wrong = busy
-          ? WORDS.extra.photoBusy
-          : photo === undefined
+        const wrong =
+          photo === undefined
             ? WORDS.extra.photoNeeded
             : photos.length > 1
               ? WORDS.extra.onePhoto
@@ -205,8 +207,9 @@ export function ExtraParcelDialog({
         required
         error={photoError}
         onChange={setPhotos}
-        onBusyChange={setBusy}
+        onBusyChange={gate.watch(WORDS.extra.photoLabel)}
       />
+      <UploadGateNotice gate={gate} />
       <Field label={WORDS.extra.noteLabel} help={WORDS.extra.noteHelp}>
         <Textarea
           name="note"
@@ -252,7 +255,7 @@ export function DamageDialog({
 }: DamageDialogProps) {
   const client = useApiClient();
   const [photos, setPhotos] = useState<readonly string[]>([]);
-  const [busy, setBusy] = useState(false);
+  const gate = useUploadGate();
   const [photoError, setPhotoError] = useState<string | undefined>(undefined);
   const [note, setNote] = useState('');
   const label = WORDS.parcel.label(parcel.ordinal, parcel.origin === 'HUB_EXTRA');
@@ -267,11 +270,9 @@ export function DamageDialog({
       operation="floor:recordIntakeCondition"
       retryable
       build={() => {
-        const wrong = busy
-          ? WORDS.damage.photoBusy
-          : photos.length === 0
-            ? WORDS.damage.photoNeeded
-            : undefined;
+        // A photo on its way is told by the gate's own line beside the field, which is on the screen already: nothing is sent until it is stored.
+        if (gate.busy) return undefined;
+        const wrong = photos.length === 0 ? WORDS.damage.photoNeeded : undefined;
         setPhotoError(wrong);
         if (wrong !== undefined) return undefined;
         const said = note.trim();
@@ -312,8 +313,9 @@ export function DamageDialog({
         required
         error={photoError}
         onChange={setPhotos}
-        onBusyChange={setBusy}
+        onBusyChange={gate.watch(WORDS.damage.photoLabel)}
       />
+      <UploadGateNotice gate={gate} />
       <Field label={WORDS.damage.noteLabel} help={WORDS.damage.noteHelp}>
         <Textarea
           name="note"

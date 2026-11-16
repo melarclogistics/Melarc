@@ -12,6 +12,7 @@ import { formatClock } from '../../../platform/time/format-time';
 import { countPath } from '../intakes/intake-presentation';
 import { ParcelDialog } from './ParcelDialog';
 import { ParcelGrid } from './ParcelGrid';
+import { ParcelViewer } from './ParcelViewer';
 import { countsText, photographedText, VENDOR_STATE_MAP } from './receiving-presentation';
 import type { RunActs } from './use-run-acts';
 import {
@@ -158,6 +159,8 @@ function PhotoVendor({
   const [chosen, setChosen] = useState(false);
   const [dialog, setDialog] = useState<'all' | 'finish' | 'extra' | undefined>(undefined);
   const [openId, setOpenId] = useState<string | undefined>(undefined);
+  /** The photo looked at in the viewer, by the parcel it is of: pressing a tile outside a check-in opens it, and so does *Look at the photos*. */
+  const [viewId, setViewId] = useState<string | undefined>(undefined);
   const [damagedId, setDamagedId] = useState<string | undefined>(undefined);
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
   /** The parcels whose tap is on its way: a second press on one is ignored (a disabled tile would lose the focus). */
@@ -177,9 +180,9 @@ function PhotoVendor({
   const gridLabel = WORDS.vendor.gridLabel(vendor.vendor_name);
 
   async function press(parcel: ParcelView): Promise<void> {
-    // An extra is never toggled by a press: taking it back is a decision of its own, made in its dialog.
+    // An extra is never toggled by a press: taking it back is a decision of its own, made in its dialog, which the viewer leads to.
     if (!tapping || parcel.origin === 'HUB_EXTRA') {
-      setOpenId(parcel.id);
+      setViewId(parcel.id);
       return;
     }
     if (sending.current.has(parcel.id)) return;
@@ -231,6 +234,20 @@ function PhotoVendor({
           void press(parcel);
         }}
       />
+      {tapping && vendor.parcels.length > 0 ? (
+        <div className="receiving-actions">
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            onClick={() => {
+              setViewId(vendor.parcels[0]?.id);
+            }}
+          >
+            {WORDS.viewer.lookAt}
+          </Button>
+        </div>
+      ) : null}
       {mayAddExtra ? (
         <div className="receiving-actions">
           {waiting && tapping ? (
@@ -344,6 +361,23 @@ function PhotoVendor({
             void readAgain();
           }}
           onReload={readAgain}
+        />
+      )}
+      {viewId === undefined ? null : (
+        <ParcelViewer
+          parcels={vendor.parcels}
+          startId={viewId}
+          onClose={() => {
+            setViewId(undefined);
+          }}
+          {...(mayCount
+            ? {
+                onAct: (parcel: ParcelView) => {
+                  setViewId(undefined);
+                  setOpenId(parcel.id);
+                },
+              }
+            : {})}
         />
       )}
       {opened === undefined ? null : (

@@ -27,7 +27,7 @@ export interface ParcelDialogProps {
 }
 
 /** What the parcel is, in a sentence: the API's state and the officer and the moment it was checked in. */
-function stateLine(parcel: ParcelView): string {
+export function stateLine(parcel: ParcelView): string {
   switch (parcel.state) {
     case 'ARRIVED': {
       const at = parcel.arrived_at === null ? undefined : formatClock(parcel.arrived_at);

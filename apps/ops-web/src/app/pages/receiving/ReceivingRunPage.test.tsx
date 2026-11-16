@@ -133,6 +133,27 @@ const alertSaying = async (text: string | RegExp): Promise<HTMLElement> => {
 /** The vendor's section, once the run is drawn. */
 const kente = () => section(KENTE);
 
+/** A press on a tile opens the photo in the viewer, and *Open this parcel* leads from it to the parcel's own dialog, where the acts are. */
+const actOn = async (
+  user: ReturnType<typeof open>['user'],
+  tile: HTMLElement,
+  name: string,
+): Promise<HTMLElement> => {
+  await user.click(tile);
+  await user.click(await screen.findByRole('button', { name: 'Open this parcel' }));
+  await waitFor(() => {
+    expect(screen.queryByRole('button', { name: 'Open this parcel' })).toBeNull();
+  });
+  return screen.findByRole('dialog', { name });
+};
+
+/** The camera's input of an upload in photo mode: the one the page's own button opens on a tablet. */
+const cameraOf = (dialog: HTMLElement): HTMLInputElement => {
+  const input = dialog.querySelector<HTMLInputElement>('input[capture]');
+  if (input === null) throw new Error('no camera input');
+  return input;
+};
+
 /** The answer of a tap: the parcels as they are after it, the vendor's token and its counts. */
 const tapAnswer = (
   parcels: ReturnType<typeof parcelFixture>[],
@@ -680,9 +701,11 @@ describe('one parcel, opened', () => {
   // Break caught: a condition drawn as fine from a default, when nobody has recorded one.
   it('says who checked the parcel in and when, and that its condition is not checked yet', async () => {
     const { user } = open({ run });
-    await user.click(await screen.findByRole('button', { name: 'Parcel 1, Checked in' }));
-
-    const dialog = await screen.findByRole('dialog', { name: 'Parcel 1' });
+    const dialog = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Parcel 1, Checked in' }),
+      'Parcel 1',
+    );
     expect(within(dialog).getByText('From Kente Crafts.')).toBeVisible();
     expect(within(dialog).getByText('Checked in by Ama Owusu at 09:14.')).toBeVisible();
     expect(within(dialog).getByText('Condition not checked yet.')).toBeVisible();
@@ -700,8 +723,11 @@ describe('one parcel, opened', () => {
       },
     });
     // The finished run's summary shows the missing parcel's photo too, so the tile is asked for in the vendor's own section.
-    await user.click(within(await kente()).getByRole('button', { name: 'Parcel 3, Missing' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Parcel 3' });
+    const dialog = await actOn(
+      user,
+      within(await kente()).getByRole('button', { name: 'Parcel 3, Missing' }),
+      'Parcel 3',
+    );
     expect(within(dialog).getByText(/Missing since 09:20/)).toBeVisible();
     await user.click(within(dialog).getByRole('button', { name: 'Found it' }));
 
@@ -713,8 +739,11 @@ describe('one parcel, opened', () => {
 
   it('does not offer "Found it" for a parcel that is checked in', async () => {
     const { user } = open({ run });
-    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Checked in' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Parcel 2' });
+    const dialog = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Parcel 2, Checked in' }),
+      'Parcel 2',
+    );
     expect(within(dialog).queryByRole('button', { name: 'Found it' })).toBeNull();
     expect(within(dialog).getByRole('button', { name: 'Close' })).toBeVisible();
   });
@@ -735,15 +764,109 @@ describe('one parcel, opened', () => {
         [arrivalOf(extraParcel(4).id)]: () => tapAnswer(voided, 3),
       },
     });
-    await user.click(await screen.findByRole('button', { name: 'Extra parcel 4, Checked in' }));
-    // A press only opens it.
+    const dialog = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Extra parcel 4, Checked in' }),
+      'Extra parcel 4',
+    );
+    // A press only opens the photo, and the viewer only leads to the dialog: the parcel is taken back by its own button there.
     expect(requestsTo(arrivalOf(extraParcel(4).id))).toHaveLength(0);
-    const dialog = await screen.findByRole('dialog', { name: 'Extra parcel 4' });
     await user.click(within(dialog).getByRole('button', { name: 'Take this parcel back' }));
 
     expect(await screen.findByText('Extra parcel 4 was taken back.')).toBeVisible();
     const [sent] = requestsTo(arrivalOf(extraParcel(4).id));
     expect(await sent?.clone().json()).toEqual({ arrived: false });
+  });
+});
+
+describe('the photos of a vendor, one at a time (the kit’s viewer)', () => {
+  const missing = parcelFixture(3, { state: 'MISSING', missing_marked_at: '2026-11-16T09:20:00Z' });
+  const parcels = [arrivedParcel(1), arrivedParcel(2), missing];
+  const finished = runFixture([
+    photoVendorFixture(
+      3,
+      { state: 'RECONCILIATION_REQUIRED', received_count: 2, count_variance: 'SHORT' },
+      parcels,
+    ),
+  ]);
+
+  // Break caught: a press on a tile that opens only the parcel's dialog (one photo, no way to the others), a viewer that cannot move on, or a press that sends an act.
+  it('opens the photo of a pressed tile among the vendor’s photos, and moves with next and previous, sending nothing', async () => {
+    const { user } = open({ run: finished });
+    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Checked in' }));
+
+    const viewer = await screen.findByRole('dialog', { name: 'Parcel 2' });
+    expect(within(viewer).getByText('2 of 3')).toBeVisible();
+    // Under the photo the viewer says where the parcel stands, as the dialog does.
+    expect(within(viewer).getByText(/^Checked in/)).toBeVisible();
+    await user.click(within(viewer).getByRole('button', { name: 'Next photo' }));
+    expect(await screen.findByRole('dialog', { name: 'Parcel 3' })).toBeVisible();
+    expect(screen.getByText('3 of 3')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Previous photo' }));
+    await user.click(screen.getByRole('button', { name: 'Previous photo' }));
+    expect(await screen.findByRole('dialog', { name: 'Parcel 1' })).toBeVisible();
+    expect(screen.getByText('1 of 3')).toBeVisible();
+    for (const parcel of parcels) expect(requestsTo(arrivalOf(parcel.id))).toHaveLength(0);
+  });
+
+  // Break caught: the viewer as the only way to a parcel's acts (a missing parcel could not be found), or acts in it that decide for the page.
+  it('leads from the viewer to the parcel’s own dialog, where the acts are, for an officer who may act', async () => {
+    const { user } = open({ run: finished });
+    const dialog = await actOn(
+      user,
+      within(await kente()).getByRole('button', { name: 'Parcel 3, Missing' }),
+      'Parcel 3',
+    );
+    expect(within(dialog).getByRole('button', { name: 'Found it' })).toBeVisible();
+    expect(screen.queryByText('3 of 3')).toBeNull();
+  });
+
+  // Break caught: an act offered to an officer without the count key (the API would refuse it), or a viewer that is not offered to a person who may only look.
+  it('shows an officer who can only look the photos and no way to act on them', async () => {
+    const { user } = open({ run: finished, keys: ['hub.read'] });
+    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Checked in' }));
+    const viewer = await screen.findByRole('dialog', { name: 'Parcel 2' });
+    expect(within(viewer).getByText('2 of 3')).toBeVisible();
+    expect(within(viewer).queryByRole('button', { name: 'Open this parcel' })).toBeNull();
+  });
+
+  // Break caught: the pictures of the missing parcels opened one by one in a page of their own, or among parcels that are not missing.
+  it('opens a missing parcel’s tile in the summary among the parcels that are missing, with no act', async () => {
+    const { user } = open({
+      run: runFixture([
+        photoVendorFixture(
+          4,
+          { state: 'RECONCILIATION_REQUIRED', received_count: 2, count_variance: 'SHORT' },
+          [
+            arrivedParcel(1),
+            arrivedParcel(2),
+            { ...missing },
+            parcelFixture(4, { state: 'MISSING', missing_marked_at: '2026-11-16T09:20:00Z' }),
+          ],
+        ),
+      ]),
+    });
+    const summary = await section('Before the rider leaves');
+    await user.click(within(summary).getByRole('button', { name: 'Parcel 4, Missing' }));
+
+    const viewer = await screen.findByRole('dialog', { name: 'Parcel 4' });
+    expect(within(viewer).getByText('2 of 2')).toBeVisible();
+    expect(within(viewer).queryByRole('button', { name: 'Open this parcel' })).toBeNull();
+  });
+
+  // Break caught: no way to look at a photo larger while the officer is checking parcels in (a tile is then a toggle), or a look that taps.
+  it('lets the officer look at the photos while checking in, without checking anything in', async () => {
+    const { user } = open({
+      run: runFixture([
+        photoVendorFixture(3, {}, [arrivedParcel(1), parcelFixture(2), parcelFixture(3)]),
+      ]),
+    });
+    await user.click(await screen.findByRole('button', { name: 'Look at the photos' }));
+    const viewer = await screen.findByRole('dialog', { name: 'Parcel 1' });
+    expect(within(viewer).getByText('1 of 3')).toBeVisible();
+    for (const id of [parcelFixture(1).id, parcelFixture(2).id]) {
+      expect(requestsTo(arrivalOf(id))).toHaveLength(0);
+    }
   });
 });
 
@@ -854,7 +977,7 @@ describe('a photo taken at the hub: a parcel that is not on the list, and damage
     expect(await within(dialog).findByText('Take a photo of the parcel.')).toBeVisible();
     expect(requestsTo(extraRoute)).toHaveLength(0);
 
-    await user.upload(within(dialog).getByLabelText(/Photo of the parcel/), photo());
+    await user.upload(cameraOf(dialog), photo());
     await within(dialog).findByText('Stored');
     await user.type(within(dialog).getByLabelText(/Note/), 'A box of soap, from the vendor');
     await user.click(within(dialog).getByRole('button', { name: 'Add this parcel' }));
@@ -901,12 +1024,13 @@ describe('a photo taken at the hub: a parcel that is not on the list, and damage
     });
     await user.click(await screen.findByRole('button', { name: 'Add a parcel not on the list' }));
     const dialog = await screen.findByRole('alertdialog');
-    await user.upload(within(dialog).getByLabelText(/Photo of the parcel/), photo());
+    await user.upload(cameraOf(dialog), photo());
     await user.click(within(dialog).getByRole('button', { name: 'Add this parcel' }));
 
+    // The gate names what it waits for, in a status line beside the field, which says so before the officer asks.
     expect(
       await within(dialog).findByText(
-        'The photo is still being sent. Wait for it, then add the parcel.',
+        'Photo of the parcel is still being sent. Wait until it says Stored, then send.',
       ),
     ).toBeVisible();
     expect(requestsTo(extraRoute)).toHaveLength(0);
@@ -974,19 +1098,19 @@ describe('a photo taken at the hub: a parcel that is not on the list, and damage
           ),
       },
     });
-    await user.click(await screen.findByRole('button', { name: 'Parcel 1, Checked in' }));
-    await user.click(
-      within(await screen.findByRole('dialog', { name: 'Parcel 1' })).getByRole('button', {
-        name: 'Damaged',
-      }),
+    const parcelDialog = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Parcel 1, Checked in' }),
+      'Parcel 1',
     );
+    await user.click(within(parcelDialog).getByRole('button', { name: 'Damaged' }));
     const dialog = await screen.findByRole('alertdialog', { name: 'Record damage on Parcel 1?' });
 
     await user.click(within(dialog).getByRole('button', { name: 'Record the damage' }));
     expect(await within(dialog).findByText('Take a photo of the damage.')).toBeVisible();
     expect(requestsTo(conditionRoute)).toHaveLength(0);
 
-    await user.upload(within(dialog).getByLabelText(/Photo of the damage/), photo());
+    await user.upload(cameraOf(dialog), photo());
     await within(dialog).findByText('Stored');
     await user.type(within(dialog).getByLabelText(/What is damaged/), 'A torn corner');
     await user.click(within(dialog).getByRole('button', { name: 'Record the damage' }));
@@ -1032,20 +1156,26 @@ describe('a photo taken at the hub: a parcel that is not on the list, and damage
         ]),
       ]),
     });
-    await user.click(await screen.findByRole('button', { name: 'Parcel 1, Checked in' }));
-    expect(
-      within(await screen.findByRole('dialog', { name: 'Parcel 1' })).getByRole('button', {
-        name: 'Damaged',
-      }),
-    ).toBeVisible();
+    const first = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Parcel 1, Checked in' }),
+      'Parcel 1',
+    );
+    expect(within(first).getByRole('button', { name: 'Damaged' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Close' }));
-    await user.click(await screen.findByRole('button', { name: 'Parcel 2, Damaged' }));
-    const second = await screen.findByRole('dialog', { name: 'Parcel 2' });
+    const second = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Parcel 2, Damaged' }),
+      'Parcel 2',
+    );
     expect(within(second).queryByRole('button', { name: 'Damaged' })).toBeNull();
     expect(within(second).getByText(/Damaged\. Recorded by Ama Owusu at 09:31\./)).toBeVisible();
     await user.click(within(second).getByRole('button', { name: 'Close' }));
-    await user.click(await screen.findByRole('button', { name: 'Parcel 3' }));
-    const third = await screen.findByRole('dialog', { name: 'Parcel 3' });
+    const third = await actOn(
+      user,
+      await screen.findByRole('button', { name: 'Parcel 3' }),
+      'Parcel 3',
+    );
     expect(within(third).queryByRole('button', { name: 'Damaged' })).toBeNull();
     expect(within(third).getByText('Not checked in yet.')).toBeVisible();
   });

@@ -81,6 +81,8 @@ const PICTURE_COMPONENT_USERS = [
   'app/pages/evidence/PhotoPicture.tsx',
   'app/pages/receiving/ParcelGrid.tsx',
   'app/pages/receiving/ParcelDialog.tsx',
+  // The viewer of a vendor's parcels: one photo at a time, among the grid's (D-D1: the door photos are the officer's reference).
+  'app/pages/receiving/ParcelViewer.tsx',
 ];
 const PHOTO_GRID = 'PhotoGrid';
 const GRID_USERS = [
