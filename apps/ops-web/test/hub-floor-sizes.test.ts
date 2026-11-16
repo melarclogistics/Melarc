@@ -88,6 +88,24 @@ describe('the hub floor’s 56 px, held to the tokens', () => {
     );
   });
 
+  // Break caught (the second review of the pictures, new defect 5): the help line of a choice back to floating midway between its own choice and the next, or a dead strip that a press on it does not reach.
+  it('keeps the help line of a choice under its own choice, inside its reach, and the choices further apart than a choice and its help', () => {
+    const floor = css('hub-floor/hub-floor.css');
+    const label = ruleOf(
+      floor,
+      '.ui-hub-floor .ui-radio-group--lg .ui-radio:has(.ui-radio__help) .ui-radio__label',
+    );
+
+    expect(label).toMatch(/grid-row:\s*1\s*\/\s*span\s*2\s*;/);
+    expect(label).toMatch(/align-items:\s*flex-start\s*;/);
+    expect(ruleOf(floor, '.ui-hub-floor .ui-radio-group--lg .ui-radio__help')).toMatch(
+      /pointer-events:\s*none\s*;/,
+    );
+    expect(ruleOf(floor, '.ui-hub-floor .ui-radio-group--lg .ui-radio-group__choices')).toMatch(
+      /gap:\s*var\(--space-4\)\s*;/,
+    );
+  });
+
   // The reader proved on text it must find and text it must leave alone.
   it('finds a rule by one of its selectors and leaves the rule of another alone', () => {
     const text = '/* .a { x: 1; } */ .b, .c { min-height: 1rem; } .d { min-height: 2rem; }';

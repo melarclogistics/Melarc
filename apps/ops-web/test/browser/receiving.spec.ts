@@ -842,6 +842,49 @@ test.describe('what the pictures showed again, from the fixed build (the second 
       expect(covered).toEqual([]);
     });
   }
+
+  // Break caught (new defect 5): the help line of each outcome midway between its own outcome and the next (24 px under the one and 27 over the other), so that a reader cannot tell which it belongs to.
+  test('the help line of each outcome is nearer to its own outcome than to the next, and a press on it chooses its own', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await open(page, discrepancy(RUNS.yaw), { permissions: SENIOR });
+    const group = page.getByRole('group', { name: /What do you decide\?/ });
+    await expect(group.getByRole('radio')).toHaveCount(3);
+
+    const gaps = await group.evaluate((node) => {
+      const text = (element: Element): DOMRect => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return range.getBoundingClientRect();
+      };
+      const options = [...node.querySelectorAll('.ui-radio')];
+      return options.map((option, index) => {
+        const label = option.querySelector('.ui-radio__label');
+        const help = option.querySelector('.ui-radio__help');
+        const next = options[index + 1]?.querySelector('.ui-radio__label');
+        if (label === null || help === null) throw new Error('an outcome has no label or no help');
+        const helpBox = help.getBoundingClientRect();
+        return {
+          above: helpBox.top - text(label).bottom,
+          below: next === undefined || next === null ? null : text(next).top - helpBox.bottom,
+        };
+      });
+    });
+    expect(gaps).toHaveLength(3);
+    for (const gap of gaps) {
+      // Nearer to its own outcome than to the next one: at most half as far.
+      if (gap.below !== null) expect(gap.above * 2).toBeLessThanOrEqual(gap.below);
+    }
+
+    // The help line is part of its outcome: a press on it chooses that outcome (it is not a dead strip between two).
+    const help = group.locator('.ui-radio__help').nth(1);
+    await help.scrollIntoViewIfNeeded();
+    const box = await help.boundingBox();
+    if (box === null) throw new Error('the help line is not drawn');
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(group.getByRole('radio').nth(1)).toBeChecked();
+  });
 });
 
 test.describe('the blind count', () => {

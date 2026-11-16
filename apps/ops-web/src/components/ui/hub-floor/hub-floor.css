@@ -57,3 +57,23 @@
   align-items: center;
   min-height: var(--control-height-lg);
 }
+
+/*
+ * The help line of a choice belongs to its choice (the second review of the pictures: on the decision the help lines floated midway between their own choice and the next, 24px under the one and 27 over the
+ * other). The label of a choice that has a help line is the whole of the choice: it covers both rows of the choice's grid, its words at the top, and the help line lies under them inside the label's reach, and
+ * lets a press through to the label, so that a press on the help line chooses its own choice. The choices stand further apart than a choice and its help line, so that the help is nearer to its own choice
+ * than to the next (8px above it, and 22px below it, at the size of the text of the floor).
+ */
+.ui-hub-floor .ui-radio-group--lg .ui-radio:has(.ui-radio__help) .ui-radio__label {
+  grid-row: 1 / span 2;
+  align-items: flex-start;
+  padding-block-start: var(--space-1);
+}
+
+.ui-hub-floor .ui-radio-group--lg .ui-radio__help {
+  pointer-events: none;
+}
+
+.ui-hub-floor .ui-radio-group--lg .ui-radio-group__choices {
+  gap: var(--space-4);
+}
