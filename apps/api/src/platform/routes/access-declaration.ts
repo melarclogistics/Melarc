@@ -351,7 +351,8 @@ function checkedOptions(options: AuthenticatedRouteOptions): AuthenticatedRouteO
       typeof named.entity !== 'string' ||
       !/^[a-z][a-z0-9_]*$/.test(named.entity) ||
       typeof named.param !== 'string' ||
-      !/^[A-Za-z][A-Za-z0-9]*$/.test(named.param)
+      // A path parameter is a word of letters and digits, with underscores where the contract names it so (`parcel_id`, `manifest_id`: Run D); never a place for anything else.
+      !/^[A-Za-z][A-Za-z0-9_]*$/.test(named.param)
     ) {
       throw new TypeError(
         'A record scope names an entity and the path parameter that carries its id',

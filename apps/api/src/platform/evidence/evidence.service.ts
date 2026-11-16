@@ -38,7 +38,7 @@ import { CONTENT_TYPE_SIGNATURE, EVIDENCE_SETTINGS } from './evidence-vocabulary
 const CREATE = 'createEvidence';
 
 export interface EvidenceServiceOptions {
-  readonly runner: Pick<OperationRunner, 'mutate'>;
+  readonly runner: Pick<OperationRunner, 'mutate' | 'read'>;
   readonly idempotency: IdempotencyStore;
   readonly store: EvidenceStore;
   /** The malicious-content check: a record is `STORED` only on its clean verdict (Run A2, D-A6). */
@@ -355,12 +355,14 @@ export class EvidenceService {
   ): Promise<string> {
     if (!isUuid(ownerId)) throw notFound();
     const found = await tx.execute(
-      sql`select state, responsible_hub_id from pickup_intake where id = ${ownerId}::uuid`,
+      sql`select state, responsible_hub_id, receiving_mode from pickup_intake where id = ${ownerId}::uuid`,
     );
     const row = found.rows[0] as unknown as
-      { state: string; responsible_hub_id: string } | undefined;
+      { state: string; responsible_hub_id: string; receiving_mode: string } | undefined;
     if (row === undefined) throw notFound();
-    if (row.state === 'AWAITING_COUNT') {
+    // A blind-count intake takes its evidence after its count. A PHOTO intake's receiver takes the photos of a damaged parcel while the vendor's check-in is open and the photo of an extra while the
+    // vendor or the case is open (Run D, D-D2; migration 0104 holds the purpose and the state for every writer), so such an intake is not refused here for waiting.
+    if (row.state === 'AWAITING_COUNT' && row.receiving_mode !== 'PHOTO_CHECK_IN') {
       throw ApiException.of(ErrorCode.StateConflict, 'The intake has not been counted', {
         rule: 'intake_not_counted',
       });
@@ -507,6 +509,29 @@ export class EvidenceService {
       }
       const storedView = evidenceViewOf(stored);
       return { evidence: storedView, etag: evidenceEtagOf(storedView, stored.version) };
+    });
+  }
+
+  /**
+   * `getEvidenceLimits` (Run D, OB-S1-110): the two platform settings a file of evidence is judged by, as `createEvidence` reads them (`evidence_upload_allowed_mime_types`, `evidence_upload_max_bytes`), so
+   * that a screen refuses a file above the size limit before it reads it whole. **Never defaulted**: a setting that is missing or unusable ends the read as the platform's failed read. Configuration only: no
+   * record, no secret, no address. For the Ops Portal's staff alone.
+   */
+  async limits(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+  ): Promise<{ readonly allowed_content_types: readonly string[]; readonly max_byte_size: number }> {
+    if (authorized.session.principalType !== 'STAFF') throw denied();
+    return this.#options.runner.read(authorized, correlationId, async (handle) => {
+      const { settings } = this.#options;
+      const maxBytes = await settings.integer(handle, EVIDENCE_SETTINGS.maxBytes);
+      const allowed = await settings.list(handle, EVIDENCE_SETTINGS.allowedMimeTypes);
+      // A list that holds anything but types is not a usable setting: the read fails as the platform's own, and nothing is defaulted.
+      const types = allowed.filter((type): type is string => typeof type === 'string' && type !== '');
+      if (types.length === 0 || types.length !== allowed.length) {
+        throw new SettingMissingError(EVIDENCE_SETTINGS.allowedMimeTypes);
+      }
+      return { allowed_content_types: types, max_byte_size: maxBytes };
     });
   }
 
