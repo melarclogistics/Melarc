@@ -2816,9 +2816,15 @@ test.describe('the photo kit in a browser', () => {
       expect(boxes).toHaveLength(7);
       const top = boxes[0]?.y ?? 0;
       const firstRow = boxes.filter((each) => Math.abs(each.y - top) < 2).length;
-      // A column is at least 6rem (96px) and the gap is 12px.
-      expect(firstRow).toBe(Math.min(7, Math.floor((list.width + 12) / (96 + 12))));
-      if (width === 390) expect(firstRow).toBe(3);
+      // As many tiles to a row as the grid has columns (the browser's own count of them, which is the stylesheet's `auto-fill` of the room there is), and the width is in every message so that a run that fails says what
+      // it measured: the CI run of 16 November 2026 said "got 2" and not how wide the list was.
+      const columns = await frame
+        .getByRole('list', { name: 'Sample photos of one stop' })
+        .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+      const measured = `the list is ${String(list.width)}px wide, in ${String(columns)} columns`;
+      expect(firstRow, measured).toBe(Math.min(7, columns));
+      // A 390px phone has three to a row, in the showcase's frame and in the receiving run's (the grid's room there is 324px).
+      if (width === 390) expect(firstRow, measured).toBe(3);
       for (const each of boxes) {
         expect(each.width).toBeGreaterThanOrEqual(56);
         expect(each.height).toBeGreaterThanOrEqual(56);
@@ -2862,14 +2868,17 @@ test.describe('the photo kit in a browser', () => {
     await openKit(page, 'photos', { width: 390, height: 844 });
     const opener = page.getByRole('button', { name: 'Open the sample photos' });
     await opener.click();
-    const dialog = page.getByRole('dialog', { name: 'Sample photo 1' });
+    // The viewer is named by the photo it shows, which changes as the person moves: it is found by the kind of name, and not by the first photo's.
+    const dialog = page.getByRole('dialog', { name: /^Sample photo \d$/ });
     await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleName('Sample photo 1');
     await expect(dialog.getByText('1 of 5')).toBeVisible();
 
     await page.keyboard.press('ArrowRight');
     await expect(dialog.getByText('2 of 5')).toBeVisible();
     await dialog.getByRole('button', { name: 'Next photo' }).click();
     await expect(dialog.getByText('3 of 5')).toBeVisible();
+    await expect(dialog).toHaveAccessibleName('Sample photo 3');
 
     // A swipe of a finger to the left across the photo: the pointer events of a touch, which the stage hears.
     const target = dialog.locator('.ui-photo-viewer__stage');
@@ -2899,7 +2908,8 @@ test.describe('the photo kit in a browser', () => {
   test('does not animate a change of photo under reduced motion', async ({ page }) => {
     await openKit(page, 'photos', { width: 1280, height: 900, reducedMotion: true });
     await page.getByRole('button', { name: 'Open the sample photos' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Sample photo 1' });
+    const dialog = page.getByRole('dialog', { name: /^Sample photo \d$/ });
+    await expect(dialog.getByText('1 of 5')).toBeVisible();
     await page.keyboard.press('ArrowRight');
     await expect(dialog.getByText('2 of 5')).toBeVisible();
 
@@ -2942,8 +2952,10 @@ test.describe('the photo kit in a browser', () => {
       ),
     ).toBeVisible();
 
-    // The photo of the count is shown back on a canvas of 5rem, named by its place.
-    await expect(form.getByText(/^Photo 1/)).toBeVisible();
+    // The photo of the count is shown back on a canvas of 5rem, named by its place (the seal's upload has a "Photo 1" of its own, in the part that is shut: the list of the count is the one asked).
+    await expect(
+      form.getByRole('list', { name: 'Photos of the count: photos added' }).getByText(/^Photo 1/),
+    ).toBeVisible();
     const preview = await box(form.locator('canvas:visible'));
     expect(preview.width).toBeCloseTo(80, 0);
     expect(preview.height).toBeCloseTo(80, 0);

@@ -163,7 +163,8 @@ test.describe('the kit in a production build under the strict content-security p
     await expect(form.locator('img')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Open the sample photos' }).click();
-    const viewer = page.getByRole('dialog', { name: 'Sample photo 1' });
+    // The viewer is named by the photo it shows, which changes as the person moves: it is found by the kind of name.
+    const viewer = page.getByRole('dialog', { name: /^Sample photo \d$/ });
     await expect(viewer).toBeVisible();
     await page.keyboard.press('ArrowRight');
     await expect(viewer.getByText('2 of 5')).toBeVisible();
