@@ -22,6 +22,17 @@ engineStrict: true
 overrides:
   '@nestjs/platform-express@12.1.2>multer': 2.5.0
 
+# THE ONE RECORDED AUDIT EXCEPTION (scripts/dependency-policy.ts, AUDIT_EXCEPTIONS; engineering standards section 3.3: a high finding needs a fix or an
+# explicit, time-bounded exception with its reason and owner; the policy test refuses any other audit setting, and refuses this one when it lapses or goes
+# stale). GHSA-fc5q-39xc-vjpf: picomatch up to 4.0.7, a denial of service through repeated extglob patterns, rated high on 17 November 2026. No fixed release
+# exists (the newest is 4.0.7; the 4.0.8 the advisory names is not published). Only build and lint tools resolve it (typescript-eslint, tinyglobby, fdir, Vite),
+# on the repository's own patterns, and `pnpm audit --prod` finds nothing. Accepted by the Product Owner on 17 November 2026; it holds through 17 December 2026,
+# when the Product Owner decides again. REMOVE IT when a fixed picomatch is published (4.0.8 or later): upgrade what resolves it, delete this block and the
+# entry in AUDIT_EXCEPTIONS, and run pnpm install. The audit says nothing of an advisory it ignores, so a published fix is not noticed here: the date is the bound.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf
+
 # openapi-typescript (the generator behind packages/api-client) declares typescript ^5.x, and this repository
 # pins 6.0.3 because typescript-eslint does not yet allow 7. The generator was run under 6.0.3 and its output
 # type-checks; the freshness check and generator tests in packages/api-client fail if a TypeScript change ever
