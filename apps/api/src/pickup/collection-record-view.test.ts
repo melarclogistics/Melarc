@@ -82,6 +82,35 @@ describe('the collection record as the contract states it (S1.26)', () => {
     expect(Object.keys(collectionRecordViewOf(ROW, []))).not.toContain('parcel_photo_ids');
   });
 
+  // Break caught (D-E1): the number of photos the count attached left out of the answer (the rider is never told how many were counted), or the staged photos listed
+  // among the named ones (a collection of twenty thousand parcels answering with twenty thousand identifiers).
+  it('states how many photos the count attached in all, and lists only the ones the request named', () => {
+    const named = ['0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e12', '0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e11'];
+    const view = collectionRecordViewOf(ROW, named, [], 3);
+    expect(view.parcel_photo_count).toBe(3);
+    expect(view.parcel_photo_ids).toEqual(named);
+    // A count whose photos were all staged names none: the number is stated, the list is not.
+    const staged = collectionRecordViewOf(ROW, [], [], 3);
+    expect(staged.parcel_photo_count).toBe(3);
+    expect(Object.keys(staged)).not.toContain('parcel_photo_ids');
+  });
+
+  // Break caught (D-E1): a zero stated for a stop Ops let through without photos (it would say photos were counted), or an absent number written as null or zero.
+  it('leaves the number out when it is not given or is zero', () => {
+    expect(Object.keys(collectionRecordViewOf(ROW))).not.toContain('parcel_photo_count');
+    expect(Object.keys(collectionRecordViewOf(ROW, [], [], undefined))).not.toContain(
+      'parcel_photo_count',
+    );
+    expect(Object.keys(collectionRecordViewOf(ROW, [], [], 0))).not.toContain('parcel_photo_count');
+  });
+
+  // Break caught: the number taken for the length of the named list, so that a count that staged some of its photos states only the ones it named.
+  it('states the number it is given and not the length of the list of named photos', () => {
+    const view = collectionRecordViewOf(ROW, ['0191a4f8-6c2e-7a3e-8f10-5d6c7b8a9e12'], [], 20_000);
+    expect(view.parcel_photo_count).toBe(20_000);
+    expect(view.parcel_photo_ids).toHaveLength(1);
+  });
+
   // Break caught (Run D, Part 2, finding F2): the evidence a short count's reason asked for (`evidence_ids`, the photo of the parcel left behind) dropped from the answer, and so from the
   // replay that returns it, although the contract declares it (`CollectionRecord.evidence_ids`); or named in another order than the one the rider named it in, or kept apart from the
   // parcel photos it must never be confused with.

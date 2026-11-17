@@ -379,7 +379,7 @@ describe('DescribeServers: the hosts an operation is reachable at', () => {
       }
     }
 
-    expect(named).toHaveLength(15);
+    expect(named).toHaveLength(16);
     for (const urls of named) expect(urls).toEqual(RIDER_SERVERS.map((server) => server.url));
     expect(RIDER_SERVERS[0]).toBe(SAME_ORIGIN_SERVER);
   });

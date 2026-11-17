@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.108.0
- *   SHA-256 dcc2f0b056dbc0487779f9c7203238b296f8dfc684daf81e760324b9317d5a9c (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.109.0
+ *   SHA-256 94a368b55c16ffab573253b21df7fe960950e41a98430bb9eb5961c9d210a237 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -948,25 +948,37 @@ export interface paths {
          *     staff of that hub read under `notification.read`. A count that matches queues nothing.
          *
          *     **The photo of every parcel** (the Product Owner's decision D-A10, 12 November 2026; pickup-collection.md
-         *     5.5): `parcel_photo_ids` names **exactly `collected_count`** records of purpose `PARCEL_PHOTO`, each
+         *     5.5): the count has **exactly `collected_count`** records of purpose `PARCEL_PHOTO`, each
          *     `STORED`, captured by this rider and of this stop, each attached to one count only (no cap: a pickup
-         *     of two hundred parcels has two hundred photos). The photos are judged after every other refusal
+         *     of two hundred parcels has two hundred photos). **From 5.109.0 they come from two sets that the count
+         *     joins** (D-E1, 17 November 2026): the photos the rider **staged** beforehand with `stageParcelPhotos`, in
+         *     batches of at most 500, and the ones `parcel_photo_ids` names; **the number is the two together**, so a
+         *     collection that staged all of its photos names none, and a small one names all of its photos in this one
+         *     request, as it always did. **The order the photos are named or staged in is not significant**: a count's
+         *     photos are read in the order they were attached, which is by the moment each was attached and then by
+         *     identifier. The photos are judged after every other refusal
          *     of this operation. A different number - none at all included - is `VALIDATION_FAILED` (`details.violations`
-         *     `/parcel_photo_ids`, rule `parcel_photo_count`), and the same photo named twice is `VALIDATION_FAILED`
-         *     (rule `duplicate`). A photo that is still `PENDING_UPLOAD`, has `EXPIRED`, is another rider's, is of
+         *     `/parcel_photo_ids`, rule `parcel_photo_count`), and the same photo named twice, or named and also staged, is
+         *     `VALIDATION_FAILED` (rule `duplicate`). A photo that is still `PENDING_UPLOAD`, has `EXPIRED`, is another rider's, is of
          *     another stop or another purpose, or is already attached to a count is **one answer**,
          *     `EVIDENCE_NOT_STORED`, so that the reply tells a rider nothing about a record that is not its own.
-         *     **For a stop Ops let through without photos** (`authoriseParcelPhotoException`) the count takes none, and a
-         *     count that names some is refused (`parcel_photo_count`). The database holds the number for every
+         *     A count that is refused leaves the staged photos as they were, and the same count can be sent again once
+         *     the number is right (a photo cannot be taken back: **stage only the photos of the parcels the count will
+         *     take**). **For a stop Ops let through without photos** (`authoriseParcelPhotoException`) the count takes none, and a
+         *     count that names some is refused (`parcel_photo_count`); what was staged for such a stop stays staged and is
+         *     attached to nothing. The database holds the number for every
          *     writer, at the end of the transaction, and holds that a photo is attached once and only to the count
          *     of its own stop. `evidence_ids` is the photo a short count's reason asks for (purpose
          *     `COLLECTION_PROOF`, a record of this stop, attached to the stop as a failure's photo is, at most ten):
          *     any record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer. The database holds that
          *     photo for every writer, at the end of the transaction: a short count whose reason asks for a photo has
          *     attached to its stop a stored `COLLECTION_PROOF` record of that stop, captured by the rider who counted.
-         *     **The answer states the photos it attached**: `parcel_photo_ids`, in the order the rider named them, as
-         *     `CollectionRecord` declares it. A stop Ops let through without photos states none, and the member is then
-         *     absent, never an empty list. A replay returns the original answer, its photos included.
+         *     **The answer states what it attached**: `parcel_photo_ids`, the photos **the request named**, in the order the
+         *     rider named them (the photos that were staged beforehand are not repeated: the answer of a collection of any
+         *     size is the size of a small one), and `parcel_photo_count`, **how many photos the count attached in all**, staged and
+         *     named together (5.109.0), as `CollectionRecord` declares them. A stop Ops let through without photos states
+         *     neither, and the members are then absent, never an empty list or zero. A replay returns the original answer, its
+         *     photos included.
          *
          *     **An individual (ad-hoc) sender is promoted** (`PROVISIONAL` to `REUSABLE`,
          *     `pickup.sender.promoted`) when the count is recorded, without waiting for the handshake
@@ -1001,6 +1013,72 @@ export interface paths {
          *     `Idempotency-Key` is a request and takes another place, though it sends nothing again; a request the ceiling refuses takes no place in it (it has already taken one in the bucket).
          */
         post: operations["recordCollection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pickup-stops/{id}/parcel-photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put the parcel photos of a count aside, in a batch
+         * @description **A collection of any size reaches the server in requests the transport admits** (the Product Owner's
+         *     decision D-E1, 17 November 2026; pickup-collection.md 5.5; contract 5.109.0). `recordCollection` used to
+         *     name every photo of the count in its one body, and the body of a request is bounded (about 2,600
+         *     identifiers fit under the default limit of 100 KB), so a collection of a few thousand parcels could not be
+         *     counted. The rider now **stages** the photos of a count that is not yet made, in batches of **one to 500**
+         *     identifiers (about 20 KB), and the count attaches the staged photos with the ones it names, together, in its
+         *     own transaction. **500 is a limit on a request and never on a pickup**: a collection of 20,000 parcels is
+         *     forty batches and one small count.
+         *
+         *     `pickup.collection.confirm` - the **assigned rider only**, on a stop it has arrived at (the key is a
+         *     vendor's too, to enter a code, and a vendor is `PERMISSION_DENIED` here). Idempotent twice over: **by its
+         *     key** (a replay returns the stored answer, whatever has been staged since) and **by its rows** (a photo
+         *     that is already staged is a no-op, so a batch sent again under another key is the same set). No `If-Match`:
+         *     a batch changes nothing the stop's `ETag` is made of.
+         *
+         *     **Each photo is judged as the count judges it**: a record of purpose `PARCEL_PHOTO`, `STORED`, captured by
+         *     this rider and of this stop, attached to no count. A record that is still `PENDING_UPLOAD`, has `EXPIRED`,
+         *     is another rider's, is of another stop or another purpose, does not exist, or is already attached to a
+         *     count is **one answer**, `EVIDENCE_NOT_STORED`, so that the reply tells a rider nothing about a record that
+         *     is not its own; one such record refuses the whole batch and stages none of it. The batch itself is
+         *     `VALIDATION_FAILED` when it names no photo (rule `minItems`), more than 500 (`maxItems`), a value that is not an
+         *     identifier (`format`), or the same photo twice (`duplicate`).
+         *
+         *     **The stop is judged as the count judges it**, in the same order and under the same lock: the rider's own
+         *     (a stop on a run assigned to another rider, on a draft, and an id that matches nothing are **one answer**,
+         *     `NOT_ASSIGNED_RIDER`); a run that is only dispatched is `MANIFEST_NOT_STARTED` and one that is over
+         *     `STATE_CONFLICT`; a stop not yet arrived at is `STATE_CONFLICT` (`stop_not_arrived`) and one already
+         *     worked or skipped `STATE_CONFLICT` (`stop_resolved`); a stop Ops let through without photos
+         *     (`authoriseParcelPhotoException`) takes none, staged or named, and is `STATE_CONFLICT`
+         *     (`parcel_photo_exception`). **The staged set is closed by the count**: once the stop has its collection record
+         *     a batch is `STATE_CONFLICT` (`collection_recorded`). The stop's row lock orders a batch and the count, so that
+         *     one of them commits first and the other finds the stop as it then is: a batch that commits before the count is
+         *     counted, a batch that meets the count is refused. The database holds all of it for every writer.
+         *
+         *     **What it changes**: its rows, and nothing else - no count, no change of the stop, no sender promoted, no
+         *     envelope, no event of its own (the count's event, `pickup.collection.recorded`, is the record of what was
+         *     counted). A batch that is refused changes nothing. **Photos cannot be taken back**: a count that has more
+         *     photos staged than parcels counted is refused (`parcel_photo_count`), so the app stages the photos of the
+         *     parcels the count will take; a set that is staged and never counted stays evidence of the stop that was never
+         *     attached, as a photo that was declared and never named does.
+         *
+         *     **The answer is how many photos are staged for the stop now** (`staged_count`), never a list of them: the set
+         *     is the rider's own and as large as the count. A request that is refused for being too fast is `RATE_LIMITED`
+         *     (429, `Retry-After`) and does nothing; the app sends the batch again by its own act, with the same key.
+         */
+        post: operations["stageParcelPhotos"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9515,7 +9593,7 @@ export interface components {
             note?: string;
         };
         CollectionRecordCreate: {
-            /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). */
+            /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). At most 2,147,483,647, the number the record holds: a larger one is `VALIDATION_FAILED` (rule `maximum`; rule `range` before 5.109.0). */
             collected_count: number;
             /**
              * @description Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer
@@ -9526,7 +9604,7 @@ export interface components {
             variance_note?: string;
             /** @description Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
-            /** @description The photo of each parcel counted: exactly `collected_count` ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only; none when Ops let the stop through without photos. A different number, or an id named twice, is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each. */
+            /** @description The photos of the parcels counted **that were not staged beforehand** (`stageParcelPhotos`): ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only. **With the staged photos they are exactly `collected_count`**; none when Ops let the stop through without photos, or when every photo was staged. A different number, or an id named twice (or named and staged), is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each. The order is not significant. In the answer, the ones the request named, in the order named. */
             parcel_photo_ids?: string[];
             /**
              * Format: date-time
@@ -9541,11 +9619,11 @@ export interface components {
          *     creation schema.** That schema is closed (`additionalProperties: false`, so a rider cannot send a
          *     server field), and a closed schema inside an `allOf` refuses every field its sibling adds, so no
          *     answer could satisfy the composition. The creation fields below are stated exactly as
-         *     `CollectionRecordCreate` states them (a test holds the two together); the last five are the
+         *     `CollectionRecordCreate` states them (a test holds the two together); the last six are the
          *     server's.
          */
         CollectionRecord: {
-            /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). */
+            /** @description Zero is a failed pickup — `ZERO_COLLECTION_IS_FAILURE` (§36.4). At most 2,147,483,647, the number the record holds: a larger one is `VALIDATION_FAILED` (rule `maximum`; rule `range` before 5.109.0). */
             collected_count: number;
             /**
              * @description Required when `collected_count` is not `declared_count`: a code of the `PICKUP_SHORT_COUNT` catalogue when fewer
@@ -9556,7 +9634,7 @@ export interface components {
             variance_note?: string;
             /** @description Each id must name an evidence record in `STORED` (EVIDENCE_NOT_STORED otherwise). */
             evidence_ids?: string[];
-            /** @description The photo of each parcel counted: exactly `collected_count` ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only; none when Ops let the stop through without photos. A different number, or an id named twice, is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each. */
+            /** @description The photos of the parcels counted **that were not staged beforehand** (`stageParcelPhotos`): ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, each attached to one count only. **With the staged photos they are exactly `collected_count`**; none when Ops let the stop through without photos, or when every photo was staged. A different number, or an id named twice (or named and staged), is `VALIDATION_FAILED` (rules `parcel_photo_count` and `duplicate`); a record that cannot be counted is `EVIDENCE_NOT_STORED`, the same answer for each. The order is not significant. In the answer, the ones the request named, in the order named. */
             parcel_photo_ids?: string[];
             /**
              * Format: date-time
@@ -9582,6 +9660,20 @@ export interface components {
              * @description Set when the shortfall flag reached the Ops surface.
              */
             office_notified_at?: string | null;
+            /** @description How many parcel photos the count attached, **staged and named together** (equal to `collected_count`); absent, never zero, for a stop Ops let through without photos (5.109.0). */
+            parcel_photo_count?: number;
+        };
+        /** @description The body of `stageParcelPhotos` (5.109.0). */
+        ParcelPhotosStage: {
+            /** @description One to 500 ids of `PARCEL_PHOTO` evidence of this stop, `STORED` and captured by this rider, none attached to a count: **a limit on a request, never on a pickup** (a collection is staged in as many batches as it needs). An id named twice is `VALIDATION_FAILED` (rule `duplicate`); a record that cannot be used is `EVIDENCE_NOT_STORED`, the same answer for each. A photo that is already staged is a no-op. */
+            parcel_photo_ids: string[];
+        };
+        /** @description The answer of `stageParcelPhotos` (5.109.0). */
+        ParcelPhotosStaged: {
+            /** Format: uuid */
+            pickup_stop_id: string;
+            /** @description How many parcel photos are staged for the stop, at the end of this batch (never a list of them: the set is as large as the count). */
+            staged_count: number;
         };
         /** @description One evidence record of a pickup stop as Ops reads it (`listPickupStopEvidence`). **No object key, no address and no signed operation**: the image is read with `createEvidenceRetrievalAuthorization`, one record at a time. */
         StopEvidenceItem: {
@@ -10555,7 +10647,7 @@ export interface components {
         CheckInFinish: {
             /** @description True: "All N here" (every parcel still expected arrives). False: finish as tapped (every parcel not tapped is missing). */
             all_arrived: boolean;
-            /** @description The number of parcels the officer counted on the table. **Required with `all_arrived: true` and not allowed without it** (`VALIDATION_FAILED`); it must equal the number of parcels the intake expects (`STATE_CONFLICT`, rule `count_changed`). It is the officer's own statement, never a default. */
+            /** @description The number of parcels the officer counted on the table (at most 2,147,483,647, the number the intake holds). **Required with `all_arrived: true` and not allowed without it** (`VALIDATION_FAILED`); it must equal the number of parcels the intake expects (`STATE_CONFLICT`, rule `count_changed`). It is the officer's own statement, never a default. */
             confirmed_count?: number;
         };
         /** @description The body of `addExtraParcel`. */
@@ -10583,7 +10675,7 @@ export interface components {
             reason: string;
             /** @description The correction of a photo intake. Not allowed for a blind-count intake (`VALIDATION_FAILED`, rule `mode_mismatch`). */
             parcel_changes?: components["schemas"]["IntakeParcelChange"][];
-            /** @description The correction of a blind-count intake. Not allowed for a photo intake (`VALIDATION_FAILED`, rule `mode_mismatch`). */
+            /** @description The correction of a blind-count intake (at most 2,147,483,647, the number the intake holds). Not allowed for a photo intake (`VALIDATION_FAILED`, rule `mode_mismatch`). */
             physical_count?: number;
         };
         /** @description The answer of `recordParcelArrival` and `addExtraParcel`: the parcel as it now is and the vendor's counts after the act. */
@@ -10851,7 +10943,8 @@ export interface components {
             /** Format: uuid */
             pickup_request_id: string;
             /**
-             * @description The parcels the rider hands over for this request. **Zero is legal**: the request's
+             * @description The parcels the rider hands over for this request (at most 2,147,483,647, the number the
+             *     intake holds). **Zero is legal**: the request's
              *     intake still opens, and is routed to reconciliation after the blind count.
              */
             declared_count: number;
@@ -15480,6 +15573,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectionRecord"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    stageParcelPhotos: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParcelPhotosStage"];
+            };
+        };
+        responses: {
+            /** @description The photos are staged (or were) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParcelPhotosStaged"];
                 };
             };
             400: components["responses"]["ValidationFailed"];

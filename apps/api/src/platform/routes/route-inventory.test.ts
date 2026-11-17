@@ -145,6 +145,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/sms-fallback' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/handshake/verify' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/parcel-photo-exception' },
+      { method: 'POST', path: '/api/v1/pickup-stops/:id/parcel-photos' },
       { method: 'POST', path: '/api/v1/pickup-stops/:id/skip' },
       { method: 'POST', path: '/api/v1/staff-identities' },
       { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
@@ -1249,6 +1250,15 @@ describe('the real application', () => {
           activity: 'qualifying',
           record: { entity: 'pickup_stop', param: 'id' },
         },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // D-E1: the rider puts the photos of a count aside, in batches: the Rider app alone, the key of the count, no provider-initiating ceiling (it queues no envelope).
+      {
+        method: 'POST',
+        path: '/api/v1/pickup-stops/:id/parcel-photos',
+        access: 'permission',
+        permission: 'pickup.collection.confirm',
+        authenticated: { surfaces: ['RIDER_ANDROID'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
       // S1.23: Ops skips a stop. The Ops Portal alone (no rider bundle holds the key), the stop found or refused by the record-scope guard.

@@ -586,6 +586,7 @@ describe('the existence rule is asked about records that are real (the control o
       revokeVendorDevice: 'device',
       setManifestStopOrder: 'pickupManifest',
       skipPickupStop: 'pickupStop',
+      stageParcelPhotos: 'pickupStop',
       startRun: 'pickupManifest',
       submitBlindCount: 'pickupIntake',
       submitHubHandover: 'pickupManifest',

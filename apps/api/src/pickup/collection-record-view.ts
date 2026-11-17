@@ -41,8 +41,10 @@ export interface CollectionRecordView {
   readonly variance_note?: string;
   /** The evidence the count attached beside its reason (the photo of the parcel left behind that a short count's reason may ask for), as the rider named it; absent, and never an empty list, when none was attached. */
   readonly evidence_ids?: readonly string[];
-  /** The photo of each parcel counted, as the rider named them (D-A10); absent, and never an empty list, for a stop Ops let through without photos. */
+  /** The photos of the parcels counted that **this request named** (D-A10), as the rider named them: the photos it staged beforehand are not repeated; absent, and never an empty list, when it named none. */
   readonly parcel_photo_ids?: readonly string[];
+  /** How many parcel photos the count attached, **staged and named together** (D-E1): the count's number of photos, which equals `collected_count`; absent, and never zero, for a stop Ops let through without photos. */
+  readonly parcel_photo_count?: number;
   readonly captured_at?: string;
   readonly office_notified_at: string | null;
 }
@@ -53,8 +55,10 @@ const iso = (value: string | Date | null): string | null =>
 /**
  * The record as the contract states it: the members it names and no other, so that what the table keeps beside them (the hub, the rider, the direction
  * of the handshake to come) is never on the wire. The label and the attribution of the reason are the catalogue's and are not repeated to the rider.
- * `parcelPhotoIds` are the photos the count attached, in the order the rider named them (the record's own row does not hold them: they are links to it); the answer states them as the
- * contract's `CollectionRecord.parcel_photo_ids` declares, and the stored answer that a replay returns carries them with it. None attached (a stop Ops let through without photos) states none.
+ * `parcelPhotoIds` are the photos **the request named**, in the order the rider named them (the record's own row does not hold them: they are links to it); the answer states them as the
+ * contract's `CollectionRecord.parcel_photo_ids` declares, and the stored answer that a replay returns carries them with it. **The photos the rider staged beforehand are not listed** (a
+ * collection of twenty thousand parcels would otherwise answer with twenty thousand identifiers, the bottleneck of the request turned round): `parcelPhotoCount` is how many the count attached
+ * in all, staged and named together (D-E1). None attached (a stop Ops let through without photos) states neither.
  * `evidenceIds` are the other evidence the count attached to the stop beside its reason (the photo of the parcel left behind), in the order the rider named it, stated as the contract's
  * `CollectionRecord.evidence_ids` declares (Run D, Part 2, finding F2: the answer and its replay used to drop them); none attached states none.
  */
@@ -62,6 +66,7 @@ export function collectionRecordViewOf(
   row: CollectionRecordRow,
   parcelPhotoIds: readonly string[] = [],
   evidenceIds: readonly string[] = [],
+  parcelPhotoCount?: number,
 ): CollectionRecordView {
   const reason = row.variance_reason_snapshot;
   const captured = iso(row.captured_at);
@@ -75,6 +80,9 @@ export function collectionRecordViewOf(
     ...(reason?.note === undefined ? {} : { variance_note: reason.note }),
     ...(evidenceIds.length === 0 ? {} : { evidence_ids: evidenceIds }),
     ...(parcelPhotoIds.length === 0 ? {} : { parcel_photo_ids: parcelPhotoIds }),
+    ...(parcelPhotoCount === undefined || parcelPhotoCount === 0
+      ? {}
+      : { parcel_photo_count: parcelPhotoCount }),
     ...(captured === null ? {} : { captured_at: captured }),
     office_notified_at: iso(row.office_notified_at),
   };

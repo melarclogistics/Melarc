@@ -183,6 +183,7 @@ describe('recordCollection: the photos make the count (AC-SLICE-001-86)', () => 
       pickup_stop_id: stop.id,
       collected_count: 3,
       parcel_photo_ids: photos,
+      parcel_photo_count: 3,
     });
     expect(Object.keys(response.json() as object).toSorted()).toEqual(
       [
@@ -190,6 +191,7 @@ describe('recordCollection: the photos make the count (AC-SLICE-001-86)', () => 
         'declared_count',
         'id',
         'office_notified_at',
+        'parcel_photo_count',
         'parcel_photo_ids',
         'pickup_stop_id',
         'variance',

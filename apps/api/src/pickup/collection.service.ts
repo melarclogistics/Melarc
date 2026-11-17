@@ -23,7 +23,11 @@ import {
 import {
   attachParcelPhotos,
   checkedParcelPhotoIds,
+  checkedStagedBatch,
+  refuseStagedNames,
   requireStoredParcelPhotos,
+  stageParcelPhotos,
+  stagedParcelPhotoCount,
   stopIsExcused,
 } from './collection-parcel-photos.js';
 import { momentOf } from '../platform/time/device-moment.js';
@@ -34,6 +38,7 @@ import { pickupStopEtagOf } from './pickup-stop-etag.js';
 import { overCountReasonRequest, pickupReasonRequest } from './pickup-vocabulary.js';
 
 const OPERATION = 'recordCollection';
+const STAGE_OPERATION = 'stageParcelPhotos';
 const EXCEPTION_OPERATION = 'authoriseParcelPhotoException';
 /** The most parcels a count can say: what the column of the record holds (a whole number of four bytes). A count above the booking is recorded (D-D5), so the database's range is the only bound. */
 const MAX_COLLECTED_COUNT = 2_147_483_647;
@@ -53,7 +58,10 @@ export interface CollectionBody {
   readonly variance_note?: string;
   /** The photo a short count's reason asks for (a failure-kind photo of the stop, `COLLECTION_PROOF`), attached to the stop as a failure's is. */
   readonly evidence_ids?: readonly string[];
-  /** The photo of each parcel counted (`PARCEL_PHOTO`, D-A10): exactly `collected_count` of them, or none for a stop Ops let through without photos. */
+  /**
+   * The photo of each parcel counted (`PARCEL_PHOTO`, D-A10) **that was not staged beforehand** (`stageParcelPhotos`, D-E1): with the staged ones, exactly `collected_count` of them,
+   * or none at all for a stop Ops let through without photos. A collection that staged all of its photos names none.
+   */
   readonly parcel_photo_ids?: readonly string[];
   readonly captured_at?: string;
 }
@@ -64,6 +72,17 @@ export interface RecordedCollection {
 
 interface StoredCollection {
   readonly record: CollectionRecordView;
+}
+
+/** The body of `stageParcelPhotos` (D-E1): the photos of a count that is not yet made, one to 500 of them. */
+export interface StageParcelPhotosBody {
+  readonly parcel_photo_ids: readonly string[];
+}
+
+/** The contract's `ParcelPhotosStaged`: the stop, and **how many** of its photos are staged now (never a list: the set is as large as the count). */
+export interface StagedParcelPhotos {
+  readonly pickup_stop_id: string;
+  readonly staged_count: number;
 }
 
 export interface ParcelPhotoExceptionBody {
@@ -163,10 +182,14 @@ const notTheRidersWork = (): ApiException =>
  *   pickup (`ZERO_COLLECTION_IS_FAILURE`: nothing is made, no sender is promoted, no handover is touched); then, in the transaction, the retry
  *   (`Idempotency-Key`); the stop under its lock (not the rider's: `NOT_ASSIGNED_RIDER`, one answer); the run (`MANIFEST_NOT_STARTED`,
  *   `STATE_CONFLICT`); the stop's `ETag`; that the stop was arrived at and has no record; the count against what the stop declared and the reason of a count that is not equal to it; and last
- *   the photos (D-A10, Run A2): **the photo of every parcel** (`parcel_photo_ids`: exactly `collected_count` stored photos of this rider and this stop, each attached once, or none
- *   for a stop Ops let through without them, `authoriseParcelPhotoException`; `VALIDATION_FAILED` for the wrong number or a photo named twice, `EVIDENCE_NOT_STORED`, one answer, for
+ *   the photos (D-A10, Run A2): **the photo of every parcel** (`parcel_photo_ids` and the photos staged beforehand: exactly `collected_count` stored photos of this rider and this stop, each
+ *   attached once, or none for a stop Ops let through without them, `authoriseParcelPhotoException`; `VALIDATION_FAILED` for the wrong number or a photo named twice, `EVIDENCE_NOT_STORED`, one answer, for
  *   a photo that cannot be counted) and the photo a short count's reason asks for (`evidence_ids`, attached to the stop as a failure's photo is). The database holds the number of
  *   parcel photos for every writer, at the end of the transaction (migration 0088).
+ * - **A collection of any size (D-E1, Run E).** The photos of a count that is not yet made may be put aside in batches of at most 500 (`stageParcelPhotos`), so that no request has to name
+ *   them all: this act then attaches **the staged photos and the ones it names, together**, in its own transaction, and the number is the two together. It never reads the staged photos
+ *   into memory and never answers with them (it states how many, `parcel_photo_count`). The stop's lock, taken first here and by every batch, orders the two: a batch that commits first is
+ *   counted, one that meets the count is refused.
  * - **The actual count, never the declared one.** The declared count is what the stop's dispatch-time summary said (the rider was shown it, and it is
  *   the one request fact the rider's context reads as itself). Fewer is a `SHORT` count and needs a reason of the `PICKUP_SHORT_COUNT` catalogue
  *   with the note and the photo its metadata asks for (`REASON_REQUIRED`); equal is `MATCH`, which has no reason; **more than was declared is an `OVER` count**
@@ -383,11 +406,22 @@ export class Collections {
 
       // The photos (D-A10), judged after every other refusal so that a count refused for another reason is told so, and before anything is written: one photo of each parcel counted,
       // or none for a stop Ops let through without them, each a stored photo of this rider and this stop, attached once. The database holds the number for every writer.
+      // The number is the staged photos' and the named ones' together (D-E1): a stop that is let through takes none, so what was staged for it is left as it is, attached to nothing. The
+      // stop's lock is held, so no photo is staged between this reading and the attachment below (the guard of the staged table takes the lock first, and finds the count made).
       const excused = await stopIsExcused(tx, stop.id);
+      const staged = excused ? 0 : await stagedParcelPhotoCount(tx, stop.id);
+      // A photo that is staged and also named is `duplicate` whatever the numbers are (the likeliest mistake of a retry), so it is judged before the number is.
+      if (!excused) {
+        await refuseStagedNames(
+          tx,
+          (body.parcel_photo_ids ?? []).map((id) => id.toLowerCase()),
+        );
+      }
       const parcelPhotos = checkedParcelPhotoIds(
         body.parcel_photo_ids,
         body.collected_count,
         excused,
+        staged,
       );
       await requireStoredParcelPhotos(tx, stop.id, riderId, parcelPhotos);
       await requireStoredEvidence(tx, stop.id, riderId, reasonPhotos);
@@ -425,8 +459,8 @@ export class Collections {
       })();
       const row = written.rows[0] as unknown as CollectionRecordRow | undefined;
       if (row === undefined) throw new Error('A collection record was not made');
-      // The photos are attached to the count in the same transaction; the database refuses at its end a count whose photos are not its number.
-      await attachParcelPhotos(tx, row.id, parcelPhotos);
+      // The photos are attached to the count in the same transaction, the staged ones first and then the ones it names; the database refuses at its end a count whose photos are not its number.
+      await attachParcelPhotos(tx, row.id, parcelPhotos, staged > 0 ? stop.id : undefined);
       await attachEvidence(tx, stop.id, reasonPhotos);
 
       // The count's own event (OB-S1-54), the same for a clean count and a short one: it says that a count was recorded and that the stop is still
@@ -473,15 +507,145 @@ export class Collections {
       // and an event the ledger cannot take undoes the promotion with the rest of the act.
       await tx.execute(sql`select melarc.promote_collected_sender(${stop.id}::uuid)`);
 
-      // The answer states the photos it attached, in the order the rider named them, and the stored answer that a replay returns is this one (Run B, Part 1, item 5).
+      // The answer states the photos the request named, in the order the rider named them, and how many photos the count attached in all, staged and named together; the stored answer that a
+      // replay returns is this one (Run B, Part 1, item 5). The photos that were staged are not listed: the answer of a collection of any size is the size of a small one (D-E1).
       // (Run D, Part 2, finding F2: the evidence the count attached beside its reason is in the answer, and so in the replay that returns this stored answer.)
-      const view = collectionRecordViewOf(row, parcelPhotos, reasonPhotos);
+      const view = collectionRecordViewOf(
+        row,
+        parcelPhotos,
+        reasonPhotos,
+        parcelPhotos.length + staged,
+      );
       const answer: StoredCollection = { record: view };
       await idempotency.complete(handle, scope, {
         status: 200,
         body: new TextEncoder().encode(JSON.stringify(answer)),
       });
       return { record: view };
+    });
+  }
+
+  /**
+   * `stageParcelPhotos` (D-E1, 17 November 2026; `pickup.collection.confirm`; pickup-collection.md section 5.5; the plan's Stage 6b): the rider puts the parcel photos of a count that is not
+   * yet made aside, in a batch of **1 to 500** identifiers, so that a collection of any size reaches the server in requests the transport admits. The limit is a request's and never a pickup's:
+   * a collection of 20,000 parcels is 40 batches and one small count.
+   *
+   * - **The same judgement as the count's own, for each photo**: a stored `PARCEL_PHOTO` of this stop, captured by this rider and not attached to a count (`EVIDENCE_NOT_STORED`, one answer for
+   *   any that cannot be used). The stop is judged as the count judges it, under its lock: the rider's own (`NOT_ASSIGNED_RIDER`), on a run in progress (`MANIFEST_NOT_STARTED`, `STATE_CONFLICT`), arrived
+   *   at and not worked (`stop_not_arrived`, `stop_resolved`), **with no count** (`collection_recorded`: the staged set is closed by the count) and no exception that let it through without
+   *   photos (`parcel_photo_exception`). The database holds all of it for every writer (migration 0108).
+   * - **Idempotent twice over**: by its key (a replay returns the stored answer) and by its rows (a photo already staged is a no-op, so a batch sent again under another key is the same set).
+   * - **It changes nothing but its rows**: no count, no stop, no event (the count's own event is the record of what was counted), no envelope. A batch that is refused leaves nothing, and
+   *   a set that is never counted stays staged evidence of the stop, as a photo that was declared and never named does today. Staged photos are never removed: **stage only the photos of the
+   *   parcels the count will take** (a count refused for the wrong number of photos leaves the staged set as it was).
+   * - **The answer is how many photos are staged for the stop now, never a list.**
+   */
+  async stage(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    stopId: string,
+    request: {
+      readonly body: StageParcelPhotosBody;
+      readonly idempotencyKey: string;
+      readonly fingerprint: string;
+    },
+  ): Promise<StagedParcelPhotos> {
+    const { runner, idempotency } = this.#options;
+    if (authorized.session.principalType !== 'RIDER') {
+      throw ApiException.of(ErrorCode.PermissionDenied, 'Not permitted');
+    }
+    if (!isIdempotencyKey(request.idempotencyKey)) {
+      throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+        violations: [{ in: 'header', pointer: 'Idempotency-Key', rule: 'format' }],
+      });
+    }
+    const photos = checkedStagedBatch(request.body.parcel_photo_ids);
+    const riderId = authorized.session.principalId.toLowerCase();
+
+    return runner.mutate(authorized, correlationId, async (handle) => {
+      const tx = transactionOf(handle);
+      const scope = {
+        principalType: 'RIDER',
+        principalId: riderId,
+        operationId: STAGE_OPERATION,
+        key: request.idempotencyKey,
+      } as const;
+      const begun = await idempotency.begin(handle, scope, request.fingerprint);
+      if (begun.outcome === 'REPLAY') {
+        return JSON.parse(Buffer.from(begun.response.body).toString('utf8')) as StagedParcelPhotos;
+      }
+      if (begun.outcome === 'CONFLICT') {
+        throw ApiException.of(
+          ErrorCode.IdempotencyKeyConflict,
+          'That Idempotency-Key was used with a different request',
+        );
+      }
+      if (begun.outcome !== 'NEW') {
+        // A record that began and did not complete is a stranded one (OB-100): the command is not run again, and nothing is invented.
+        throw new Error('An idempotency record of this command is stranded');
+      }
+
+      // The stop, under its lock and nothing else (as the count takes it, so that a batch and the count meet in either order). A rider is shown the stops of its own dispatched runs and
+      // no other, so one that comes back is its own.
+      const found = await tx.execute(
+        sql`select id, state, pickup_manifest_id from pickup_stop where id = ${stopId}::uuid for update`,
+      );
+      const stop = found.rows[0] as
+        { id: string; state: string; pickup_manifest_id: string } | undefined;
+      if (stop === undefined) throw notTheRidersWork();
+      const runs = await tx.execute(
+        sql`select state from pickup_manifest where id = ${stop.pickup_manifest_id}::uuid`,
+      );
+      const run = runs.rows[0] as unknown as { state: string } | undefined;
+      if (run === undefined) throw notTheRidersWork();
+      if (run.state === 'DISPATCHED') {
+        throw ApiException.of(ErrorCode.ManifestNotStarted, 'The run has not been started');
+      }
+      if (run.state !== 'IN_PROGRESS') {
+        throw ApiException.of(ErrorCode.StateConflict, 'The run is over', {
+          rule: 'run_not_in_progress',
+        });
+      }
+      if (stop.state === 'PENDING') {
+        throw ApiException.of(ErrorCode.StateConflict, 'The rider has not arrived at this stop', {
+          rule: 'stop_not_arrived',
+        });
+      }
+      if (stop.state !== 'ARRIVED') {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'The stop has been worked or skipped and is not counted',
+          { rule: 'stop_resolved' },
+        );
+      }
+      const earlier = await tx.execute(
+        sql`select id from collection_record where pickup_stop_id = ${stop.id}::uuid`,
+      );
+      if (earlier.rows.length > 0) {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'A collection is already recorded for this stop',
+          { rule: 'collection_recorded' },
+        );
+      }
+      if (await stopIsExcused(tx, stop.id)) {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'Ops let this stop through without parcel photos, so none is staged for it',
+          { rule: 'parcel_photo_exception' },
+        );
+      }
+
+      await stageParcelPhotos(tx, stop.id, riderId, photos);
+      const answer: StagedParcelPhotos = {
+        pickup_stop_id: stop.id,
+        staged_count: await stagedParcelPhotoCount(tx, stop.id),
+      };
+      await idempotency.complete(handle, scope, {
+        status: 200,
+        body: new TextEncoder().encode(JSON.stringify(answer)),
+      });
+      return answer;
     });
   }
 

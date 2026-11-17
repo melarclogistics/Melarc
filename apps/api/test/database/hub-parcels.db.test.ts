@@ -2106,3 +2106,81 @@ describe('the names of the receiving side (migration 0106)', () => {
     expect(rowsOf(restored)).toEqual([{ n: 2 }]);
   });
 });
+
+describe('the deferred checks of an intake judge it once, and believe no setting alone (migration 0109)', () => {
+  // The act key the guard reads for a tap and a finish, set the way the operations set it (a statement of the login never meets it).
+  const asReceiver = `select set_config('melarc.authorization_key', '${COUNT}', true)`;
+
+  // Break caught: the guard of a door parcel no longer asking that its photo is one of the stop's (the place of each is judged at the end of the transaction, the photo is the guard's): a parcel made
+  // for another stop's photo is refused at its statement, by the guard and not by the set.
+  it('refuses a door parcel made for a photo that is not one of the stop’s, at the statement', async () => {
+    const own = await photoIntake(2);
+    const other = await photoIntake(2);
+    expect(
+      await adminCommit([
+        `insert into intake_parcel (id, pickup_intake_id, responsible_hub_id, ordinal, origin, door_photo_evidence_id, state)
+         values (gen_random_uuid(), '${own.id}', '${HUB_A}', 3, 'DOOR_PHOTO', '${other.photos[0] ?? ''}', 'EXPECTED')`,
+      ]),
+    ).toEqual({ code: '23514', constraint: undefined });
+    expect(await parcelsOf(own.id)).toHaveLength(2);
+  });
+
+  // Break caught: the set check believing the setting alone. Any statement of a login can set it, so for an intake an EARLIER transaction opened it is never believed: the door parcels are judged in
+  // full, and a set that is not the stop's photos is refused though the setting names the intake.
+  it('judges the door parcels of an intake that an earlier transaction opened in full, whatever the setting says', async () => {
+    const photo = await photoIntake(3);
+    const [, second, third] = photo.parcels;
+    expect(
+      await adminCommit([
+        'set local session_replication_role = replica',
+        `delete from intake_parcel where id in ('${second?.id ?? ''}', '${third?.id ?? ''}')`,
+        'set local session_replication_role = origin',
+        `insert into intake_parcel (id, pickup_intake_id, responsible_hub_id, ordinal, origin, door_photo_evidence_id, state)
+         values (gen_random_uuid(), '${photo.id}', '${HUB_A}', 3, 'DOOR_PHOTO', '${third?.door_photo_evidence_id ?? ''}', 'EXPECTED')`,
+        `select set_config('melarc.parcel_set_checked', '${photo.id}', true)`,
+      ]),
+    ).toEqual({ code: '23514', constraint: 'intake_parcel_set' });
+    expect((await parcelsOf(photo.id)).map((parcel) => parcel.ordinal)).toEqual([1, 2, 3]);
+  });
+
+  // Break caught: the count check believing the setting alone, for an intake an earlier transaction wrote: a parcel marked missing while the vendor is still being checked in is refused.
+  it('judges the count of an intake that an earlier transaction wrote in full, whatever the setting says', async () => {
+    const open = await photoIntake(2);
+    expect(
+      await adminCommit([
+        asReceiver,
+        `update intake_parcel set state = 'MISSING' where id = '${open.parcels[0]?.id ?? ''}'`,
+        `select set_config('melarc.parcel_count_checked', '${open.id}', true)`,
+      ]),
+    ).toEqual({ code: '23514', constraint: 'intake_parcel_count' });
+    expect((await parcelOf(open.parcels[0]?.id ?? '')).state).toBe('EXPECTED');
+  });
+
+  // Break caught (the bypass the statement trigger closes): the count of an intake judged early (SET CONSTRAINTS ... IMMEDIATE, the intake's own row written), and a parcel changed by a LATER statement
+  // never judged because the first judgement is remembered.
+  it('judges a parcel changed after the intake was judged early, in immediate mode', async () => {
+    const open = await photoIntake(2);
+    expect(
+      await adminCommit([
+        asReceiver,
+        'set constraints all immediate',
+        `update pickup_intake set state = state where id = '${open.id}'`,
+        `update intake_parcel set state = 'MISSING' where id = '${open.parcels[0]?.id ?? ''}'`,
+      ]),
+    ).toEqual({ code: '23514', constraint: 'intake_parcel_count' });
+  });
+
+  // Break caught: the intake's own event not fired when the transaction writes its row by a column the count does not use (the event used to be for four columns): the parcel events are then skipped,
+  // by the setting and the intake's row being this transaction's, and nobody judges the count.
+  it('judges an intake that the transaction wrote by a column the count does not use, because its own event is never skipped', async () => {
+    const open = await photoIntake(2);
+    expect(
+      await adminCommit([
+        asReceiver,
+        `update intake_parcel set state = 'MISSING' where id = '${open.parcels[0]?.id ?? ''}'`,
+        `update pickup_intake set active_receiver_id = active_receiver_id where id = '${open.id}'`,
+        `select set_config('melarc.parcel_count_checked', '${open.id}', true)`,
+      ]),
+    ).toEqual({ code: '23514', constraint: 'intake_parcel_count' });
+  });
+});

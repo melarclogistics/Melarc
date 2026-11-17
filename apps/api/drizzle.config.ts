@@ -43,6 +43,7 @@ export default defineConfig({
     './src/pickup/pickup-stop-evidence.schema.ts',
     // SLICE-001 (Run A2, D-A10): the photo of every parcel at the door, attached to the count, and Ops's exception for the day the camera fails.
     './src/pickup/collection-parcel-photo.schema.ts',
+    './src/pickup/collection-parcel-photo-staged.schema.ts',
     './src/pickup/parcel-photo-exception.schema.ts',
     // SLICE-001 (S1.31): what the hub handover opens for each collected request of a run, to be counted blind at the hub.
     './src/hub/pickup-intake.schema.ts',

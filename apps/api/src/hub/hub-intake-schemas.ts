@@ -90,7 +90,7 @@ export const BLIND_COUNT_BODY = described({
   required: ['physical_count'],
   additionalProperties: false,
   properties: {
-    physical_count: { type: 'integer', minimum: 0 },
+    physical_count: { type: 'integer', minimum: 0, maximum: 2_147_483_647 },
   },
 });
 

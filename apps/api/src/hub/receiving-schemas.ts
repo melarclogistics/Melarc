@@ -367,7 +367,7 @@ export const CHECK_IN_FINISH_BODY = described({
   additionalProperties: false,
   properties: {
     all_arrived: { type: 'boolean' },
-    confirmed_count: { type: 'integer', minimum: 1 },
+    confirmed_count: { type: 'integer', minimum: 1, maximum: 2_147_483_647 },
   },
 });
 
@@ -398,7 +398,7 @@ export const INTAKE_CORRECTION_BODY = described({
   properties: {
     reason: { type: 'string', minLength: 1, maxLength: 1000 },
     parcel_changes: { type: 'array', minItems: 1, items: INTAKE_PARCEL_CHANGE_SCHEMA },
-    physical_count: { type: 'integer', minimum: 0 },
+    physical_count: { type: 'integer', minimum: 0, maximum: 2_147_483_647 },
   },
 });
 

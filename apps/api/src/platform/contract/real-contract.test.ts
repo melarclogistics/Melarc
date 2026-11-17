@@ -367,6 +367,79 @@ describe('CollectionRecord: a record the server can really answer with (audit C0
   });
 });
 
+describe('the inputs that take a number of parcels state what the column holds (contract 5.109.0)', () => {
+  const MAXIMUM = 2_147_483_647;
+  const schemas = (CONTRACT.components as JsonObject).schemas as JsonObject;
+
+  /** The properties of a named schema of the contract. */
+  const propertiesOf = (name: string): JsonObject =>
+    (schemas[name] as JsonObject).properties as JsonObject;
+
+  /** The properties of the inline body of an operation's request. */
+  function bodyPropertiesOf(operationId: string): JsonObject {
+    for (const item of Object.values(CONTRACT.paths as JsonObject)) {
+      for (const operation of Object.values(item as JsonObject)) {
+        if (isJsonObject(operation) && operation.operationId === operationId) {
+          const content = (operation.requestBody as JsonObject).content as JsonObject;
+          const schema = (content['application/json'] as JsonObject).schema as JsonObject;
+          return schema.properties as JsonObject;
+        }
+      }
+    }
+    throw new Error(`The contract has no operation ${operationId}`);
+  }
+
+  // Break caught: a count input that states no maximum again (a client that reads the contract is not told the bound, and the validator no longer refuses a count the column cannot hold:
+  // the service answered `range` for one input and nothing at all for the others).
+  it.each([
+    [
+      'CollectionRecordCreate.collected_count',
+      () => propertiesOf('CollectionRecordCreate').collected_count,
+    ],
+    ['CollectionRecord.collected_count', () => propertiesOf('CollectionRecord').collected_count],
+    ['submitBlindCount physical_count', () => bodyPropertiesOf('submitBlindCount').physical_count],
+    [
+      'CheckInFinish.confirmed_count (finishCheckIn)',
+      () => propertiesOf('CheckInFinish').confirmed_count,
+    ],
+    ['IntakeCorrection.physical_count', () => propertiesOf('IntakeCorrection').physical_count],
+    ['HubHandoverRow.declared_count', () => propertiesOf('HubHandoverRow').declared_count],
+  ])('states the maximum of %s', (_name, schemaOf) => {
+    const schema = schemaOf() as JsonObject;
+    expect(schema.type).toBe('integer');
+    expect(schema.maximum).toBe(MAXIMUM);
+  });
+
+  const UUID = '0190d7c2-7a3e-7c1e-9d2a-3f4b5c6d7e8f';
+  const collect = (checked: ContractValidator, count: number) =>
+    checked.validateRequest('recordCollection', {
+      params: { id: UUID },
+      query: {},
+      headers: { 'idempotency-key': 'k', 'if-match': '"1"' },
+      body: { collected_count: count },
+      hasBody: true,
+    });
+
+  // Break caught: a count above what the column holds let through by the contract's validation to the service (or the database), or refused with another rule than the schema's own.
+  it('takes the largest count the record holds and refuses one more, with the rule maximum', () => {
+    expect(collect(validator, MAXIMUM)).toEqual([]);
+    expect(collect(validator, MAXIMUM + 1)).toEqual([
+      { in: 'body', pointer: '/collected_count', rule: 'maximum' },
+    ]);
+  });
+
+  // Break caught (of the test above): a check that refuses the count for another reason than the contract's maximum. The same request against a copy of the contract whose input states no
+  // maximum is let through, so the refusal above is the contract's and not an accident of the request.
+  it('would let the count through if the contract stated no maximum', () => {
+    const copy = structuredClone(CONTRACT) as { components: { schemas: Record<string, unknown> } };
+    const create = copy.components.schemas.CollectionRecordCreate as {
+      properties: { collected_count: { maximum?: number } };
+    };
+    delete create.properties.collected_count.maximum;
+    expect(collect(new ContractValidator(copy as unknown as JsonObject), MAXIMUM + 1)).toEqual([]);
+  });
+});
+
 describe('the Rider operations that name the dedicated host (audit C03)', () => {
   const RIDER_OPERATIONS = [
     'arriveAtDeliveryStop',
@@ -381,6 +454,7 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
     'requestRiderSignInChallenge',
     'requestSmsHandshakeFallback',
     'riderSignIn',
+    'stageParcelPhotos',
     'startDeliveryRun',
     'startRun',
     'verifyHandshake',
@@ -402,17 +476,17 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
     return found.toSorted();
   };
 
-  // Break caught: a server declaration dropped to make a count agree. All fifteen stay: the dedicated host is
+  // Break caught: a server declaration dropped to make a count agree. All sixteen stay: the dedicated host is
   // where a native client calls these, and removing one would send it to the cookie-only default. (The three of the
   // collection handshake were added in S1.27: the rider shows and enters codes at the door; the report of a failure in S1.28;
-  // the declaration and the completion of a piece of evidence in S1.11: the rider uploads what it captured.)
-  it('keeps all fifteen operation-level server declarations', () => {
+  // the declaration and the completion of a piece of evidence in S1.11: the rider uploads what it captured; the staging of the photos of a count in Run E, D-E1.)
+  it('keeps all sixteen operation-level server declarations', () => {
     expect(withServers()).toEqual(RIDER_OPERATIONS);
   });
 
   // Break caught: the comment above `servers` giving a different count from the one the document has, which
   // sends the next reader looking for an operation that is not there.
-  it('says in its header comment how many there are, and says fifteen', () => {
+  it('says in its header comment how many there are, and says sixteen', () => {
     const text = readFileSync(locateContract(import.meta.dirname), 'utf8');
     const stated = /declared per operation on the (\w+)\s+# Rider native operations/.exec(text);
     const words = [
@@ -432,10 +506,11 @@ describe('the Rider operations that name the dedicated host (audit C03)', () => 
       'thirteen',
       'fourteen',
       'fifteen',
+      'sixteen',
     ];
 
     expect(stated?.[1]).toBe(words[withServers().length]);
-    expect(stated?.[1]).toBe('fifteen');
+    expect(stated?.[1]).toBe('sixteen');
   });
 });
 

@@ -24,6 +24,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'approveStaffIdentity',
   'arriveAtPickupStop',
   'recordCollection',
+  'stageParcelPhotos',
   'authoriseParcelPhotoException',
   'recordIntakeCondition',
   'reportPickupFailure',

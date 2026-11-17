@@ -459,7 +459,7 @@ describe('submitHubHandover: one intake for each collected request, and the run 
       { rows, captured_at: capturedNow(), extra: true },
       { rows: [{ ...rows[0], declared_count: -1 }], captured_at: capturedNow() },
       { rows: [{ ...rows[0], declared_count: 1.5 }], captured_at: capturedNow() },
-      // Past the column's range: it passes the contract's schema (a minimum and no maximum) and would reach the insert; the service refuses it.
+      // Past the column's range: since contract 5.109.0 the schema states the maximum (2147483647), so the contract's validation refuses it (rule `maximum`) before it reaches the service or the insert.
       { rows: [{ ...rows[0], declared_count: 2_147_483_648 }], captured_at: capturedNow() },
       { rows: [{ pickup_request_id: rows[0]?.pickup_request_id }], captured_at: capturedNow() },
       { rows: [{ ...rows[0], note: 'x' }], captured_at: capturedNow() },
