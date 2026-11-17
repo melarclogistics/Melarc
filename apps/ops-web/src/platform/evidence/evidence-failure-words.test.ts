@@ -159,7 +159,7 @@ describe('the words of a file that could not be stored', () => {
 describe('the steps of a file’s trip, in words', () => {
   it('has words for every step, and each says what is being done', () => {
     expect(Object.keys(UPLOAD_STEP_WORDS).toSorted()).toEqual(
-      ['confirming', 'declaring', 'hashing', 'sending'].toSorted(),
+      ['confirming', 'declaring', 'hashing', 'sending', 'waiting'].toSorted(),
     );
     for (const words of Object.values(UPLOAD_STEP_WORDS)) expect(words).toMatch(/…$/);
   });

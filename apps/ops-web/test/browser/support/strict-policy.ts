@@ -56,6 +56,15 @@ export async function enforceStrictPolicy(
       throw error;
     }
   });
+  return reportPolicyViolations(page);
+}
+
+/**
+ * Reports what the browser says of the policy it was sent: every `securitypolicyviolation` of every document of the page, as `<directive> <blocked address>`, into the list this returns. It is what
+ * `enforceStrictPolicy` ends with, and it is the whole of what a spec needs when the policy reaches the browser in the header of a **real server** and not through the test's own interception
+ * (`evidence-store-origin.spec.ts`, whose page is served by an edge of its own that sets the header, so that the browser knows the real address of the page and of the store it reaches).
+ */
+export async function reportPolicyViolations(page: Page): Promise<string[]> {
   const violations: string[] = [];
   await page.exposeFunction('reportViolation', (detail: string) => {
     violations.push(detail);

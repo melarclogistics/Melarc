@@ -291,6 +291,8 @@ export interface ReceivingApi {
   /** The addresses the browser asked the photo store for: one for each photo that was opened, and none before. */
   readonly images: string[];
   readonly unexpected: string[];
+  /** The origin of the store the addresses of the world point at: empty for the page's own origin (the usual stand-in), or a real store on another origin (`evidence-store-origin.spec.ts`). */
+  readonly storeOrigin: string;
 }
 
 function parsed(text: string | null): unknown {
@@ -690,8 +692,16 @@ async function answer(route: Route, state: ReceivingApi, call: Call): Promise<vo
         },
         upload: {
           method: 'PUT',
-          url: `/test-evidence-store/upload/${record.id}?sig=${PLANTED.signature}`,
-          headers: { 'content-type': record.contentType },
+          url: `${state.storeOrigin}/test-evidence-store/upload/${record.id}?sig=${PLANTED.signature}`,
+          // What the real capability echoes: the type and the checksum it is signed for (the store checks the bytes against the second). Only a store on another origin is told it, since it is what a CORS rule has to allow.
+          headers: {
+            'content-type': record.contentType,
+            ...(state.storeOrigin === ''
+              ? {}
+              : {
+                  'x-amz-checksum-sha256': Buffer.from(record.checksum, 'hex').toString('base64'),
+                }),
+          },
           // An address the platform has just made lives for minutes from now: the portal judges it by the clock.
           expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
           storage_ref: PLANTED.objectKey,
@@ -738,7 +748,7 @@ async function answer(route: Route, state: ReceivingApi, call: Call): Promise<vo
       headers: JSON_HEADERS,
       json: {
         method: 'GET',
-        url: `/test-evidence-store/photo/${photo}?token=issued-${String(issued)}`,
+        url: `${state.storeOrigin}/test-evidence-store/photo/${photo}?token=issued-${String(issued)}`,
         expires_at: '2026-11-03T08:36:00Z',
       },
     });
@@ -749,59 +759,81 @@ async function answer(route: Route, state: ReceivingApi, call: Call): Promise<vo
 }
 
 /** One picture the browser really decodes as an image, so that a photo opened in the dialog is drawn as a photo is. */
-const PICTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="#b9c6d8"/><rect x="120" y="140" width="560" height="320" rx="24" fill="#8497b3"/><text x="400" y="540" text-anchor="middle" font-family="sans-serif" font-size="32" fill="#26364d">A synthetic photo</text></svg>`;
+export const PICTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="#b9c6d8"/><rect x="120" y="140" width="560" height="320" rx="24" fill="#8497b3"/><text x="400" y="540" text-anchor="middle" font-family="sans-serif" font-size="32" fill="#26364d">A synthetic photo</text></svg>`;
 
+/**
+ * `options.storeOrigin` is the origin of a store that is **not** the page's: the addresses of the uploads and of the photos then point at it, and the stand-in answers nothing at them (it is not
+ * asked: a real server answers, with a real CORS rule, and `state.uploads` is filled by that server as the store receives a `PUT`). Left out, the store is the page's own origin, as it always was.
+ */
 export async function stubReceivingApi(
   target: Page | BrowserContext,
   initial: World = world(),
+  options: { readonly storeOrigin?: string } = {},
 ): Promise<ReceivingApi> {
-  const state: ReceivingApi = {
+  const state = receivingApiState(initial, options);
+  // The clock of the world: the dates are the world's, whatever day the machine thinks it is.
+  await freezeClock(target);
+  // The store of the world is the page's own origin (the production policy is `connect-src 'self'` and `img-src 'self'`): the bytes of an upload, and the picture of a photo.
+  if (options.storeOrigin === undefined)
+    await target.route('**/test-evidence-store/upload/**', async (route) => {
+      const request = route.request();
+      // WebKit does not hand a test the body of a request that carries a Blob: the size is then the `content-length` the browser sent, if it sent one, and the digest is not known (an unknown size or digest is not a mismatch).
+      const bytes = request.postDataBuffer();
+      const length = Number(request.headers()['content-length']);
+      state.uploads.push({
+        path: new URL(request.url()).pathname,
+        headers: request.headers(),
+        size: bytes?.length ?? (Number.isFinite(length) ? length : null),
+        sha256: bytes === null ? null : sha256(bytes),
+      });
+      await route.fulfill({ status: 200, headers: { 'cache-control': 'no-store' }, body: '' });
+    });
+  if (options.storeOrigin === undefined)
+    await target.route('**/test-evidence-store/photo/**', async (route) => {
+      state.images.push(new URL(route.request().url()).pathname);
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' },
+        body: PICTURE,
+      });
+    });
+  await target.route('**/api/v1/**', (route) => answerReceivingCall(route, state));
+  return state;
+}
+
+/**
+ * The state of a stand-in of the API and nothing else: no page, no route. It is what `stubReceivingApi` puts on a page, and what a spec that serves the API from **a real server** (so that no route is on the page
+ * and the browser sends the CORS preflights it really sends, `evidence-store-origin.spec.ts`) answers calls from, through `answerReceivingCall`.
+ */
+export function receivingApiState(
+  initial: World = world(),
+  options: { readonly storeOrigin?: string } = {},
+): ReceivingApi {
+  return {
     world: initial,
     calls: [],
     uploads: [],
     images: [],
     unexpected: [],
+    storeOrigin: options.storeOrigin ?? '',
   };
-  // The clock of the world: the dates are the world's, whatever day the machine thinks it is.
-  await freezeClock(target);
-  // The store of the world is the page's own origin (the production policy is `connect-src 'self'` and `img-src 'self'`): the bytes of an upload, and the picture of a photo.
-  await target.route('**/test-evidence-store/upload/**', async (route) => {
-    const request = route.request();
-    // WebKit does not hand a test the body of a request that carries a Blob: the size is then the `content-length` the browser sent, if it sent one, and the digest is not known (an unknown size or digest is not a mismatch).
-    const bytes = request.postDataBuffer();
-    const length = Number(request.headers()['content-length']);
-    state.uploads.push({
-      path: new URL(request.url()).pathname,
-      headers: request.headers(),
-      size: bytes?.length ?? (Number.isFinite(length) ? length : null),
-      sha256: bytes === null ? null : sha256(bytes),
-    });
-    await route.fulfill({ status: 200, headers: { 'cache-control': 'no-store' }, body: '' });
-  });
-  await target.route('**/test-evidence-store/photo/**', async (route) => {
-    state.images.push(new URL(route.request().url()).pathname);
-    await route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' },
-      body: PICTURE,
-    });
-  });
-  await target.route('**/api/v1/**', async (route) => {
-    if (await answerQueueSummary(route)) return;
-    const request = route.request();
-    const url = new URL(request.url());
-    const headers = request.headers();
-    const call: Call = {
-      method: request.method(),
-      path: url.pathname,
-      search: url.search,
-      ifMatch: headers['if-match'],
-      idempotencyKey: headers['idempotency-key'],
-      cookie: headers.cookie,
-      body: parsed(request.postData()),
-    };
-    state.calls.push(call);
-    await answer(route, state, call);
-  });
-  return state;
+}
+
+/** Answers one call of the API from the state, through the route it came by: a Playwright route of a page, or the same shape of a real server's request (`fulfill` and `abort`). */
+export async function answerReceivingCall(route: Route, state: ReceivingApi): Promise<void> {
+  if (await answerQueueSummary(route)) return;
+  const request = route.request();
+  const url = new URL(request.url());
+  const headers = request.headers();
+  const call: Call = {
+    method: request.method(),
+    path: url.pathname,
+    search: url.search,
+    ifMatch: headers['if-match'],
+    idempotencyKey: headers['idempotency-key'],
+    cookie: headers.cookie,
+    body: parsed(request.postData()),
+  };
+  state.calls.push(call);
+  await answer(route, state, call);
 }

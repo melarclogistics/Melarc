@@ -76,6 +76,33 @@ export class ReadHold {
     this.#waiting.delete(key);
   }
 
+  #sequence = 0;
+
+  /**
+   * Resolves when nothing is held: at once when nothing is, or once when the hold ends. It is for the **automatic work that has a promise to wait on** (a file that has not begun to upload, the link of a photo
+   * that has come near the screen), as `whenFree` is for the reads that are a function to run: the work waits and is not retried, and the wait is the one wait of the page. Every caller is its own waiter
+   * (the key only names it, and the latest under a key does not replace an earlier here, as it does in `whenFree`), and `signal` ends the wait of one that is no longer wanted, which then never resolves.
+   * A hold that began again by the time a waiter runs is waited out too, so that what waited does not run into a limit that has only just been told.
+   */
+  async untilFree(key: string, signal?: AbortSignal): Promise<void> {
+    while (this.#held) {
+      if (signal?.aborted === true) throw new DOMException('The wait was abandoned.', 'AbortError');
+      const own = `${key}#${String((this.#sequence += 1))}`;
+      await new Promise<void>((resolve, reject) => {
+        const abandon = (): void => {
+          this.forget(own);
+          reject(new DOMException('The wait was abandoned.', 'AbortError'));
+        };
+        signal?.addEventListener('abort', abandon, { once: true });
+        this.whenFree(own, () => {
+          signal?.removeEventListener('abort', abandon);
+          resolve();
+        });
+      });
+    }
+    if (signal?.aborted === true) throw new DOMException('The wait was abandoned.', 'AbortError');
+  }
+
   /**
    * Ends the hold now and runs what waited, each once. The timer calls it when the wait is over. What runs sees the hold off, so a read that is
    * refused again begins a new hold and nothing here sends it a second time.

@@ -64,6 +64,22 @@ describe('answerOf: a success', () => {
     expect(answer.requestId).toBeUndefined();
   });
 
+  // Break caught: the server's moment not read, so that a moment it gives (the end of an upload address) is judged against a device clock that can be minutes out, which made every address look run out
+  // on a clock that was fast and none look run out on one that was slow (the review of 17 November 2026).
+  it('keeps the server’s own time, from the Date header', () => {
+    const answer = answerOf(respond(200, {}, { Date: 'Tue, 17 Nov 2026 09:30:15 GMT' }));
+
+    expect(answer.serverTime).toBe(Date.UTC(2026, 10, 17, 9, 30, 15));
+  });
+
+  it.each(['', 'yesterday', 'Tue, 32 Nov 2026 09:30:15 GMT'])(
+    'has no server time when the Date header is %j',
+    (value) => {
+      const answer = answerOf(value === '' ? respond(200, {}) : respond(200, {}, { Date: value }));
+      expect(answer.serverTime).toBeUndefined();
+    },
+  );
+
   // A command that answers 204 has no data; the status is what says it succeeded.
   it('is a success with no data for a 204', () => {
     const answer = answerOf({ response: new Response(null, { status: 204 }) });

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { EvidenceUpload } from '../../../components/ui/evidence-upload/EvidenceUpload';
@@ -11,6 +12,7 @@ import {
 import { imagesOnly } from '../../../platform/evidence/evidence-limits';
 import { createEvidenceUploader } from '../../../platform/evidence/upload-evidence';
 import { useEvidenceLimits } from '../../../platform/evidence/use-evidence-limits';
+import { holdOf } from '../../../platform/query/read-hold';
 
 export interface ReceivingPhotoProps {
   /** The vendor the photo is of: the owner of the evidence record. */
@@ -47,6 +49,7 @@ export function ReceivingPhoto({
   onBusyChange,
 }: ReceivingPhotoProps) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const limits = useEvidenceLimits().data;
   const photoLimits = useMemo(
     () => (limits === undefined ? undefined : imagesOnly(limits)),
@@ -57,9 +60,13 @@ export function ReceivingPhoto({
       createEvidenceUploader(
         client,
         { ownerId: intakeId, purpose },
-        photoLimits === undefined ? {} : { limits: photoLimits },
+        // The page's own hold: the files that have not begun wait while the API has asked the page to wait (a request refused for being too fast), as its automatic reads do.
+        {
+          hold: holdOf(queryClient),
+          ...(photoLimits === undefined ? {} : { limits: photoLimits }),
+        },
       ),
-    [client, intakeId, purpose, photoLimits],
+    [client, queryClient, intakeId, purpose, photoLimits],
   );
   return (
     <EvidenceUpload

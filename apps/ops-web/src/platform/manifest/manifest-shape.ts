@@ -1,5 +1,6 @@
 import type { components, operations } from '@melarc/api-client';
 
+import { isCount } from '../api/count-range';
 import {
   calendarDateOf,
   OPERATIONAL_CODE,
@@ -202,8 +203,6 @@ const MAX_CODE_LENGTH = 64;
 const REASON_CODE = /^[A-Za-z0-9_.-]+$/;
 /** The longest note the audit ledger keeps: one line. */
 const MAX_NOTE = 1000;
-/** The most a receiver can say they took: far beyond a run's 64 pickups of however many packages, and bounded so a figure is a figure. */
-const MAX_PARCELS_TAKEN = 1_000_000;
 
 function hasControlCharacter(text: string): boolean {
   for (let index = 0; index < text.length; index += 1) {
@@ -425,10 +424,9 @@ export function parseHandover(body: unknown): HandoverView | undefined {
   const toHub = optional(body.to_hub_id, uuidOf);
   const initiated = instantOf(body.initiated_at);
   const resolved = optional(body.resolved_at, instantOf);
-  const taken = optional(body.parcel_count_taken, (value) => {
-    const count = wholeAtLeast(value, 0);
-    return count !== undefined && count <= MAX_PARCELS_TAKEN ? count : undefined;
-  });
+  // What a receiver says they took is a count like any other: as many as the platform can hold (2,147,483,647, the API's own `maximum`), never fewer. A ceiling of a million here once made a completed handover
+  // of more than a million parcels unreadable, a page that failed whole for one valid record.
+  const taken = optional(body.parcel_count_taken, (value) => (isCount(value) ? value : undefined));
   if (
     id === undefined ||
     manifest === undefined ||

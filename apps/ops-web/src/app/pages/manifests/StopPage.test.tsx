@@ -463,7 +463,7 @@ describe('a photo opened', () => {
 });
 
 describe('the photos a page at a time', () => {
-  it('loads the next page by the server’s position when asked, reads the pages shown again after it, and keeps the photos', async () => {
+  it('loads the next page by the server’s position when asked, reads the pages already shown again only while a photo on them was still on its way, and keeps the photos', async () => {
     const { user } = open((request) =>
       new URL(request.url).searchParams.get('page_token') === 'p2'
         ? json(200, evidenceListFixture({ items: [photo(3)], parcel_photos: progress(3) }))
@@ -484,14 +484,41 @@ describe('the photos a page at a time', () => {
     await waitFor(() => {
       expect(panel.getAllByRole('listitem')).toHaveLength(3);
     });
-    // The next page by the position the server gave, and then the pages already shown once more, in order and by the positions the server gives now: the tiles of the first page are of the moment
-    // of the newest (the progress is the newest page's, for the whole stop).
+    // Every photo shown is stored, and a stored photo stays stored: the next page by the position the server gave, and nothing read again (the reads were [first page, next page], not [first, next, first, next]).
     await waitFor(() => {
       expect(
         evidenceReads().map((read) => new URL(read.url).searchParams.get('page_token')),
-      ).toEqual([null, 'p2', null, 'p2']);
+      ).toEqual([null, 'p2']);
     });
     expect(panel.queryByRole('button', { name: 'Load more photos' })).toBeNull();
+  });
+
+  // Break caught: a read of every page shown after each page loaded (the cost of n pages was n(n+1)/2 requests: 351 for a stop of 2,600 photos, against 120 a minute for the session), made even when every
+  // photo shown is stored and none can change.
+  it('reads each page of a long stop once when every photo is stored, however many pages it takes', async () => {
+    const PAGES = 12;
+    const { user } = open((request) => {
+      const token = new URL(request.url).searchParams.get('page_token');
+      const page = token === null ? 1 : Number(token.slice(1));
+      return json(
+        200,
+        evidenceListFixture({
+          items: [photo(page * 2 - 1), photo(page * 2)],
+          ...(page < PAGES ? { next_page_token: `p${String(page + 1)}` } : {}),
+          parcel_photos: progress(PAGES * 2),
+        }),
+      );
+    });
+
+    const panel = within(await photosPanel());
+    for (let page = 1; page < PAGES; page += 1) {
+      await user.click(await panel.findByRole('button', { name: 'Load more photos' }));
+      await waitFor(() => {
+        expect(panel.getAllByRole('listitem')).toHaveLength((page + 1) * 2);
+      });
+    }
+
+    expect(evidenceReads()).toHaveLength(PAGES);
   });
 
   // Break caught: a page that fails to load taking the photos that were loaded away, or told as if nothing had been read.

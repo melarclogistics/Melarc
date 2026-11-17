@@ -519,6 +519,8 @@ describe('custody: the handover that waits', () => {
     ['a word', 'seven'],
     ['a negative number', '-1'],
     ['a fraction', '2.5'],
+    ['one more than the database can hold', '2147483648'],
+    ['a number too large for any whole number to be safe', '99999999999999999999999'],
   ])('asks for a whole number of parcels, not %s', async (_name, typed) => {
     const { user } = open(pending);
     await user.click(await screen.findByRole('button', { name: 'Accept the handover' }));
@@ -532,6 +534,38 @@ describe('custody: the handover that waits', () => {
       await within(dialog).findByText(/Enter how many parcels were taken, as a whole number/),
     ).toBeVisible();
     expect(sent(ACCEPT)).toHaveLength(0);
+  });
+
+  // Break caught: the ceiling of a million that this form had, below the 2,147,483,647 the API takes and the database holds: the platform sets no limit on the parcels of a pickup, so a count the server would
+  // take is never refused here for its size, and what is typed is what is sent, to the digit.
+  it.each([
+    ['a million and one', '1000001', 1_000_001],
+    ['ten million and one', '10000001', 10_000_001],
+    ['the largest the database holds', '2147483647', 2_147_483_647],
+  ])('sends %s parcels taken as typed', async (_name, typed, count) => {
+    const { user } = open({
+      ...pending,
+      [ACCEPT]: () =>
+        json(
+          200,
+          handoverFixture({
+            state: 'COMPLETED',
+            parcel_count_taken: count,
+            resolved_at: '2026-11-04T10:30:00Z',
+          }),
+          etag('h2'),
+        ),
+    });
+    await user.click(await screen.findByRole('button', { name: 'Accept the handover' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Accept this handover for the hub?' });
+    await user.type(within(dialog).getByRole('textbox', { name: /Parcels taken/ }), typed);
+
+    await user.click(within(dialog).getByRole('button', { name: 'Accept the handover' }));
+
+    await waitFor(() => {
+      expect(sent(ACCEPT)).toHaveLength(1);
+    });
+    expect(await bodyOf(ACCEPT)).toEqual({ parcel_count_taken: count });
   });
 
   it('accepts a count of zero, which is a custody record like any other', async () => {

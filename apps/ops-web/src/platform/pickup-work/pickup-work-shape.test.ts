@@ -375,6 +375,52 @@ describe('a short count', () => {
     });
   });
 
+  // Break caught: the ceiling of ten million that this guard had on a count of parcels (the API takes up to 2,147,483,647): a count the server took made the whole list of count differences unreadable. The figures
+  // are read as sent, to the largest the database holds, on both sides of the old line; one above the database's is not the API's.
+  it.each([
+    ['ten million', 10_000_000],
+    ['ten million and one', 10_000_001],
+    ['two billion', 2_000_000_000],
+  ])('is read when the booked count is %s and the count taken is one more', (_name, declared) => {
+    expect(
+      parseShortfall(
+        shortfallFixture({
+          declared_count: declared,
+          collected_count: declared + 1,
+          variance: 'OVER',
+          difference_count: 1,
+          stop_state: 'COLLECTED',
+        }),
+      ),
+    ).toMatchObject({ declared_count: declared, collected_count: declared + 1, variance: 'OVER' });
+  });
+
+  it('is read at the largest count the database holds, and refused one above it', () => {
+    const largest = 2_147_483_647;
+    expect(
+      parseShortfall(
+        shortfallFixture({
+          declared_count: largest - 1,
+          collected_count: largest,
+          variance: 'OVER',
+          difference_count: 1,
+          stop_state: 'COLLECTED',
+        }),
+      ),
+    ).toMatchObject({ collected_count: largest });
+    expect(
+      parseShortfall(
+        shortfallFixture({
+          declared_count: largest,
+          collected_count: largest + 1,
+          variance: 'OVER',
+          difference_count: 1,
+          stop_state: 'COLLECTED',
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
   // Break caught: a count difference that does not add up, shown with the figures as sent (the page works out none of it, and a sum that is not the API's is refused), or on the wrong side of the booking.
   it.each([
     [

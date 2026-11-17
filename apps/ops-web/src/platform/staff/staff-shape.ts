@@ -159,6 +159,27 @@ export function uuidOf(value: unknown): string | undefined {
   return typeof value === 'string' && UUID.test(value) ? value : undefined;
 }
 
+/**
+ * A list of identifiers, each once, **in any number**: the evidence of a finding, the photos of a count. It is `undefined` when the value is not a list, when one entry is not an identifier, or when
+ * one is there twice (compared without regard to case: the platform's identifiers are lower case, and a server that repeats one in another case has repeated it). There is no ceiling here on
+ * purpose (the platform sets none on the photos or the evidence of a record: OB-S1-97, and the review of 17 November 2026 found a 1,000 and a 100 that the API does not have), and the repeat
+ * is found with a set, because a list of twenty thousand identifiers checked entry by entry against the ones before it takes fourteen seconds of the browser's one thread.
+ */
+export function uuidListOf(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value as unknown[]) {
+    const id = uuidOf(entry);
+    if (id === undefined) return undefined;
+    const key = id.toLowerCase();
+    if (seen.has(key)) return undefined;
+    seen.add(key);
+    ids.push(id);
+  }
+  return ids;
+}
+
 export function instantOf(value: unknown): string | undefined {
   return typeof value === 'string' && ISO_INSTANT.test(value) && !Number.isNaN(Date.parse(value))
     ? value

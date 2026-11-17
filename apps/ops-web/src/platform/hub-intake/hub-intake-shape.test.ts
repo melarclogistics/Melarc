@@ -349,3 +349,128 @@ describe('who holds the lock', () => {
     ).toEqual({ kind: 'nobody' });
   });
 });
+
+/**
+ * An intake of any size. The platform sets no limit on the parcels of an intake (OB-S1-97), nor on the photos of its collection, the findings made on it or the evidence of each (the contract and the API
+ * have no `maxItems` on them), so the guard judges an answer for its shape, its identifiers, its order and its repeats, and **never for its number**. The review of 17 November 2026 found three ceilings that
+ * the API does not have (1,000 photos, 100 pieces of evidence for a finding, 200 findings), each of which made the whole intake unreadable for one more; each is tried on both sides of its old line and far beyond.
+ */
+const photoIds = (count: number): string[] =>
+  Array.from(
+    { length: count },
+    (_, index) => `${(index + 1).toString(16).padStart(8, '0')}-0001-4000-8000-000000000000`,
+  );
+const evidenceOf = (count: number): string[] =>
+  Array.from(
+    { length: count },
+    (_, index) => `${(index + 1).toString(16).padStart(8, '0')}-0002-4000-8000-000000000000`,
+  );
+const findingsOf = (count: number, evidence = 0) =>
+  Array.from({ length: count }, (_, index) =>
+    findingFixture({
+      id: `${(index + 1).toString(16).padStart(8, '0')}-0003-4000-8000-000000000000`,
+      recorded_at: new Date(Date.UTC(2026, 10, 14, 9, 0, 0) + index * 1000).toISOString(),
+      evidence_ids: evidenceOf(evidence),
+    }),
+  );
+
+describe('an intake of any size', () => {
+  // Break caught: a ceiling on the photos of a collection that the API does not have (it was 1,000).
+  it.each([1, 999, 1000, 1001, 2625, 5000, 20_000])(
+    'is read with %i photos of its collection, all of them and in order',
+    (count) => {
+      const photos = photoIds(count);
+      const intake = parseIntake(postCountFixture({ parcel_photo_ids: photos }));
+      expect(intake).toMatchObject({ count_phase: 'POST_COUNT' });
+      expect(intake && 'parcel_photo_ids' in intake ? intake.parcel_photo_ids : []).toEqual(photos);
+    },
+  );
+
+  // Break caught: a ceiling on the evidence of one finding (it was 100): evidence is kept whole, never cut and never a reason to refuse the intake.
+  it.each([1, 99, 100, 101, 500, 5000])(
+    'is read with a finding that has %i pieces of evidence, all of them',
+    (count) => {
+      const evidence = evidenceOf(count);
+      const finding = parseFinding(findingFixture({ evidence_ids: evidence }));
+      expect(finding?.evidence_ids).toEqual(evidence);
+      const intake = parseIntake(
+        postCountFixture({ condition_findings: [findingFixture({ evidence_ids: evidence })] }),
+      );
+      expect(intake).toBeDefined();
+    },
+  );
+
+  // Break caught: a ceiling on the history of an intake (it was 200 findings): a long case is as readable as a short one, and its findings keep the order they were made in.
+  it.each([1, 199, 200, 201, 1000, 5000])(
+    'is read with %i findings, in the order made',
+    (count) => {
+      const findings = findingsOf(count);
+      const intake = parseIntake(postCountFixture({ condition_findings: findings }));
+      expect(
+        intake && 'condition_findings' in intake ? intake.condition_findings : [],
+      ).toHaveLength(count);
+      expect(
+        (intake && 'condition_findings' in intake ? intake.condition_findings : []).map(
+          (finding) => finding.id,
+        ),
+      ).toEqual(findings.map((finding) => finding.id));
+    },
+  );
+
+  it('is read with everything at once: thousands of photos, hundreds of findings and many pieces of evidence for each', () => {
+    const photos = photoIds(3000);
+    const findings = findingsOf(300, 120);
+    const intake = parseIntake(
+      postCountFixture({ parcel_photo_ids: photos, condition_findings: findings }),
+    );
+    expect(intake).toBeDefined();
+  });
+
+  // Break caught: a repeat or a bad identifier let through because the list is long, or a long list refused for its length and not for what is wrong with it.
+  it('is refused whole when the first photo is named again at the end of a long list', () => {
+    const photos = photoIds(5000);
+    expect(parseIntake(postCountFixture({ parcel_photo_ids: [...photos, photos[0] ?? ''] }))).toBe(
+      undefined,
+    );
+  });
+
+  it('is refused whole when one photo of a long list is not an identifier', () => {
+    const photos = photoIds(5000);
+    photos[4321] = 'not-an-identifier';
+    expect(parseIntake(postCountFixture({ parcel_photo_ids: photos }))).toBeUndefined();
+  });
+
+  it('is refused whole when a finding of a long history is made twice', () => {
+    const findings = findingsOf(1000);
+    expect(
+      parseIntake(postCountFixture({ condition_findings: [...findings, findings[0] ?? {}] })),
+    ).toBeUndefined();
+  });
+
+  it('is refused whole when a long history is in the wrong order', () => {
+    const findings = findingsOf(1000);
+    expect(
+      parseIntake(postCountFixture({ condition_findings: [...findings].reverse() })),
+    ).toBeUndefined();
+  });
+
+  it('is refused whole when a piece of evidence is named twice in one finding of a long list', () => {
+    const evidence = evidenceOf(3000);
+    expect(
+      parseFinding(findingFixture({ evidence_ids: [...evidence, evidence[1000] ?? ''] })),
+    ).toBeUndefined();
+  });
+
+  // Break caught: a duplicate check made entry by entry against the ones before it, which took fourteen seconds at twenty thousand identifiers on the one thread of the browser: an intake of that
+  // size is read in well under the time the old check needed for a tenth of it.
+  it('is read in well under a second with twenty thousand photos and two thousand findings', () => {
+    const photos = photoIds(20_000);
+    const findings = findingsOf(2000, 10);
+    const start = performance.now();
+    const intake = parseIntake(
+      postCountFixture({ parcel_photo_ids: photos, condition_findings: findings }),
+    );
+    expect(intake).toBeDefined();
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+});

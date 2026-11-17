@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { errorResponse, installFakeApi, json, type FakeApi } from '../../test-support/fake-api';
 import { sha256Hex } from './file-checksum';
 import { ObjectStoreError } from './object-store-upload';
+import { createBoundedQueue } from '../api/bounded-queue';
+import { ReadHold } from '../query/read-hold';
 import {
   createEvidenceUploader,
   EvidenceRefusedError,
   UPLOAD_BUDGETS,
+  UPLOAD_CONCURRENCY,
   UploadAddressExpiredError,
   UploadTimeoutError,
   type UploaderOptions,
@@ -671,5 +674,397 @@ describe('an upload the browser’s own policy blocked', () => {
     const removed = remove.mock.calls.filter(([type]) => type === 'securitypolicyviolation').length;
     expect(added).toBeGreaterThan(0);
     expect(removed).toBe(added);
+  });
+});
+
+/**
+ * What the review of 17 November 2026 found in a file's trip, each with the break it catches (the tests above were already there, and none of them is changed): a later refusal that threw away the key of an
+ * unanswered declaration; a `captured_at` worked out again at each attempt; an address judged by a device clock that was minutes out, and a store that said it had run out and was believed good; a file
+ * started twice; and a hundred files started at once.
+ */
+/** No hold: these tests are of a file's own journey, and a refusal of rate in them must not hold the files of the next test. */
+const noWait: UploaderOptions = {};
+const rateLimited = (seconds?: number): Response =>
+  new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'x', request_id: 'req-test-1' }), {
+    status: 429,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(seconds === undefined ? {} : { 'Retry-After': String(seconds) }),
+    },
+  });
+const bodyOfDeclaration = async (index: number): Promise<{ captured_at: string }> =>
+  JSON.parse((await requestsTo('POST', '/evidence')[index]?.clone().text()) ?? '{}') as {
+    captured_at: string;
+  };
+
+describe('the key of a file whose declaration was not answered', () => {
+  // Break caught: a refusal of a limit of rate, made to the retry of an unanswered declaration, taken as proof that the first one never committed: the key was dropped, the next attempt made a second record
+  // for the same file, and the first stayed behind.
+  it('is kept through a request refused for being too fast, so that the next attempt is a replay', async () => {
+    let calls = 0;
+    server({
+      create: () => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new TypeError('Failed to fetch'));
+        if (calls === 2) return rateLimited();
+        return json(200, ticketBody(), { ETag: '"e1"' });
+      },
+    });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    await expect(upload(chosen)).rejects.toBeDefined();
+    await expect(upload(chosen)).rejects.toMatchObject({ status: 429 });
+    expect(await upload(chosen)).toBe(RECORD);
+
+    const [first, second, third] = keysOfDeclarations();
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  // Break caught: the same with a refusal that is final for its own request (a permission, a validation): it does not say whether the first declaration committed either.
+  it.each([
+    ['a refused permission', 403, 'PERMISSION_DENIED'],
+    ['a malformed request', 422, 'VALIDATION_FAILED'],
+    ['a version that moved', 409, 'STATE_CONFLICT'],
+  ])('is kept through %s answered to the retry', async (_name, status, code) => {
+    let calls = 0;
+    server({
+      create: () => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new TypeError('Failed to fetch'));
+        if (calls === 2) return errorResponse(status, code);
+        return json(200, ticketBody(), { ETag: '"e1"' });
+      },
+    });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen);
+
+    expect(new Set(keysOfDeclarations()).size).toBe(1);
+  });
+
+  // Break caught: a request that never left the browser, taken as an answer: it says nothing of the declaration that is in doubt.
+  it('is kept through an attempt that did not get an answer, however often', async () => {
+    let calls = 0;
+    server({
+      create: () => {
+        calls += 1;
+        if (calls <= 2) return Promise.reject(new TypeError('Failed to fetch'));
+        return json(200, ticketBody(), { ETag: '"e1"' });
+      },
+    });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen);
+
+    expect(new Set(keysOfDeclarations()).size).toBe(1);
+  });
+
+  // Break caught: the first attempt of a file that the platform refused kept for ever: it was answered, nothing is in doubt, and the next attempt is a new one (the rule that was already there, held beside the
+  // new one so that neither swallows the other).
+  it('is let go when the first attempt is refused and nothing was in doubt', async () => {
+    server({ create: () => errorResponse(403, 'PERMISSION_DENIED') });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen).catch(() => undefined);
+
+    const [one, two] = keysOfDeclarations();
+    expect(two).not.toBe(one);
+  });
+
+  it('is let go when the platform refuses the completion of a record it answered', async () => {
+    server({ complete: () => errorResponse(400, 'VALIDATION_FAILED') });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen).catch(() => undefined);
+
+    const [one, two] = keysOfDeclarations();
+    expect(two).not.toBe(one);
+  });
+});
+
+describe('the moment a file was made', () => {
+  // Break caught: a file with no moment of its own (a `lastModified` of nothing) declared with the clock's time at each attempt, so that the retry under the same key carried another body, which the
+  // platform answers as a conflict.
+  it('is worked out once, and is the same in every declaration of the file', async () => {
+    server({ put: () => Promise.reject(new TypeError('Failed to fetch')) });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = new File([BYTES], 'no-date.jpg', { type: 'image/jpeg', lastModified: 0 });
+
+    await upload(chosen).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await upload(chosen).catch(() => undefined);
+
+    const [one, two] = [await bodyOfDeclaration(0), await bodyOfDeclaration(1)];
+    expect(two.captured_at).toBe(one.captured_at);
+    expect(new Set(keysOfDeclarations()).size).toBe(1);
+  });
+
+  // Break caught: a new record for an address that ran out made with another capture time: the photo was taken once.
+  it('is kept when the address ran out and a new record is asked for', async () => {
+    let calls = 0;
+    server({
+      create: () => {
+        calls += 1;
+        return json(200, ticketBody(calls === 1 ? { expires_at: inSeconds(-60) } : {}), {
+          ETag: '"e1"',
+        });
+      },
+    });
+    const chosen = new File([BYTES], 'no-date.jpg', { type: 'image/jpeg', lastModified: 0 });
+
+    await uploader('CONDITION', noWait)(chosen);
+
+    const [one, two] = [await bodyOfDeclaration(0), await bodyOfDeclaration(1)];
+    expect(two.captured_at).toBe(one.captured_at);
+    expect(new Set(keysOfDeclarations()).size).toBe(2);
+  });
+});
+
+describe('the end of an upload address, judged by the server’s clock', () => {
+  const REAL_NOW = Date.now();
+  // The device's clock is set by a spy in these tests, and a spy that stayed would hold every later test of the file to a clock that does not move.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  const serverDate = (at: number): Record<string, string> => ({
+    ETag: '"e1"',
+    Date: new Date(at).toUTCString(),
+  });
+
+  // Break caught: an address judged by a device clock that is twenty minutes fast, which read every address as run out, asked for a second and read that as run out too, and sent nothing: the file could never
+  // be uploaded from that device (the address lives fifteen minutes).
+  it('uploads from a device whose clock is twenty minutes fast', async () => {
+    server({
+      create: () =>
+        json(
+          200,
+          ticketBody({ expires_at: new Date(REAL_NOW + 15 * 60_000).toISOString() }),
+          serverDate(REAL_NOW),
+        ),
+    });
+    vi.spyOn(Date, 'now').mockReturnValue(REAL_NOW + 20 * 60_000);
+
+    expect(await uploader('CONDITION', noWait)(file())).toBe(RECORD);
+    expect(puts).toHaveLength(1);
+    expect(requestsTo('POST', '/evidence')).toHaveLength(1);
+  });
+
+  // Break caught: an address that has run out, believed good by a device clock twenty minutes slow: the bytes went to a dead address at each retry under one key, and never to a new record.
+  it('asks for a new record, once, from a device whose clock is twenty minutes slow, and sends nothing to a dead address', async () => {
+    server({
+      create: () =>
+        json(
+          200,
+          ticketBody({ expires_at: new Date(REAL_NOW - 60_000).toISOString() }),
+          serverDate(REAL_NOW),
+        ),
+    });
+    vi.spyOn(Date, 'now').mockReturnValue(REAL_NOW - 20 * 60_000);
+
+    await expect(uploader('CONDITION', noWait)(file())).rejects.toBeInstanceOf(
+      UploadAddressExpiredError,
+    );
+
+    expect(puts).toHaveLength(0);
+    expect(requestsTo('POST', '/evidence')).toHaveLength(2);
+    expect(new Set(keysOfDeclarations()).size).toBe(2);
+  });
+
+  // The rule that was there is what stands when an answer has no `Date` (a proxy that strips it): the device's own clock.
+  it('judges by the device’s clock when the answer carries no date', async () => {
+    server({
+      create: () => json(200, ticketBody({ expires_at: inSeconds(-60) }), { ETag: '"e1"' }),
+    });
+
+    await expect(uploader('CONDITION', noWait)(file())).rejects.toBeInstanceOf(
+      UploadAddressExpiredError,
+    );
+    expect(puts).toHaveLength(0);
+  });
+});
+
+describe('an address the store says has run out', () => {
+  // Break caught: a `403` of the store, which is what an address that ran out is answered with, told as a store that "declined": the next attempt sent the bytes to the same dead address under the same key, for ever.
+  it('is asked for again once, as a new record under a new key, and the bytes are sent to the new address', async () => {
+    let calls = 0;
+    server({
+      put: () => {
+        calls += 1;
+        return calls === 1
+          ? new Response('expired', { status: 403 })
+          : new Response(null, { status: 200 });
+      },
+    });
+
+    expect(await uploader('CONDITION', noWait)(file())).toBe(RECORD);
+
+    expect(puts).toHaveLength(2);
+    const [one, two] = keysOfDeclarations();
+    expect(two).not.toBe(one);
+  });
+
+  it('is told as the store’s refusal when the fresh address is refused too, after exactly two sendings', async () => {
+    server({ put: () => new Response('no', { status: 403 }) });
+
+    await expect(uploader('CONDITION', noWait)(file())).rejects.toMatchObject({
+      kind: 'refused',
+      status: 403,
+    });
+
+    expect(puts).toHaveLength(2);
+    expect(requestsTo('POST', '/evidence')).toHaveLength(2);
+  });
+
+  // Break caught: any refusal of the store taken for an address that ran out, which would send a file the store refused for what it is (a size, a type) to a second record.
+  it.each([400, 404, 413, 500])(
+    'is not asked for again when the store answers %i',
+    async (status) => {
+      server({ put: () => new Response('no', { status }) });
+
+      await expect(uploader('CONDITION', noWait)(file())).rejects.toMatchObject({ status });
+
+      expect(puts).toHaveLength(1);
+      expect(requestsTo('POST', '/evidence')).toHaveLength(1);
+    },
+  );
+});
+
+describe('a file that is on its way', () => {
+  // Break caught: a double press (or a retry pressed while the first is still going) that starts the file twice: two declarations, two sendings and a completion of a record that is already stored, which the
+  // platform answers as a version that moved.
+  it('is not started twice: a second call is the same journey', async () => {
+    server();
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    const [one, two] = await Promise.all([upload(chosen), upload(chosen)]);
+
+    expect(one).toBe(RECORD);
+    expect(two).toBe(RECORD);
+    expect(requestsTo('POST', '/evidence')).toHaveLength(1);
+    expect(puts).toHaveLength(1);
+    expect(requestsTo('POST', `/evidence/${RECORD}/complete`)).toHaveLength(1);
+  });
+
+  it('can be sent again once the journey has ended', async () => {
+    server({ put: () => Promise.reject(new TypeError('Failed to fetch')) });
+    const upload = uploader('CONDITION', noWait);
+    const chosen = file();
+
+    await upload(chosen).catch(() => undefined);
+    await upload(chosen).catch(() => undefined);
+
+    expect(requestsTo('POST', '/evidence')).toHaveLength(2);
+  });
+});
+
+describe('many files at once', () => {
+  // Break caught: every file chosen at once started at once (a hundred photos from a gallery: each read whole into memory, two calls each, the session's limit gone in seconds).
+  it('begins at most as many files as the portal allows at a time, and finishes every one', async () => {
+    let now = 0;
+    let most = 0;
+    server({
+      put: async () => {
+        now += 1;
+        most = Math.max(most, now);
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        now -= 1;
+        return new Response(null, { status: 200 });
+      },
+    });
+    const upload = uploader('CONDITION', noWait);
+    const files = Array.from({ length: 10 }, (_, index) => file(`photo-${String(index)}.jpg`));
+
+    const stored = await Promise.all(files.map((one) => upload(one)));
+
+    expect(stored).toHaveLength(10);
+    expect(most).toBe(UPLOAD_CONCURRENCY);
+  });
+
+  it('says a file that has not begun is waiting for its turn, and then goes on in the usual steps', async () => {
+    server();
+    const upload = uploader('CONDITION', { ...noWait, queue: createBoundedQueue(1) });
+    const first: UploadStep[] = [];
+    const second: UploadStep[] = [];
+
+    await Promise.all([
+      upload(file('a.jpg'), (step) => first.push(step)),
+      upload(file('b.jpg'), (step) => second.push(step)),
+    ]);
+
+    expect(first).toEqual(['hashing', 'declaring', 'sending', 'confirming']);
+    expect(second).toEqual(['waiting', 'hashing', 'declaring', 'sending', 'confirming']);
+  });
+
+  // Break caught: a file that was left out while it waited, started all the same.
+  it('does not begin a file that was left out while it waited for its turn', async () => {
+    let release = (): void => undefined;
+    server({
+      put: () =>
+        new Promise<Response>((resolve) => {
+          release = () => {
+            resolve(new Response(null, { status: 200 }));
+          };
+        }),
+    });
+    const upload = uploader('CONDITION', { ...noWait, queue: createBoundedQueue(1) });
+    const first = upload(file('a.jpg'));
+    await vi.waitFor(() => {
+      expect(puts).toHaveLength(1);
+    });
+    const left = new AbortController();
+    const second = upload(file('b.jpg'), undefined, left.signal);
+    left.abort();
+
+    await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+    release();
+    await first;
+
+    expect(requestsTo('POST', '/evidence')).toHaveLength(1);
+  });
+});
+
+describe('a request refused for being too fast', () => {
+  // Break caught: a refusal that is retried by the uploader itself (the portal's rule is that nothing is tried again by itself) or one that lets the files behind it run into the same limit.
+  it('is told as it is, is not retried, and holds the files that have not begun for the wait it asked', async () => {
+    let calls = 0;
+    server({
+      create: () => {
+        calls += 1;
+        return calls === 1 ? rateLimited(1) : json(200, ticketBody(), { ETag: '"e1"' });
+      },
+    });
+    const hold = new ReadHold();
+    const upload = uploader('CONDITION', { hold, queue: createBoundedQueue(1) });
+    const second: UploadStep[] = [];
+
+    const first = upload(file('a.jpg')).then(
+      () => 'stored',
+      (failure: unknown) => failure,
+    );
+    const later = upload(file('b.jpg'), (step) => second.push(step));
+    const failure = await first;
+    const failedAt = Date.now();
+    await later;
+    const began = Date.now();
+
+    expect(failure).toMatchObject({ status: 429 });
+    // The refused file was not sent again by itself: one declaration for it, one for the other.
+    expect(requestsTo('POST', '/evidence')).toHaveLength(2);
+    // The file that had not begun waited out the second the API asked for.
+    expect(began - failedAt).toBeGreaterThanOrEqual(900);
+    expect(second).toContain('waiting');
   });
 });

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { cannotText } from '../../../platform/problem/capability-words';
+import { holdOf } from '../../../platform/query/read-hold';
 import {
   errorResponse,
   installFakeApi,
@@ -160,6 +161,43 @@ describe('PhotoPicture as the picture of a tile', () => {
     expect(await screen.findByText('Photo not available')).toBeVisible();
     expect(container.textContent).not.toMatch(/account|permission|administrator/i);
     expect(screen.queryByRole('button')).toBeNull();
+    expect(asked()).toBe(1);
+  });
+});
+
+describe('PhotoPicture while the page is held (a request refused for being too fast)', () => {
+  const WORDS = 'Parcel 3, taken 12 Nov 2026, 10:42';
+
+  // Break caught: a tile that asks for its link while the API has asked the page to wait (the grid scrolled past a hundred and twenty tiles in a minute), which spends the limit again at once; the wait is
+  // kept for the page's automatic work, and a tile is that.
+  it('asks nothing for a tile until the hold is over, then draws it', async () => {
+    api = installFakeApi({ [ROUTE]: () => link(ONE) });
+    const view = picture({ wanted: false });
+    holdOf(view.queryClient).hold(1);
+
+    view.rerenderUi(<PhotoPicture evidenceId={PHOTO} wanted size="tile" />);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(asked()).toBe(0);
+
+    await waitFor(
+      () => {
+        expect(view.container.querySelector('img')).not.toBeNull();
+      },
+      { timeout: 4000 },
+    );
+    expect(asked()).toBe(1);
+  });
+
+  // Break caught: the photo a person opened held like a tile: a click that does nothing for the length of a wait (a read the person asks for is never held).
+  it('asks at once for the photo the person opened, whatever the hold says', async () => {
+    api = installFakeApi({ [ROUTE]: () => link(ONE) });
+    const view = picture({ wanted: false, size: 'full', alt: WORDS });
+    holdOf(view.queryClient).hold(30);
+
+    view.rerenderUi(<PhotoPicture evidenceId={PHOTO} wanted size="full" alt={WORDS} />);
+
+    const image = await imageOf(view.container);
+    expect(image).toHaveAttribute('src', ONE);
     expect(asked()).toBe(1);
   });
 });

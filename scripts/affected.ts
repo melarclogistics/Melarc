@@ -393,6 +393,14 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/app/pages/evidence/',
     'apps/ops-web/src/app/pages/pickup-work/',
   ],
+  // The evidence store on another origin: the screens that store and draw a photo (the receiving folder and the photo picture), the platform's evidence code that sends it and the policy builder that names the
+  // store's origin.
+  'evidence-store-origin.spec.ts': [
+    'apps/ops-web/src/app/pages/receiving/',
+    'apps/ops-web/src/app/pages/evidence/',
+    'apps/ops-web/src/platform/evidence/',
+    'apps/ops-web/config/',
+  ],
   'messages.spec.ts': [
     'apps/ops-web/src/app/pages/messages/',
     'apps/ops-web/src/app/pages/pickup/',

@@ -71,6 +71,10 @@ describe('evidenceOriginOf', () => {
     ['https://evidence.example:9000', 'https://evidence.example:9000'],
     ['https://eu-west.store.example', 'https://eu-west.store.example'],
     ['https://xn--bcher-kva.example', 'https://xn--bcher-kva.example'],
+    // A name that has digits in it is a name, and `localhost` is one (the local test of a store on another origin uses it beside a page served on the loopback address).
+    ['https://store1.example', 'https://store1.example'],
+    ['https://1password.example', 'https://1password.example'],
+    ['https://localhost:9443', 'https://localhost:9443'],
   ])('takes %s as the origin %s', (given, origin) => {
     expect(evidenceOriginOf(given)).toBe(origin);
   });
@@ -97,6 +101,13 @@ describe('evidenceOriginOf', () => {
     ['a second source with a space', 'https://evidence.example https://evil.example'],
     ['a quote', "https://evidence.example'"],
     ['an IPv6 literal', 'https://[::1]'],
+    ['an IPv6 literal that wraps an IPv4 address', 'https://[::ffff:1.2.3.4]'],
+    ['an IPv4 address', 'https://1.2.3.4'],
+    ['the loopback address', 'https://127.0.0.1'],
+    ['an IPv4 address with a port', 'https://1.2.3.4:9000'],
+    ['an IPv4 address written as one number', 'https://2130706433'],
+    ['an IPv4 address written in hexadecimal', 'https://0x7f.1'],
+    ['an IPv4 address written in octal', 'https://0177.0.0.1'],
     ['a host with an underscore', 'https://evidence_store.example'],
     ['a trailing dot', 'https://evidence.example.'],
     ['a blank value', ''],

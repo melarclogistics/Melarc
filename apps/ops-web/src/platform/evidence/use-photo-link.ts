@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useApiClient } from '../api/api-client';
 import { createRetrievalAuthorization } from '../pickup-work/pickup-work-commands';
+import { holdOf } from '../query/read-hold';
 import { photoLinkQueue } from './photo-link-queue';
 import { watchPolicy, type PolicyWatch } from './policy-violation';
 
@@ -58,8 +59,13 @@ interface Verdict {
  * watched from the moment the address is known). The one renewal belongs to whoever draws the photo, so a second failure is told and no third link is asked for. The link is a bearer capability: it is held by
  * this query only, never drawn as text, logged or kept after the photo is.
  */
-export function usePhotoLink(evidenceId: string, enabled: boolean): PhotoLinkView {
+export function usePhotoLink(
+  evidenceId: string,
+  enabled: boolean,
+  automatic = false,
+): PhotoLinkView {
   const client = useApiClient();
+  const hold = holdOf(useQueryClient());
   const query = useQuery({
     queryKey: ['evidence', 'photo-link', evidenceId],
     enabled,
@@ -68,8 +74,11 @@ export function usePhotoLink(evidenceId: string, enabled: boolean): PhotoLinkVie
     refetchOnReconnect: false,
     gcTime: 0,
     staleTime: LINK_FRESH_MS,
-    queryFn: ({ signal }) =>
-      photoLinkQueue.run(() => createRetrievalAuthorization(client, evidenceId), signal),
+    queryFn: async ({ signal }) => {
+      // A tile that came near the screen is **automatic** work: while the API has asked the page to wait it waits too, and goes on when the wait is over (it is not retried). The photo the person opened is theirs, and is never held.
+      if (automatic) await hold.untilFree(`photo-link:${evidenceId}`, signal);
+      return photoLinkQueue.run(() => createRetrievalAuthorization(client, evidenceId), signal);
+    },
   });
   const { data, refetch } = query;
   const url = data?.url;

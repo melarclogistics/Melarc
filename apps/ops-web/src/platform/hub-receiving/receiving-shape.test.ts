@@ -5,6 +5,7 @@ import {
   RUN_ID,
   arrivedParcel,
   blindVendorFixture,
+  checkInFixture,
   extraParcel,
   lockFixture,
   missingParcelFixture,
@@ -18,6 +19,7 @@ import {
 import {
   nameOf,
   parseCheckIn,
+  parseFinding,
   parseMissingPage,
   parseParcel,
   parseParcelAnswer,
@@ -306,5 +308,126 @@ describe('the answers of the acts', () => {
     expect(parseCheckIn({ ...record, count_phase: 'POST_COUNT' })).toBeUndefined();
     expect(parseCheckIn({ ...record, receiving_mode: 'BLIND_COUNT' })).toBeUndefined();
     expect(parseCheckIn({ ...record, missing_count: 0 })).toBeUndefined();
+  });
+});
+
+/**
+ * A vendor, a parcel and a check-in of any size. The platform sets no limit on the parcels of a pickup (OB-S1-97), and the contract and the API have no `maxItems` on the parcels of a vendor, the evidence
+ * of a parcel or of a finding, or the findings of a check-in. The review of 17 November 2026 found 5,000, 100 and 200 in this guard that the server does not have: each made a whole run page or check-in
+ * unreadable for one more. Each is tried on both sides of its old line and far beyond, with the repeats, the order and the identifiers still held.
+ */
+const evidenceFor = (count: number): string[] =>
+  Array.from({ length: count }, (_, i) => uuid(0xe0, i + 1));
+const findingFor = (n: number, evidence = 0) => ({
+  id: uuid(0xf0, n),
+  kind: 'CONDITION' as const,
+  intake_parcel_id: null,
+  condition: 'DAMAGED' as const,
+  outcome: null,
+  note: 'Crushed at one corner.',
+  evidence_ids: evidenceFor(evidence),
+  recorded_by_name: 'Ama Owusu',
+  recorded_at: new Date(Date.UTC(2026, 10, 14, 9, 0, 0) + n * 1000).toISOString(),
+});
+
+describe('a vendor of any size', () => {
+  // Break caught: a ceiling on the parcels of one vendor (it was 5,000) that the API does not have.
+  it.each([3, 4999, 5000, 5001, 6000, 12_000])('is read with %i parcels, all of them', (count) => {
+    const vendor = parseVendor(photoVendorFixture(count));
+    expect(vendor?.parcels).toHaveLength(count);
+    expect(vendor?.parcels.at(-1)?.ordinal).toBe(count);
+  });
+
+  it('is refused whole when a parcel of a long list is there twice, or its photo is, or the order breaks', () => {
+    const parcels = Array.from({ length: 6000 }, (_, i) => parcelFixture(i + 1));
+    expect(
+      parseVendor(photoVendorFixture(0, {}, [...parcels, parcels[0] ?? parcelFixture(1)])),
+    ).toBeUndefined();
+    const samePhoto = [
+      ...parcels,
+      parcelFixture(6001, { photo_evidence_id: parcels[10]?.photo_evidence_id ?? '' }),
+    ];
+    expect(parseVendor(photoVendorFixture(0, {}, samePhoto))).toBeUndefined();
+    const out = [...parcels];
+    const first = parcels[100] ?? parcelFixture(101);
+    const second = parcels[101] ?? parcelFixture(102);
+    out[100] = second;
+    out[101] = first;
+    expect(parseVendor(photoVendorFixture(0, {}, out))).toBeUndefined();
+  });
+
+  // Break caught: a ceiling on the evidence of a parcel's condition (it was 100): the evidence is kept whole.
+  it.each([1, 100, 101, 750, 5000])(
+    'keeps %i pieces of evidence of a parcel’s condition',
+    (count) => {
+      const evidence = evidenceFor(count);
+      const parcel = parseParcel(
+        arrivedParcel(1, {
+          condition: {
+            condition: 'DAMAGED',
+            note: 'Crushed at one corner.',
+            evidence_ids: evidence,
+            recorded_by_name: 'Ama Owusu',
+            recorded_at: '2026-11-14T09:20:00Z',
+          },
+        }),
+      );
+      expect(parcel?.condition?.evidence_ids).toEqual(evidence);
+    },
+  );
+
+  it('refuses a piece of evidence named twice in a long list, and one that is not an identifier', () => {
+    const evidence = evidenceFor(2000);
+    const condition = (ids: unknown[]) => ({
+      condition: 'DAMAGED' as const,
+      note: 'Crushed at one corner.',
+      evidence_ids: ids as string[],
+      recorded_by_name: 'Ama Owusu',
+      recorded_at: '2026-11-14T09:20:00Z',
+    });
+    expect(
+      parseParcel(arrivedParcel(1, { condition: condition([...evidence, evidence[5]]) })),
+    ).toBeUndefined();
+    expect(
+      parseParcel(arrivedParcel(1, { condition: condition([...evidence, 'x']) })),
+    ).toBeUndefined();
+  });
+
+  // Break caught: a ceiling on the evidence of a finding (it was 100) and on the findings of a check-in (it was 200), in the guard of the run's own check-in as in the intake's.
+  it.each([1, 100, 101, 750, 5000])('keeps %i pieces of evidence of a finding', (count) => {
+    const finding = parseFinding(findingFor(1, count));
+    expect(finding?.evidence_ids).toHaveLength(count);
+  });
+
+  it.each([1, 199, 200, 201, 1000, 5000])(
+    'reads a check-in with %i findings, all of them',
+    (count) => {
+      const findings = Array.from({ length: count }, (_, i) => findingFor(i + 1));
+      const view = parseCheckIn(
+        checkInFixture([parcelFixture(1)], { condition_findings: findings }),
+      );
+      expect(view?.condition_findings).toHaveLength(count);
+    },
+  );
+
+  it('refuses a check-in in which a finding of a long history is made twice', () => {
+    const findings = Array.from({ length: 1000 }, (_, i) => findingFor(i + 1));
+    expect(
+      parseCheckIn(
+        checkInFixture([parcelFixture(1)], { condition_findings: [...findings, findings[0]] }),
+      ),
+    ).toBeUndefined();
+  });
+
+  // Break caught: a repeat check made entry by entry (fourteen seconds at twenty thousand): a check-in of that size is read in well under a second per thousand.
+  it('reads a check-in of six thousand parcels and fifteen thousand findings in well under two seconds', () => {
+    const parcels = Array.from({ length: 6000 }, (_, i) => parcelFixture(i + 1));
+    const findings = Array.from({ length: 15_000 }, (_, i) => findingFor(i + 1));
+    const start = performance.now();
+    const view = parseCheckIn(checkInFixture(parcels, { condition_findings: findings }));
+    expect(view?.parcels).toHaveLength(6000);
+    expect(view?.condition_findings).toHaveLength(15_000);
+    // Entry by entry against the ones before it, this is about 8 seconds on a developer's machine; with a set it is a few tens of milliseconds.
+    expect(performance.now() - start).toBeLessThan(2000);
   });
 });

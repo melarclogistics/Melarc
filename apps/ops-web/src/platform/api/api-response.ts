@@ -20,6 +20,12 @@ export interface Answer<D> {
    */
   readonly etag: string | undefined;
   readonly requestId: string | undefined;
+  /**
+   * The server's clock when it answered (the `Date` header, which has whole seconds), as milliseconds since the epoch; nothing when the header is absent or is not a date. It is read to judge a moment the
+   * server gave (the end of an upload address) against the server's own time and not the device's, which can be minutes out: the difference between the two is the device's error, and it is measured in the
+   * answer that carries the moment.
+   */
+  readonly serverTime: number | undefined;
 }
 
 /**
@@ -144,6 +150,13 @@ function etagOf(response: Response): string | undefined {
   return value !== null && ENTITY_TAG.test(value) ? value : undefined;
 }
 
+function serverTimeOf(response: Response): number | undefined {
+  const value = response.headers.get('Date');
+  if (value === null) return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : undefined;
+}
+
 function requestIdOf(response: Response): string | undefined {
   const value = response.headers.get('X-Request-Id');
   return value !== null && /^[0-9A-Za-z-]{1,64}$/.test(value) ? value : undefined;
@@ -173,6 +186,7 @@ export function answerOf<D>(result: {
     status: response.status,
     etag: etagOf(response),
     requestId: requestIdOf(response),
+    serverTime: serverTimeOf(response),
   };
 }
 
@@ -198,4 +212,18 @@ export function isNotFound(error: unknown): boolean {
  */
 export function isNotSignedIn(error: unknown): boolean {
   return error instanceof ApiError && error.kind === 'http' && error.status === 401;
+}
+
+/** A refusal that is the platform's answer about *this* request and nothing else: a `4xx`, but not a wait it asked for (`408`, `425`, `429`), which says nothing of the request. */
+export function isDefiniteRefusal(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.kind === 'http' &&
+    error.status !== undefined &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 425 &&
+    error.status !== 429
+  );
 }
