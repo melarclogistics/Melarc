@@ -13,6 +13,7 @@ import { handOver } from './support/handed-over.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { HUB_A, HUB_B } from './support/staff-routes.js';
+import { withClient } from './support/test-database.js';
 import {
   startVendorRoutes,
   type ArrangedVendor,
@@ -2140,6 +2141,132 @@ describe('the deferred checks of an intake judge it once, and believe no setting
         `select set_config('melarc.parcel_set_checked', '${photo.id}', true)`,
       ]),
     ).toEqual({ code: '23514', constraint: 'intake_parcel_set' });
+    expect((await parcelsOf(photo.id)).map((parcel) => parcel.ordinal)).toEqual([1, 2, 3]);
+  });
+
+  /**
+   * The race the review of 17 November 2026 found. One transaction begins and fixes its moment; another opens an intake and commits; the first (a read-committed transaction sees it) breaks the set of
+   * the intake's door parcels (a parcel of the stop's photos is left out) and says by the setting that the set was judged. `also` is what else it writes of the intake's row, after the break. The intake
+   * is later than the first transaction's moment, which is all the old test of "opened by this transaction" asked, and it is not this transaction's.
+   */
+  async function setBrokenWhileAnotherTransactionOpenedTheIntake(
+    also: (intakeId: string) => readonly string[],
+  ): Promise<{
+    readonly intake: PhotoIntake;
+    readonly later: boolean;
+    readonly outcome:
+      { readonly code: string | undefined; readonly constraint: string | undefined } | 'committed';
+  }> {
+    return withClient(routes.database.urlFor('postgres'), async (late) => {
+      await late.query('begin');
+      try {
+        await late.query('select 1');
+        const intake = await photoIntake(3);
+        const [, second, third] = intake.parcels;
+        for (const statement of [
+          'set local session_replication_role = replica',
+          `delete from intake_parcel where id in ('${second?.id ?? ''}', '${third?.id ?? ''}')`,
+          'set local session_replication_role = origin',
+          `insert into intake_parcel (id, pickup_intake_id, responsible_hub_id, ordinal, origin, door_photo_evidence_id, state)
+           values (gen_random_uuid(), '${intake.id}', '${HUB_A}', 3, 'DOOR_PHOTO', '${third?.door_photo_evidence_id ?? ''}', 'EXPECTED')`,
+          ...also(intake.id),
+          `select set_config('melarc.parcel_set_checked', '${intake.id}', true)`,
+        ])
+          await late.query(statement);
+        const [moment] = (
+          await late.query<{ later: boolean }>(
+            'select handed_over_at >= transaction_timestamp() as later from pickup_intake where id = $1',
+            [intake.id],
+          )
+        ).rows;
+        try {
+          await late.query('commit');
+          return { intake, later: moment?.later === true, outcome: 'committed' as const };
+        } catch (error) {
+          const server = serverErrorIn(error);
+          return {
+            intake,
+            later: moment?.later === true,
+            outcome: { code: server?.code, constraint: server?.constraint },
+          };
+        }
+      } finally {
+        await late.query('rollback').catch(() => undefined);
+      }
+    });
+  }
+
+  // Break caught: the set check taking "the intake was opened no earlier than this transaction began" for "this transaction wrote it". The intake of a transaction that committed while this one was open
+  // passes that, this transaction has no event of the intake's own, and with the setting forged a set that is not the stop's photos was committed unjudged.
+  it('judges in full the door parcels of an intake that another transaction opened while this one was open, whatever the setting says', async () => {
+    const { intake, later, outcome } = await setBrokenWhileAnotherTransactionOpenedTheIntake(
+      () => [],
+    );
+    // The premise: the intake is later than this transaction's moment, so the old condition was met and only the row's own xmin tells the two transactions apart.
+    expect(later).toBe(true);
+    expect(outcome).toEqual({ code: '23514', constraint: 'intake_parcel_set' });
+    expect((await parcelsOf(intake.id)).map((parcel) => parcel.ordinal)).toEqual([1, 2, 3]);
+  });
+
+  // Break caught: the intake's own set event fired for an insert alone. A transaction that writes the row of an intake it did not make has the row's xmin, so its parcel events are skipped by the setting,
+  // and only an event of the intake's own for the UPDATE judges the set at the end.
+  it('judges the set at the end when the transaction wrote the row of an intake another transaction opened, because the intake’s own event is fired for an update', async () => {
+    const { intake, later, outcome } = await setBrokenWhileAnotherTransactionOpenedTheIntake(
+      (id) => [
+        asReceiver,
+        `update pickup_intake set active_receiver_id = active_receiver_id where id = '${id}'`,
+      ],
+    );
+    expect(later).toBe(true);
+    expect(outcome).toEqual({ code: '23514', constraint: 'intake_parcel_set' });
+    expect((await parcelsOf(intake.id)).map((parcel) => parcel.ordinal)).toEqual([1, 2, 3]);
+  });
+
+  // Break caught: the set check's shortcut asking only that this transaction wrote the row. An intake opened long before can be written by any act (a lock, a count), so with the setting forged the door
+  // parcels made for it in this transaction were committed unjudged: the shortcut is for an intake opened since this transaction began, and the intake's own event for an update of an older one rests.
+  it('judges in full the door parcels made for an intake that an earlier transaction opened, even when this transaction wrote its row, whatever the setting says', async () => {
+    const photo = await photoIntake(3);
+    const [, second, third] = photo.parcels;
+    expect(
+      await adminCommit([
+        asReceiver,
+        'set local session_replication_role = replica',
+        `delete from intake_parcel where id in ('${second?.id ?? ''}', '${third?.id ?? ''}')`,
+        'set local session_replication_role = origin',
+        `insert into intake_parcel (id, pickup_intake_id, responsible_hub_id, ordinal, origin, door_photo_evidence_id, state)
+         values (gen_random_uuid(), '${photo.id}', '${HUB_A}', 3, 'DOOR_PHOTO', '${third?.door_photo_evidence_id ?? ''}', 'EXPECTED')`,
+        `update pickup_intake set active_receiver_id = active_receiver_id where id = '${photo.id}'`,
+        `select set_config('melarc.parcel_set_checked', '${photo.id}', true)`,
+      ]),
+    ).toEqual({ code: '23514', constraint: 'intake_parcel_set' });
+    expect((await parcelsOf(photo.id)).map((parcel) => parcel.ordinal)).toEqual([1, 2, 3]);
+  });
+
+  // Break caught: the intake's own event judging the set at every update. A finish writes the row of an intake opened long before, and judging the whole stop at each write took a finish of 10,000 parcels 12 s
+  // where it took 2 s. Nothing about the set can have changed by the write of that row (a parcel keeps its place and its photo for ever), so the event returns at once, as it did before 0109: a set that was
+  // broken out of band (the guards off, kept) is not held against an update that does not touch it.
+  it('does not judge the set again when an update writes the row of an intake that was opened before the transaction began', async () => {
+    const photo = await photoIntake(3);
+    const second = photo.parcels[1];
+    expect(
+      await adminCommit([
+        'set local session_replication_role = replica',
+        `update intake_parcel set ordinal = 20 where id = '${second?.id ?? ''}'`,
+      ]),
+    ).toBe('committed');
+    try {
+      expect(
+        await adminCommit([
+          asReceiver,
+          `update pickup_intake set active_receiver_id = active_receiver_id where id = '${photo.id}'`,
+        ]),
+      ).toBe('committed');
+    } finally {
+      await adminCommit([
+        'set local session_replication_role = replica',
+        `update intake_parcel set ordinal = ${String(second?.ordinal ?? 2)} where id = '${second?.id ?? ''}'`,
+      ]);
+    }
     expect((await parcelsOf(photo.id)).map((parcel) => parcel.ordinal)).toEqual([1, 2, 3]);
   });
 

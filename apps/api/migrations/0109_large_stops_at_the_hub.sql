@@ -13,12 +13,20 @@
 -- check, which already judges it exactly at the end of the transaction for every writer (the guard's own comment said so); each deferred check judges an intake ONCE for a transaction, and a later event
 -- for another parcel of the same intake returns at once. Nothing is relaxed, because the shortcut is taken only when the database itself shows that the intake's own deferred event judges the same
 -- state at the commit:
---   * the set check: when the intake was OPENED BY THIS TRANSACTION (handed_over_at is the database's moment and no earlier than the transaction's: the test open_intake_parcels already uses), the
---     intake's own insert event judges every door parcel at the end of the transaction, and the setting names the intake as judged since the last statement that changed parcels;
+--   * the set check: when the intake was OPENED SINCE THIS TRANSACTION BEGAN (handed_over_at is the database's moment and no earlier than the transaction's: the test open_intake_parcels already uses)
+--     AND its row was WRITTEN BY THIS TRANSACTION (its xmin is the transaction's), the intake's own event (fired for an insert, as 0103 made it, and now for an update of such an intake) judges every
+--     door parcel at the end of the transaction, and the setting names the intake as judged since the last statement that changed parcels. The write of the row of an intake opened EARLIER cannot have
+--     changed its set (the guard keeps a door parcel's place and photo for ever and removes none), so its own event for an update returns at once, as 0103 had it (it fired for an insert alone); the
+--     door parcels made for such an intake are each judged in full;
 --   * the count check: when the intake's row was WRITTEN BY THIS TRANSACTION (its xmin is the transaction's), the intake's own event (now fired for every insert and update of the row, not only for
 --     those of four columns) judges the count at the end, and the setting names the intake as judged since the last statement that changed parcels.
--- A setting alone is never believed (any statement of the runtime login can set one): a parcel of an intake an EARLIER transaction made or wrote is always judged in full. A statement trigger puts the
--- settings back to empty before every statement that changes parcels, so a transaction that asked for its checks early (SET CONSTRAINTS ... IMMEDIATE) and then changes a parcel is judged again.
+-- A setting alone is never believed (any statement of the runtime login can set one): a parcel of an intake an EARLIER transaction made or wrote, or one that ANOTHER transaction opened while this one
+-- was open, is always judged in full. (The set check first took "opened no earlier than this transaction began" for "opened by it": the intake of a concurrent transaction passes that, and this
+-- transaction has no event of the intake's own to rely on. The row's xmin is the database's own fact, and a write of the row by this transaction is what queues an event of its own.) A statement
+-- trigger puts the settings back to empty before every statement that changes parcels, so a transaction that asked for its checks early (SET CONSTRAINTS ... IMMEDIATE) and then changes a parcel is
+-- judged again. The runtime login cannot insert a door parcel at all (it holds SELECT on intake_parcel; melarc.open_intake_parcels is the one writer, once, for the handover that opened the
+-- intake): these are the checks that hold for every writer if that ever changes, and they cost the handover nothing while it does not. (An update of the intake's own row for EVERY update judged the
+-- set at each of them: a finish of 10,000 parcels took 12 s instead of 2 s, which is why the update event returns at once for an intake opened before the transaction began.)
 
 -- 1. The settings are put back to empty before every statement that changes the parcels.
 CREATE FUNCTION melarc.intake_parcels_unchecked() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
@@ -166,8 +174,10 @@ BEGIN
 END
 $$;
 --> statement-breakpoint
--- 3. The first deferred check as 0103 made it, judged ONCE for an intake that this transaction opened: a door parcel's event returns at once when the setting names the intake as judged since the last
--- statement that changed parcels and the intake was opened by this transaction (its own insert event judges the set at the end of the transaction and is never skipped). Nothing else changes.
+-- 3. The first deferred check as 0103 made it, judged ONCE for an intake that this transaction opened and wrote: a door parcel's event returns at once when the setting names the intake as judged
+-- since the last statement that changed parcels, the intake was opened since this transaction began and its row was written by this transaction (its own event, fired for an insert and for an update of
+-- such an intake, judges the set at the end of the transaction and is never skipped). The intake's own event for an UPDATE of an intake opened before this transaction began returns at once: it cannot
+-- have changed the set. Nothing else changes.
 CREATE OR REPLACE FUNCTION melarc.intake_parcel_set_check() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
   previous_type text := coalesce(pg_catalog.current_setting('melarc.principal_type', true), '');
@@ -185,12 +195,23 @@ BEGIN
   ELSE
     target := NEW.pickup_intake_id;
   END IF;
-  SELECT i.receiving_mode, i.pickup_manifest_id, i.pickup_request_id, i.handed_over_at INTO held FROM public.pickup_intake AS i WHERE i.id = target;
+  SELECT i.receiving_mode, i.pickup_manifest_id, i.pickup_request_id,
+         i.handed_over_at >= pg_catalog.transaction_timestamp() AS opened_since,
+         i.xmin::text = (pg_catalog.pg_current_xact_id()::text::bigint % 4294967296)::text AS written_here
+    INTO held FROM public.pickup_intake AS i WHERE i.id = target;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'the intake whose parcels were checked is not there to be judged' USING ERRCODE = '23514', CONSTRAINT = 'intake_parcel_set';
   END IF;
-  -- 0109: the intake was opened by this transaction, and its set was judged since the last statement that changed parcels: not judged again for each of its parcels.
-  IF TG_TABLE_NAME = 'intake_parcel' AND held.handed_over_at >= pg_catalog.transaction_timestamp()
+  -- 0109: the write of the row of an intake that was opened before this transaction began cannot have changed its door parcels (a parcel keeps its place and its photo for ever, none is removed, and the
+  -- door parcels made for such an intake are judged in full by their own events below): nothing for the intake's own event to judge, as it was before this migration.
+  IF TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'pickup_intake' AND NOT held.opened_since THEN
+    PERFORM pg_catalog.set_config('melarc.principal_type', previous_type, true);
+    PERFORM pg_catalog.set_config('melarc.task_capability', previous_capability, true);
+    RETURN NULL;
+  END IF;
+  -- 0109: the intake was opened since this transaction began and its row was written by it (so an event of the intake's own is waiting to judge the set at the end), and its set was judged since the last
+  -- statement that changed parcels: not judged again for each of its parcels.
+  IF TG_TABLE_NAME = 'intake_parcel' AND held.opened_since AND held.written_here
      AND coalesce(pg_catalog.current_setting('melarc.parcel_set_checked', true), '') = target::text THEN
     PERFORM pg_catalog.set_config('melarc.principal_type', previous_type, true);
     PERFORM pg_catalog.set_config('melarc.task_capability', previous_capability, true);
@@ -220,6 +241,13 @@ $$;
 REVOKE ALL ON FUNCTION melarc.intake_parcel_set_check() FROM PUBLIC;
 --> statement-breakpoint
 GRANT EXECUTE ON FUNCTION melarc.intake_parcel_set_check() TO melarc_owner;
+--> statement-breakpoint
+-- The intake's own set event is the one that is never skipped, so it must fire whenever a transaction writes the row of an intake that was opened since it began: an insert (0103) and an update of any
+-- column (which judges only for such an intake: above), so that a transaction that wrote the row has an event of its own to rely on, whoever made the row.
+DROP TRIGGER "pickup_intake_parcels_set" ON "pickup_intake";
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER "pickup_intake_parcels_set" AFTER INSERT OR UPDATE ON "pickup_intake"
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION melarc.intake_parcel_set_check();
 --> statement-breakpoint
 -- 4. The second deferred check as 0103 made it, judged ONCE for an intake whose row this transaction wrote: a parcel's event returns at once when the setting names the intake as judged since the last
 -- statement that changed parcels and the intake's row was written by this transaction (its own event, now fired for every insert and update of the row, judges the count at the end and is never skipped).

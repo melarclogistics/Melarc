@@ -24,8 +24,8 @@ import {
  */
 const N = 1000;
 /**
- * Rows read of the parcel table and the photo links for N parcels. Observed on 17 November 2026 for N = 1,000, across the parcel table and the photo links: 8,000 for the handover and 27,000 for the finish (eight and twenty-seven times N); the defect is N
- * squared, which is millions. The bound is far above the one and far below the other.
+ * Rows read of the parcel table and the photo links for N parcels. Observed on 17 November 2026 for N = 1,000, across the parcel table and the photo links: 9,000 for the handover and 27,000 for the finish (nine and
+ * twenty-seven times N; for N = 10,000 they were 80,000 and 260,000, eight and twenty-six times N, so the cost is linear); the defect is N squared, which is millions. The bound is far above the one and far below the other.
  */
 const BOUND = 60 * N;
 let routes: VendorRoutes;
