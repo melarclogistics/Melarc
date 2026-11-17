@@ -14,13 +14,14 @@ screen can be reached before the first sign-in (section 5). The API serves its t
 
 ## Prerequisites
 
-| You need | Version                                                          | Notes                                                                                                                                                                                                                             |
-| -------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Git      | any recent                                                       |                                                                                                                                                                                                                                   |
-| Node.js  | **24.21.0**, the version in [.node-version](.node-version)       | Version managers such as fnm and nvm read that file. `pnpm install` refuses a Node outside `engines` in [package.json](package.json).                                                                                             |
-| pnpm     | **11.1.3**, the `packageManager` in [package.json](package.json) | `npm install -g pnpm@11.1.3`                                                                                                                                                                                                      |
-| Docker   | Docker Desktop, or Docker Engine with the Compose plugin         | Running before step 3. It only hosts the local PostgreSQL service.                                                                                                                                                                |
-| JDK      | **21**, the major in [.java-version](.java-version)              | Temurin; for the verifier ([step 6](#the-attestation-verifier)) and for `pnpm run test:db`, whose attested rider enrolment test and alert rehearsal build and start it. Windows: `winget install EclipseAdoptium.Temurin.21.JDK`. |
+| You need   | Version                                                            | Notes                                                                                                                                                                                                                             |
+| ---------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git        | any recent                                                         |                                                                                                                                                                                                                                   |
+| Node.js    | **24.21.0**, the version in [.node-version](.node-version)         | Version managers such as fnm and nvm read that file. `pnpm install` refuses a Node outside `engines` in [package.json](package.json).                                                                                             |
+| pnpm       | **11.1.3**, the `packageManager` in [package.json](package.json)   | `npm install -g pnpm@11.1.3`                                                                                                                                                                                                      |
+| PostgreSQL | **18**, installed on this machine                                  | A native server (on Windows the service `postgresql-x64-18`), listening on this machine only. Running before step 3.                                                                                                              |
+| Docker     | Optional: Docker Desktop, or Docker Engine with the Compose plugin | Only if you would rather run the database as a container ([step 3](#3-start-the-database)). A native server needs none of it.                                                                                                     |
+| JDK        | **21**, the major in [.java-version](.java-version)                | Temurin; for the verifier ([step 6](#the-attestation-verifier)) and for `pnpm run test:db`, whose attested rider enrolment test and alert rehearsal build and start it. Windows: `winget install EclipseAdoptium.Temurin.21.JDK`. |
 
 ## 1. Install dependencies
 
@@ -122,23 +123,37 @@ it is rebuilt or they are added.** The passwords are only ever used on your mach
 
 ## 3. Start the database
 
+The database is a **PostgreSQL 18 server installed on this machine**. On Windows it is the service `postgresql-x64-18`,
+which starts with the machine, so there is usually nothing to start. It must listen on this machine only
+(`listen_addresses = 'localhost'` in its `postgresql.conf`). Tell the tools where it is:
+
+- `MELARC_PG_PORT` in `infrastructure/postgres/.env`: the server's port (`5432` unless its installer chose another).
+- The same port in `DATABASE_URL` of `apps/api/.env`.
+- `MELARC_PG_ADMIN_PASSWORD` in `infrastructure/postgres/.env`: the password of the server's `postgres` superuser, the
+  identity `db:bootstrap` signs in with (step 4) to create the migration and runtime roles and the databases.
+
+Then ask the machine whether a server answers there:
+
+```text
+pnpm run infra:check
+```
+
+`infra:check` opens one connection to the address the database tools use and says whether a PostgreSQL server answers
+there. It sends no password and changes nothing, and when it fails it says why and what to do.
+
+**Or the container.** If you would rather not install a server, `infra:up` starts the `melarc-db` container
+(PostgreSQL 18.6, [compose.yaml](infrastructure/postgres/compose.yaml)) and waits until it is healthy. It listens on
+loopback only, `127.0.0.1:5432`, and keeps its data in the Docker volume `melarc_pgdata`, so it survives a stop. Docker
+must be running first. `infra:status` should show it `healthy`; `infra:check` then works the same:
+
 ```text
 pnpm run infra:up
 pnpm run infra:status
 pnpm run infra:check
 ```
 
-`infra:up` starts the `melarc-db` container (PostgreSQL 18.6, [compose.yaml](infrastructure/postgres/compose.yaml))
-and waits until it is healthy. It listens on loopback only, `127.0.0.1:5432`, and keeps its data in the Docker volume
-`melarc_pgdata`, so it survives a stop. `infra:status` should show it `healthy`. `infra:check` opens one connection to
-the address the database tools use and says whether a PostgreSQL server answers there. It sends no password and
-changes nothing, and when it fails it says why and what to do.
-
-**Or a native server, without Docker.** A PostgreSQL 18 installed on this machine works the same. Set
-`MELARC_PG_PORT` in `infrastructure/postgres/.env` to its port, the same port in `DATABASE_URL` of `apps/api/.env`,
-and `MELARC_PG_ADMIN_PASSWORD` to the password of its `postgres` superuser; make it listen on this machine only
-(`listen_addresses = 'localhost'`). Then skip `infra:up`: `infra:check` works the same, and step 4 creates the roles and
-the database. `infra:up`, `infra:down` and the volume belong to the container alone.
+`infra:up`, `infra:status`, `infra:stop` and the volume belong to the container alone; a native server is never
+started, stopped or removed by this repository.
 
 ## 4. Build and migrate
 
@@ -580,7 +595,8 @@ The single-hash measurement of the Argon2id cost is `node apps/api/dist/tools/be
 ## 7. Stop safely
 
 Press Ctrl+C in each application terminal; the API finishes in-flight requests and closes its database connections
-before it exits. Then stop the database:
+before it exits. A native PostgreSQL server is left running as the service it is, and its data stays. If you run the
+database as a container, stop it too:
 
 ```text
 pnpm run infra:stop
@@ -604,8 +620,12 @@ is removed by naming it after `--drop`, and `--disconnect` is needed if somethin
 pnpm --filter @melarc/api run db:orphans
 ```
 
-To throw away everything the database holds, volume included, then rebuild it from nothing. This deletes all local
-data in `melarc_pgdata`. It is the simple way to a clean slate, not something a password change needs:
+With a native server, `db:reset` above is the clean slate of the development database, and the roles stay: nothing in
+this repository drops the server's other databases or its roles, so do that yourself, in the server's own tools, only if
+you must, and never on a server that holds anything you want.
+
+With the container, to throw away everything the database holds, volume included, then rebuild it from nothing. This
+deletes all local data in `melarc_pgdata`. It is the simple way to a clean slate, not something a password change needs:
 
 ```text
 pnpm run infra:stop
@@ -619,9 +639,10 @@ To change a password and keep the data, edit `MELARC_PG_MIGRATION_PASSWORD` or `
 `infrastructure/postgres/.env` and run `db:bootstrap`, which sets both passwords again every time it runs (the database
 tests prove that the runtime password changes and the old one stops working). For the runtime password also put the new
 value in `DATABASE_URL` in `apps/api/.env` and restart the API. The cluster superuser's password,
-`MELARC_PG_ADMIN_PASSWORD`, is the exception: PostgreSQL reads it only when the volume is first created, so changing it
-in the file later leaves `db:bootstrap` unable to sign in. Put the value the volume was created with back, or use the
-reset above.
+`MELARC_PG_ADMIN_PASSWORD`, is the exception: it is the password the server already holds, not one the tools set (a
+container reads it only when its volume is first created), so changing it in the file later leaves `db:bootstrap` unable
+to sign in. Put the server's own value back (native: the `postgres` password you chose at the install), or, for the
+container, use the reset above.
 
 ## 9. Package the source for review
 
@@ -662,8 +683,8 @@ database, which listens on loopback.
 
   The database is the part that depends on your setup. Inside WSL2, `127.0.0.1` is the WSL2 virtual machine, not
   Windows, unless WSL2 uses mirrored networking; and the database is published on loopback only. Whether a database
-  that was started from Windows is at `127.0.0.1:5432` for a WSL2 shell therefore depends on how Docker is installed
-  and how WSL2 is configured, and this page does not assume it. Ask the machine:
+  that runs on Windows is at `127.0.0.1` for a WSL2 shell therefore depends on how WSL2 is configured, and this page does
+  not assume it. Ask the machine:
 
   ```text
   pnpm run infra:check
@@ -671,11 +692,12 @@ database, which listens on loopback.
 
   If it says PostgreSQL answers, carry on. If it does not, use one of these two setups:
 
-  1. **The database inside WSL2.** Make Docker available in the distribution (Docker Engine installed in it, which is
-     plain Linux, or Docker Desktop with its WSL integration enabled for it) and run `pnpm run infra:up` from the WSL2
-     shell. Run only one `melarc-db`: its name and port 5432 are taken by the first.
-  2. **The database on Windows, the rest in WSL2.** Turn on mirrored networking, which makes `127.0.0.1` in WSL2 reach
-     servers on Windows (Windows 11 22H2 or later; Microsoft's
+  1. **The database inside WSL2.** Install PostgreSQL 18 in the distribution (it is plain Linux) and set the port and
+     the superuser's password as in step 3, or make Docker available in it (Docker Engine installed in it, or Docker
+     Desktop with its WSL integration enabled for it) and run `pnpm run infra:up` from the WSL2 shell. Run only one
+     server on a port, and only one `melarc-db`: its name and port 5432 are taken by the first.
+  2. **The database on Windows, the rest in WSL2.** This is the native Windows service of step 3. Turn on mirrored
+     networking, which makes `127.0.0.1` in WSL2 reach servers on Windows (Windows 11 22H2 or later; Microsoft's
      [WSL networking page](https://learn.microsoft.com/en-us/windows/wsl/networking) describes it).
      Put these two lines in `%UserProfile%\.wslconfig`, run `wsl --shutdown` from Windows, then open WSL2 again and
      run `pnpm run infra:check`:
@@ -692,18 +714,21 @@ database, which listens on loopback.
   setups above.
 
   Not verified: neither setup has been run on a WSL2 machine for this repository, and nor has whether Docker Desktop's
-  WSL integration lets a distribution reach a port published on `127.0.0.1`. `infra:check` is how you find out on
+  WSL integration lets a distribution reach a port published on `127.0.0.1` (the container's case). `infra:check` is how you find out on
   yours. A full run of this page in WSL2 is still to be done ([runbook B0.10](delivery/planning/BOOTSTRAP_B0_RUNBOOK.md)).
 
 ## When something goes wrong
 
-- **`PostgreSQL is not reachable ... ECONNREFUSED`:** Docker is not running or the container is stopped. Run
-  `pnpm run infra:status`, then `pnpm run infra:up`, then `pnpm run infra:check`. In WSL2 the database may be running
-  where this shell's `127.0.0.1` does not reach: see the WSL2 section above.
-- **Port 5432 is taken** by another PostgreSQL on this machine. Set `MELARC_PG_PORT` in
-  `infrastructure/postgres/.env` and the port in `DATABASE_URL` in `apps/api/.env`, then recreate the container
-  (`down` without `--volumes`, then `pnpm run infra:up`). The tools only ever act on a server on this machine, and they
-  must only be pointed at the one this repository started.
+- **`PostgreSQL is not reachable ... ECONNREFUSED`:** no server answers at the port the settings name. With a native
+  server: start the service (on Windows `postgresql-x64-18`, in Services) and check that `MELARC_PG_PORT` and the port of
+  `DATABASE_URL` are the one it listens on, then run `pnpm run infra:check`. With the container: Docker is not running or
+  the container is stopped; run `pnpm run infra:status`, then `pnpm run infra:up`, then `pnpm run infra:check`. In WSL2
+  the database may be running where this shell's `127.0.0.1` does not reach: see the WSL2 section above.
+- **Port 5432 is taken** by another PostgreSQL on this machine, or your server listens on another port. Set
+  `MELARC_PG_PORT` in `infrastructure/postgres/.env` and the port in `DATABASE_URL` in `apps/api/.env` to the one the
+  server you mean to use listens on (the container: then recreate it, `down` without `--volumes`, then `pnpm run
+infra:up`). The tools only ever act on a server on this machine, and they must only be pointed at the one meant for
+  this repository.
 - **Port 3000 (the API) or 5172 (the Ops dev server) is taken** by another project. For the API set `HTTP_PORT` in
   `apps/api/.env`, then copy `apps/ops-web/.env.example` to `apps/ops-web/.env` and set `OPS_API_PROXY_TARGET` to the
   API's new address. The dev server never moves to another port, because the API allows exactly one origin: to move it,
@@ -712,8 +737,9 @@ database, which listens on loopback.
 - **Password authentication failed after a password in `infrastructure/postgres/.env` changed or the file was
   regenerated:** the server still holds the passwords it was given. Run `db:bootstrap` (step 4), which sets the
   migration and runtime passwords from the file, and make `DATABASE_URL` in `apps/api/.env` carry the runtime one. If
-  `db:bootstrap` itself cannot sign in, `MELARC_PG_ADMIN_PASSWORD` no longer matches the volume: put back the value
-  it had when the volume was created, or use the full reset in step 8.
+  `db:bootstrap` itself cannot sign in, `MELARC_PG_ADMIN_PASSWORD` no longer matches the server: put back its own value
+  (native: the `postgres` password; container: the one the volume was created with), or, for the container, use the
+  full reset in step 8.
 - **A browser download times out:** on a slow or filtered connection, retry with a longer connection timeout, for
   example `PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=120000`. That is generic advice and it does not help in the
   following case.
