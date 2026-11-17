@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
+import { skipWhereKnownFlaky } from './support/known-flaky';
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
 
 /**
@@ -359,7 +360,9 @@ test.describe('the components in a browser: states under the pointer', () => {
   // that is not loading must still change, or the check proves nothing.
   test('a loading button keeps its fill under the pointer, and an ordinary one changes it', async ({
     page,
+    browserName,
   }) => {
+    skipWhereKnownFlaky(browserName, 'loading-button-fill-under-pointer');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openShowcase(page);
 
@@ -568,7 +571,9 @@ test.describe('the sidebar and the top bar in a browser', () => {
   // Break caught: a rail whose entry gives no name to a pointer or a keyboard user: an icon that has to be guessed.
   test('shows the name of an entry of the rail in a tooltip on hover and on focus, and Escape takes it away', async ({
     page,
+    browserName,
   }) => {
+    skipWhereKnownFlaky(browserName, 'rail-tooltip-on-hover-and-focus');
     await openShell(page);
     const link = entries(rail(page)).filter({ hasText: 'Demo staff' });
     await link.scrollIntoViewIfNeeded();

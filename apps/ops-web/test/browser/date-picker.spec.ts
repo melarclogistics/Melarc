@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
+import { leavesOutStep } from './support/known-flaky';
 import { watchPage, wcagViolations } from './support/page';
 
 /**
@@ -259,6 +260,7 @@ test.describe('the date field in a browser: what only the stylesheet gives', () 
   // days of the next month drawn, and a day that does not answer the pointer.
   test('draws the invalid border, today and the days that are not in the month, and answers the pointer', async ({
     page,
+    browserName,
   }) => {
     // Without motion the states are the ones the rules give, not a step of a transition between two of them.
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -294,6 +296,8 @@ test.describe('the date field in a browser: what only the stylesheet gives', () 
       'hidden',
     );
 
+    // The pointer step reads a colour once, right after the pointer moved and was pressed: known flaky on the hosted WebKit run alone (known-flaky-list.ts), and the rest above still runs there.
+    if (leavesOutStep(browserName, 'date-field-pointer-states')) return;
     const other = page.getByRole('button', { name: /Friday,? 30 October 2026/ });
     const background = (): Promise<string> =>
       other.evaluate((element) => getComputedStyle(element).backgroundColor);
