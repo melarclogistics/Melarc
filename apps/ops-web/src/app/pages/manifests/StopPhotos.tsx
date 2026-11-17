@@ -149,16 +149,18 @@ function Photos({
   const proof = tilesOf(items, 'COLLECTION_PROOF', 'Photo of the failure or short count');
   const moreFailed = evidence.isFetchNextPageError;
   // The page just added was read after the ones shown before it, and its progress is the newest: the pages already shown are read again once it is in **when one of the photos on them was still on its way
-  // when they were read**, so that a photo is never drawn as waiting under a progress that says every photo is uploaded (the review of Run B, finding 5). A photo that is stored stays stored, so when every
-  // photo shown is, there is nothing on the earlier pages to bring up to date, and reading them all again after each page would cost a stop of a few thousand photos (a page of a hundred each) a few hundred
-  // requests of the session's hundred and twenty a minute (the review of 17 November 2026). Not after a page that failed: what was loaded stays as it was read, and the line says so.
+  // when they were read**, so that a photo is never drawn as waiting under a progress that says every photo is uploaded (the review of Run B, finding 5). A photo that is stored or expired is settled (the
+  // machine of evidence has no way back from either), and the page just read is current, so when no photo on the pages before it is still pending there is nothing to bring up to date, and reading them
+  // all again after each page would cost a stop of a few thousand photos (a page of a hundred each) a few hundred requests of the session's hundred and twenty a minute (the review of 17 November 2026).
+  // Not after a page that failed: what was loaded stays as it was read, and the line says so.
   const loadMore = () => {
     void evidence.fetchNextPage().then((read) => {
       if (read.isFetchNextPageError) return;
-      const waiting =
-        read.data?.pages.some((page) => page.items.some((item) => item.state !== 'STORED')) ??
-        false;
-      if (waiting) void evidence.refetch();
+      const onItsWay =
+        read.data?.pages
+          .slice(0, -1)
+          .some((page) => page.items.some((item) => item.state === 'PENDING_UPLOAD')) ?? false;
+      if (onItsWay) void evidence.refetch();
     });
   };
   const updatedAt =

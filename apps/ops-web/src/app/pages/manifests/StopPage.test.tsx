@@ -57,6 +57,11 @@ const progress = (stored: number, pending = 0, expired = 0) => ({
   pending,
   expired,
 });
+/** A photo still on its way (its upload has not completed) and one whose time to upload ran out: the two states of a photo that is not stored. */
+const WAITING = { state: 'PENDING_UPLOAD', uploaded_at: null, scanned_clean: false };
+const NEVER_UPLOADED = { state: 'EXPIRED', uploaded_at: null, scanned_clean: false };
+const tokensOf = (reads: readonly Request[]) =>
+  reads.map((read) => new URL(read.url).searchParams.get('page_token'));
 
 /** The five minutes a link lives (`createEvidenceRetrievalAuthorization`), counted from the moment the test asks: a link with time left, and not one of a fixed day that has since gone by. */
 const FIVE_MINUTES = 5 * 60_000;
@@ -463,7 +468,7 @@ describe('a photo opened', () => {
 });
 
 describe('the photos a page at a time', () => {
-  it('loads the next page by the server’s position when asked, reads the pages already shown again only while a photo on them was still on its way, and keeps the photos', async () => {
+  it('loads the next page by the server’s position when asked, reads nothing again when every photo shown is settled, and keeps the photos', async () => {
     const { user } = open((request) =>
       new URL(request.url).searchParams.get('page_token') === 'p2'
         ? json(200, evidenceListFixture({ items: [photo(3)], parcel_photos: progress(3) }))
@@ -485,12 +490,66 @@ describe('the photos a page at a time', () => {
       expect(panel.getAllByRole('listitem')).toHaveLength(3);
     });
     // Every photo shown is stored, and a stored photo stays stored: the next page by the position the server gave, and nothing read again (the reads were [first page, next page], not [first, next, first, next]).
-    await waitFor(() => {
-      expect(
-        evidenceReads().map((read) => new URL(read.url).searchParams.get('page_token')),
-      ).toEqual([null, 'p2']);
-    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(tokensOf(evidenceReads())).toEqual([null, 'p2']);
     expect(panel.queryByRole('button', { name: 'Load more photos' })).toBeNull();
+  });
+
+  // Break caught: a photo whose time to upload ran out counted as one still on its way. It never changes (the machine of evidence has no way back from EXPIRED), so reading the pages again cannot bring it up
+  // to date, and a stop with one would cost the reading of every page again with each page.
+  it('does not read the pages already shown again for a photo whose time to upload ran out', async () => {
+    const { user } = open((request) =>
+      new URL(request.url).searchParams.get('page_token') === 'p2'
+        ? json(200, evidenceListFixture({ items: [photo(3)], parcel_photos: progress(2, 0, 1) }))
+        : json(
+            200,
+            evidenceListFixture({
+              items: [photo(1), photo(2, NEVER_UPLOADED)],
+              next_page_token: 'p2',
+              parcel_photos: progress(2, 0, 1),
+            }),
+          ),
+    );
+
+    const panel = within(await photosPanel());
+    expect(await panel.findByText(/1 photo never uploaded/)).toBeVisible();
+    await user.click(panel.getByRole('button', { name: 'Load more photos' }));
+
+    await waitFor(() => {
+      expect(panel.getAllByRole('listitem')).toHaveLength(3);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(tokensOf(evidenceReads())).toEqual([null, 'p2']);
+  });
+
+  // Break caught: the pages before the one just read not told from the one just read. A photo on its way on the page just added is as current as that page (it is the newest read), so reading the earlier
+  // pages again would bring up to date what is not stale.
+  it('does not read the pages already shown again for a photo on its way on the page just read', async () => {
+    const { user } = open((request) =>
+      new URL(request.url).searchParams.get('page_token') === 'p2'
+        ? json(
+            200,
+            evidenceListFixture({ items: [photo(3, WAITING)], parcel_photos: progress(2, 1) }),
+          )
+        : json(
+            200,
+            evidenceListFixture({
+              items: [photo(1), photo(2)],
+              next_page_token: 'p2',
+              parcel_photos: progress(2, 1),
+            }),
+          ),
+    );
+
+    const panel = within(await photosPanel());
+    await user.click(await panel.findByRole('button', { name: 'Load more photos' }));
+
+    await waitFor(() => {
+      expect(panel.getAllByRole('listitem')).toHaveLength(3);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(tokensOf(evidenceReads())).toEqual([null, 'p2']);
+    expect(panel.getByText('Waiting to upload')).toBeVisible();
   });
 
   // Break caught: a read of every page shown after each page loaded (the cost of n pages was n(n+1)/2 requests: 351 for a stop of 2,600 photos, against 120 a minute for the session), made even when every
@@ -518,6 +577,7 @@ describe('the photos a page at a time', () => {
       });
     }
 
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(evidenceReads()).toHaveLength(PAGES);
   });
 
@@ -556,7 +616,6 @@ function pageBecomes(state: 'visible' | 'hidden'): void {
 }
 
 describe('the photos as they arrive', () => {
-  const WAITING = { state: 'PENDING_UPLOAD', uploaded_at: null, scanned_clean: false };
   /** What the server answers each time the list is read, in the order of the reads: the last answer stands for every read after it. */
   const reads = (answers: readonly Record<string, unknown>[]): Handler => {
     let read = 0;
