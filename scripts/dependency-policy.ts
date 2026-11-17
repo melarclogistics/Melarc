@@ -9,6 +9,8 @@
  *     package extensions or pnpmfile, in package.json files, pnpm-workspace.yaml, the lockfile or on disk, with ONE recorded
  *     exception (OVERRIDE_EXCEPTIONS): an exact selector and an exact version, in pnpm-workspace.yaml and the lockfile alone,
  *     which is itself a finding once it is stale;
+ *   - the audit's own settings are no way round it: `auditConfig` in pnpm-workspace.yaml may hold only the recorded, time-bounded audit exception
+ *     (AUDIT_EXCEPTIONS: the advisory, its reason, its owner and the day it lapses), which is itself a finding once it has lapsed or applies to nothing;
  *   - dependency build scripts run only when approved, and none is: `allowBuilds` may hold `false` values only;
  *   - the lockfile resolves every package from the registry, with an integrity hash: no git, tarball URL, `file:`
  *     or directory source, and a `link:` only to a package of this workspace.
@@ -48,6 +50,8 @@ export interface PolicyInputs {
   workspaceDirectories: readonly string[];
   /** Which of the customisation files exist in the repository root. */
   customisationFiles: readonly string[];
+  /** The day the policy is judged on, `YYYY-MM-DD` (UTC), so that the lapse of an audit exception can be tested. */
+  today: string;
 }
 
 /**
@@ -79,6 +83,39 @@ export const OVERRIDE_EXCEPTIONS: Readonly<Record<string, OverrideException>> = 
   },
 };
 
+/**
+ * The audit exception the policy allows, and why. The dependency audit (`pnpm audit --audit-level high`, a required job that runs on every run) fails on a high advisory, and the
+ * engineering standards (section 3.3) let one through only as a fix or an explicit, time-bounded exception with its reason and owner. An advisory with no fixed release has no
+ * fix, so the exception is the way: it is recorded here and in `pnpm-workspace.yaml` (`auditConfig.ignoreGhsas`), the exact advisory and nothing wider. `findPolicyProblems`
+ * refuses any other audit setting, and refuses this one when it has lapsed (the day after `expires`) or applies to nothing (the lockfile resolves no version of the package
+ * at or below `affectedThrough`). What it cannot see is a fixed release being published: the audit says nothing of an advisory it ignores, so the date is the bound.
+ */
+export interface AuditException {
+  /** The package the advisory is about. */
+  readonly package: string;
+  /** The highest version the advisory covers (an exact version): the lockfile must still resolve one at or below it, or the exception applies to nothing. */
+  readonly affectedThrough: string;
+  readonly why: string;
+  /** Who accepted the risk, the day they did, and the last day the exception holds (ISO dates). */
+  readonly owner: string;
+  readonly approved: string;
+  readonly expires: string;
+  readonly removeWhen: string;
+}
+
+export const AUDIT_EXCEPTIONS: Readonly<Record<string, AuditException>> = {
+  'GHSA-fc5q-39xc-vjpf': {
+    package: 'picomatch',
+    affectedThrough: '4.0.7',
+    why: "picomatch up to 4.0.7 has a denial of service through repeated extglob patterns (rated high on 17 November 2026), and no fixed release exists: the newest is 4.0.7 and the 4.0.8 the advisory names is not published. Only build and lint tools resolve it (typescript-eslint, tinyglobby, fdir, Vite), on the repository's own patterns, and the audit of the production dependencies finds nothing.",
+    owner: 'the Product Owner',
+    approved: '2026-11-17',
+    expires: '2026-12-17',
+    removeWhen:
+      'a fixed picomatch is published (4.0.8 or later): upgrade what resolves it, delete the auditConfig block from pnpm-workspace.yaml and the entry from AUDIT_EXCEPTIONS, and run pnpm install; and in any case after 17 December 2026, when the Product Owner decides again.',
+  },
+};
+
 /** pnpm's customisation files: code or patches that change what an install does. */
 export const CUSTOMISATION_FILES: readonly string[] = [
   '.pnpmfile.cjs',
@@ -97,6 +134,7 @@ const DEPENDENCY_FIELDS = [
 /** Settings that rewrite what is resolved, or what an install does, wherever they are written. */
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set([
   'overrides',
+  'auditConfig',
   'resolutions',
   'patchedDependencies',
   'packageExtensions',
@@ -139,13 +177,37 @@ function isRecordedException(value: unknown): boolean {
 }
 
 /**
- * `allowException` is for the two files that hold pnpm's settings, `pnpm-workspace.yaml` and the lockfile, and for their top level only:
- * a manifest, `pnpm.overrides`, `config.overrides` or the lockfile's `settings.overrides` may not hold even the recorded override.
+ * Whether `value` is the recorded audit exception and nothing else: `ignoreGhsas` alone, holding the advisories of AUDIT_EXCEPTIONS, no more and no fewer. Another list
+ * (`ignoreCves`), a flag (`ignoreUnfixable`), another advisory, the same one beside another, or an empty list are not.
+ */
+function isRecordedAuditConfig(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const given = Object.keys(value);
+  const ids = value.ignoreGhsas;
+  const recorded = Object.keys(AUDIT_EXCEPTIONS).toSorted();
+  if (given.length !== 1 || given[0] !== 'ignoreGhsas' || !Array.isArray(ids)) return false;
+  const listed = ids.filter((id): id is string => typeof id === 'string').toSorted();
+  return (
+    listed.length === ids.length &&
+    listed.length === recorded.length &&
+    listed.every((id, index) => id === recorded[index])
+  );
+}
+
+/** The two settings a file may hold in their recorded form, and only at its top level: the others are forbidden wherever they are written. */
+interface AllowedSettings {
+  readonly overrides?: boolean;
+  readonly auditConfig?: boolean;
+}
+
+/**
+ * `allowed` is for the files that hold pnpm's settings, and for their top level only: `pnpm-workspace.yaml` may hold the recorded override and the recorded audit exception, and
+ * the lockfile the recorded override. A manifest, `pnpm.overrides`, `config.overrides`, `pnpm.auditConfig` or the lockfile's `settings.overrides` may not hold even those.
  */
 function forbiddenSettings(
   where: string,
   document: unknown,
-  allowException = false,
+  allowed: AllowedSettings = {},
 ): PolicyProblem[] {
   if (!isRecord(document)) return [];
   const maps: [prefix: string, map: unknown][] = [
@@ -154,23 +216,30 @@ function forbiddenSettings(
   ];
   return maps.flatMap(([prefix, map]) => {
     const settings = isRecord(map) ? map : {};
+    const topLevel = prefix === '';
     return Object.keys(settings)
       .filter((key) => FORBIDDEN_KEYS.has(key))
       .filter(
         (key) =>
           !(
-            allowException &&
-            prefix === '' &&
-            key === 'overrides' &&
-            isRecordedException(settings[key])
+            topLevel &&
+            ((key === 'overrides' &&
+              allowed.overrides === true &&
+              isRecordedException(settings[key])) ||
+              (key === 'auditConfig' &&
+                allowed.auditConfig === true &&
+                isRecordedAuditConfig(settings[key])))
           ),
       )
       .map((key) => ({
         code: 'FORBIDDEN_SETTING' as const,
         message:
           `${where} sets ${prefix}${key}: nothing may rewrite what is resolved or what an install does.` +
-          (allowException && prefix === '' && key === 'overrides'
+          (topLevel && key === 'overrides' && allowed.overrides === true
             ? ` The one override allowed is the recorded exception (${Object.keys(OVERRIDE_EXCEPTIONS).join(', ')}), written exactly and alone.`
+            : '') +
+          (topLevel && key === 'auditConfig' && allowed.auditConfig === true
+            ? ` The one audit setting allowed is ignoreGhsas holding the recorded exception (${Object.keys(AUDIT_EXCEPTIONS).join(', ')}), written exactly and alone.`
             : ''),
       }));
   });
@@ -232,6 +301,63 @@ function exceptionProblems(workspaceYaml: string, lockfileText: string): PolicyP
   return problems;
 }
 
+/** The exact registry versions of `name` that the lockfile's packages resolve (`name@1.2.3` keys), in the order the lockfile lists them. */
+function resolvedVersions(packages: Record<string, unknown>, name: string): string[] {
+  return Object.keys(packages)
+    .filter((key) => key.startsWith(`${name}@`))
+    .map((key) => key.slice(name.length + 1))
+    .filter((version) => EXACT_VERSION.test(version));
+}
+
+/** `major.minor.patch` of an exact version, a prerelease or build suffix left out. */
+const triple = (version: string): [number, number, number] => {
+  const [major = 0, minor = 0, patch = 0] = (version.split(/[-+]/)[0] ?? '').split('.').map(Number);
+  return [major, minor, patch];
+};
+
+/** Whether `version` is `ceiling` or lower. */
+function atMost(version: string, ceiling: string): boolean {
+  const [low, high] = [triple(version), triple(ceiling)];
+  for (let part = 0; part < 3; part += 1) {
+    const [a = 0, b = 0] = [low[part], high[part]];
+    if (a !== b) return a < b;
+  }
+  return true;
+}
+
+/**
+ * The recorded audit exception must still be doing its job, judged only when the workspace file records it. It is stale when the day is past the last day it
+ * holds, and when the lockfile resolves no version of its package at or below the highest one the advisory covers (the package was upgraded past it, or removed): it
+ * applies to nothing. A stale exception is a finding, so that it is removed or decided again by its owner, and does not stay as a setting nobody remembers.
+ */
+function auditExceptionProblems(
+  workspaceYaml: string,
+  lockfileText: string,
+  today: string,
+): PolicyProblem[] {
+  const workspace: unknown = parse(workspaceYaml);
+  if (!isRecord(workspace) || !isRecordedAuditConfig(workspace.auditConfig)) return [];
+  const lock: unknown = parse(lockfileText);
+  const packages = isRecord(lock) && isRecord(lock.packages) ? lock.packages : {};
+  const problems: PolicyProblem[] = [];
+  for (const [advisory, exception] of Object.entries(AUDIT_EXCEPTIONS)) {
+    if (today > exception.expires) {
+      problems.push({
+        code: 'STALE_EXCEPTION',
+        message: `The audit exception for ${advisory} (${exception.package}, accepted by ${exception.owner} on ${exception.approved}) lapsed after ${exception.expires}: its owner decides again. Remove it when ${exception.removeWhen}`,
+      });
+    }
+    const resolved = resolvedVersions(packages, exception.package);
+    if (!resolved.some((version) => atMost(version, exception.affectedThrough))) {
+      problems.push({
+        code: 'STALE_EXCEPTION',
+        message: `The audit exception for ${advisory} is for ${exception.package} up to ${exception.affectedThrough}, and pnpm-lock.yaml resolves ${resolved.length === 0 ? 'no such package' : resolved.join(', ')}, so it applies to nothing. Remove it when ${exception.removeWhen}`,
+      });
+    }
+  }
+  return problems;
+}
+
 function specifierProblems(path: string, json: unknown): PolicyProblem[] {
   const problems: PolicyProblem[] = [];
   for (const field of DEPENDENCY_FIELDS) {
@@ -251,7 +377,10 @@ function specifierProblems(path: string, json: unknown): PolicyProblem[] {
 
 function workspaceProblems(yaml: string): PolicyProblem[] {
   const workspace: unknown = parse(yaml);
-  const problems = forbiddenSettings('pnpm-workspace.yaml', workspace, true);
+  const problems = forbiddenSettings('pnpm-workspace.yaml', workspace, {
+    overrides: true,
+    auditConfig: true,
+  });
   const settings = isRecord(workspace) ? workspace : {};
 
   const allowBuilds = settings.allowBuilds;
@@ -377,7 +506,7 @@ function lockProblems(text: string, directories: readonly string[]): PolicyProbl
     ];
   }
   return [
-    ...forbiddenSettings('pnpm-lock.yaml', lock, true),
+    ...forbiddenSettings('pnpm-lock.yaml', lock, { overrides: true }),
     ...importerProblems(lock, directories),
     ...packageProblems(lock),
   ];
@@ -393,6 +522,7 @@ export function findPolicyProblems(inputs: PolicyInputs): PolicyProblem[] {
     ...workspaceProblems(inputs.workspaceYaml),
     ...lockProblems(inputs.lockfile, inputs.workspaceDirectories),
     ...exceptionProblems(inputs.workspaceYaml, inputs.lockfile),
+    ...auditExceptionProblems(inputs.workspaceYaml, inputs.lockfile, inputs.today),
     ...inputs.customisationFiles.map((file) => ({
       code: 'CUSTOMISATION_FILE' as const,
       message: `${file} exists in the repository root: it changes what an install does.`,
@@ -413,5 +543,6 @@ export function readPolicyInputs(root: string): PolicyInputs {
     lockfile: readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8'),
     workspaceDirectories: directories,
     customisationFiles: CUSTOMISATION_FILES.filter((file) => existsSync(join(root, file))),
+    today: new Date().toISOString().slice(0, 10),
   };
 }

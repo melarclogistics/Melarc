@@ -1,7 +1,7 @@
 import type { components } from '@melarc/api-client';
 
 import { OPERATIONAL_CODE } from '../pickup/pickup-shape';
-import { instantOf, isOneOf, isRecord, optional, uuidOf } from '../staff/staff-shape';
+import { instantOf, isOneOf, isRecord, optional, uuidListOf, uuidOf } from '../staff/staff-shape';
 import {
   COUNT_VARIANCES,
   INTAKE_CONDITIONS,
@@ -40,10 +40,13 @@ export const MAX_PAGE_ITEMS = 100;
 const MAX_TOKEN = 2048;
 const MAX_NAME = 120;
 const MAX_NOTE = 1000;
+/**
+ * A run holds at most 64 stops (the manifest's ceiling, `MAX_STOPS`) and one vendor's check-in is opened for each stop that was collected, so this is a bound no run can reach, kept so that a list
+ * that is not a run's vendors is refused. **It is the only count of things in this file with a bound**: the parcels of a vendor, the evidence of a parcel or of a finding and the findings of a check-in
+ * are as many as the server holds, and are judged for their shape, their identifiers, their order and their repeats, never for their number (the contract and the API set no `maxItems` on them, and
+ * the platform sets no limit on the parcels of a pickup: OB-S1-97).
+ */
 const MAX_VENDORS = 500;
-const MAX_PARCELS_OF_A_VENDOR = 5000;
-const MAX_EVIDENCE = 100;
-const MAX_FINDINGS = 200;
 
 /**
  * A display name: one line of text, bounded, with no control character, and **never a number that could be dialled**. A name is told by what the screens draw of a person, and a telephone number
@@ -98,19 +101,6 @@ const dateOf = (value: unknown): string | undefined =>
     ? value
     : undefined;
 
-function evidenceIdsOf(value: unknown, most: number): readonly string[] | undefined {
-  if (!Array.isArray(value) || value.length > most) return undefined;
-  const ids: string[] = [];
-  for (const entry of value as unknown[]) {
-    const id = uuidOf(entry);
-    if (id === undefined || ids.some((seen) => seen.toLowerCase() === id.toLowerCase())) {
-      return undefined;
-    }
-    ids.push(id);
-  }
-  return ids;
-}
-
 // ---- the parcel and the lock ------------------------------------------------------------------------------------------------------------------------------------------------------
 
 /** What was found on one parcel (`IntakeParcelCondition`): recorded once for each parcel; a parcel with none reads *Not checked yet*. */
@@ -147,7 +137,7 @@ function parseCondition(body: unknown): ParcelConditionView | null | undefined {
   if (body === null || body === undefined) return null;
   if (!isRecord(body)) return undefined;
   const note = optional(body.note, noteOf);
-  const evidence = evidenceIdsOf(body.evidence_ids ?? [], MAX_EVIDENCE);
+  const evidence = uuidListOf(body.evidence_ids ?? []);
   const by = nameOf(body.recorded_by_name);
   const at = instantOf(body.recorded_at);
   if (
@@ -211,7 +201,7 @@ export function parseParcel(body: unknown): ParcelView | undefined {
 }
 
 function parseParcels(value: unknown): readonly ParcelView[] | undefined {
-  if (!Array.isArray(value) || value.length > MAX_PARCELS_OF_A_VENDOR) return undefined;
+  if (!Array.isArray(value)) return undefined;
   const parcels: ParcelView[] = [];
   const seen = new Set<string>();
   const photos = new Set<string>();
@@ -677,7 +667,7 @@ export function parseFinding(body: unknown): FindingView | undefined {
   );
   const outcome = optional(body.outcome, (value) => (isOneOf(OUTCOMES, value) ? value : undefined));
   const note = optional(body.note, noteOf);
-  const evidence = evidenceIdsOf(body.evidence_ids ?? [], MAX_EVIDENCE);
+  const evidence = uuidListOf(body.evidence_ids ?? []);
   const by = nameOf(body.recorded_by_name);
   const at = instantOf(body.recorded_at);
   if (
@@ -773,21 +763,18 @@ export function parseCheckIn(body: unknown): CheckInView | undefined {
     lock === undefined ||
     parcels === undefined ||
     !Array.isArray(findingsRaw) ||
-    findingsRaw.length > MAX_FINDINGS ||
     !isOneOf(INTAKE_STATES, body.state) ||
     !isOneOf(INTAKE_CONDITIONS, body.condition)
   ) {
     return undefined;
   }
   const findings: FindingView[] = [];
+  const seenFindings = new Set<string>();
   for (const entry of findingsRaw as unknown[]) {
     const finding = parseFinding(entry);
-    if (
-      finding === undefined ||
-      findings.some((seen) => seen.id.toLowerCase() === finding.id.toLowerCase())
-    ) {
-      return undefined;
-    }
+    // Each finding once, found with a set: the history of a long case is as long as it is.
+    if (finding === undefined || seenFindings.has(finding.id.toLowerCase())) return undefined;
+    seenFindings.add(finding.id.toLowerCase());
     findings.push(finding);
   }
   const view: CheckInView = {

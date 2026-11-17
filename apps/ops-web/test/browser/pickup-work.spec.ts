@@ -511,15 +511,17 @@ test.describe('the photos of a stop', () => {
 
     await page.getByRole('button', { name: 'Try to load more photos again' }).click();
     await expect(tiles(page)).toHaveCount(130);
-    // The page that failed is asked for again by the position the server gave, and once it is in the pages already shown are read again, in order, so that the progress and the tiles are of one
-    // moment (the review of Run B, finding 5): the first page, then the second by the position that read gives.
-    await expect.poll(() => reads(api, '/evidence').length).toBe(5);
+    // The page that failed is asked for again by the position the server gave. Every photo shown is stored, and a stored photo stays stored, so the pages already shown are not read again after it: the
+    // first page, the page that failed, and that page again (reading every page again after each page was n(n+1)/2 reads for n pages, the review of 17 November 2026).
+    await expect.poll(() => reads(api, '/evidence').length).toBe(3);
+    // A read of the pages already shown would be on its way by now.
+    await page.waitForTimeout(700);
     const list = reads(api, '/evidence');
     expect(
       list.map((call) =>
         new URL(`http://x${call.path}${call.search}`).searchParams.get('page_token'),
       ),
-    ).toEqual([null, '100', '100', null, '100']);
+    ).toEqual([null, '100', '100']);
     expect(authorizations(api)).toHaveLength(0);
     expect(api.unexpected).toEqual([]);
     // The one refusal the test makes on purpose.
@@ -528,6 +530,40 @@ test.describe('the photos of a stop', () => {
         (problem) => !problem.includes('HTTP 500') && !problem.includes('status of 500'),
       ),
     ).toEqual([]);
+  });
+
+  // Break caught (the review of Run B, finding 5): the pages already shown not read again once a page is added, so a photo that was on its way when the first page was read stays drawn as waiting under a
+  // progress that says every photo is uploaded.
+  test('brings a photo that was on its way when the first page was read up to date once the next page is in', async ({
+    page,
+  }) => {
+    const settled = (stillOnItsWay?: number) =>
+      Array.from({ length: 130 }, (_, index) =>
+        index + 1 === stillOnItsWay ? waiting(index + 1) : stored(index + 1),
+      );
+    const { api, watch } = await open(page, STOP, { photos: settled(7) });
+
+    await expect(tiles(page)).toHaveCount(100);
+    await expect(photos(page)).toContainText(
+      '129 of 130 parcel photos uploaded. 1 photo is still waiting to upload.',
+    );
+    await expect(photos(page).getByText('Waiting to upload', { exact: true })).toHaveCount(1);
+
+    // The photo arrives while the officer looks at the first page; the officer loads the next.
+    api.world.photos = settled();
+    await page.getByRole('button', { name: 'Load more photos' }).click();
+    await expect(tiles(page)).toHaveCount(130);
+
+    await expect(photos(page)).toContainText('130 of 130 parcel photos uploaded.');
+    await expect(photos(page).getByText('Waiting to upload', { exact: true })).toHaveCount(0);
+    // The next page by the position the server gave, then the pages already shown again, in order.
+    expect(
+      reads(api, '/evidence').map((call) =>
+        new URL(`http://x${call.path}${call.search}`).searchParams.get('page_token'),
+      ),
+    ).toEqual([null, '100', null, '100']);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
   });
 
   test('says who, when and why where Ops let the count through without photos', async ({

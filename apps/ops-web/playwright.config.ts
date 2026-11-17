@@ -117,6 +117,8 @@ function requestedShard(value: string | undefined): { current: number; total: nu
  *   receiving   the receiving screens (S1.35, S1.35c): the queue by run and the run's page (All N here, a tap on each parcel, the lock, the photos, a parcel that is not on the list, damage, the summary and the
  *               rider's bag, the hub floor's 56 px and the action bar above the keyboard), the blind count (proved from outside: the rider's number in no response and nowhere on the page before the count), the
  *               vendor's record, the decision, the correction of a count, the damage of a vendor with no photos and the list of missing parcels, the same two ways, with a stateful stand-in for the API that carries the rider's number only where the contract does and, on demand, everywhere.
+ *   evidence-store-origin the evidence store on another origin, under the production policy (OB-S1-107): a real HTTPS server on another port with the behaviour of a bucket (the CORS preflight, the signed
+ *               headers), the photo sent and drawn with the store's origin named by the policy, and an unapproved origin and a wrong CORS rule refused, against the production build.
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
  *               answers that never carry them.
  *   queue-summary the counts of the queues (task C1), the same two ways: the sidebar's counts, My work's cards, a failed read and the read again on
@@ -309,6 +311,13 @@ export default defineConfig({
       name: `receiving-dev-${engine}`,
       testMatch: 'receiving.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The evidence store on **another origin** under the production policy (OB-S1-107): a real HTTPS server on another port stands for the bucket and answers the browser's own CORS preflight, so the page's
+      // requests to it are not intercepted. Production build only: the strict policy is proved against it.
+      name: `evidence-store-origin-${engine}`,
+      testMatch: 'evidence-store-origin.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
     },
     {
       // The message log (S1.12e) against the production build, with a stand-in for the API that plants a number in clear, a message's text

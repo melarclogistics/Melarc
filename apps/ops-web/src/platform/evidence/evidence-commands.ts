@@ -33,7 +33,13 @@ export interface EvidenceDeclaration {
  * record as it is now: **`STORED`** (the completion was done and its answer was lost: the file is a success and there is nothing to send) or **`EXPIRED`** (its address is of no use: a new record is asked for).
  */
 export type DeclaredEvidence =
-  | { readonly state: 'PENDING_UPLOAD'; readonly ticket: EvidenceTicket; readonly version: string }
+  | {
+      readonly state: 'PENDING_UPLOAD';
+      readonly ticket: EvidenceTicket;
+      readonly version: string;
+      /** The server's own moment when it answered (the `Date` header), which the end of the upload address is judged against; nothing when the answer had none. */
+      readonly serverTime: number | undefined;
+    }
   | { readonly state: 'STORED'; readonly evidenceId: string }
   | { readonly state: 'EXPIRED'; readonly evidenceId: string };
 
@@ -70,7 +76,12 @@ export async function declareEvidence(
   if (declared.state !== 'PENDING_UPLOAD') return declared;
   // A record that waits for its bytes is completed on the version this answer carries: without one the bytes would be sent and could never be confirmed.
   if (answer.etag === undefined) throw unexpectedResponse(answer.status);
-  return { state: 'PENDING_UPLOAD', ticket: declared.ticket, version: answer.etag };
+  return {
+    state: 'PENDING_UPLOAD',
+    ticket: declared.ticket,
+    version: answer.etag,
+    serverTime: answer.serverTime,
+  };
 }
 
 /** `completeEvidenceUpload`: step two of two, which the server answers only for bytes it finds as declared. The answer is the identifier of the stored record. */

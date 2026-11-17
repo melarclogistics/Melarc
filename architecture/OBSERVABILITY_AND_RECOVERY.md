@@ -370,7 +370,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**208 operations: 120 `CRITICAL_WRITE` · 0 `ASYNC` · 88 `NORMAL`.**
+**209 operations: 120 `CRITICAL_WRITE` · 0 `ASYNC` · 89 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -541,6 +541,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `openSecurityRiskHold`| `CRITICAL_WRITE`| Restricts a vendor's new business; Enhanced-audited|
 | `clearSecurityRiskHold`| `CRITICAL_WRITE`| Lifts that restriction once no other hold is open|
 | `listSecurityRiskHolds`| `NORMAL`| —|
+| `stageParcelPhotos`| `NORMAL`| puts the photos of a count aside in a batch (D-E1); no custody passes and no money moves: the count is the `CRITICAL_WRITE`|
 | `skipPickupStop`| `CRITICAL_WRITE`| **Terminal for the stop, and it unblocks run completion** — §4's guard needs every stop terminal. Notifies the Vendor|
 | `requestAccountingExport`| `CRITICAL_WRITE`| writes the `AccountingExport` record that authorises payment facts to leave the platform, under an Enhanced audit event (§38.5 category 8) — classified with `createEvidence`, which carries the class for issuing a short-lived single-object capability. **This operation is substantively `ASYNC` and the class could not be applied**: its authoritative work completes after the response, `status` advances `REQUESTED → GENERATED`/`FAILED` with no caller present, and `getAccountingExport` is the completion-polling path — but contract-consistency validation's `HANDLE` rule is unsatisfiable by any operation in this contract (see the `ASYNC` note above). **Reversible in one line if that rule is widened**|
 | `requestAdditionalDeviceGrant`| `CRITICAL_WRITE`| security authority — the authoritative `SetupGrant` is created in the request, the same reasoning `requestCredentialRecovery` uses and the same reason a `202` does not make it `ASYNC`|

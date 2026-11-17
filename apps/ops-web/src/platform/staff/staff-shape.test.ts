@@ -18,6 +18,7 @@ import {
   parseTrustedBrowser,
   parseTrustedBrowsers,
   parseTrustedBrowsersRevoked,
+  uuidListOf,
   type SessionRecordView,
 } from './staff-shape';
 
@@ -521,5 +522,77 @@ describe('parseTrustedBrowsersRevoked: how many an administrator’s removal end
     { revoked: null },
   ])('refuses %j', (body) => {
     expect(parseTrustedBrowsersRevoked(body)).toBeUndefined();
+  });
+});
+
+/**
+ * A list of identifiers of any length (`uuidListOf`): the photos of a collection, the evidence of a finding. The platform sets no limit on how many, so the guard sets none either; it refuses a list
+ * that is not one of identifiers, and an identifier twice. The review of 17 November 2026 found a ceiling of 1,000 on the photos and of 100 on the evidence that the API does not have, and a check for
+ * a repeat that took fourteen seconds at twenty thousand identifiers.
+ */
+const idsOf = (count: number): string[] =>
+  Array.from(
+    { length: count },
+    (_, index) => `${(index + 1).toString(16).padStart(8, '0')}-0000-4000-8000-000000000000`,
+  );
+
+describe('uuidListOf: a list of identifiers, each once, in any number', () => {
+  it('is an empty list for an empty list', () => {
+    expect(uuidListOf([])).toEqual([]);
+  });
+
+  // Break caught: a ceiling that refuses a valid record for its size: the three that were there (100 evidence, 200 findings, 1,000 photos) are each tried on both sides, and far beyond.
+  it.each([1, 99, 100, 101, 199, 200, 201, 999, 1000, 1001, 5000, 25_000])(
+    'takes %i identifiers, in the order they came',
+    (count) => {
+      const ids = idsOf(count);
+      expect(uuidListOf(ids)).toEqual(ids);
+    },
+  );
+
+  it('keeps each identifier as it was written, in either case', () => {
+    const upper = 'AAAAAAAA-0000-4000-8000-00000000000A';
+    expect(uuidListOf([upper])).toEqual([upper]);
+  });
+
+  // Break caught: a repeat that gets through, in the same case, in another case, or deep in a long list.
+  it('refuses an identifier twice, in the same case and in another', () => {
+    const [one, two] = idsOf(2);
+    expect(uuidListOf([one, two, one])).toBeUndefined();
+    expect(uuidListOf([one, (one ?? '').toUpperCase()])).toBeUndefined();
+  });
+
+  it('refuses the repeat of the first identifier at the end of a long list', () => {
+    const ids = idsOf(5000);
+    expect(uuidListOf([...ids, ids[0]])).toBeUndefined();
+  });
+
+  it.each([
+    ['text'],
+    [null],
+    [undefined],
+    [{}],
+    [{ length: 2, 0: 'a', 1: 'b' }],
+    [['not an identifier']],
+    [[7]],
+    [[null]],
+    [['aaaaaaaa-0000-4000-8000-000000000000 ']],
+    [['aaaaaaaa-0000-0000-8000-000000000000']],
+  ])('refuses %j', (value) => {
+    expect(uuidListOf(value)).toBeUndefined();
+  });
+
+  it('refuses a list in which one entry of a long list is not an identifier', () => {
+    const ids: unknown[] = idsOf(5000);
+    ids[4321] = 'x';
+    expect(uuidListOf(ids)).toBeUndefined();
+  });
+
+  // Break caught: the check for a repeat made entry by entry against the ones before it, which takes fourteen seconds at twenty thousand identifiers on the one thread of the browser.
+  it('takes twenty thousand identifiers in well under a second', () => {
+    const ids = idsOf(20_000);
+    const start = performance.now();
+    expect(uuidListOf(ids)).toHaveLength(20_000);
+    expect(performance.now() - start).toBeLessThan(1000);
   });
 });

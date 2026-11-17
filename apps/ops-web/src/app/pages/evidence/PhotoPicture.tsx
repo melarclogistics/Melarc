@@ -169,7 +169,7 @@ function FullState({
  * provisional and is said so in the pattern. **No address, key or identifier is ever drawn as text**: the address is held by the `<img>` alone, and a picture is named by the words the page gives it.
  */
 export function PhotoPicture({ evidenceId, wanted, size, alt, reading }: PhotoPictureProps) {
-  const view = usePhotoLink(evidenceId, wanted);
+  const view = usePhotoLink(evidenceId, wanted, size === 'tile');
   return size === 'tile' ? (
     <TilePicture view={view} />
   ) : (

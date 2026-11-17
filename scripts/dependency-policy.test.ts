@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import { parse, stringify } from 'yaml';
 
 import {
+  AUDIT_EXCEPTIONS,
   CUSTOMISATION_FILES,
   findPolicyProblems,
   OVERRIDE_EXCEPTIONS,
@@ -75,6 +76,7 @@ function goodInputs(): PolicyInputs {
     lockfile: stringify(goodLock()),
     workspaceDirectories: ['apps/a', 'packages/lib'],
     customisationFiles: [],
+    today: '2026-11-18',
   };
 }
 
@@ -798,6 +800,192 @@ describe('the one recorded exception: multer under @nestjs/platform-express (dec
   });
 });
 
+describe('the recorded audit exception: picomatch (accepted by the Product Owner on 17 November 2026)', () => {
+  const ADVISORY = 'GHSA-fc5q-39xc-vjpf';
+
+  /** Puts the exception in place the way pnpm records it (`auditConfig.ignoreGhsas` in the workspace file), with the package it is about resolved in the lockfile. */
+  function withAuditException(
+    inputs: PolicyInputs,
+    lock: Json,
+    options: { ids?: readonly string[]; resolved?: readonly string[]; today?: string } = {},
+  ): void {
+    const { ids = [ADVISORY], resolved = ['2.3.2', '4.0.7'], today = '2026-11-18' } = options;
+    inputs.workspaceYaml = `${GOOD_WORKSPACE}\nauditConfig:\n  ignoreGhsas:\n${ids.map((id) => `    - ${id}`).join('\n')}\n`;
+    inputs.today = today;
+    for (const version of resolved) {
+      lockOf(lock, 'packages')[`picomatch@${version}`] = { resolution: { integrity: INTEGRITY } };
+      lockOf(lock, 'snapshots')[`picomatch@${version}`] = {};
+    }
+  }
+
+  /** The messages of the problems found after `change` has edited good inputs. */
+  function messagesWith(change: (inputs: PolicyInputs, lock: Json) => void): string[] {
+    const inputs = goodInputs();
+    const lock = goodLock();
+    change(inputs, lock);
+    return findPolicyProblems({ ...inputs, lockfile: stringify(lock) }).map(
+      (problem) => problem.message,
+    );
+  }
+
+  // Break caught: the exception refused, so that the advisory can be cleared only by leaving the audit stage red.
+  it('is accepted when it is exactly the recorded one, the lockfile still resolves the package and it has not lapsed', () => {
+    assert.deepEqual(
+      codesWith((inputs, lock) => {
+        withAuditException(inputs, lock);
+      }),
+      [],
+    );
+  });
+
+  it('is recorded with the advisory it answers, the package, its owner, its dates and the condition on which it goes', () => {
+    // `find`, not an index: the compiler (noUncheckedIndexedAccess) and the linter disagree about whether an indexed entry may be absent.
+    const recorded = Object.entries(AUDIT_EXCEPTIONS).find(([id]) => id === ADVISORY)?.[1];
+    assert.ok(recorded, 'the recorded exception is present');
+    assert.equal(recorded.package, 'picomatch');
+    assert.equal(recorded.affectedThrough, '4.0.7');
+    assert.equal(recorded.owner, 'the Product Owner');
+    assert.equal(recorded.approved, '2026-11-17');
+    assert.equal(recorded.expires, '2026-12-17');
+    assert.match(recorded.removeWhen, /picomatch/);
+    assert.match(recorded.removeWhen, /17 December 2026/);
+    assert.deepEqual(Object.keys(AUDIT_EXCEPTIONS), [ADVISORY]);
+    for (const day of [recorded.approved, recorded.expires])
+      assert.match(day, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(
+      recorded.expires.localeCompare(recorded.approved) > 0,
+      'it holds for some days after it is accepted',
+    );
+  });
+
+  // Break caught: the policy loosened for the audit in general. Each of these is something other than the recorded exception.
+  const notTheException: [label: string, yaml: string][] = [
+    ['another advisory', 'auditConfig:\n  ignoreGhsas:\n    - GHSA-aaaa-bbbb-cccc\n'],
+    [
+      'the recorded one beside another',
+      `auditConfig:\n  ignoreGhsas:\n    - ${ADVISORY}\n    - GHSA-aaaa-bbbb-cccc\n`,
+    ],
+    ['an empty list', 'auditConfig:\n  ignoreGhsas: []\n'],
+    ['a list that is not a list', `auditConfig:\n  ignoreGhsas: ${ADVISORY}\n`],
+    ['a list of other things', 'auditConfig:\n  ignoreGhsas:\n    - 7\n'],
+    ['an advisory by its CVE', 'auditConfig:\n  ignoreCves:\n    - CVE-2026-0001\n'],
+    [
+      'the recorded one with every unfixable advisory',
+      `auditConfig:\n  ignoreGhsas:\n    - ${ADVISORY}\n  ignoreUnfixable: true\n`,
+    ],
+    ['nothing but a flag', 'auditConfig:\n  ignoreUnfixable: true\n'],
+    ['a setting that is not a map', 'auditConfig: true\n'],
+  ];
+  for (const [label, yaml] of notTheException) {
+    it(`refuses ${label}`, () => {
+      assert.ok(
+        codesWith((inputs, lock) => {
+          withAuditException(inputs, lock);
+          inputs.workspaceYaml = `${GOOD_WORKSPACE}\n${yaml}`;
+        }).includes('FORBIDDEN_SETTING'),
+        label,
+      );
+    });
+  }
+
+  // Break caught: the exception honoured wherever a setting can be written, which would let a manifest or the lockfile quiet the audit.
+  it('is allowed in the workspace file only: a manifest, a settings map or the lockfile may not hold it', () => {
+    const recorded = { ignoreGhsas: [ADVISORY] };
+    for (const path of ['package.json', 'apps/a/package.json']) {
+      assert.ok(
+        codesWith((inputs, lock) => {
+          withAuditException(inputs, lock);
+          packageJson(inputs, path).auditConfig = recorded;
+        }).includes('FORBIDDEN_SETTING'),
+        `${path}: auditConfig`,
+      );
+      assert.ok(
+        codesWith((inputs, lock) => {
+          withAuditException(inputs, lock);
+          packageJson(inputs, path).pnpm = { auditConfig: recorded };
+        }).includes('FORBIDDEN_SETTING'),
+        `${path}: pnpm.auditConfig`,
+      );
+    }
+    assert.ok(
+      codesWith((inputs, lock) => {
+        withAuditException(inputs, lock);
+        lock.auditConfig = recorded;
+      }).includes('FORBIDDEN_SETTING'),
+      'lockfile auditConfig',
+    );
+    assert.ok(
+      codesWith((inputs, lock) => {
+        withAuditException(inputs, lock);
+        lock.settings = { ...(lock.settings as Json), auditConfig: recorded };
+      }).includes('FORBIDDEN_SETTING'),
+      'lockfile settings.auditConfig',
+    );
+  });
+
+  // Break caught: the exception that never ends, which is what "time-bounded" is for.
+  it('holds through its last day and has lapsed the day after, and says so', () => {
+    assert.deepEqual(
+      codesWith((inputs, lock) => {
+        withAuditException(inputs, lock, { today: '2026-12-17' });
+      }),
+      [],
+    );
+    const messages = messagesWith((inputs, lock) => {
+      withAuditException(inputs, lock, { today: '2026-12-18' });
+    });
+    assert.equal(messages.length, 1);
+    assert.match(messages[0] ?? '', new RegExp(`audit exception for ${ADVISORY}`));
+    assert.match(messages[0] ?? '', /lapsed after 2026-12-17/);
+    assert.match(messages[0] ?? '', /accepted by the Product Owner on 2026-11-17/);
+    assert.deepEqual(
+      codesWith((inputs, lock) => {
+        withAuditException(inputs, lock, { today: '2027-06-01' });
+      }),
+      ['STALE_EXCEPTION'],
+    );
+  });
+
+  // Break caught: an exception that goes stale unseen, after the package was upgraded past the advisory or removed.
+  it('is stale when the lockfile resolves no version of the package that the advisory covers, and says so', () => {
+    for (const resolved of [['4.0.8'], ['4.1.0', '5.0.0'], ['4.0.8', '5.0.0'], []]) {
+      const messages = messagesWith((inputs, lock) => {
+        withAuditException(inputs, lock, { resolved });
+      });
+      assert.equal(messages.length, 1, JSON.stringify(resolved));
+      assert.match(messages[0] ?? '', /picomatch up to 4\.0\.7/);
+      assert.match(messages[0] ?? '', /applies to nothing/);
+    }
+    assert.match(
+      messagesWith((inputs, lock) => {
+        withAuditException(inputs, lock, { resolved: [] });
+      })[0] ?? '',
+      /resolves no such package/,
+    );
+  });
+
+  it('is not stale while any version at or below the highest the advisory covers is resolved', () => {
+    for (const resolved of [['2.3.2'], ['4.0.7'], ['2.3.2', '4.0.8'], ['4.0.0', '4.0.7']]) {
+      assert.deepEqual(
+        codesWith((inputs, lock) => {
+          withAuditException(inputs, lock, { resolved });
+        }),
+        [],
+        JSON.stringify(resolved),
+      );
+    }
+  });
+
+  it('is judged only when the workspace file records it', () => {
+    assert.deepEqual(
+      codesWith((inputs) => {
+        inputs.today = '2030-01-01';
+      }),
+      [],
+    );
+  });
+});
+
 describe('this repository', () => {
   const inputs = readPolicyInputs(root);
 
@@ -830,6 +1018,20 @@ describe('this repository', () => {
 
   it('keeps the dependency policy', () => {
     assert.deepEqual(findPolicyProblems(inputs), []);
+  });
+
+  // The workspace file and the policy say the same: an audit exception removed from one and left in the other would be a setting nobody remembers.
+  it('records the audit exceptions the policy knows, and no other audit setting', () => {
+    const workspace = parse(inputs.workspaceYaml) as { auditConfig?: Json };
+    const configured = workspace.auditConfig?.ignoreGhsas;
+    assert.deepEqual(
+      [...((configured as string[] | undefined) ?? [])].toSorted(),
+      Object.keys(AUDIT_EXCEPTIONS).toSorted(),
+    );
+    assert.deepEqual(
+      Object.keys(workspace.auditConfig ?? {}),
+      Object.keys(AUDIT_EXCEPTIONS).length === 0 ? [] : ['ignoreGhsas'],
+    );
   });
 
   it('declares only dependencies that the lockfile locked from the same exact specifier', () => {

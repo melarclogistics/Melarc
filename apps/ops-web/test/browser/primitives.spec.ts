@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
+import { freezeClock } from './support/clock';
 import { watchPage, wcagViolations } from './support/page';
 
 /**
@@ -16,6 +17,9 @@ type Scheme = 'light' | 'dark';
 async function openShowcase(page: Page, scheme?: Scheme): Promise<ReturnType<typeof watchPage>> {
   const seen = watchPage(page);
   if (scheme !== undefined) await page.emulateMedia({ colorScheme: scheme });
+  // The calendar of the showcase sits on November 2026 and the keyboard test names a day of it, which the calendar calls "Today, ..." on the one day it is that day: the hosted run of
+  // 17 November 2026 failed in every engine on exactly that, with no change to the code. The page's clock is fixed, as the other date specs fix it (`support/clock.ts`).
+  await freezeClock(page);
   await page.goto(SHOWCASE);
   await expect(page.getByRole('heading', { level: 1, name: 'Primitives showcase' })).toBeVisible();
   return seen;

@@ -50,6 +50,11 @@ export function evidenceOriginOf(value: string): string {
   if (url.href !== `${url.origin}/`) return refuse('it has credentials or more than an origin');
   // The host is a host name: no wildcard, no `;` that would end a directive, no `,` that would end a source, no IP literal, no trailing dot.
   if (!HOST.test(url.hostname)) return refuse('the host is not a host name');
+  // A name and not an address: an object store has a name, and a policy must not name a machine by its number. The URL parser turns every spelling of an IPv4 address (`2130706433`, `0x7f.1`) into the dotted
+  // form, so the one check below sees them all; an IPv6 literal was refused above, by its brackets.
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(url.hostname)) {
+    return refuse('the host is an address, not a name');
+  }
   return url.origin;
 }
 

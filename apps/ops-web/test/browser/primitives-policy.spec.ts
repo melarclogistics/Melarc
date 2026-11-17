@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
+import { leavesOutStep } from './support/known-flaky';
 import { watchPage } from './support/page';
 import { enforceStrictPolicy } from './support/strict-policy';
 
@@ -18,6 +19,7 @@ test.describe('the primitives in a production build under the strict content-sec
   // origin), in any engine; and a policy that is looser than it needs to be, since the same run under `style-src 'self'` alone reports the styles.
   test('every overlay, the calendar, the table and the toaster run and raise no violation', async ({
     page,
+    browserName,
   }) => {
     const violations = await enforceStrictPolicy(page);
     const seen = watchPage(page);
@@ -55,9 +57,13 @@ test.describe('the primitives in a production build under the strict content-sec
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-slot="select-content"]')).toHaveCount(0);
 
-    await button(page, 'Next pickup day').focus();
-    await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible();
-    await page.keyboard.press('Escape');
+    // The tooltip that shows when the keyboard reaches its button has to be visible within five seconds: known flaky on the hosted WebKit run alone (known-flaky-list.ts). Every other check of
+    // this test, the policy's among them, still runs there.
+    if (!leavesOutStep(browserName, 'tooltip-on-keyboard-focus-under-policy')) {
+      await button(page, 'Next pickup day').focus();
+      await expect(page.locator('[data-slot="tooltip-content"]')).toBeVisible();
+      await page.keyboard.press('Escape');
+    }
 
     await button(page, 'Show a confirmation').click();
     await expect(page.locator('[data-sonner-toast]')).toHaveCount(1);

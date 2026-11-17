@@ -30,6 +30,8 @@ import {
   COLLECTION_RECORD_SCHEMA,
   PARCEL_PHOTO_EXCEPTION_CREATE_BODY,
   PARCEL_PHOTO_EXCEPTION_SCHEMA,
+  PARCEL_PHOTOS_STAGED_SCHEMA,
+  STAGE_PARCEL_PHOTOS_BODY,
 } from './collection-schemas.js';
 import type { CollectionRecordView } from './collection-record-view.js';
 import type {
@@ -37,6 +39,8 @@ import type {
   Collections,
   ParcelPhotoExceptionBody,
   ParcelPhotoExceptionView,
+  StagedParcelPhotos,
+  StageParcelPhotosBody,
 } from './collection.service.js';
 import { PICKUP_COLLECTION } from './pickup-manifests-providers.js';
 
@@ -104,6 +108,50 @@ export class CollectionController {
       fingerprint: fingerprintOfRequest(request, 'recordCollection'),
     });
     return recorded.record;
+  }
+
+  /**
+   * `POST /pickup-stops/{id}/parcel-photos` (D-E1, 17 November 2026): the rider puts the parcel photos of a count that is not yet made aside, in a batch of one to 500, so that a collection of
+   * any size reaches the server in requests the transport admits. The Rider app alone (a bearer credential; the dedicated non-browser host as well as same-origin),
+   * `pickup.collection.confirm`, an `Idempotency-Key` and no `If-Match` (it changes nothing the stop's `ETag` is made of). It answers how many photos are staged for the stop, never a list.
+   * The count (`recordCollection`) attaches the staged photos with the ones it names, and the count's own commit closes the staged set.
+   */
+  @Post(':id/parcel-photos')
+  @HttpCode(200)
+  @ContractOperation('stageParcelPhotos')
+  @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
+  @ApiBody({ schema: STAGE_PARCEL_PHOTOS_BODY })
+  @ApiResponse({ status: 200, schema: PARCEL_PHOTOS_STAGED_SCHEMA })
+  @DescribeServers(RIDER_SERVERS)
+  @DescribeErrors(
+    ErrorCode.CsrfValidationFailed,
+    ErrorCode.EvidenceNotStored,
+    ErrorCode.IdempotencyKeyConflict,
+    ErrorCode.ManifestNotStarted,
+    ErrorCode.NotAssignedRider,
+    ErrorCode.PermissionDenied,
+    ErrorCode.SessionInvalid,
+    ErrorCode.StateConflict,
+    ErrorCode.ValidationFailed,
+  )
+  @RequiresPermission('pickup.collection.confirm', {
+    surfaces: ['RIDER_ANDROID'],
+    activity: 'qualifying',
+  })
+  async stage(
+    @Authorized() authorized: AuthorizedRequest,
+    @Param('id') id: string,
+    @Body() body: StageParcelPhotosBody,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @Req() request: Request,
+  ): Promise<StagedParcelPhotos> {
+    if (this.collections === undefined) throw new OperationUnavailableError('stageParcelPhotos');
+    return this.collections.stage(authorized, correlation(), id, {
+      body,
+      idempotencyKey,
+      fingerprint: fingerprintOfRequest(request, 'stageParcelPhotos'),
+    });
   }
 
   /**

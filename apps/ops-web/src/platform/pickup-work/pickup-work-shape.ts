@@ -1,5 +1,6 @@
 import type { components } from '@melarc/api-client';
 
+import { MAX_COUNT } from '../api/count-range';
 import { MANIFEST_STATES, STOP_STATES } from '../manifest/manifest-shape';
 import { OPERATIONAL_CODE } from '../pickup/pickup-shape';
 import { instantOf, isOneOf, isRecord, lineOf, optional, uuidOf } from '../staff/staff-shape';
@@ -81,8 +82,11 @@ const MAX_TOKEN = 2048;
 const MAX_NOTE = 1000;
 const MAX_CODE_LENGTH = 64;
 const REASON_CODE = /^[A-Za-z0-9_.-]+$/;
-/** Far beyond what a counter or a count of parcels can be, and bounded so that a figure is a figure. */
-const MAX_FIGURE = 10_000_000;
+/**
+ * The most a figure can be: the largest count the platform holds (`../api/count-range.ts`), which is what the API takes for a count of parcels. It was 10,000,000 until the review of 17 November 2026, a
+ * ceiling the API does not have, below which the shortfalls, the over counts and the stop's photo progress were readable and above which a valid record made its whole page unreadable.
+ */
+const MAX_FIGURE = MAX_COUNT;
 /** The longest wait a failure can have: a century of seconds. A longer one is not a clock's. */
 const MAX_SECONDS = 3_153_600_000;
 const MAX_ATTEMPTS_LISTED = 50;

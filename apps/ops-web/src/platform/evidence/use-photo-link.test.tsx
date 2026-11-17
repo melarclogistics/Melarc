@@ -9,6 +9,7 @@ import {
   type FakeApi,
 } from '../../test-support/fake-api';
 import { renderWithProviders } from '../../test-support/render-providers';
+import { holdOf } from '../query/read-hold';
 import { usePhotoLink, type PhotoLinkView } from './use-photo-link';
 
 /**
@@ -56,12 +57,14 @@ function Probe({
   into,
   id = PHOTO,
   enabled = true,
+  automatic = false,
 }: {
   readonly into: Held;
   readonly id?: string;
   readonly enabled?: boolean;
+  readonly automatic?: boolean;
 }) {
-  const view = usePhotoLink(id, enabled);
+  const view = usePhotoLink(id, enabled, automatic);
   into.current = view;
   into.seen.push(view.link);
   return null;
@@ -71,6 +74,63 @@ const violation = (directive: string, blocked: string): Event =>
     effectiveDirective: directive,
     blockedURI: blocked,
   });
+
+describe('usePhotoLink while the page is held', () => {
+  // Break caught: a tile that asks for its link while the API has asked the page to wait (a request refused for being too fast), so that a grid scrolled past a hundred and twenty tiles in a minute spends
+  // the session's limit again at once and shows "failed" on every tile after the first refusal.
+  it('does not ask for the link of a tile that came near the screen until the hold is over, and then asks once', async () => {
+    api = installFakeApi({ [ROUTE]: () => link(ONE) });
+    const into = held();
+    const view = renderWithProviders(<Probe into={into} enabled={false} automatic />, {
+      signedIn: true,
+    });
+    holdOf(view.queryClient).hold(1);
+
+    view.rerenderUi(<Probe into={into} enabled automatic />);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(asked()).toBe(0);
+    expect(into.current?.link).toEqual({ status: 'loading' });
+
+    await waitFor(
+      () => {
+        expect(into.current?.link).toEqual({ status: 'ready', url: ONE });
+      },
+      { timeout: 4000 },
+    );
+    expect(asked()).toBe(1);
+  });
+
+  // Break caught: the photo a person opened held with the page's automatic reads, so that a click on a photo does nothing for a minute (a read the person asks for is never held).
+  it('asks at once for the link of a photo the person opened, whatever the hold says', async () => {
+    api = installFakeApi({ [ROUTE]: () => link(ONE) });
+    const into = held();
+    const view = renderWithProviders(<Probe into={into} enabled={false} />, { signedIn: true });
+    holdOf(view.queryClient).hold(30);
+
+    view.rerenderUi(<Probe into={into} enabled />);
+
+    await waitFor(() => {
+      expect(into.current?.link).toEqual({ status: 'ready', url: ONE });
+    });
+    expect(asked()).toBe(1);
+  });
+
+  it('leaves the wait of a tile that scrolled away: nothing is asked for it when the hold ends', async () => {
+    api = installFakeApi({ [ROUTE]: () => link(ONE) });
+    const into = held();
+    const view = renderWithProviders(<Probe into={into} enabled={false} automatic />, {
+      signedIn: true,
+    });
+    holdOf(view.queryClient).hold(1);
+    view.rerenderUi(<Probe into={into} enabled automatic />);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+
+    expect(asked()).toBe(0);
+  });
+});
 
 describe('usePhotoLink', () => {
   // Break caught: sixty tiles that ask the platform for sixty links the moment a page opens, whether or not anyone will ever scroll to them.

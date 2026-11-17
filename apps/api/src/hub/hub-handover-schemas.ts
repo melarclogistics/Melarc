@@ -11,8 +11,9 @@ export const HUB_HANDOVER_ROW_SCHEMA = described({
     declared_count: {
       type: 'integer',
       minimum: 0,
+      maximum: 2_147_483_647,
       description:
-        'The parcels the rider hands over for this request. **Zero is legal**: the request’s intake still opens, and is routed to reconciliation after the blind count.',
+        'The parcels the rider hands over for this request (at most 2,147,483,647, the number the intake holds). **Zero is legal**: the request’s intake still opens, and is routed to reconciliation after the blind count.',
     },
   },
 });

@@ -622,6 +622,8 @@ describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -
 
   // Break caught (D-D5): a count the column cannot hold (more than a whole number of four bytes) left to the database, which would answer a server error and, for a count above the
   // booking, could never keep the record; or answered as anything but the contract's validation failure naming the count. (A count above the booking itself is recorded as OVER now.)
+  // Since contract 5.109.0 the schema of `collected_count` states the maximum (2147483647), so the contract's validation refuses it first, with its own rule `maximum`; the service's rule
+  // `range` is left for a caller that does not go through the schema.
   it('refuses a count the column cannot hold, naming the count, and makes nothing', async () => {
     const arranged = await run();
     const stop = first(arranged);
@@ -632,7 +634,7 @@ describe('recordCollection: what is refused makes nothing (AC-SLICE-001-20 and -
     });
     expect(outcome(huge)).toEqual([400, 'VALIDATION_FAILED']);
     expect(violationsOf(huge)).toEqual([
-      { in: 'body', pointer: '/collected_count', rule: 'range' },
+      { in: 'body', pointer: '/collected_count', rule: 'maximum' },
     ]);
     await nothingMade(arranged, before);
   });

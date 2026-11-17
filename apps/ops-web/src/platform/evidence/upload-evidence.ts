@@ -1,9 +1,12 @@
+import { isDefiniteRefusal, OperationFailure } from '../api/api-response';
 import type { ApiClient } from '../api/api-client';
+import { createBoundedQueue, type BoundedQueue } from '../api/bounded-queue';
 import { failureOf, newIdempotencyKey } from '../api/idempotency';
+import type { ReadHold } from '../query/read-hold';
 import { completeEvidence, declareEvidence, type IntakeEvidencePurpose } from './evidence-commands';
 import { refusalOfFile, type EvidenceLimitsView, type LimitRefusal } from './evidence-limits';
 import { sha256Hex } from './file-checksum';
-import { putBytes } from './object-store-upload';
+import { ObjectStoreError, putBytes } from './object-store-upload';
 
 /**
  * One file of evidence, from the file the person chose to a record the platform has stored: its checksum is computed, the record is declared, the bytes are sent to the address the platform issued, and
@@ -11,15 +14,23 @@ import { putBytes } from './object-store-upload';
  * declaration to the end of the `PUT`, and nothing else holds it (a retry declares again, and the platform says the same record and a new address). `steps` tells a screen where the file is, in words
  * it chooses; it is told nothing of the address.
  *
- * **Retry is safe, and does not make a second record.** The declaration takes an `Idempotency-Key`: a file whose attempt failed with an outcome nobody knows (no answer, a time that ran out) keeps its key and is
- * declared again under it, so that the platform answers the record it made; a file the platform refused, or whose upload was done, is forgotten and any later attempt is new.
+ * **Retry is safe, and does not make a second record.** The declaration takes an `Idempotency-Key`, and the file keeps its key, and **the moment it was made** (`captured_at`, worked out once and sent
+ * unchanged, so that the same key never meets a different body), until the file is stored or the platform has answered it for good. **Only an authoritative answer ends an attempt whose outcome is not known**
+ * (the rule of every command, `platform/api/idempotency.ts`): an attempt that got no answer leaves the file *unresolved*, and a later refusal (a limit of rate, a refused permission, a request the
+ * browser did not send) does not say that the earlier declaration did not commit, so it does not release the key; the first attempt of a file that is refused is finished, and any later one is new.
  *
- * **What the retry is told is acted on, and never looped on** (the review of Run B and the UX audit of Stage 6): a record that is **already stored** (the answer to its completion was lost) is the file's success;
- * a record whose **upload address has run out** (or that the platform says expired) is asked for again **once**, as a new record under a new key, and told if the fresh one has run out too; and **a file that the
- * platform's limits would refuse is refused before it is read whole** (the checksum reads every byte), when the limits are known. **Every step has its time** (`UPLOAD_BUDGETS`): a step that gets no answer is
- * told as the timeout of that step, never retried by itself.
+ * **What the retry is told is acted on, and never looped on** (the review of Run B and the UX audit of Stage 6, and the review of 17 November 2026): a record that is **already stored** (the answer to its
+ * completion was lost) is the file's success; a record whose **upload address has run out**, by the **server's** clock and not the device's (the `Date` of the answer that carries the moment: a device clock
+ * that is minutes out made every address look run out, or none), or that the platform says expired, or that **the store refused as run out** (a `403` of the `PUT`), is asked for again **once**, as a new record
+ * under a new key, and told if the fresh one has run out too; and **a file that the platform's limits would refuse is refused before it is read whole** (the checksum reads every byte), when the limits are
+ * known. **Every step has its time** (`UPLOAD_BUDGETS`): a step that gets no answer is told as the timeout of that step, never retried by itself.
+ *
+ * **A file is on its way once.** A second call for a file that is already on its way is the same journey and answers with it, so that a double press makes no second declaration. **At most
+ * `UPLOAD_CONCURRENCY` files are on their way at once** (the rest wait for their turn, in the order they were chosen): each of them reads its whole file into memory and makes two calls of a session
+ * that has a limit a minute, and a hundred photos chosen from a gallery at once spent it in seconds. A `429` holds the files that have not begun for the wait the API asked for (as the page's automatic
+ * reads are held, `surfaces/ops-portal.md` section 8) and **retries nothing by itself**: the file that was refused says so, in the one words for it, and is sent again by the person.
  */
-export type UploadStep = 'hashing' | 'declaring' | 'sending' | 'confirming';
+export type UploadStep = 'waiting' | 'hashing' | 'declaring' | 'sending' | 'confirming';
 
 export type EvidenceUploader = (
   file: File,
@@ -41,14 +52,32 @@ export const UPLOAD_BUDGETS = {
   sendMaxMs: 300_000,
 } as const;
 
+/**
+ * How many files are on their way at once. Provisional, like the budgets: three is what a tablet's memory (each file is read whole to be checksummed, up to the platform's size limit) and the session's limit
+ * of calls a minute (each file is two calls) can carry. It is a limit on **how many at a time**, never on how many files a record may have.
+ */
+export const UPLOAD_CONCURRENCY = 3;
+
 /** An address with less than this left is as good as run out: the bytes would reach the store after it had stopped taking them. */
 const ADDRESS_MARGIN_MS = 10_000;
 
 /** What the uploader needs beyond its owner and purpose. */
 export interface UploaderOptions {
-  /** The platform's limits (`getEvidenceLimits`), where they were read: a file they refuse is refused before it is read. Left out when the read failed, and then nothing is judged here. */
+  /** The platform's limits (`getEvidenceLimits`), where they were read: a file they refuse is refused before it is read whole. Left out when the read failed, and then nothing is judged here. */
   readonly limits?: EvidenceLimitsView | undefined;
+  /** The queue that paces the files. Left out, the portal's one queue of uploads (`UPLOAD_CONCURRENCY`) is used; a test gives its own. */
+  readonly queue?: BoundedQueue | undefined;
+  /**
+   * The page's hold (`platform/query/read-hold.ts`, which the session boundary starts on every `429` of the session): the files that have not begun wait for it to end, and a `429` this uploader sees is
+   * told to it. Left out, nothing is held (a tool, a test).
+   */
+  readonly hold?: UploadHold | undefined;
 }
+
+/** What the uploader needs of the page's hold: whether it is on, a way to start or lengthen it, and a wait that ends with it. */
+export type UploadHold = Pick<ReadHold, 'held' | 'hold' | 'untilFree'>;
+
+const uploadQueue = createBoundedQueue(UPLOAD_CONCURRENCY);
 
 /** A file the platform's limits refuse, told before anything is read or sent: its type is not one the platform takes, or it is larger than the largest file. */
 export class EvidenceRefusedError extends Error {
@@ -88,11 +117,22 @@ export class UploadAddressExpiredError extends Error {
   }
 }
 
-/** The moment a file was made, which the platform records as the capture time and refuses in the future: the file's own, and never later than now. */
+/**
+ * The moment a file was made, which the platform records as the capture time and refuses in the future (beyond a tolerance for a phone's clock): the file's own, and never later than now. **It is worked
+ * out once for a file**, when its first attempt begins, and kept with the key: a file that has no moment of its own (a `lastModified` of nothing, or of a time that has not come) would otherwise be declared
+ * with a different `captured_at` at each attempt, and the same key with another body is `IDEMPOTENCY_KEY_CONFLICT`.
+ */
 function capturedAt(file: File): string {
   const made =
     Number.isFinite(file.lastModified) && file.lastModified > 0 ? file.lastModified : Date.now();
   return new Date(Math.min(made, Date.now())).toISOString();
+}
+
+/** What a file keeps between its attempts: the key of its declaration, the moment it was made, and whether a declaration under the key was sent and never answered. */
+interface Attempt {
+  key: string;
+  readonly capturedAt: string;
+  unresolved: boolean;
 }
 
 /** The time the bytes of a file of this size are given. */
@@ -132,73 +172,167 @@ async function within<Result>(
   }
 }
 
+/** The store's own word that the address ran out: the signed address of the `PUT` is refused with a `403` once its time has passed, whatever the device's clock said. */
+function storeSaysAddressRanOut(error: unknown): boolean {
+  return error instanceof ObjectStoreError && error.kind === 'refused' && error.status === 403;
+}
+
 /** Makes the uploader of one owner (an intake) and one purpose, which a screen calls once for each file the person adds. */
 export function createEvidenceUploader(
   client: ApiClient,
   target: { readonly ownerId: string; readonly purpose: IntakeEvidencePurpose },
   options: UploaderOptions = {},
 ): EvidenceUploader {
-  const keys = new WeakMap<File, string>();
-  return async (file, steps, signal) => {
-    // What the platform would refuse is told before the file is read whole, and before anything is sent: a tablet is not made to hold a file in memory to be told it is too large.
-    const limits = options.limits;
-    const refusal = limits === undefined ? undefined : refusalOfFile(file, limits);
-    if (refusal !== undefined) throw new EvidenceRefusedError(refusal);
+  const queue = options.queue ?? uploadQueue;
+  const hold = options.hold;
+  const attempts = new WeakMap<File, Attempt>();
+  const journeys = new WeakMap<File, Promise<string>>();
 
+  /** The files that have not begun wait out a hold, in words ("waiting"), and the person can leave one out while it waits. */
+  async function waitOutHold(
+    steps: ((step: UploadStep) => void) | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (!hold?.held) return;
+    steps?.('waiting');
+    await hold.untilFree('evidence-upload', signal);
+  }
+
+  /** The declaration of a file under its key, with the bookkeeping of whether an earlier one is still in doubt. */
+  async function declare(
+    file: File,
+    attempt: Attempt,
+    checksum: string,
+    signal: AbortSignal | undefined,
+  ) {
+    const wasUnresolved = attempt.unresolved;
+    // Sent, and not yet answered: its outcome is not known until an answer comes.
+    attempt.unresolved = true;
+    try {
+      const declared = await within('declaring', UPLOAD_BUDGETS.declareMs, signal, (step) =>
+        declareEvidence(
+          client,
+          {
+            ownerId: target.ownerId,
+            purpose: target.purpose,
+            capturedAt: attempt.capturedAt,
+            contentType: file.type,
+            byteSize: file.size,
+            checksumSha256: checksum,
+          },
+          attempt.key,
+          step,
+        ),
+      );
+      attempt.unresolved = false;
+      return declared;
+    } catch (error) {
+      // An answer that refused this attempt (or said to wait, or a request that never left) says nothing of an earlier one: the doubt stays as it was. Only no answer leaves this one in doubt.
+      if (failureOf(error) !== 'unknown') attempt.unresolved = wasUnresolved;
+      throw error;
+    }
+  }
+
+  async function work(
+    file: File,
+    steps: ((step: UploadStep) => void) | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
+    await waitOutHold(steps, signal);
+    signal?.throwIfAborted();
     steps?.('hashing');
     const checksum = await sha256Hex(file);
-    let key = keys.get(file) ?? newIdempotencyKey();
-    keys.set(file, key);
+    signal?.throwIfAborted();
+    const attempt = attempts.get(file) ?? {
+      key: newIdempotencyKey(),
+      capturedAt: capturedAt(file),
+      unresolved: false,
+    };
+    attempts.set(file, attempt);
     // A fresh record is asked for once when the address of the one the platform answers with has run out; the second is judged as it comes.
     let renewals = 0;
+    const renew = (): void => {
+      renewals += 1;
+      attempt.key = newIdempotencyKey();
+      attempt.unresolved = false;
+    };
     try {
       for (;;) {
         steps?.('declaring');
-        const declared = await within('declaring', UPLOAD_BUDGETS.declareMs, signal, (step) =>
-          declareEvidence(
-            client,
-            {
-              ownerId: target.ownerId,
-              purpose: target.purpose,
-              capturedAt: capturedAt(file),
-              contentType: file.type,
-              byteSize: file.size,
-              checksumSha256: checksum,
-            },
-            key,
-            step,
-          ),
-        );
+        const declared = await declare(file, attempt, checksum, signal);
         // The completion was done and its answer was lost: the retry is told the record as it is now, and that is the file's success.
         if (declared.state === 'STORED') {
-          keys.delete(file);
+          attempts.delete(file);
           return declared.evidenceId;
         }
+        // The address is judged against the server's own clock where its answer gave one: the device's can be minutes out in either direction.
+        const now = declared.state === 'PENDING_UPLOAD' ? (declared.serverTime ?? Date.now()) : 0;
         if (
           declared.state === 'EXPIRED' ||
-          Date.parse(declared.ticket.upload.expires_at) - Date.now() <= ADDRESS_MARGIN_MS
+          Date.parse(declared.ticket.upload.expires_at) - now <= ADDRESS_MARGIN_MS
         ) {
           if (renewals >= 1) throw new UploadAddressExpiredError();
-          renewals += 1;
-          key = newIdempotencyKey();
-          keys.set(file, key);
+          renew();
           continue;
         }
         steps?.('sending');
-        await within('sending', sendBudgetMs(file.size), signal, (step) =>
-          putBytes(declared.ticket.upload, file, step),
-        );
+        try {
+          await within('sending', sendBudgetMs(file.size), signal, (step) =>
+            putBytes(declared.ticket.upload, file, step),
+          );
+        } catch (error) {
+          // The store says the address ran out (what the clocks could not tell): a new record, once. A second refusal is the store's and is told as it is.
+          if (renewals < 1 && storeSaysAddressRanOut(error)) {
+            renew();
+            continue;
+          }
+          throw error;
+        }
         steps?.('confirming');
         const stored = await within('confirming', UPLOAD_BUDGETS.confirmMs, signal, (step) =>
           completeEvidence(client, declared.ticket.evidenceId, declared.version, step),
         );
-        keys.delete(file);
+        attempts.delete(file);
         return stored;
       }
     } catch (error) {
-      // An answer that declined this attempt says nothing of an earlier one, and the next attempt is a new one; only an outcome nobody knows is tried again under the same key.
-      if (failureOf(error) !== 'unknown') keys.delete(file);
+      // A request refused for being too fast holds the files that have not begun, for the wait it asked; nothing is retried by itself.
+      if (error instanceof OperationFailure && error.status === 429) {
+        hold?.hold(error.retryAfterSeconds);
+      }
+      // The platform's own answer about this request ends it, when no earlier attempt of the file is still in doubt: a later refusal never says that an earlier declaration did not commit.
+      if (isDefiniteRefusal(error) && !attempt.unresolved) attempts.delete(file);
       throw error;
     }
+  }
+
+  function journey(
+    file: File,
+    steps: ((step: UploadStep) => void) | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
+    // What the platform would refuse is told before the file is read whole, and before anything is sent: a tablet is not made to hold a file in memory to be told it is too large.
+    const limits = options.limits;
+    const refusal = limits === undefined ? undefined : refusalOfFile(file, limits);
+    if (refusal !== undefined) return Promise.reject(new EvidenceRefusedError(refusal));
+
+    const place = { begun: false };
+    const running = queue.run(() => {
+      place.begun = true;
+      return work(file, steps, signal);
+    }, signal);
+    // A free place begins the file at once; a file that is still here was not given one, and says it is waiting for its turn.
+    if (!place.begun) steps?.('waiting');
+    return running;
+  }
+
+  return (file, steps, signal) => {
+    const flying = journeys.get(file);
+    if (flying !== undefined) return flying;
+    const started = journey(file, steps, signal).finally(() => {
+      journeys.delete(file);
+    });
+    journeys.set(file, started);
+    return started;
   };
 }

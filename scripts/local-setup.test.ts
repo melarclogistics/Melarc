@@ -139,7 +139,7 @@ const TABLE_COMMANDS = [
 ];
 
 const PLATFORM_LABELS = ['**Windows.**', '**Linux and CI.**', '**WSL2.**'];
-const PREREQUISITES = ['Git', 'Node.js', 'pnpm', 'Docker'];
+const PREREQUISITES = ['Git', 'Node.js', 'pnpm', 'PostgreSQL', 'Docker'];
 
 /** Why a document is not the setup page: its sections, the commands of each topic, the table, the platforms. */
 function structureProblems(markdown: string): string[] {
@@ -258,6 +258,11 @@ describe('DEVELOPMENT.md', () => {
       (text) => text.replace('| Docker ', '| Podman '),
       /no row for Docker/,
     ],
+    [
+      'the native server dropped from the prerequisites',
+      (text) => text.replace('| PostgreSQL ', '| Podman '),
+      /no row for PostgreSQL/,
+    ],
   ];
   for (const [label, change, reported] of breaks) {
     it(`reports ${label}`, () => {
@@ -270,6 +275,38 @@ describe('DEVELOPMENT.md', () => {
       );
     });
   }
+
+  // Break caught (the owner, 17 November 2026: the database is a native server and Docker is not used): the page sending a developer to a
+  // container first. Step 3 leads with the native server and its check, and the container is the stated alternative, whose commands stay.
+  describe('the database step', () => {
+    const section = (): string => sectionOf(document, '3. Start the database') ?? '';
+
+    it('names the native server first and the container as the alternative', () => {
+      const text = section();
+      const native = text.indexOf('PostgreSQL 18 server installed on this machine');
+      const container = text.indexOf('**Or the container.**');
+      assert.ok(
+        native !== -1 && container !== -1 && native < container,
+        'the native server is not named before the container',
+      );
+      assert.ok(
+        text.indexOf('MELARC_PG_ADMIN_PASSWORD') < container,
+        'the native settings are not given before the container',
+      );
+    });
+
+    it('shows the check before the commands of the container', () => {
+      const shown = fencedCommandLines(section());
+      assert.equal(shown[0], 'pnpm run infra:check');
+      assert.ok(shown.indexOf('pnpm run infra:up') > 0);
+    });
+
+    it('says in the prerequisites that Docker is optional', () => {
+      const rows = (sectionOf(document, 'Prerequisites') ?? '').split('\n');
+      const row = rows.find((line) => line.startsWith('| Docker '));
+      assert.match(row ?? '', /Optional/);
+    });
+  });
 
   // Break caught (audit B-03): WSL2 told that it reaches a database running on Windows at 127.0.0.1 without
   // saying when. In WSL2's default (NAT) networking 127.0.0.1 is the WSL2 virtual machine, so that holds only

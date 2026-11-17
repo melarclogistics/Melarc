@@ -11,6 +11,7 @@ import {
   CommandOutcomeActions,
   CommandOutcomeNotice,
 } from '../../../components/ui/reason-confirmation/command-outcome';
+import { countOfText } from '../../../platform/api/count-range';
 import { useConfirmedCommand } from '../../../platform/api/use-confirmed-command';
 import type { HandoverDestination } from '../../../platform/manifest/manifest-commands';
 import { copyFor, type Problem } from '../../../platform/problem/problem-copy';
@@ -455,9 +456,6 @@ export interface AcceptHandoverDialogProps<Result> {
   readonly onReload: () => unknown;
 }
 
-/** The most a figure of parcels taken may be before it is not one a person typed meaning it. */
-const MAX_PARCELS_TYPED = 1_000_000;
-
 /**
  * Accepting a custody handover for the hub (`acceptRunCustodyHandover`), as Ops. **The number is a custody record**: how many parcels were
  * physically taken, written down at the moment custody moves. It is never the hub's count and is never used as one: the hub's blind count runs
@@ -490,13 +488,14 @@ function OpenAccept<Result>({
       operation="acceptRunCustodyHandover"
       retryable
       build={() => {
-        const trimmed = text.trim();
-        if (!/^\d+$/.test(trimmed) || Number(trimmed) > MAX_PARCELS_TYPED) {
+        // The platform sets no limit on the parcels of a pickup, so the form refuses only what the server would: not a whole number, or one the database cannot hold (`../../../platform/api/count-range.ts`).
+        const parcels = countOfText(text);
+        if (parcels === undefined) {
           setInvalid('Enter how many parcels were taken, as a whole number: 0 or more.');
           return undefined;
         }
         setInvalid(undefined);
-        return { parcels: Number(trimmed), version };
+        return { parcels, version };
       }}
       send={(command, key) => send(command.parcels, command.version, key)}
       onDone={onDone}

@@ -163,8 +163,8 @@ export function probePostgres(
 const WSL_ADVICE = [
   'This shell is in WSL2. Inside WSL2, 127.0.0.1 is the WSL2 virtual machine, not Windows (unless WSL2 uses mirrored',
   'networking), so a database that is running on Windows may not be reachable here. Either:',
-  '  1. Run the database inside WSL2: have Docker available in this distribution (Docker Desktop with WSL integration',
-  '     enabled for it, or Docker Engine) and run `pnpm run infra:up` from this shell; or',
+  '  1. Run the database inside WSL2: install PostgreSQL 18 in this distribution, or have Docker available in it (Docker',
+  '     Desktop with WSL integration enabled for it, or Docker Engine) and run `pnpm run infra:up` from this shell; or',
   '  2. Keep the database on Windows and turn on mirrored networking: add networkingMode=mirrored under [wsl2] in',
   '     %UserProfile%\\.wslconfig, run `wsl --shutdown` from Windows, then open WSL2 again.',
   'Either way the database stays bound to this machine only. See "Windows, WSL2 and Linux" in DEVELOPMENT.md.',
@@ -237,7 +237,7 @@ export async function runInfraCheck(
     for (const line of WSL_ADVICE) out(line);
   } else {
     out(
-      'Start the database with `pnpm run infra:up`, and see what it is doing with `pnpm run infra:status`. Docker must be running.',
+      'Start your PostgreSQL server (on Windows the service `postgresql-x64-18`, in Services) and check that MELARC_PG_PORT and the port of DATABASE_URL are its port. If you run the database as a container instead, start it with `pnpm run infra:up` (Docker must be running) and see what it is doing with `pnpm run infra:status`.',
     );
   }
   return 1;

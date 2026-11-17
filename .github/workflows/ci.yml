@@ -39,6 +39,11 @@
 # a developer's WebKit, Chromium and Firefox stay headless. scripts/ci-workflow.test.ts holds the wrapper, the value and the install to exactly those jobs (the wrapper is the one prefix a mandatory
 # command may have: xvfb-run returns the status of what it runs). The proof is a hosted run of every engine, and then the nightly runs of main.
 #
+# One exception to "no test is changed for it", by the Product Owner's decision of 17 November 2026: six tests (or the last step of a test) that read a hover, a tooltip or a focus once, within the five seconds of an
+# assertion, failed now and then in the hosted WebKit jobs and nowhere else, and are accepted as known flaky so that they do not block. They are left out on the hosted WebKit run alone (the value above is what tells
+# the test), still run in Chromium and Firefox and in a developer's WebKit, and are a closed list (apps/ops-web/test/browser/support/known-flaky-list.ts, held by apps/ops-web/test/known-flaky.test.ts). Nothing
+# here absorbs a failure: "CI result" is still the one verdict, and a failure of any other test fails it.
+#
 # To see the verdict turn red without breaking anything, run this workflow by hand with "rehearse-failure"
 # ticked: the static job fails on purpose and "CI result" must fail with it.
 
@@ -257,11 +262,21 @@ jobs:
 
       # The attested enrolment (S0.57) is tested against the real verifier service, which these tests build from source and start: the JDK comes
       # from .java-version (Temurin), as in the verifier job, and Gradle from the wrapper, whose distribution is held to a checksum.
+      # The Gradle caches are kept between runs (the plugins and libraries the build resolves, and the wrapper's distribution), keyed by the build files and the
+      # verification metadata: the hosted run of 17 November 2026 failed this job and the verifier job on "Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugin",
+      # the plugin repository being out of reach for a moment, and a run that has the artifacts does not ask for them again. A cached artifact is still held to the checksum of
+      # gradle/verification-metadata.xml.
       - name: Set up the JDK
         uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
+          cache: gradle
+          cache-dependency-path: |
+            apps/attestation-verifier/**/*.gradle*
+            apps/attestation-verifier/gradle/wrapper/gradle-wrapper.properties
+            apps/attestation-verifier/gradle/libs.versions.toml
+            apps/attestation-verifier/gradle/verification-metadata.xml
 
       # JIT is off on this disposable server. The row-level-security policies of this line chain through many tables, which puts the planner's
       # estimated cost of a rider-roster read near 6.5 million although the plan itself runs in microseconds on a handful of rows. That is above
@@ -703,12 +718,19 @@ jobs:
         uses: ./.github/actions/setup
 
       # The JDK comes from .java-version (Temurin); do not pin a version here. Gradle comes from the wrapper, whose distribution is
-      # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml.
+      # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml. The Gradle caches are kept between runs, as in the database job
+      # above, so that a plugin repository that is out of reach for a moment does not fail the job when the artifacts are already here.
       - name: Set up the JDK
         uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version-file: .java-version
+          cache: gradle
+          cache-dependency-path: |
+            apps/attestation-verifier/**/*.gradle*
+            apps/attestation-verifier/gradle/wrapper/gradle-wrapper.properties
+            apps/attestation-verifier/gradle/libs.versions.toml
+            apps/attestation-verifier/gradle/verification-metadata.xml
 
       - name: Test the attestation verifier
         timeout-minutes: 16

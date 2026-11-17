@@ -313,6 +313,10 @@ describe('runInfraCheck', () => {
     const { status, text } = await run({ probe: { kind: 'unreachable', code: 'ECONNREFUSED' } });
     assert.equal(status, 1);
     assert.match(text, /Nothing is listening at 127\.0\.0\.1:5432 \(ECONNREFUSED\)/);
+    // The native server first (the owner's decision of 17 November 2026), the container as what to do if that is what is run.
+    assert.match(text, /postgresql-x64-18/);
+    assert.match(text, /MELARC_PG_PORT/);
+    assert.ok(text.indexOf('postgresql-x64-18') < text.indexOf('pnpm run infra:up'));
     assert.match(text, /pnpm run infra:up/);
     assert.match(text, /pnpm run infra:status/);
     assert.doesNotMatch(text, /WSL/);

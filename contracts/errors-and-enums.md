@@ -169,7 +169,7 @@ Harvested from every transition table in [state-machines.md](state-machines.md) 
 | `parcel_required`| `VALIDATION_FAILED`| `recordIntakeCondition`| *Designed.* A condition for the whole intake of a photo intake: damage is a parcel's|
 | `mode_mismatch`| `VALIDATION_FAILED`| `correctIntakeCount`| *Declared by Run D.* The body names the other mode's member (`physical_count` for a photo intake, `parcel_changes` for a blind-count one), both, or neither|
 
-The rules of the door that the screens also word (`collection_recorded`, `stop_not_arrived`, `stop_resolved`, `parcel_photo_count`, `duplicate`, `not_short`) are in the operations' text and in [pickup-collection.md](../features/pickup/pickup-collection.md); Run D's over count touches one of them: `not_short` is told of a reason sent with a count that matches, and the build of S1.35a decides whether it keeps the name now that a reason is also valid for an over count. **Provisional:** the names marked designed are the build's to confirm when S1.35a and S1.35b declare them in the contract.
+The rules of the door that the screens also word (`collection_recorded`, `stop_not_arrived`, `stop_resolved`, `parcel_photo_count`, `duplicate`, `not_short`) are in the operations' text and in [pickup-collection.md](../features/pickup/pickup-collection.md). **`stageParcelPhotos` (Run E, contract 5.109.0) says four of the `STATE_CONFLICT` rules**: `collection_recorded` (the count is made, so its staged set is closed), `parcel_photo_exception` (Ops let the stop through without photos), `stop_not_arrived` and `stop_resolved`; its `VALIDATION_FAILED` rules are `minItems`, `maxItems`, `format` and `duplicate`; Run D's over count touches one of them: `not_short` is told of a reason sent with a count that matches, and the build of S1.35a decides whether it keeps the name now that a reason is also valid for an over count. **Provisional:** the names marked designed are the build's to confirm when S1.35a and S1.35b declare them in the contract.
 
 ### 5.4 `pricing` and commercial
 
@@ -287,7 +287,7 @@ Added 24 August by `MSC-DEC-251`. **Two codes**, both guarding the same thing: t
 
 | Reference shape| Operations|
 |---|---|
-| An `evidence_ids` **collection**, where any referenced record is not `STORED`| every operation accepting `evidence_ids` — currently `adjudicateDiscrepancy` (HIGH-11 audit remediation, 13 September 2026), `recordCollection` (S1.26: no photo of a count is built, so any reference answers it) and `reportPickupFailure` (S1.28: the photo of a failure; a record that is not `STORED`, not the rider's own, not about this stop or already attached is refused, one answer)|
+| An `evidence_ids` **collection**, where any referenced record is not `STORED`| every operation accepting `evidence_ids` — currently `adjudicateDiscrepancy` (HIGH-11 audit remediation, 13 September 2026), `recordCollection` (S1.26: no photo of a count is built, so any reference answers it), `stageParcelPhotos` (Run E: a parcel photo that is not stored, not the rider's own, not of this stop or already attached refuses the whole batch, one answer) and `reportPickupFailure` (S1.28: the photo of a failure; a record that is not `STORED`, not the rider's own, not about this stop or already attached is refused, one answer)|
 | A **single targeted** Evidence resource that is not `STORED`| `createEvidenceRetrievalAuthorization`|
 | A **single referenced** Evidence record named in a request body, that is not `STORED`| `approveAgent` — the agent's identity photo|
 

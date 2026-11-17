@@ -170,6 +170,96 @@ describe('the hold: how the page waits when the API has said a request was too f
   });
 });
 
+describe('the wait of work that has a promise to wait on', () => {
+  // Break caught: automatic work (a file that has not begun to upload, the link of a photo) that waits when nothing is held, or that does not wait when something is.
+  it('is free at once when nothing is held, and waits for the end of the hold when something is', async () => {
+    const hold = new ReadHold();
+    let free = false;
+
+    await hold.untilFree('upload');
+    hold.hold(30);
+    void hold.untilFree('upload').then(() => {
+      free = true;
+    });
+    await vi.advanceTimersByTimeAsync(seconds(29));
+    expect(free).toBe(false);
+    await vi.advanceTimersByTimeAsync(seconds(1));
+    expect(free).toBe(true);
+  });
+
+  // Break caught: the latest under a key replacing an earlier one, as the reads do: two files (or a tile and the viewer of the same photo) that wait under one name, and one of them never going on.
+  it('lets every waiter go on when the hold ends, even those that wait under one name', async () => {
+    const hold = new ReadHold();
+    const done: number[] = [];
+
+    hold.hold(10);
+    for (const n of [1, 2, 3]) {
+      void hold.untilFree('photo').then(() => {
+        done.push(n);
+      });
+    }
+    await vi.advanceTimersByTimeAsync(seconds(10));
+
+    expect(done.toSorted()).toEqual([1, 2, 3]);
+  });
+
+  // Break caught: a waiter that was left out (a file the person removed, a tile that scrolled away) that still goes on, or one that is left waiting for ever.
+  it('ends the wait of a waiter that is abandoned, with an abort, and lets the others go on', async () => {
+    const hold = new ReadHold();
+    const left = new AbortController();
+    const done: string[] = [];
+    const failures: unknown[] = [];
+
+    hold.hold(10);
+    void hold
+      .untilFree('a', left.signal)
+      .then(() => done.push('a'))
+      .catch((error: unknown) => failures.push(error));
+    void hold.untilFree('b').then(() => done.push('b'));
+    left.abort();
+    await vi.advanceTimersByTimeAsync(seconds(10));
+
+    expect(done).toEqual(['b']);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ name: 'AbortError' });
+  });
+
+  it('refuses at once for a signal that was already aborted, even when nothing is held', async () => {
+    const hold = new ReadHold();
+    const left = new AbortController();
+    hold.hold(5);
+    left.abort();
+
+    await expect(hold.untilFree('a', left.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  // Break caught: work that goes on into a limit that has only just been told: a hold that began again while a waiter was being released.
+  it('waits out a hold that began again by the time it was released', async () => {
+    const hold = new ReadHold();
+    let free = false;
+
+    hold.hold(5);
+    void hold.untilFree('upload').then(() => {
+      free = true;
+    });
+    // The wait ends and, as the waiter runs, a refusal begins a new one.
+    await vi.advanceTimersByTimeAsync(seconds(5));
+    expect(free).toBe(true);
+
+    free = false;
+    hold.hold(5);
+    const again = hold.untilFree('upload').then(() => {
+      free = true;
+    });
+    hold.hold(20);
+    await vi.advanceTimersByTimeAsync(seconds(5));
+    expect(free).toBe(false);
+    await vi.advanceTimersByTimeAsync(seconds(15));
+    await again;
+    expect(free).toBe(true);
+  });
+});
+
 describe('the hold of an application instance', () => {
   // Break caught: one hold for every client, so that a wait kept for one application instance (a test, a second window of a shared module) is kept for all.
   it('belongs to one query client, and is the same each time it is asked for', () => {

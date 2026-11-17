@@ -240,6 +240,8 @@ describe('the generated description of the real application', () => {
       ['/pickup-stops/{id}/fail', ['post'], ['reportPickupFailure']],
       // S1.26: the rider's count at the door.
       ['/pickup-stops/{id}/collect', ['post'], ['recordCollection']],
+      // D-E1: the rider puts the photos of a count that is not yet made aside, in batches.
+      ['/pickup-stops/{id}/parcel-photos', ['post'], ['stageParcelPhotos']],
       // D-A10: Ops lets a stop's count through without parcel photos, the day the camera fails.
       ['/pickup-stops/{id}/parcel-photo-exception', ['post'], ['authoriseParcelPhotoException']],
       // S1.27: the collection handshake, the two-party proof that closes a counted stop.

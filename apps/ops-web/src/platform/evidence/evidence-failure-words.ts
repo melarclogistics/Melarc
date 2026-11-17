@@ -28,6 +28,7 @@ import {
 
 /** What a file is doing, in words, at each step of its trip to a stored record. */
 export const UPLOAD_STEP_WORDS: Readonly<Record<UploadStep, string>> = {
+  waiting: 'Waiting for its turn…',
   hashing: 'Checking the file…',
   declaring: 'Preparing the photo…',
   sending: 'Sending the photo…',

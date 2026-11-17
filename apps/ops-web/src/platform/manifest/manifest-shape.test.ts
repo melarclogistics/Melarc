@@ -256,6 +256,55 @@ describe('a custody handover', () => {
     expect(parseHandover(handoverFixture(overrides))).toBeUndefined();
   });
 
+  // Break caught: the ceiling of a million that this parser had (and the form of the acceptance beside it), below the 2,147,483,647 the API takes and the database holds: a completed handover of
+  // 1,000,001 parcels was refused, and with it the whole page of handovers that held it. Each side of the old line, the largest count, and one above it.
+  it.each([0, 999_999, 1_000_000, 1_000_001, 10_000_001, 2_000_000_000, 2_147_483_647])(
+    'is read as completed with %i parcels taken, however many',
+    (taken) => {
+      const handover = parseHandover(
+        handoverFixture({
+          state: 'COMPLETED',
+          parcel_count_taken: taken,
+          resolved_at: '2026-11-04T10:30:00Z',
+        }),
+      );
+      expect(handover).toMatchObject({ state: 'COMPLETED', parcel_count_taken: taken });
+    },
+  );
+
+  it.each([
+    ['one above the largest the database holds', 2_147_483_648],
+    ['an unsafe integer', 2 ** 53],
+    ['a fraction', 1.5],
+    ['text', '7'],
+    ['not a number', Number.NaN],
+  ])('is refused when the count taken is %s', (_name, taken) => {
+    expect(
+      parseHandover(
+        handoverFixture({
+          state: 'COMPLETED',
+          parcel_count_taken: taken as number,
+          resolved_at: '2026-11-04T10:30:00Z',
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('keeps a page of handovers whole when one of them took more than a million parcels', () => {
+    const big = handoverFixture({
+      id: '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b',
+      state: 'COMPLETED',
+      parcel_count_taken: 1_500_000,
+      resolved_at: '2026-11-04T10:30:00Z',
+    });
+    const page = parseHandoverPage({
+      items: [handoverFixture(), big],
+      next_page_token: null,
+    });
+    expect(page?.items).toHaveLength(2);
+    expect(page?.items[1]).toMatchObject({ parcel_count_taken: 1_500_000 });
+  });
+
   it('is a page, refused whole when one entry is not a handover', () => {
     expect(
       parseHandoverPage({ items: [handoverFixture()], next_page_token: null })?.items,

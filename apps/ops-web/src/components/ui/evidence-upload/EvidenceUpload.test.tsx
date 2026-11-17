@@ -183,6 +183,25 @@ describe('EvidenceUpload', () => {
     });
     expect(screen.queryByText('Stored')).toBeNull();
     expect(onChange).toHaveBeenLastCalledWith([]);
+    // Nor is it said to a screen reader: the polite region does not announce a file the person left out (the review of 17 November 2026: a late completion still announced "stored").
+    expect(screen.getByRole('status')).not.toHaveTextContent('two.jpg');
+  });
+
+  // Break caught: the failure of a file that was left out, told in the polite region and shown as a file that is not there.
+  it('does not tell the failure of a file that was left out', async () => {
+    const { user, input, pending } = harness();
+    await user.upload(input, photo('door.jpg'));
+    await user.click(screen.getByRole('button', { name: 'Leave out door.jpg' }));
+    expect(pending[0]?.signal.aborted).toBe(true);
+
+    await act(async () => {
+      pending[0]?.reject(new Error('The store could not be reached.'));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole('listitem')).toBeNull();
+    expect(screen.getByRole('status')).not.toHaveTextContent('not sent');
+    expect(screen.getByRole('status')).not.toHaveTextContent('door.jpg');
   });
 
   // Break caught: a page left with files on their way and no way to know, so that it sends its act without the evidence it was told to attach.

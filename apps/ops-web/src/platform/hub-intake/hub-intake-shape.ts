@@ -1,7 +1,8 @@
 import type { components } from '@melarc/api-client';
 
+import { MAX_COUNT } from '../api/count-range';
 import { OPERATIONAL_CODE } from '../pickup/pickup-shape';
-import { instantOf, isOneOf, isRecord, optional, uuidOf } from '../staff/staff-shape';
+import { instantOf, isOneOf, isRecord, optional, uuidListOf, uuidOf } from '../staff/staff-shape';
 
 /**
  * What the receiving screens (S1.35: the awaiting-receive queue, the blind count, the record of an intake, the condition and the adjudication) believe of an answer, judged field by field before
@@ -51,13 +52,13 @@ export const FINDING_KINDS = ['CONDITION', 'ADJUDICATION'] as const;
 /** The longest note the audit ledger keeps, and so the longest a screen is shown. */
 const MAX_NOTE = 1000;
 /**
- * The largest count the platform can hold (the database's whole number). It is a bound of representation and not a business limit: the platform sets none on the parcels of an intake (OB-S1-97),
- * and a screen takes a count the server took, so that no count the server accepts is unreadable here.
+ * The largest count the platform can hold (the database's whole number), from the one place that holds it (`../api/count-range.ts`). It is a bound of representation and not a business limit: the
+ * platform sets none on the parcels of an intake (OB-S1-97), and a screen takes a count the server took, so that no count the server accepts is unreadable here.
+ *
+ * **Nor is there a ceiling on what an intake has**: the photos of its collection, the findings made on it and the evidence of each are as many as the server holds (the contract and the API set no
+ * `maxItems` on any of them). The answer is judged for its shape, its identifiers, its order and its repeats, and never for its size: an intake of five thousand parcels is as readable as one of five.
  */
-export const MAX_PARCELS = 2_147_483_647;
-const MAX_FINDINGS = 200;
-const MAX_PHOTOS = 1000;
-const MAX_EVIDENCE_PER_FINDING = 100;
+export const MAX_PARCELS = MAX_COUNT;
 const MAX_DEPTH = 8;
 
 /** A text an officer wrote, as one block: not blank, bounded, and with no control character but a line break or a tab. It is drawn as text and never as markup. */
@@ -239,20 +240,6 @@ function parseBase(body: Record<string, unknown>): IntakeBaseView | undefined {
   };
 }
 
-/** The evidence of a finding: whole identifiers, each once. */
-function evidenceIdsOf(value: unknown, most: number): readonly string[] | undefined {
-  if (!Array.isArray(value) || value.length > most) return undefined;
-  const ids: string[] = [];
-  for (const entry of value as unknown[]) {
-    const id = uuidOf(entry);
-    if (id === undefined || ids.some((seen) => seen.toLowerCase() === id.toLowerCase())) {
-      return undefined;
-    }
-    ids.push(id);
-  }
-  return ids;
-}
-
 export function parseFinding(body: unknown): FindingView | undefined {
   if (!isRecord(body)) return undefined;
   const id = uuidOf(body.id);
@@ -263,7 +250,7 @@ export function parseFinding(body: unknown): FindingView | undefined {
     isOneOf(ADJUDICATION_OUTCOMES, value) ? value : undefined,
   );
   const note = optional(body.note, noteTextOf);
-  const evidence = evidenceIdsOf(body.evidence_ids ?? [], MAX_EVIDENCE_PER_FINDING);
+  const evidence = uuidListOf(body.evidence_ids ?? []);
   const by = uuidOf(body.recorded_by);
   const at = instantOf(body.recorded_at);
   if (
@@ -295,19 +282,21 @@ export function parseFinding(body: unknown): FindingView | undefined {
 
 function parseFindings(value: unknown): readonly FindingView[] | undefined {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.length > MAX_FINDINGS) return undefined;
+  if (!Array.isArray(value)) return undefined;
   const findings: FindingView[] = [];
+  const seen = new Set<string>();
   for (const entry of value as unknown[]) {
     const finding = parseFinding(entry);
     const last = findings.at(-1);
-    // Each finding once, in the order they were made: a list the other way round is not the one the server keeps.
+    // Each finding once (found with a set: the history of a long case is as long as it is), in the order they were made: a list the other way round is not the one the server keeps.
     if (
       finding === undefined ||
-      findings.some((seen) => seen.id.toLowerCase() === finding.id.toLowerCase()) ||
+      seen.has(finding.id.toLowerCase()) ||
       (last !== undefined && Date.parse(finding.recorded_at) < Date.parse(last.recorded_at))
     ) {
       return undefined;
     }
+    seen.add(finding.id.toLowerCase());
     findings.push(finding);
   }
   return findings;
@@ -330,7 +319,7 @@ function parsePostCount(
   const physical = wholeAtLeast(body.physical_count, 0);
   const difference = optional(body.count_difference, signedWhole);
   const findings = parseFindings(body.condition_findings);
-  const photos = evidenceIdsOf(body.parcel_photo_ids ?? [], MAX_PHOTOS);
+  const photos = uuidListOf(body.parcel_photo_ids ?? []);
   if (
     declared === undefined ||
     physical === undefined ||
