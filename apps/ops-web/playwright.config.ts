@@ -95,7 +95,7 @@ const REQUESTED_ENGINES = requestedEngines(process.env.MELARC_BROWSERS);
  * underneath is covered, so it is hidden to itself (`document.hidden`) and gets no pointer and no focus, and a library that waits for the page to be visible (the toast's timer) never runs out. The hosted run of main of
  * 17 November 2026 failed one test of the kit twice in a row, identically, in the same shard (`kit.spec.ts`, "stays with an action until it is dismissed, and goes by itself without one": the toast that should go by
  * itself stayed), while the other worker had a window up for the whole of its 7 seconds (two tests of 1.9 and 4.9 seconds, one after the other); it passes in a developer's WebKit, where one window is up at a time. That
- * is the likely cause of the hover, focus and tooltip checks that failed in the hosted WebKit jobs before it (the six of the quarantine, `known-flaky-list.ts`, and the many others that failed once). Chromium and Firefox
+ * is the likely cause of the hover, focus and tooltip checks that failed in the hosted WebKit jobs before it (the six that were once left out of the hosted run, and the many others that failed once). Chromium and Firefox
  * are launched headless and have no window to cover, and a run without WebKit headed keeps two workers. The HTTPS journeys of the e2e workspace run with one worker for the same reason.
  */
 const WEBKIT_HEADED_RUN = WEBKIT_HEADED && REQUESTED_ENGINES.includes('webkit');
