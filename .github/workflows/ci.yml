@@ -262,7 +262,7 @@ jobs:
       # the plugin repository being out of reach for a moment, and a run that has the artifacts does not ask for them again. A cached artifact is still held to the checksum of
       # gradle/verification-metadata.xml.
       - name: Set up the JDK
-        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version-file: .java-version
@@ -719,7 +719,7 @@ jobs:
       # held to a checksum, and resolves only artifacts whose checksum is in gradle/verification-metadata.xml. The Gradle caches are kept between runs, as in the database job
       # above, so that a plugin repository that is out of reach for a moment does not fail the job when the artifacts are already here.
       - name: Set up the JDK
-        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version-file: .java-version
