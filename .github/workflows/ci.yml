@@ -39,11 +39,6 @@
 # a developer's WebKit, Chromium and Firefox stay headless. scripts/ci-workflow.test.ts holds the wrapper, the value and the install to exactly those jobs (the wrapper is the one prefix a mandatory
 # command may have: xvfb-run returns the status of what it runs). The proof is a hosted run of every engine, and then the nightly runs of main.
 #
-# One exception to "no test is changed for it", by the Product Owner's decision of 17 November 2026: six tests (or the last step of a test) that read a hover, a tooltip or a focus once, within the five seconds of an
-# assertion, failed now and then in the hosted WebKit jobs and nowhere else, and are accepted as known flaky so that they do not block. They are left out on the hosted WebKit run alone (the value above is what tells
-# the test), still run in Chromium and Firefox and in a developer's WebKit, and are a closed list (apps/ops-web/test/browser/support/known-flaky-list.ts, held by apps/ops-web/test/known-flaky.test.ts). Nothing
-# here absorbs a failure: "CI result" is still the one verdict, and a failure of any other test fails it.
-#
 # To see the verdict turn red without breaking anything, run this workflow by hand with "rehearse-failure"
 # ticked: the static job fails on purpose and "CI result" must fail with it.
 
