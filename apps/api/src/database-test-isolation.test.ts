@@ -235,6 +235,55 @@ describe('stringLiterals', () => {
       "it\\'s",
     ]);
   });
+
+  // Break caught: the scan changed for the awkward texts when it was made linear (it stepped over each literal by reading the rest of the file for it, which took the whole test file 15 to 18 seconds of its
+  // 20 on a hosted runner). Each is what the first reading gave, found by running it, and what the second must keep giving.
+  it.each([
+    [
+      'a string that is never closed ends at its line',
+      "const a = 'abc\nconst b = 'def';",
+      ['abc', 'def'],
+    ],
+    ['an escape at the end of the text', "const a = 'it\\", ['it\\']],
+    [
+      'a template inside the interpolation of another',
+      'const a = `x ${`y ${z} w`} v`;',
+      ['x ${`y ${z} w`} v'],
+    ],
+    ['a quote that is the last character', "const a = 1; '", ['']],
+    [
+      'a quote in a comment and in another kind of string',
+      "// it's\nconst a = \"don't\"; /* ' */ const b = `ok`;",
+      ["don't", 'ok'],
+    ],
+    ['quotes inside an interpolation', 'const a = `${\'q\'} and ${"r"}`;', ['${\'q\'} and ${"r"}']],
+  ])('reads %s', (_label, text, expected) => {
+    expect(stringLiterals(text).map((literal) => literal.text)).toEqual(expected);
+  });
+
+  it('does not take a name inside a string that is never closed for code, and still finds the next line’s use', () => {
+    const text = "const a = 'provisionRoles\nawait provisionRoles(admin);";
+    expect(
+      findSharedStateStatements([{ path: 'test/database/x.db.test.ts', text }]).map((finding) => [
+        finding.line,
+        finding.text,
+      ]),
+    ).toEqual([[2, 'provisionRoles']]);
+  });
+
+  // Break caught: the quadratic scan back. A file of forty thousand literals was 120 seconds of work when each literal was stepped over by reading the rest of the file, and is a few milliseconds when each is read
+  // once; the framework's own limit of twenty seconds is the bound, a thousand times above the one and far below the other, so no time is asserted here.
+  it('reads a file of forty thousand literals as one pass over it, finding the one use at its end', () => {
+    const body = Array.from(
+      { length: 40_000 },
+      (_, index) => `const v${String(index)} = 'x';`,
+    ).join('\n');
+    const text = `${body}\nawait provisionRoles(admin);`;
+    const found = findSharedStateStatements([{ path: 'test/database/x.db.test.ts', text }]);
+    expect(found.map((finding) => [finding.line, finding.text])).toEqual([
+      [40_001, 'provisionRoles'],
+    ]);
+  });
 });
 
 describe('the tests whose bounds are wall-clock time, which a pull request leaves out (task CI.2)', () => {
