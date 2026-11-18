@@ -546,7 +546,10 @@ jobs:
   #
   # One engine's whole run is longer than a job may last (1,430 tests an engine on this tree, about 51 minutes for Chromium alone on the
   # developer machine with the two workers the configuration sets; the same specs took about 1.4 times as long in Firefox and 1.2 times in
-  # WebKit), so Playwright cuts each engine into N shards: the job `i` of `N` runs the tests that `playwright test --shard=i/N` selects
+  # WebKit; and in CI about twice that for WebKit, which is launched headed and so runs with one worker, because two headed browsers cover each
+  # other's windows on the one virtual display: apps/ops-web/playwright.config.ts. The longest WebKit shard took about 6 minutes of tests with two
+  # workers on 17 November 2026, so about 12 with one, in a step limit of 26: when a shard nears it, add shards), so Playwright cuts each engine
+  # into N shards: the job `i` of `N` runs the tests that `playwright test --shard=i/N` selects
   # (the configuration reads it from MELARC_BROWSER_SHARD), and the N shards together hold every test of every project of the engine once.
   # A shard is a run of equal numbers of tests in the order of the projects, so the longest of N takes about 1.4 times the mean: 7 shards
   # of Chromium make the longest about 10.5 minutes of tests and about 14 with the job's set-up (3.5), in a limit of 30; 8 of WebKit about
