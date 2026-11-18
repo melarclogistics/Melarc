@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, beforeEach } from 'vitest';
+
+import { matchesWidth } from '../src/test-support/viewport';
 
 // Vitest does not expose globals here, so Testing Library cannot register its own cleanup.
 afterEach(() => {
@@ -91,4 +93,30 @@ document.addEventListener('keydown', (event) => {
 
 afterEach(() => {
   openModals.length = 0;
+});
+
+/*
+ * The window of a component test is a desktop whose person asked the system for less motion. jsdom has no `matchMedia`, and without one the kit animates: a panel enters with a fade from
+ * nothing, and a check of "visible" made on its first frame read it at opacity 0, now and then (MissingParcelsPage, 18 November 2026: one run in about two hundred). With less motion asked for,
+ * `useMotion` makes everything instant and a panel is drawn where it ends, so a test reads what a person with that setting sees; what moves is proved in a real browser (kit.spec.ts and the
+ * specs of each component) and by the few tests of the motion itself, which give the window a `matchMedia` of their own after this runs (use-motion.test.tsx, SidePanel.test.tsx, StatTile.test.tsx,
+ * ReorderList.motion.test.tsx). Every other query is answered as a window of 1440 px at 16 px of text answers it, which is also what the shell is told when the window cannot be asked
+ * (`use-viewport.ts`: wide). It is put back before each test, because a test that gives the window its own `matchMedia` takes it away again when it ends.
+ */
+const DEFAULT_WINDOW_PX = 1440;
+const LESS_MOTION = /prefers-reduced-motion:\s*reduce/;
+
+beforeEach(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      media: query,
+      matches: LESS_MOTION.test(query) || matchesWidth(query, DEFAULT_WINDOW_PX),
+      addEventListener: (): void => undefined,
+      removeEventListener: (): void => undefined,
+      addListener: (): void => undefined,
+      removeListener: (): void => undefined,
+    }),
+  });
 });

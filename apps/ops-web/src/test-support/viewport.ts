@@ -3,8 +3,8 @@ import type { Viewport } from '../platform/viewport/use-viewport';
 /** A width, in px, inside each size the shell tells (`use-viewport.ts`): 390 is a phone, 900 a tablet and 1440 a desktop. */
 const WIDTHS: Readonly<Record<Viewport, number>> = { narrow: 390, medium: 900, wide: 1440 };
 
-/** What `matchMedia` answers for the two queries the shell asks, for a window of `width` px at the browser's 16px of text. */
-function matches(query: string, width: number): boolean {
+/** What `matchMedia` answers for the two queries the shell asks, for a window of `width` px at the browser's 16px of text (any other query is no match). */
+export function matchesWidth(query: string, width: number): boolean {
   const limit = /\((max|min)-width:\s*([\d.]+)rem\)/.exec(query);
   if (limit === null) return false;
   const px = Number(limit[2]) * 16;
@@ -31,7 +31,7 @@ export function stubViewport(viewport: Viewport | number) {
       return {
         media: query,
         get matches() {
-          return matches(query, width);
+          return matchesWidth(query, width);
         },
         addEventListener: (_type: string, listener: () => void) => {
           entry.listeners.add(listener);
