@@ -311,12 +311,22 @@ export async function scrollSettled(page: Page, frames = 3): Promise<void> {
  * failed in about one run in three at 768px (found in the review of 7 November 2026, and present with the stylesheet and the components of the baseline tree
  * too). The transitions and the animations under way are waited for (`settled`): they are finite, and an animation that never ends (a spinner) is not one of
  * them. A panel that fades in (a dialog, a popover) is read in the same way, at its own opacity once it has arrived and not part way.
+ *
+ * **The page is read from its top, not from where the last click left the scroll.** The rule of target size judges the part of a control that nothing covers, and the top
+ * bar of the shell is sticky and covers the top of what is scrolled under it. A control that the bar covers a little (the menu of a pickup run's acts, with the bar over
+ * its upper half) is under 24px and next to another control, so it fails, and it fails only when the scroll stops in that narrow band: where it stops depends on when the
+ * data under the page arrived and the click that scrolled it into view (the hosted run of 18 November 2026: the 768px screen of a draft pickup run, which passed on the
+ * same code in every other run). A scan is of the screen, not of a scroll position, so it starts where a person arrives, at the top. The scroll is instant: a smooth one
+ * would still be moving when axe reads.
  */
 export async function wcagViolations(
   page: Page,
   options: { readonly disable?: readonly string[]; readonly include?: string } = {},
 ): Promise<string[]> {
   await settled(page);
+  await page.evaluate(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  });
   const scan = new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
     .disableRules([...(options.disable ?? [])]);

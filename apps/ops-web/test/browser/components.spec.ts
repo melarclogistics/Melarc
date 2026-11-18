@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
@@ -1122,5 +1123,39 @@ test.describe('the accessibility scan in a browser', () => {
     expect(await background()).not.toBe('rgb(180, 35, 46)');
     expect(await wcagViolations(page)).toEqual([]);
     expect(await background()).toBe('rgb(180, 35, 46)');
+  });
+
+  // Break caught: the scan reading the page where the last click left the scroll. A control of the sticky bar over the top of another leaves under 24px of it showing, and the rule of target size
+  // fails, as a pickup run's screen did in one hosted run of 18 November 2026 and in no other, because where its scroll stopped depended on timing.
+  // The probe is scrolled into that band on purpose (and shown to fail the rule when scanned there), and the scan must not depend on it.
+  test('reads the page from its top, whatever the scroll it is left at', async ({ page }) => {
+    await page.setContent(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        body { margin: 0; }
+        header { position: sticky; top: 0; height: 46px; background: #ffffff; }
+        .bar { box-sizing: border-box; width: 100%; height: 100%; }
+        h1 { margin: 0; height: 40px; }
+        .row { display: flex; gap: 8px; margin-top: 300px; }
+        .row button { box-sizing: border-box; width: 36px; height: 36px; padding: 0; }
+        .tail { height: 2000px; }
+      </style></head><body><header><button type="button" class="bar">Bar</button></header><main><h1>Probe</h1>
+        <div class="row"><button type="button" aria-label="One">1</button><button type="button" aria-label="Two">2</button></div>
+        <div class="tail"></div></main></body></html>`);
+    const rowTop = (): Promise<number> =>
+      page.locator('.row').evaluate((row) => row.getBoundingClientRect().top);
+    // Where the control of the bar covers the upper 22px of the buttons and leaves 14px of them showing (the bar is 46px, the row is 24px under the top of the page).
+    await page.evaluate(() => {
+      const row = document.querySelector('.row');
+      window.scrollBy(0, (row?.getBoundingClientRect().top ?? 0) - 24);
+    });
+    expect(await rowTop()).toBe(24);
+    const there = await new AxeBuilder({ page }).withRules(['target-size']).analyze();
+    expect(
+      there.violations.map((violation) => violation.id),
+      'the probe is in the band',
+    ).toEqual(['target-size']);
+
+    expect(await wcagViolations(page)).toEqual([]);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
   });
 });
