@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { parse } from 'yaml';
+
 import {
   expandSteps,
   readLocalActions,
   workflowSteps,
   type LocalActions,
 } from './composite-actions.ts';
-import { inputsOf, isAction, isRecord, type Step } from './workflow-shapes.ts';
+import { inputsOf, isAction, isRecord, stepsOf, type Step } from './workflow-shapes.ts';
 
 export type PinProblemCode =
   | 'NODE_VERSION_FORMAT'
@@ -19,6 +21,7 @@ export type PinProblemCode =
   | 'CI_JAVA_PIN'
   | 'CI_PNPM_PIN'
   | 'CI_FROZEN_INSTALL'
+  | 'CI_APT_MIRROR'
   | 'CI_ACTION_UNPINNED'
   | 'CI_LOCAL_ACTION_MISSING';
 
@@ -162,6 +165,59 @@ function isFrozenInstall(line: string): boolean {
   );
 }
 
+const APT_MIRRORS_FILE = '/etc/apt/apt-mirrors.txt';
+/** The package mirror that was fast from every runner, the Amazon ones included, when it was measured (18 November 2026): the setup action puts it first. */
+const FAST_PACKAGE_MIRROR = 'http://azure.archive.ubuntu.com/ubuntu/';
+
+/** Whether a step installs a package with apt, directly or as Playwright does for the browsers' system libraries (`install --with-deps`, `install-deps`). */
+function usesApt(step: Step): boolean {
+  if (typeof step.run !== 'string') return false;
+  return commandLines(step.run).some((line) => {
+    const code = line.replace(/\s#.*$/, '').trim();
+    return (
+      /(?:^|[\s;&|])apt(?:-get)?\s+(?:install|update|upgrade)\b/.test(code) ||
+      /\bplaywright\s+(?:install\s+[^\n]*--with-deps|install-deps)\b/.test(code)
+    );
+  });
+}
+
+/**
+ * Whether a step puts the fast mirror first in apt's list of mirrors: a privileged command (`sudo ...`) writes the real list, the mirror is named in the step's commands (not in a comment),
+ * and no condition can skip it, `continue-on-error` cannot pass it over and no `||` answers a failure with another command. A step that only echoes the names is not one.
+ */
+function pinsPackageMirror(step: Step): boolean {
+  if (typeof step.run !== 'string' || 'if' in step || 'continue-on-error' in step) return false;
+  const lines = commandLines(step.run)
+    .map((line) => line.replace(/\s#.*$/, ''))
+    .filter((line) => !line.trim().startsWith('#'));
+  const code = lines.join('\n');
+  const writesTheList = lines.some(
+    (line) => /^\s*sudo\s/.test(line) && line.includes(APT_MIRRORS_FILE),
+  );
+  return writesTheList && code.includes(FAST_PACKAGE_MIRROR) && !code.includes('||');
+}
+
+/**
+ * Every job that installs a package with apt puts the fast mirror first before its first such step. Hosted runners come from two clouds under one label, and the default mirror of the Amazon
+ * ones gave a WebKit job its system libraries at 93 kB/s (22 minutes, the job cancelled at its limit, three times running): which cloud a job lands on is luck, so no job may take the default.
+ */
+function checkAptMirror(ciWorkflow: string, localActions: LocalActions): PinProblem[] {
+  const workflow: unknown = parse(ciWorkflow);
+  const jobs = isRecord(workflow) && isRecord(workflow.jobs) ? workflow.jobs : {};
+  const problems: PinProblem[] = [];
+  for (const [id, job] of Object.entries(jobs)) {
+    const steps = expandSteps(stepsOf(job), localActions, new Set<string>());
+    const first = steps.findIndex(usesApt);
+    if (first !== -1 && !steps.slice(0, first).some(pinsPackageMirror)) {
+      problems.push({
+        code: 'CI_APT_MIRROR',
+        message: `Job ${id} installs a package with apt before any step has put ${FAST_PACKAGE_MIRROR} first in ${APT_MIRRORS_FILE} (the setup action does, and every such job starts with it): the default mirror of an Amazon runner is slow enough to cancel a job.`,
+      });
+    }
+  }
+  return problems;
+}
+
 function checkCiWorkflowPins(ciWorkflow: string, localActions: LocalActions): PinProblem[] {
   const missing = new Set<string>();
   const steps = expandSteps(workflowSteps(ciWorkflow), localActions, missing);
@@ -226,6 +282,7 @@ export function findPinProblems(inputs: PinInputs): PinProblem[] {
     ...checkPackageManagerPin(inputs.packageJson),
     ...checkJavaPin(inputs.javaVersionFile),
     ...checkCiWorkflowPins(inputs.ciWorkflow, inputs.localActions ?? {}),
+    ...checkAptMirror(inputs.ciWorkflow, inputs.localActions ?? {}),
   ];
 }
 
