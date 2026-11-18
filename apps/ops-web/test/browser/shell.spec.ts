@@ -6,6 +6,7 @@ import {
   reachableNames,
   stepIncludingLinks,
   tabReachesLinks,
+  watchHiddenFocus,
   watchPage,
   wcagViolations,
 } from './support/page';
@@ -1526,7 +1527,10 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
   }
 
   // Break caught (review of 7 November 2026): the strict policy proved for the shell at a desktop's width only, with the sheet of a narrow screen (a
-  // Radix dialog that inserts a style and traps focus) never drawn under it: the sheet opened, followed and closed under the policy raises no violation.
+  // Radix dialog that inserts a style and traps focus) never drawn under it: the sheet opened, followed and closed under the policy raises no violation. And (18 November 2026) the heading of the page the
+  // sheet was followed to takes focus only when the app is shown again: the frame used to focus it at once, inside the app that the sheet's exit still hid from assistive technology for a quarter of
+  // a second, which Chromium warns of where its accessibility layer is on (a person with a screen reader; not a hosted headless run, which is why only a developer's machine failed) and which the
+  // page itself shows in every engine (`watchHiddenFocus`).
   test('runs the sheet of a narrow screen under the strict policy: opened, followed and closed', async ({
     page,
   }) => {
@@ -1534,6 +1538,7 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
     await page.setViewportSize({ width: 390, height: 800 });
     const api = await stubApi(page);
     const seen = watchPage(page);
+    const hiddenFocus = await watchHiddenFocus(page);
 
     const response = await page.goto('/');
     expect(response?.headers()['content-security-policy']).toBe(STRICT_POLICY);
@@ -1547,6 +1552,7 @@ test.describe('the sticky top bar, the skip link and the page’s padding in a b
     await expect(sheetOf(page)).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1, name: 'Sessions' })).toBeFocused();
     expect(violations).toEqual([]);
+    expect(await hiddenFocus()).toEqual([]);
     expect(seen.problems).toEqual([]);
     expect(api.unexpected).toEqual([]);
   });

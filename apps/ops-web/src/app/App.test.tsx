@@ -170,6 +170,31 @@ describe('keyboard and focus', () => {
     const heading = await screen.findByRole('heading', { level: 1, name: 'Page not found' });
     expect(heading).toHaveFocus();
   });
+
+  // Break caught: focus put on the new page's heading while a modal dialog that is still on its way out keeps the app hidden from assistive technology (`aria-hidden`, which is what Radix
+  // does to everything outside a dialog): the sheet of a narrow screen, followed to a page, left the heading focused inside a hidden app for a quarter of a second, so a screen reader may not
+  // announce the page and Chromium warns of it. Focus waits until the app is shown again.
+  it('does not put focus inside an app that a dialog hides from assistive technology, and does when it is shown again', async () => {
+    const { router, container } = renderApp();
+    await landing();
+    container.setAttribute('aria-hidden', 'true');
+
+    await act(async () => {
+      await router.navigate('/no-such-page');
+    });
+
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Page not found',
+      hidden: true,
+    });
+    expect(heading).not.toHaveFocus();
+
+    container.removeAttribute('aria-hidden');
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+  });
 });
 
 describe('unknown routes', () => {

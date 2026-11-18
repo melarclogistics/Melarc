@@ -17,6 +17,30 @@ import { useTopBarClearance } from './top-bar-clearance';
 const MAIN_CONTENT_ID = 'main-content';
 
 /**
+ * Puts focus on the heading of the page that has just opened, or, when the page is not there yet (a guard is asking who is signed in, or the page's code is on its way), on the main
+ * landmark, and on the heading when it arrives, unless the person has moved on in the meantime. Returns what stops the wait, when there is one.
+ */
+function moveFocusToTheNewPage(main: HTMLElement): (() => void) | undefined {
+  const heading = main.querySelector<HTMLElement>('h1');
+  if (heading !== null) {
+    heading.focus();
+    return undefined;
+  }
+  // Focus waits on the content, so a keyboard user is not dropped at the top of the document.
+  main.focus();
+  const observer = new MutationObserver(() => {
+    const arrived = main.querySelector<HTMLElement>('h1');
+    if (arrived === null) return;
+    observer.disconnect();
+    if (document.activeElement === main) arrived.focus();
+  });
+  observer.observe(main, { childList: true, subtree: true });
+  return () => {
+    observer.disconnect();
+  };
+}
+
+/**
  * The frame every page sits in: a skip link, a banner and the main landmark. It carries no navigation,
  * user menu or session data itself, because the Ops Portal's pre-authentication pages must render "no navigation, no
  * user menu, no data" (surfaces/ops-portal.md §7). Beside the main content it keeps an empty place
@@ -36,6 +60,11 @@ const MAIN_CONTENT_ID = 'main-content';
  * effect runs after the paint, and in that gap the new page is on the screen and can be typed into while focus is still where the old page left
  * it: the first keystrokes of a quick typist, or of a password manager, then go to the heading instead of the field (S0.43: a field filled in
  * WebKit typed into nothing one run in eight).
+ *
+ * **Focus is not put in what is hidden from assistive technology.** A modal dialog (the sheet of a narrow screen, the palette, a menu) hides the rest of the app with `aria-hidden` while it is open
+ * and while it is on its way out, which is a quarter of a second after the person has followed a link in it. A heading focused in that time is in a hidden app: a screen reader may not announce
+ * the new page, and Chromium says so ("Blocked aria-hidden on an element because its descendant retained focus"). So when the app is hidden the move waits until it is shown again, which is
+ * when the dialog has gone, and the dialog's own return of focus (`useFocusReturn`, `keepFocusOnThePage`) finds it already on the heading.
  */
 export function AppFrame() {
   const mainRef = useRef<HTMLElement>(null);
@@ -54,24 +83,24 @@ export function AppFrame() {
     previousPathname.current = pathname;
     const main = mainRef.current;
     if (main === null) return;
-    const heading = main.querySelector<HTMLElement>('h1');
-    if (heading !== null) {
-      heading.focus();
-      return;
+
+    let stop: (() => void) | undefined;
+    const hiding = main.closest('[aria-hidden="true"]');
+    if (hiding === null) {
+      stop = moveFocusToTheNewPage(main);
+    } else {
+      const shown = new MutationObserver(() => {
+        if (hiding.getAttribute('aria-hidden') === 'true') return;
+        shown.disconnect();
+        stop = moveFocusToTheNewPage(main);
+      });
+      shown.observe(hiding, { attributes: true, attributeFilter: ['aria-hidden'] });
+      stop = () => {
+        shown.disconnect();
+      };
     }
-    // The page is not there yet: a guard is asking who is signed in, or the page's code is on its way. Focus waits on the
-    // content, so a keyboard user is not dropped at the top of the document, and goes to the heading when it arrives,
-    // unless the person has moved on in the meantime.
-    main.focus();
-    const observer = new MutationObserver(() => {
-      const arrived = main.querySelector<HTMLElement>('h1');
-      if (arrived === null) return;
-      observer.disconnect();
-      if (document.activeElement === main) arrived.focus();
-    });
-    observer.observe(main, { childList: true, subtree: true });
     return () => {
-      observer.disconnect();
+      stop?.();
     };
   }, [pathname]);
 
