@@ -377,6 +377,35 @@ test.describe('the components in a browser: states under the pointer', () => {
       expect(await fill(page, 'Saving…', index), `loading button ${String(index)}`).toBe(before);
     }
   });
+
+  // Break caught: a button that is enabled changing its label to the final colour at once while its fill takes the motion token to leave the disabled grey, so that the label is the enabled colour
+  // on the disabled fill for the whole fade (the device page of a rider, whose button an answer enables: 18 November 2026). The token is made long, so that the check lands inside the fade.
+  test('a button that is enabled moves its label with its fill, and never shows the enabled label on the fill it is leaving', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--motion-fast', '4s');
+    });
+    const button = page.getByRole('button', { name: 'Disabled action' });
+    const label = (): Promise<string> =>
+      button.evaluate((element) => getComputedStyle(element).color);
+    const enabledLabel = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--color-action-primary-text)';
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    });
+    expect(await label(), 'the disabled label is not the enabled one').not.toBe(enabledLabel);
+
+    await button.evaluate((element) => {
+      (element as HTMLButtonElement).disabled = false;
+    });
+
+    expect(await label(), 'the label has not jumped to the enabled colour').not.toBe(enabledLabel);
+  });
 });
 
 test.describe('the components in a browser: forced colours and reduced motion', () => {

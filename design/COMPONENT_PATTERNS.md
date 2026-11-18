@@ -227,6 +227,8 @@ Required states:
 - disabled;
 - loading.
 
+A button that changes state moves its fill, its border and its label together on `motion.fast` (a `transition` of `background-color`, `border-color` and `color`; none under reduced motion), so that a button which leaves `disabled` is never drawn with the enabled label on the disabled fill.
+
 ### 4.9 Loading
 
 When Button initiates an in-progress action:

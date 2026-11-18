@@ -17,9 +17,14 @@
   line-height: var(--text-label-md-line-height);
   text-align: center;
   cursor: pointer;
+  /*
+   * The fill, the border and the label move together on the one token (DESIGN_SYSTEM section 9: motion.fast, hover and press). The label is in the list because a button
+   * that leaves `disabled` changes all three: with the fill alone moving, the label is the enabled colour at once and white on the disabled grey until the fill catches up.
+   */
   transition:
     background-color var(--motion-fast),
-    border-color var(--motion-fast);
+    border-color var(--motion-fast),
+    color var(--motion-fast);
 }
 
 /*
