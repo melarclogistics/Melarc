@@ -1158,4 +1158,20 @@ test.describe('the accessibility scan in a browser', () => {
     expect(await wcagViolations(page)).toEqual([]);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
   });
+
+  // Break caught: a report that names the element and not what axe measured of it. A violation that comes and goes (a colour read in the middle of a fade, a control half under a bar)
+  // is told from a wrong one by its figures, and a failed run of a page that keeps no trace has nothing else to read.
+  test('says what axe measured of an element that fails: the ratio and both colours', async ({
+    page,
+  }) => {
+    await page.setContent(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        p { color: #8a94a8; background: #eef0f4; }
+      </style></head><body><main><h1>Probe</h1><p id="faint">A line that is too faint</p></main></body></html>`);
+
+    const [violation] = await wcagViolations(page);
+
+    expect(violation).toMatch(/^color-contrast: .*\(#faint: .*foreground color: #8a94a8/);
+    expect(violation).toContain('background color: #eef0f4');
+  });
 });
