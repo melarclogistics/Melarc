@@ -488,6 +488,117 @@ describe('CI composite actions', () => {
   });
 });
 
+// Hosted runners come from two clouds under one label, and the default package mirror of the Amazon ones gave a WebKit job its system libraries at 93 kB/s (22 minutes, the job cancelled at its limit,
+// three times running). No job that installs a package with apt may take the default: the setup action puts the fast mirror first, and every such job starts with it.
+describe('CI package mirror', () => {
+  const SETUP = './.github/actions/setup';
+  const LOCAL: Step = { uses: SETUP };
+  const MIRROR: Step = {
+    name: 'Use the package mirror that is fast from every runner',
+    shell: 'bash',
+    run: [
+      'printf \'http://azure.archive.ubuntu.com/ubuntu/\\tpriority:1\\n\' > "$RUNNER_TEMP/apt-mirrors.txt"',
+      'sudo install -m 644 "$RUNNER_TEMP/apt-mirrors.txt" /etc/apt/apt-mirrors.txt',
+    ].join('\n'),
+  };
+  const DISPLAY: Step = { run: 'sudo apt-get install --no-install-recommends --yes xvfb xauth' };
+  const BROWSERS: Step = {
+    run: 'pnpm --filter @melarc/e2e exec playwright install --with-deps webkit',
+  };
+
+  const compositeOf = (...steps: Step[]): string =>
+    stringify({ name: 'Set up', runs: { using: 'composite', steps } });
+  const SETUP_WITH_MIRROR = compositeOf(MIRROR, PNPM_SETUP, NODE_SETUP, {
+    ...FROZEN_INSTALL,
+    shell: 'bash',
+  });
+
+  /** The mirror problems of a workflow of one job with these steps, and the setup action `composite`. */
+  function mirrorCodes(composite: string, ...steps: Step[]): string[] {
+    return findPinProblems({
+      ...GOOD,
+      ciWorkflow: workflowOf(...steps),
+      localActions: { [SETUP]: composite },
+    })
+      .map((problem) => problem.code)
+      .filter((code) => code === 'CI_APT_MIRROR');
+  }
+
+  it('needs nothing of a job that installs no package with apt', () => {
+    assert.deepEqual(mirrorCodes(compositeOf(PNPM_SETUP, NODE_SETUP), CHECKOUT, LOCAL), []);
+  });
+
+  it('accepts a job whose setup action puts the mirror first, before apt and before the browsers', () => {
+    assert.deepEqual(mirrorCodes(SETUP_WITH_MIRROR, CHECKOUT, LOCAL, BROWSERS, DISPLAY), []);
+  });
+
+  // Break caught: a job that takes the default mirror, which is the Amazon one on a third of the runners.
+  it('rejects a job that installs with apt and never put the mirror first', () => {
+    const without = compositeOf(PNPM_SETUP, NODE_SETUP, { ...FROZEN_INSTALL, shell: 'bash' });
+    assert.deepEqual(mirrorCodes(without, CHECKOUT, LOCAL, DISPLAY), ['CI_APT_MIRROR']);
+    assert.deepEqual(mirrorCodes(without, CHECKOUT, LOCAL, BROWSERS), ['CI_APT_MIRROR']);
+    assert.deepEqual(
+      mirrorCodes(without, CHECKOUT, LOCAL, {
+        run: 'pnpm --filter @melarc/e2e exec playwright install-deps webkit',
+      }),
+      ['CI_APT_MIRROR'],
+    );
+  });
+
+  // Break caught: the pin put after the step that needs it, or in a job that does not start with the action.
+  it('rejects an apt step that comes before the step that puts the mirror first', () => {
+    assert.deepEqual(mirrorCodes(SETUP_WITH_MIRROR, CHECKOUT, DISPLAY, LOCAL), ['CI_APT_MIRROR']);
+    assert.deepEqual(mirrorCodes(SETUP_WITH_MIRROR, CHECKOUT, BROWSERS), ['CI_APT_MIRROR']);
+  });
+
+  it('judges each job on its own', () => {
+    const text = stringify({
+      name: 'CI',
+      jobs: {
+        pinned: { 'runs-on': 'ubuntu-24.04', steps: [CHECKOUT, LOCAL, DISPLAY, JAVA_SETUP] },
+        bare: { 'runs-on': 'ubuntu-24.04', steps: [CHECKOUT, BROWSERS, JAVA_SETUP] },
+      },
+    });
+    const found = findPinProblems({
+      ...GOOD,
+      ciWorkflow: text,
+      localActions: { [SETUP]: SETUP_WITH_MIRROR },
+    }).filter((problem) => problem.code === 'CI_APT_MIRROR');
+    assert.equal(found.length, 1);
+    assert.match(found[0]?.message ?? '', /Job bare /);
+  });
+
+  // Break caught: a step that has the look of the pin and does not do it: it only names the mirror, can be skipped, cannot fail the job, or answers its failure with another command.
+  const imitations: [label: string, step: Step][] = [
+    [
+      'only echoes the names',
+      {
+        shell: 'bash',
+        run: 'echo "http://azure.archive.ubuntu.com/ubuntu/ for /etc/apt/apt-mirrors.txt"',
+      },
+    ],
+    ['only names them in a comment', { shell: 'bash', run: `# ${String(MIRROR.run)}\ntrue` }],
+    ['has a condition', { ...MIRROR, if: "runner.environment == 'github-hosted'" }],
+    ['may fail without failing the job', { ...MIRROR, 'continue-on-error': true }],
+    ['answers a failure with another command', { ...MIRROR, run: `${String(MIRROR.run)} || true` }],
+    [
+      'writes another mirror',
+      {
+        shell: 'bash',
+        run: "printf 'http://us-east-2.ec2.archive.ubuntu.com/ubuntu/\\n' | sudo tee /etc/apt/apt-mirrors.txt",
+      },
+    ],
+  ];
+  for (const [label, step] of imitations) {
+    it(`rejects a step that ${label}`, () => {
+      assert.deepEqual(
+        mirrorCodes(compositeOf(step, PNPM_SETUP, NODE_SETUP), CHECKOUT, LOCAL, DISPLAY),
+        ['CI_APT_MIRROR'],
+      );
+    });
+  }
+});
+
 // Reading the pin sources from a directory finds the local actions the workflow uses, and the ones those use.
 describe('reading the pin sources from a repository', () => {
   const directories: string[] = [];
