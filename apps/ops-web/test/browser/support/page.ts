@@ -305,7 +305,7 @@ export async function scrollSettled(page: Page, frames = 3): Promise<void> {
  * What axe measured on one element, after its selector: the contrast ratio with both colours and the size of the text, the space a target has,
  * the name that is missing. A violation that comes and goes names the selector and nothing else, and the one hosted run of 18 November 2026 in which a primary button of
  * a screen failed its contrast (and never again in 120 runs of the same test) kept no trace, because the sign-in and device pages turn tracing off: with these figures
- * the next one says which colours were read, and a colour in the middle of a fade is told from a colour that is wrong at a glance.
+ * the next one says which colours were read, and a colour in the middle of a fade is told from a colour that is wrong at a glance (the cause of those two runs was a fade: `withoutTransitions`, below).
  */
 function measured(node: {
   readonly any: readonly { readonly message?: string }[];
@@ -319,6 +319,30 @@ function measured(node: {
 }
 
 /**
+ * Runs `work` with every transition of the page at its end, and gives the page back as it was. A rule `transition: none` takes a transition that is under way to the value it was going
+ * to and gives none to a change that comes after, so a colour read in the meantime is the colour of a state and never the middle of a fade. The rule is a style sheet that the document
+ * adopts, not a style element: it adds nothing to the markup, so nothing in the page (an observer of its mutations, a count of its style elements) can notice it, and it leaves nothing behind.
+ */
+async function withoutTransitions<T>(page: Page, work: () => Promise<T>): Promise<T> {
+  const sheet = await page.evaluateHandle(() => {
+    const own = new CSSStyleSheet();
+    own.replaceSync('*, *::before, *::after { transition: none !important; }');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, own];
+    return own;
+  });
+  try {
+    return await work();
+  } finally {
+    await sheet
+      .evaluate((own) => {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((one) => one !== own);
+      })
+      .catch(() => undefined);
+    await sheet.dispose().catch(() => undefined);
+  }
+}
+
+/**
  * One line per violation: the rule, what it asks for and the first elements that break it. `disable` names rules of axe to leave out of this
  * scan, for the one state in which axe is known to be wrong, with the reason written where it is used. `include` limits the scan to the part of the
  * page a selector names (the sidebar, when it is the sidebar that is under test), so that a test of one part fails for that part only.
@@ -328,6 +352,11 @@ function measured(node: {
  * failed in about one run in three at 768px (found in the review of 7 November 2026, and present with the stylesheet and the components of the baseline tree
  * too). The transitions and the animations under way are waited for (`settled`): they are finite, and an animation that never ends (a spinner) is not one of
  * them. A panel that fades in (a dialog, a popover) is read in the same way, at its own opacity once it has arrived and not part way.
+ *
+ * **`settled` waits for what is moving when it looks, and a fade can begin after that.** A control that an answer enables a moment later (the replacement form of a rider's device page: its
+ * button is disabled until the list of reasons is in) turns its label white at once and takes `motion.fast` to leave the disabled grey, so for that moment it is white on grey, and axe, reaching
+ * it then, reports a contrast of 1.14 that nobody sees (two hosted runs of 18 November 2026 in about twenty, on that screen at 1280px and nowhere else, and shown on the page itself by holding the
+ * answer back: `riders.spec.ts`). So the scan reads the page with its transitions at their end (`withoutTransitions`): a fade that is under way is taken to the colour it was going to, and none begins.
  *
  * **The page is read from its top, not from where the last click left the scroll.** The rule of target size judges the part of a control that nothing covers, and the top
  * bar of the shell is sticky and covers the top of what is scrolled under it. A control that the bar covers a little (the menu of a pickup run's acts, with the bar over
@@ -344,17 +373,19 @@ export async function wcagViolations(
   await page.evaluate(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   });
-  const scan = new AxeBuilder({ page })
-    .withTags(WCAG_TAGS)
-    .disableRules([...(options.disable ?? [])]);
-  const results = await (
-    options.include === undefined ? scan : scan.include(options.include)
-  ).analyze();
-  return results.violations.map(
-    (violation) =>
-      `${violation.id}: ${violation.help} (${violation.nodes
-        .slice(0, 3)
-        .map((node) => `${node.target.join(' ')}${measured(node)}`)
-        .join(', ')})`,
-  );
+  return withoutTransitions(page, async () => {
+    const scan = new AxeBuilder({ page })
+      .withTags(WCAG_TAGS)
+      .disableRules([...(options.disable ?? [])]);
+    const results = await (
+      options.include === undefined ? scan : scan.include(options.include)
+    ).analyze();
+    return results.violations.map(
+      (violation) =>
+        `${violation.id}: ${violation.help} (${violation.nodes
+          .slice(0, 3)
+          .map((node) => `${node.target.join(' ')}${measured(node)}`)
+          .join(', ')})`,
+    );
+  });
 }

@@ -1125,6 +1125,43 @@ test.describe('the accessibility scan in a browser', () => {
     expect(await background()).toBe('rgb(180, 35, 46)');
   });
 
+  // Break caught: a fade that begins after the scan has looked and found the page still. `settled` waits for what is moving when it looks, and a control that an answer enables a moment later
+  // (the replacement form of a rider's device page, disabled until the list of reasons is in) turns its label white at once and takes a moment to leave the disabled grey: the scan reached it
+  // half way and reported white on grey, in two hosted runs of 18 November 2026. The probe fades over 3 s and is enabled 40 ms into the scan, after `settled` has looked, so that without the
+  // rule of the scan it always lands inside the fade; and the same probe, read by axe alone as soon as it is enabled, is shown to fail.
+  test('judges a control that is enabled while the scan runs by the colour it settles on', async ({
+    page,
+  }) => {
+    const probe = `<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        button { padding: 8px 16px; border: 0; transition: background-color 3s linear; }
+        button:disabled { background: #eef0f4; color: #5b6472; }
+        button:enabled { background: #b4232e; color: #ffffff; }
+      </style></head><body><main><h1>Probe</h1><button type="button" disabled>Go</button></main></body></html>`;
+    const enable = (): Promise<void> =>
+      page.getByRole('button', { name: 'Go' }).evaluate((element) => {
+        (element as HTMLButtonElement).disabled = false;
+      });
+
+    await page.setContent(probe);
+    await enable();
+    const alone = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
+    expect(
+      alone.violations.map((violation) => violation.id),
+      'the probe is white on the grey it is leaving',
+    ).toEqual(['color-contrast']);
+
+    await page.setContent(probe);
+    setTimeout(() => {
+      enable().catch(() => undefined);
+    }, 40);
+    expect(await wcagViolations(page)).toEqual([]);
+    expect(
+      await page.evaluate(() => document.adoptedStyleSheets.length),
+      'the scan leaves the page as it found it',
+    ).toBe(0);
+  });
+
   // Break caught: the scan reading the page where the last click left the scroll. A control of the sticky bar over the top of another leaves under 24px of it showing, and the rule of target size
   // fails, as a pickup run's screen did in one hosted run of 18 November 2026 and in no other, because where its scroll stopped depended on timing.
   // The probe is scrolled into that band on purpose (and shown to fail the rule when scanned there), and the scan must not depend on it.
