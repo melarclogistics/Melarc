@@ -515,6 +515,8 @@ describe('SidePanel: motion bound to the token (task R5.2, M14)', () => {
   });
 
   it('is still there at half of motion.slow when motion is welcome (the control of the test above)', async () => {
+    // Motion is welcome: this screen says no query is true of it, where the window of a component test asks for less motion by default (test/setup-components.ts).
+    setScreen(() => false);
     const user = userEvent.setup();
     render(<Page />);
     await user.click(screen.getByRole('button', { name: 'Row one' }));

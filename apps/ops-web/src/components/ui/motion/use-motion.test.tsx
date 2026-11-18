@@ -114,6 +114,8 @@ describe('useMotion', () => {
 
   // Break caught: a browser that cannot say taken to want no motion (or to throw): the page must still draw.
   it('allows motion in a browser that cannot say', () => {
+    // The window of a component test says it wants less motion (test/setup-components.ts); this browser says nothing.
+    Reflect.deleteProperty(window, 'matchMedia');
     render(<Probe />);
 
     expect(read().reduced).toBe(false);
