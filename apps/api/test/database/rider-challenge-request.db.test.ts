@@ -66,6 +66,32 @@ const challengeRowFor = async (challenge: string): Promise<ChallengeRow | undefi
 const countAll = async (): Promise<number> =>
   Number((await rows<{ n: string }>('select count(*) as n from rider_sign_in_challenge'))[0]?.n);
 
+/**
+ * The words that would give a rider away, looked for in what the server says and not in the challenge. The challenge is 43 characters drawn at random from 64, and it spells "hub" (in any case)
+ * by chance in about one request in 800, which failed the scheduled run of 18 November 2026 on main and said nothing about the endpoint.
+ */
+const GIVES_A_RIDER_AWAY = /device|status|hub|rider/i;
+const saidApartFromTheChallenge = (text: string, challenge: string): string =>
+  text.replace(challenge, '');
+
+describe('the words that give a rider away are looked for in what the server says', () => {
+  // Break caught: a scan that reads the random challenge as if the server had said it (a challenge that spells "hub" fails a response that says nothing of any hub), or one that no longer
+  // reads what the server does say. The challenge here is made to spell the word, and a second response is made to say it.
+  it('does not read a challenge that spells a word, and does read a word that the server adds', () => {
+    const challenge = `${'A'.repeat(20)}hUb${'A'.repeat(20)}`;
+    const plain = JSON.stringify({ challenge, expires_at: '2026-11-18T10:30:00.000Z' });
+    expect(plain, 'the whole text is the wrong place to look').toMatch(GIVES_A_RIDER_AWAY);
+    expect(saidApartFromTheChallenge(plain, challenge)).not.toMatch(GIVES_A_RIDER_AWAY);
+
+    const told = JSON.stringify({
+      challenge,
+      expires_at: '2026-11-18T10:30:00.000Z',
+      hub: 'Accra Central',
+    });
+    expect(saidApartFromTheChallenge(told, challenge)).toMatch(GIVES_A_RIDER_AWAY);
+  });
+});
+
 describe('what a challenge is (AC-SLICE-000-39, -52, -53)', () => {
   // Break caught: a nonce that is not 32 random bytes in the canonical unpadded base64url, one that is the same twice, or an expiry that is not
   // the lifetime of `authentication_challenge_ttl_minutes` (5).
@@ -171,11 +197,16 @@ describe('the endpoint is not an enumeration oracle (AC-SLICE-000-39)', () => {
     const response = await requestChallenge(routes, subject.rider.phone);
 
     const text = response.text;
+    const challenge = challengeOf(response);
+    expect(challenge, 'the challenge is the opaque token and nothing else').toMatch(
+      /^[A-Za-z0-9_-]{43}$/,
+    );
+    expect(text).toContain(challenge);
     expect(text).not.toContain('Ama Boateng');
     expect(text).not.toContain(subject.rider.id);
     expect(text).not.toContain(subject.rider.hubId);
     expect(text).not.toContain(subject.rider.phone);
-    expect(text).not.toMatch(/device|status|hub|rider/i);
+    expect(saidApartFromTheChallenge(text, challenge)).not.toMatch(GIVES_A_RIDER_AWAY);
   });
 
   // Break caught: a challenge that only a rider with a device can use to get as far as the PIN, or a number nobody holds refused earlier than
