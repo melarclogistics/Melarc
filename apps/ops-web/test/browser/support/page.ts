@@ -238,6 +238,36 @@ export function watchPage(page: Page) {
 }
 
 /**
+ * Records every time focus moves into content that is hidden from assistive technology (`aria-hidden="true"` on the element or on an ancestor): a modal dialog hides the rest of the app that way
+ * while it is open and while it is on its way out, and a heading focused then may not be announced. Chromium reports it as a console warning ("Blocked aria-hidden on an element because its
+ * descendant retained focus"), but only where its accessibility layer is on, as it is on the machine of a person with a screen reader and is not in a hosted headless run; this reads the page
+ * itself, so that the check is the same in every engine and on every machine. Call it before the page is opened; the function it returns reads what was found so far.
+ */
+export async function watchHiddenFocus(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    const found: string[] = [];
+    (window as unknown as { __hiddenFocus: string[] }).__hiddenFocus = found;
+    document.addEventListener(
+      'focusin',
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const hider = target.closest('[aria-hidden="true"]');
+        if (hider === null) return;
+        const name = (element: Element): string =>
+          `<${element.tagName.toLowerCase()}${element.id === '' ? '' : '#' + element.id}>`;
+        found.push(
+          `focus moved to ${name(target)} inside ${name(hider)}, which is aria-hidden, at ${location.pathname}`,
+        );
+      },
+      true,
+    );
+  });
+  return () =>
+    page.evaluate(() => (window as unknown as { __hiddenFocus?: string[] }).__hiddenFocus ?? []);
+}
+
+/**
  * Waits until the page has stopped moving: every transition and every animation that is running and will end (a fade, a slide, a glide) has ended. One that
  * never ends (a spinner, a caret) is not waited for, and neither is one that is paused. A read of a colour, an opacity or a place that is made before
  * this is a read of the middle of a movement, which is neither the state it comes from nor the one it goes to. Animations of pseudo-elements (a dialog's
