@@ -1170,6 +1170,36 @@ test.describe('every screen and state, at the verified widths', () => {
   }
 });
 
+test.describe('a control that an answer enables while the scan runs', () => {
+  // Break caught: the scan reading the replacement form's button in the middle of the fade that begins when the list of reasons arrives. The button is disabled until then, its label turns white
+  // at once and its fill takes a moment to leave the disabled grey, and a scan that reached it in that moment reported white on grey (two hosted runs of 18 November 2026, at 1280px, in about twenty).
+  // The probe holds the answer back, slows the fade to 3 s so that the middle of it lasts through the scan, and lets the answer go 60 ms into the scan, after the scan has looked for movement and
+  // before axe has read the button. Without the rule of the scan (`withoutTransitions`, support/page.ts) it fails every time, at every delay from 20 to 400 ms.
+  test('the device page is judged by the colours its button settles on', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    watchPage(page);
+    await stubRiderApi(page, world({}));
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/v1/reason-definitions*', async (route) => {
+      await held;
+      await route.fallback();
+    });
+    await page.goto(DEVICE);
+    await expect(page.getByRole('button', { name: 'Revoke the device' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Show the QR code' })).toBeDisabled();
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--motion-fast', '3s');
+    });
+    setTimeout(release, 60);
+
+    expect(await wcagViolations(page)).toEqual([]);
+    await expect(page.getByRole('button', { name: 'Show the QR code' })).toBeEnabled();
+  });
+});
+
 test.describe('the keyboard', () => {
   // Break caught: a control a keyboard cannot reach, or a page whose Tab order the officer cannot predict.
   test('reaches every control of the device page by Tab, in the order of the page', async ({

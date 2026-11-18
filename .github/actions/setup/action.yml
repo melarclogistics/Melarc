@@ -7,6 +7,18 @@ description: >-
 runs:
   using: composite
   steps:
+    # Hosted runners come from two clouds under the one label (Azure and Amazon EC2: 13 and 7 of 20 jobs of a probe on 18 November 2026), and apt's default mirror is the one of the runner's own
+    # cloud. The Amazon one (us-east-2.ec2.archive.ubuntu.com) gave a WebKit job the 125 MB of system libraries that Playwright installs at 93 kB/s, 22 minutes, and the job was cancelled at its limit,
+    # three times running; it is also what slowed the installs of the Chromium, Firefox and HTTPS jobs to 5 and 9 minutes. azure.archive.ubuntu.com measured 54 MB/s or more from the Amazon runners
+    # and more from the Azure ones, and with it first WebKit's system libraries installed in 31 to 81 seconds on all 20 runners of the probe, the Amazon ones included. The others stay as the fallbacks,
+    # and apt retries and gives up on a stalled connection. Every job that installs a package with apt starts with this action (scripts/workspace-pins.ts holds that).
+    - name: Use the package mirror that is fast from every runner
+      shell: bash
+      run: |
+        printf 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttp://us.archive.ubuntu.com/ubuntu/\tpriority:2\nhttps://archive.ubuntu.com/ubuntu/\tpriority:3\nhttps://security.ubuntu.com/ubuntu/\tpriority:4\n' > "$RUNNER_TEMP/apt-mirrors.txt"
+        sudo install -m 644 "$RUNNER_TEMP/apt-mirrors.txt" /etc/apt/apt-mirrors.txt
+        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80-ci-acquire > /dev/null
+
     # pnpm comes from package.json "packageManager"; do not pin a version here.
     - name: Set up pnpm
       uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

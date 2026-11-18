@@ -2051,6 +2051,9 @@ test.describe('the kit under forced colours: a fill is never the only thing that
     await two.getByRole('checkbox', { name: 'Select ACC-PR-4HT9WD' }).check();
     const chosen = two.locator('tr[data-state="selected"]').first();
     expect(await edged(chosen)).toBe(true);
+    // The row's primitive transitions its colours (`transition-colors` names the outline's), so the outline of a chosen row fades in over `motion.fast`: a read in its first frames is the colour it came from
+    // (black, in the hosted Firefox run of 18 November 2026), and the colour it settles on is what is asked. The same goes for the item a menu is on below.
+    await animationsDone(chosen);
     expect(await chosen.evaluate((element) => getComputedStyle(element).outlineColor)).toBe(
       await system(page, 'Highlight'),
     );
@@ -2062,6 +2065,7 @@ test.describe('the kit under forced colours: a fill is never the only thing that
     await page.keyboard.press('ArrowDown');
     const item = page.getByRole('menuitem', { name: 'Escalate' });
     await expect(item).toBeFocused();
+    await animationsDone(item);
     const background = await colourOf(item, 'backgroundColor');
     expect(
       (await edged(item)) || background === (await system(page, 'Highlight')),

@@ -88,6 +88,18 @@ function requestedShard(value: string | undefined): { current: number; total: nu
   return { current, total };
 }
 
+const REQUESTED_ENGINES = requestedEngines(process.env.MELARC_BROWSERS);
+
+/**
+ * **A run that launches WebKit headed makes it with one worker.** Every worker has a browser of its own, and under CI's one virtual display two headed WebKit browsers put their windows on top of each other: the page
+ * underneath is covered, so it is hidden to itself (`document.hidden`) and gets no pointer and no focus, and a library that waits for the page to be visible (the toast's timer) never runs out. The hosted run of main of
+ * 17 November 2026 failed one test of the kit twice in a row, identically, in the same shard (`kit.spec.ts`, "stays with an action until it is dismissed, and goes by itself without one": the toast that should go by
+ * itself stayed), while the other worker had a window up for the whole of its 7 seconds (two tests of 1.9 and 4.9 seconds, one after the other); it passes in a developer's WebKit, where one window is up at a time. That
+ * is the likely cause of the hover, focus and tooltip checks that failed in the hosted WebKit jobs before it (the six that were once left out of the hosted run, and the many others that failed once). Chromium and Firefox
+ * are launched headless and have no window to cover, and a run without WebKit headed keeps two workers. The HTTPS journeys of the e2e workspace run with one worker for the same reason.
+ */
+const WEBKIT_HEADED_RUN = WEBKIT_HEADED && REQUESTED_ENGINES.includes('webkit');
+
 /**
  * Browser tests of the application, in real browsers.
  *
@@ -143,8 +155,8 @@ export default defineConfig({
   forbidOnly: process.env.CI !== undefined,
   // The component tests drive the unbundled development server, which serves every page's modules one request at a
   // time: with many pages open at once it starves and the tests time out. Two workers keep it responsive. No timeout
-  // was raised and no check was loosened.
-  workers: 2,
+  // was raised and no check was loosened. A run that launches WebKit headed makes it with one worker (WEBKIT_HEADED_RUN, above).
+  workers: WEBKIT_HEADED_RUN ? 1 : 2,
   shard: requestedShard(process.env.MELARC_BROWSER_SHARD),
   reporter: 'list',
   use: {
@@ -153,7 +165,7 @@ export default defineConfig({
     // for a test that does (S0.43's sign-in, a real seed): such a test turns tracing, screenshots and video off for its own context.
     trace: 'retain-on-failure',
   },
-  projects: requestedEngines(process.env.MELARC_BROWSERS).flatMap((engine) => [
+  projects: REQUESTED_ENGINES.flatMap((engine) => [
     {
       name: `shell-${engine}`,
       testMatch: 'shell.spec.ts',

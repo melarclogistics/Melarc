@@ -238,6 +238,36 @@ export function watchPage(page: Page) {
 }
 
 /**
+ * Records every time focus moves into content that is hidden from assistive technology (`aria-hidden="true"` on the element or on an ancestor): a modal dialog hides the rest of the app that way
+ * while it is open and while it is on its way out, and a heading focused then may not be announced. Chromium reports it as a console warning ("Blocked aria-hidden on an element because its
+ * descendant retained focus"), but only where its accessibility layer is on, as it is on the machine of a person with a screen reader and is not in a hosted headless run; this reads the page
+ * itself, so that the check is the same in every engine and on every machine. Call it before the page is opened; the function it returns reads what was found so far.
+ */
+export async function watchHiddenFocus(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    const found: string[] = [];
+    (window as unknown as { __hiddenFocus: string[] }).__hiddenFocus = found;
+    document.addEventListener(
+      'focusin',
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const hider = target.closest('[aria-hidden="true"]');
+        if (hider === null) return;
+        const name = (element: Element): string =>
+          `<${element.tagName.toLowerCase()}${element.id === '' ? '' : '#' + element.id}>`;
+        found.push(
+          `focus moved to ${name(target)} inside ${name(hider)}, which is aria-hidden, at ${location.pathname}`,
+        );
+      },
+      true,
+    );
+  });
+  return () =>
+    page.evaluate(() => (window as unknown as { __hiddenFocus?: string[] }).__hiddenFocus ?? []);
+}
+
+/**
  * Waits until the page has stopped moving: every transition and every animation that is running and will end (a fade, a slide, a glide) has ended. One that
  * never ends (a spinner, a caret) is not waited for, and neither is one that is paused. A read of a colour, an opacity or a place that is made before
  * this is a read of the middle of a movement, which is neither the state it comes from nor the one it goes to. Animations of pseudo-elements (a dialog's
@@ -302,6 +332,47 @@ export async function scrollSettled(page: Page, frames = 3): Promise<void> {
 }
 
 /**
+ * What axe measured on one element, after its selector: the contrast ratio with both colours and the size of the text, the space a target has,
+ * the name that is missing. A violation that comes and goes names the selector and nothing else, and the one hosted run of 18 November 2026 in which a primary button of
+ * a screen failed its contrast (and never again in 120 runs of the same test) kept no trace, because the sign-in and device pages turn tracing off: with these figures
+ * the next one says which colours were read, and a colour in the middle of a fade is told from a colour that is wrong at a glance (the cause of those two runs was a fade: `withoutTransitions`, below).
+ */
+function measured(node: {
+  readonly any: readonly { readonly message?: string }[];
+  readonly all: readonly { readonly message?: string }[];
+  readonly none: readonly { readonly message?: string }[];
+}): string {
+  const message = [...node.any, ...node.all, ...node.none].find(
+    (check) => (check.message ?? '') !== '',
+  )?.message;
+  return message === undefined ? '' : `: ${message.replace(/\s+/g, ' ').slice(0, 220)}`;
+}
+
+/**
+ * Runs `work` with every transition of the page at its end, and gives the page back as it was. A rule `transition: none` takes a transition that is under way to the value it was going
+ * to and gives none to a change that comes after, so a colour read in the meantime is the colour of a state and never the middle of a fade. The rule is a style sheet that the document
+ * adopts, not a style element: it adds nothing to the markup, so nothing in the page (an observer of its mutations, a count of its style elements) can notice it, and it leaves nothing behind.
+ */
+async function withoutTransitions<T>(page: Page, work: () => Promise<T>): Promise<T> {
+  const sheet = await page.evaluateHandle(() => {
+    const own = new CSSStyleSheet();
+    own.replaceSync('*, *::before, *::after { transition: none !important; }');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, own];
+    return own;
+  });
+  try {
+    return await work();
+  } finally {
+    await sheet
+      .evaluate((own) => {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((one) => one !== own);
+      })
+      .catch(() => undefined);
+    await sheet.dispose().catch(() => undefined);
+  }
+}
+
+/**
  * One line per violation: the rule, what it asks for and the first elements that break it. `disable` names rules of axe to leave out of this
  * scan, for the one state in which axe is known to be wrong, with the reason written where it is used. `include` limits the scan to the part of the
  * page a selector names (the sidebar, when it is the sidebar that is under test), so that a test of one part fails for that part only.
@@ -311,23 +382,40 @@ export async function scrollSettled(page: Page, frames = 3): Promise<void> {
  * failed in about one run in three at 768px (found in the review of 7 November 2026, and present with the stylesheet and the components of the baseline tree
  * too). The transitions and the animations under way are waited for (`settled`): they are finite, and an animation that never ends (a spinner) is not one of
  * them. A panel that fades in (a dialog, a popover) is read in the same way, at its own opacity once it has arrived and not part way.
+ *
+ * **`settled` waits for what is moving when it looks, and a fade can begin after that.** A control that an answer enables a moment later (the replacement form of a rider's device page: its
+ * button is disabled until the list of reasons is in) turns its label white at once and takes `motion.fast` to leave the disabled grey, so for that moment it is white on grey, and axe, reaching
+ * it then, reports a contrast of 1.14 that nobody sees (two hosted runs of 18 November 2026 in about twenty, on that screen at 1280px and nowhere else, and shown on the page itself by holding the
+ * answer back: `riders.spec.ts`). So the scan reads the page with its transitions at their end (`withoutTransitions`): a fade that is under way is taken to the colour it was going to, and none begins.
+ *
+ * **The page is read from its top, not from where the last click left the scroll.** The rule of target size judges the part of a control that nothing covers, and the top
+ * bar of the shell is sticky and covers the top of what is scrolled under it. A control that the bar covers a little (the menu of a pickup run's acts, with the bar over
+ * its upper half) is under 24px and next to another control, so it fails, and it fails only when the scroll stops in that narrow band: where it stops depends on when the
+ * data under the page arrived and the click that scrolled it into view (the hosted run of 18 November 2026: the 768px screen of a draft pickup run, which passed on the
+ * same code in every other run). A scan is of the screen, not of a scroll position, so it starts where a person arrives, at the top. The scroll is instant: a smooth one
+ * would still be moving when axe reads.
  */
 export async function wcagViolations(
   page: Page,
   options: { readonly disable?: readonly string[]; readonly include?: string } = {},
 ): Promise<string[]> {
   await settled(page);
-  const scan = new AxeBuilder({ page })
-    .withTags(WCAG_TAGS)
-    .disableRules([...(options.disable ?? [])]);
-  const results = await (
-    options.include === undefined ? scan : scan.include(options.include)
-  ).analyze();
-  return results.violations.map(
-    (violation) =>
-      `${violation.id}: ${violation.help} (${violation.nodes
-        .slice(0, 3)
-        .map((node) => node.target.join(' '))
-        .join(', ')})`,
-  );
+  await page.evaluate(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  });
+  return withoutTransitions(page, async () => {
+    const scan = new AxeBuilder({ page })
+      .withTags(WCAG_TAGS)
+      .disableRules([...(options.disable ?? [])]);
+    const results = await (
+      options.include === undefined ? scan : scan.include(options.include)
+    ).analyze();
+    return results.violations.map(
+      (violation) =>
+        `${violation.id}: ${violation.help} (${violation.nodes
+          .slice(0, 3)
+          .map((node) => `${node.target.join(' ')}${measured(node)}`)
+          .join(', ')})`,
+    );
+  });
 }

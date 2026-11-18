@@ -1,7 +1,7 @@
+import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 
-import { skipWhereKnownFlaky } from './support/known-flaky';
 import { reachableNames, tabReachesLinks, watchPage, wcagViolations } from './support/page';
 
 /**
@@ -360,9 +360,7 @@ test.describe('the components in a browser: states under the pointer', () => {
   // that is not loading must still change, or the check proves nothing.
   test('a loading button keeps its fill under the pointer, and an ordinary one changes it', async ({
     page,
-    browserName,
   }) => {
-    skipWhereKnownFlaky(browserName, 'loading-button-fill-under-pointer');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openShowcase(page);
 
@@ -375,6 +373,35 @@ test.describe('the components in a browser: states under the pointer', () => {
       await page.getByRole('button', { name: 'Saving…' }).nth(index).hover();
       expect(await fill(page, 'Saving…', index), `loading button ${String(index)}`).toBe(before);
     }
+  });
+
+  // Break caught: a button that is enabled changing its label to the final colour at once while its fill takes the motion token to leave the disabled grey, so that the label is the enabled colour
+  // on the disabled fill for the whole fade (the device page of a rider, whose button an answer enables: 18 November 2026). The token is made long, so that the check lands inside the fade.
+  test('a button that is enabled moves its label with its fill, and never shows the enabled label on the fill it is leaving', async ({
+    page,
+  }) => {
+    await openShowcase(page);
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--motion-fast', '4s');
+    });
+    const button = page.getByRole('button', { name: 'Disabled action' });
+    const label = (): Promise<string> =>
+      button.evaluate((element) => getComputedStyle(element).color);
+    const enabledLabel = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--color-action-primary-text)';
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    });
+    expect(await label(), 'the disabled label is not the enabled one').not.toBe(enabledLabel);
+
+    await button.evaluate((element) => {
+      (element as HTMLButtonElement).disabled = false;
+    });
+
+    expect(await label(), 'the label has not jumped to the enabled colour').not.toBe(enabledLabel);
   });
 });
 
@@ -571,9 +598,7 @@ test.describe('the sidebar and the top bar in a browser', () => {
   // Break caught: a rail whose entry gives no name to a pointer or a keyboard user: an icon that has to be guessed.
   test('shows the name of an entry of the rail in a tooltip on hover and on focus, and Escape takes it away', async ({
     page,
-    browserName,
   }) => {
-    skipWhereKnownFlaky(browserName, 'rail-tooltip-on-hover-and-focus');
     await openShell(page);
     const link = entries(rail(page)).filter({ hasText: 'Demo staff' });
     await link.scrollIntoViewIfNeeded();
@@ -1122,5 +1147,92 @@ test.describe('the accessibility scan in a browser', () => {
     expect(await background()).not.toBe('rgb(180, 35, 46)');
     expect(await wcagViolations(page)).toEqual([]);
     expect(await background()).toBe('rgb(180, 35, 46)');
+  });
+
+  // Break caught: a fade that begins after the scan has looked and found the page still. `settled` waits for what is moving when it looks, and a control that an answer enables a moment later
+  // (the replacement form of a rider's device page, disabled until the list of reasons is in) turns its label white at once and takes a moment to leave the disabled grey: the scan reached it
+  // half way and reported white on grey, in two hosted runs of 18 November 2026. The probe fades over 3 s and is enabled 40 ms into the scan, after `settled` has looked, so that without the
+  // rule of the scan it always lands inside the fade; and the same probe, read by axe alone as soon as it is enabled, is shown to fail.
+  test('judges a control that is enabled while the scan runs by the colour it settles on', async ({
+    page,
+  }) => {
+    const probe = `<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        button { padding: 8px 16px; border: 0; transition: background-color 3s linear; }
+        button:disabled { background: #eef0f4; color: #5b6472; }
+        button:enabled { background: #b4232e; color: #ffffff; }
+      </style></head><body><main><h1>Probe</h1><button type="button" disabled>Go</button></main></body></html>`;
+    const enable = (): Promise<void> =>
+      page.getByRole('button', { name: 'Go' }).evaluate((element) => {
+        (element as HTMLButtonElement).disabled = false;
+      });
+
+    await page.setContent(probe);
+    await enable();
+    const alone = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
+    expect(
+      alone.violations.map((violation) => violation.id),
+      'the probe is white on the grey it is leaving',
+    ).toEqual(['color-contrast']);
+
+    await page.setContent(probe);
+    setTimeout(() => {
+      enable().catch(() => undefined);
+    }, 40);
+    expect(await wcagViolations(page)).toEqual([]);
+    expect(
+      await page.evaluate(() => document.adoptedStyleSheets.length),
+      'the scan leaves the page as it found it',
+    ).toBe(0);
+  });
+
+  // Break caught: the scan reading the page where the last click left the scroll. A control of the sticky bar over the top of another leaves under 24px of it showing, and the rule of target size
+  // fails, as a pickup run's screen did in one hosted run of 18 November 2026 and in no other, because where its scroll stopped depended on timing.
+  // The probe is scrolled into that band on purpose (and shown to fail the rule when scanned there), and the scan must not depend on it.
+  test('reads the page from its top, whatever the scroll it is left at', async ({ page }) => {
+    await page.setContent(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        body { margin: 0; }
+        header { position: sticky; top: 0; height: 46px; background: #ffffff; }
+        .bar { box-sizing: border-box; width: 100%; height: 100%; }
+        h1 { margin: 0; height: 40px; }
+        .row { display: flex; gap: 8px; margin-top: 300px; }
+        .row button { box-sizing: border-box; width: 36px; height: 36px; padding: 0; }
+        .tail { height: 2000px; }
+      </style></head><body><header><button type="button" class="bar">Bar</button></header><main><h1>Probe</h1>
+        <div class="row"><button type="button" aria-label="One">1</button><button type="button" aria-label="Two">2</button></div>
+        <div class="tail"></div></main></body></html>`);
+    const rowTop = (): Promise<number> =>
+      page.locator('.row').evaluate((row) => row.getBoundingClientRect().top);
+    // Where the control of the bar covers the upper 22px of the buttons and leaves 14px of them showing (the bar is 46px, the row is 24px under the top of the page).
+    await page.evaluate(() => {
+      const row = document.querySelector('.row');
+      window.scrollBy(0, (row?.getBoundingClientRect().top ?? 0) - 24);
+    });
+    expect(await rowTop()).toBe(24);
+    const there = await new AxeBuilder({ page }).withRules(['target-size']).analyze();
+    expect(
+      there.violations.map((violation) => violation.id),
+      'the probe is in the band',
+    ).toEqual(['target-size']);
+
+    expect(await wcagViolations(page)).toEqual([]);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  });
+
+  // Break caught: a report that names the element and not what axe measured of it. A violation that comes and goes (a colour read in the middle of a fade, a control half under a bar)
+  // is told from a wrong one by its figures, and a failed run of a page that keeps no trace has nothing else to read.
+  test('says what axe measured of an element that fails: the ratio and both colours', async ({
+    page,
+  }) => {
+    await page.setContent(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Probe</title><style>
+        p { color: #8a94a8; background: #eef0f4; }
+      </style></head><body><main><h1>Probe</h1><p id="faint">A line that is too faint</p></main></body></html>`);
+
+    const [violation] = await wcagViolations(page);
+
+    expect(violation).toMatch(/^color-contrast: .*\(#faint: .*foreground color: #8a94a8/);
+    expect(violation).toContain('background color: #eef0f4');
   });
 });

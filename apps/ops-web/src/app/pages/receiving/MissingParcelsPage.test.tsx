@@ -199,8 +199,11 @@ describe('finding a parcel', () => {
     const { user } = open(undefined, ['hub.read']);
     await table();
     await user.click(screen.getByRole('button', { name: OPEN_ONE }));
-    // The parcel is open (its facts are drawn), and the one act is not there.
-    expect(await screen.findByText('Missing since')).toBeVisible();
+    // The parcel is open (its facts are drawn), and the one act is not there. The panel comes in with a fade from nothing, and the first frame of it is not visible: the fact
+    // is looked for until it is (one run in about eighty read it at that frame: the unit job of 18 November 2026).
+    await waitFor(() => {
+      expect(screen.getByText('Missing since')).toBeVisible();
+    });
     expect(screen.queryByRole('button', { name: 'Found: check it in' })).toBeNull();
   });
 
@@ -209,7 +212,9 @@ describe('finding a parcel', () => {
     const { user } = open(() => json(200, runPage([written])), KEYS, {}, [written]);
     await table();
     await user.click(screen.getByRole('button', { name: OPEN_ONE }));
-    expect(await screen.findByText(/The search for this parcel is over/)).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByText(/The search for this parcel is over/)).toBeVisible();
+    });
     expect(screen.queryByRole('button', { name: 'Found: check it in' })).toBeNull();
   });
 

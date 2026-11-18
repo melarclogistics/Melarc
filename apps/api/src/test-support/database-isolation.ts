@@ -97,6 +97,38 @@ interface Literal {
 }
 
 /**
+ * Where the string literal that starts at `start` (its opening quote) ends: the index of its closing quote, or of the newline that ended a quoted string that was never closed, or the end of the text.
+ * One scan of that literal and nothing after it, so that a caller that has to step over each literal of a file does not read the rest of the file for each (that was quadratic, and the isolation test
+ * of the database tests took 15 to 18 seconds of its 20 on a hosted runner for it).
+ */
+function literalEnd(source: string, start: number): number {
+  const char = source[start];
+  let index = start + 1;
+  let depth = 0;
+  while (index < source.length) {
+    const current = source[index];
+    if (current === '\\') {
+      index += 2;
+      continue;
+    }
+    if (char === '`' && current === '$' && source[index + 1] === '{') {
+      depth += 1;
+      index += 2;
+      continue;
+    }
+    if (depth > 0 && current === '}') {
+      depth -= 1;
+    } else if (depth === 0 && current === char) {
+      break;
+    } else if (char !== '`' && current === '\n') {
+      break;
+    }
+    index += 1;
+  }
+  return index;
+}
+
+/**
  * The string literals of a TypeScript text, comments left out: quoted strings and template literals (the text of a `${...}` part is kept
  * with its template, which is where an interpolated statement lives).
  */
@@ -113,31 +145,9 @@ export function stringLiterals(source: string): Literal[] {
       const end = source.indexOf('*/', index + 2);
       index = end === -1 ? source.length : end + 2;
     } else if (char === "'" || char === '"' || char === '`') {
-      const start = index;
-      index += 1;
-      let depth = 0;
-      while (index < source.length) {
-        const current = source[index];
-        if (current === '\\') {
-          index += 2;
-          continue;
-        }
-        if (char === '`' && current === '$' && source[index + 1] === '{') {
-          depth += 1;
-          index += 2;
-          continue;
-        }
-        if (depth > 0 && current === '}') {
-          depth -= 1;
-        } else if (depth === 0 && current === char) {
-          break;
-        } else if (char !== '`' && current === '\n') {
-          break;
-        }
-        index += 1;
-      }
-      literals.push({ text: source.slice(start + 1, index), offset: start });
-      index += 1;
+      const end = literalEnd(source, index);
+      literals.push({ text: source.slice(index + 1, end), offset: index });
+      index = end + 1;
     } else {
       index += 1;
     }
@@ -211,8 +221,8 @@ function withoutCommentsAndStrings(source: string): string {
       blank(index, stop);
       index = stop;
     } else if (char === "'" || char === '"' || char === '`') {
-      const literal = stringLiterals(source.slice(index))[0];
-      const stop = index + (literal === undefined ? 1 : literal.text.length + 2);
+      // The literal, its quotes included: from its opening quote to the one after its end (the stop `stringLiterals` steps to).
+      const stop = literalEnd(source, index) + 1;
       blank(index, stop);
       index = stop;
     } else {
