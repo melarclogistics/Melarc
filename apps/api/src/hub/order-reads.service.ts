@@ -16,16 +16,33 @@ export interface OrderReadsOptions {
   readonly audit: AuditWriter;
 }
 
-/** What a vendor is not shown of an order, whatever the code does: the recipient, the serial or IMEI, who judged the size and the carrier's own cost (37.6; the contract's `getOrder`). */
-const WITHHELD_FROM_A_VENDOR = [
-  'recipient',
-  'serial_imei',
-  'size_class_selected_by',
-  'carrier_cost',
+/**
+ * What a vendor is shown of an order, **by allowlist** (37.6; the contract's `getOrder`: the locked price and never its inputs): a member added to the staff's view is not a vendor's until it is named here. The
+ * recipient, the serial or IMEI, the officer who judged the size, the carrier's cost, **the components of the price** (they name the margin and the carrier's cost), the zones, the hub and the date override stay
+ * with the staff.
+ */
+const SHOWN_TO_A_VENDOR = [
+  'id',
+  'code',
+  'pickup_intake_id',
+  'intake_parcel_id',
+  'intake_parcel_state',
+  'commercial_state',
+  'fulfilment_state',
+  'size_class',
+  'lane',
+  'commercial_mode',
+  'is_high_value',
+  'locked_price',
+  'payer_allocation',
+  'derived_delivery_date',
+  'requested_delivery_date',
+  'service_level',
+  'delivery_attempt_count',
 ] as const;
 
-/** The order a vendor reads: the view with the four members it is not shown left out (never present and null). */
-export type VendorOrderView = Omit<OrderView, (typeof WITHHELD_FROM_A_VENDOR)[number]>;
+/** The order a vendor reads: the members named above and no other. */
+export type VendorOrderView = Partial<Pick<OrderView, (typeof SHOWN_TO_A_VENDOR)[number]>>;
 
 /** An order as one session reads it, and the `ETag` of what that session was shown. */
 export interface ReadOrder {
@@ -73,10 +90,11 @@ export function orderEtagMatches(header: string | undefined, current: string): b
 
 /** The order a vendor reads. */
 export function vendorOrderViewOf(view: OrderView): VendorOrderView {
-  const withheld = new Set<string>(WITHHELD_FROM_A_VENDOR);
-  return Object.fromEntries(
-    Object.entries(view).filter(([member]) => !withheld.has(member)),
-  ) as VendorOrderView;
+  const shown = new Set<string>(SHOWN_TO_A_VENDOR);
+  const picked: VendorOrderView = Object.fromEntries(
+    Object.entries(view).filter(([member]) => shown.has(member)),
+  );
+  return picked;
 }
 
 const isoOf = (value: string | Date): string =>

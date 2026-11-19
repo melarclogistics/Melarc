@@ -1713,7 +1713,15 @@ describe('the summary of a closed intake and the read of an order (S1.38, AC-SLI
       id: made.id,
       locked_price: { amount_minor: 3500, currency: 'GHS' },
     });
-    for (const withheld of ['recipient', 'serial_imei', 'size_class_selected_by', 'carrier_cost']) {
+    for (const withheld of [
+      'recipient',
+      'serial_imei',
+      'size_class_selected_by',
+      'carrier_cost',
+      'price_components_snapshot',
+      'responsible_hub_id',
+      'destination_zone_snapshot',
+    ]) {
       expect(shown, withheld).not.toHaveProperty(withheld);
     }
     expect(vendorRead.header('etag')).not.toBe(staffRead.header('etag'));

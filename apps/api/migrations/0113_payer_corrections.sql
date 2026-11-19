@@ -139,7 +139,9 @@ CREATE POLICY "pickup_request_amend" ON "pickup_request" FOR UPDATE USING (
 CREATE POLICY "pickup_intake_amend_read" ON "pickup_intake" FOR SELECT USING (
   CASE melarc.principal_type()
     WHEN 'STAFF' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.request.create'
+      AND (melarc.hub_scope_mode() = 'ALL' OR "pickup_intake"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
     WHEN 'VENDOR' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.request.create'
+      AND EXISTS (SELECT 1 FROM "pickup_request" AS r WHERE r.id = "pickup_intake"."pickup_request_id" AND r.vendor_organization_id = melarc.current_vendor_organization_id())
     ELSE false
   END
 );
@@ -147,7 +149,9 @@ CREATE POLICY "pickup_intake_amend_read" ON "pickup_intake" FOR SELECT USING (
 CREATE POLICY "order_amend_read" ON "order" FOR SELECT USING (
   CASE melarc.principal_type()
     WHEN 'STAFF' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.request.create'
+      AND (melarc.hub_scope_mode() = 'ALL' OR "order"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
     WHEN 'VENDOR' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.request.create'
+      AND "order"."vendor_organization_id" = melarc.current_vendor_organization_id()
     ELSE false
   END
 );
@@ -155,6 +159,7 @@ CREATE POLICY "order_amend_read" ON "order" FOR SELECT USING (
 CREATE POLICY "pickup_stop_amend_read" ON "pickup_stop" FOR SELECT USING (
   CASE melarc.principal_type()
     WHEN 'STAFF' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.request.create'
+      AND (melarc.hub_scope_mode() = 'ALL' OR "pickup_stop"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
     ELSE false
   END
 );
@@ -162,6 +167,7 @@ CREATE POLICY "pickup_stop_amend_read" ON "pickup_stop" FOR SELECT USING (
 CREATE POLICY "pickup_manifest_amend_read" ON "pickup_manifest" FOR SELECT USING (
   CASE melarc.principal_type()
     WHEN 'STAFF' THEN current_user = 'melarc_owner' AND coalesce(current_setting('melarc.authorization_key', true), '') = 'pickup.request.create'
+      AND (melarc.hub_scope_mode() = 'ALL' OR "pickup_manifest"."responsible_hub_id" = ANY (melarc.authorized_hub_ids()))
     ELSE false
   END
 );
