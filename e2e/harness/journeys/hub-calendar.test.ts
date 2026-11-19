@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { hubRunsOn, hubToday } from './hub-calendar.ts';
+import { hubRunsOn, hubToday, msToWaitForADay, msUntilHubMidnight } from './hub-calendar.ts';
 
 describe('the hub works Monday to Saturday', () => {
   // Break caught: a Sunday taken for a day the hub works (the journey then builds a manifest the API refuses), or a working day taken for a
@@ -30,6 +30,33 @@ describe('the hub works Monday to Saturday', () => {
     for (const bad of ['', '2026-11-8', '08/11/2026', '2026-02-30', '2026-13-01', 'Sunday']) {
       expect(() => hubRunsOn(bad), bad).toThrow(/not a calendar day/);
     }
+  });
+});
+
+describe('the end of the hub’s day', () => {
+  const MINUTE = 60 * 1000;
+
+  // Break caught: the time left read in the machine's own zone, or from the wrong end of the day (a journey that waits when it need not, or does not when it must).
+  it('is the time from an instant to the hub’s next midnight', () => {
+    expect(msUntilHubMidnight(new Date('2026-11-18T23:55:00Z'))).toBe(5 * MINUTE);
+    expect(msUntilHubMidnight(new Date('2026-11-18T23:59:59.500Z'))).toBe(500);
+    expect(msUntilHubMidnight(new Date('2026-11-18T12:00:00Z'))).toBe(12 * 60 * MINUTE);
+    expect(msUntilHubMidnight(new Date('2026-11-19T00:00:00Z'))).toBe(24 * 60 * MINUTE);
+  });
+
+  // Break caught: the journey of 18 November 2026, which began at 23:58 UTC and found the day over: it must wait for the next one.
+  it('makes a journey that began in the last minutes of the day wait for the next day, and no other', () => {
+    const needed = 5 * MINUTE;
+    expect(msToWaitForADay(needed, new Date('2026-11-18T12:00:00Z'))).toBe(0);
+    expect(msToWaitForADay(needed, new Date('2026-11-18T23:55:00Z'))).toBe(0);
+    expect(msToWaitForADay(needed, new Date('2026-11-18T23:55:01Z'))).toBe(299_000 + 2000);
+    const began = new Date('2026-11-18T23:58:00Z');
+    const waited = msToWaitForADay(needed, began);
+    expect(waited).toBe(2 * MINUTE + 2000);
+    // After the wait it is the next day, and a long one.
+    const resumed = new Date(began.getTime() + waited);
+    expect(hubToday(resumed)).toBe('2026-11-19');
+    expect(msToWaitForADay(needed, resumed)).toBe(0);
   });
 });
 

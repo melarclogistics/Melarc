@@ -17,6 +17,33 @@ export function hubToday(now: Date = new Date()): string {
   }).format(now);
 }
 
+/** Milliseconds from an instant to the hub's next midnight. The hub's zone keeps one offset all year, so a day of it is 24 hours. */
+export function msUntilHubMidnight(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: HUB_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const at = (type: 'hour' | 'minute' | 'second'): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? Number.NaN);
+  const sinceMidnight =
+    ((at('hour') * 60 + at('minute')) * 60 + at('second')) * 1000 + now.getMilliseconds();
+  if (Number.isNaN(sinceMidnight)) throw new Error('The hub clock could not be read.');
+  return 24 * 60 * 60 * 1000 - sinceMidnight;
+}
+
+/**
+ * How long a journey that needs one day, from its first request to its last, waits for it: nothing when `needed` milliseconds of the hub's day are left, and the rest of the day and
+ * two seconds more when fewer are. A run is started on its own day and a day is judged by the hub's clock, so a journey that began in the last minutes of the hub's day found the day
+ * over under its hands ("That day has passed": the HTTPS journeys of a pull request, 23:58 UTC on 18 November 2026). It is not a retry: the journey starts once, on a day that is long enough.
+ */
+export function msToWaitForADay(needed: number, now: Date = new Date()): number {
+  const left = msUntilHubMidnight(now);
+  return left >= needed ? 0 : left + 2000;
+}
+
 /** Whether the hub works on a calendar day, `YYYY-MM-DD`: Monday to Saturday. A date that is not a real day is refused. */
 export function hubRunsOn(day: string): boolean {
   const noon = new Date(`${day}T12:00:00Z`);

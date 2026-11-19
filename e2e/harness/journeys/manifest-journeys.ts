@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { arrange } from '../database.ts';
 import { readMessages, readTexts } from '../messages.ts';
 import { signInAs } from './actions.ts';
-import { hubRunsOn, hubToday } from './hub-calendar.ts';
+import { hubRunsOn, hubToday, msToWaitForADay } from './hub-calendar.ts';
 import { clearBrowser, expectHeading, fromPage } from './pages.ts';
 import { readEnrolmentCode, RiderHandset } from './rider-handset.ts';
 import type { JourneyContext } from './staff-journeys.ts';
@@ -27,7 +27,11 @@ import { worldOf, type RiderState } from './world.ts';
  * (`Africa/Accra`), whatever the browser's own clock says: the harness freezes that clock on 5 October 2026 and the API runs on the real one.
  * The hub works Monday to Saturday (`hub-calendar.ts`), so on a Sunday there is no day on which this story can be told: the API refuses a manifest
  * for it, and a run starts only on its own day. The journey is then **skipped, with that reason, and not passed**; it runs on every other day.
+ * It needs the **whole** of that day, from its first request to its last (about half a minute, a slow runner several times that): begun in the last five minutes of
+ * the hub's day it waits for the next one (`msToWaitForADay`), as the HTTPS journeys of a pull request, begun at 23:58 UTC on 18 November 2026, would have had to
+ * ("That day has passed"). The day is read once, so that every step of the walk is of the same day.
  */
+const A_DAY_FOR_THE_JOURNEY_MS = 5 * 60 * 1000;
 const TWO = {
   name: 'Demonstration Rider Two (fixture)',
   phone: '+99900000002',
@@ -166,6 +170,14 @@ async function letTheChallengeMinutePass(database: string): Promise<void> {
  * recorders off (it is a secret spec), so the words of the page are the only picture of where it stopped.
  */
 export async function manifestsAndCustody(journey: JourneyContext): Promise<void> {
+  const wait = msToWaitForADay(A_DAY_FOR_THE_JOURNEY_MS);
+  if (wait > 0) {
+    // The wait is not the journey's own time: the test's timeout is lengthened by it.
+    test.setTimeout(test.info().timeout + wait + 5000);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, wait);
+    });
+  }
   const today = hubToday();
   test.skip(
     !hubRunsOn(today),
@@ -173,7 +185,7 @@ export async function manifestsAndCustody(journey: JourneyContext): Promise<void
       `work and a run starts only on its own day, so this journey has nothing to walk today. It is not passed; it runs on every other day.`,
   );
   try {
-    await walk(journey);
+    await walk(journey, today);
   } catch (error) {
     const said = await journey.page
       .locator('main')
@@ -189,7 +201,7 @@ The page said: ${said.slice(0, 700)}`,
   }
 }
 
-async function walk({ page, context, stack }: JourneyContext): Promise<void> {
+async function walk({ page, context, stack }: JourneyContext, day: string): Promise<void> {
   const world = worldOf(stack);
   const ama = world.person('ama.accra');
   const vendor = world.vendor;
@@ -198,7 +210,6 @@ async function walk({ page, context, stack }: JourneyContext): Promise<void> {
     throw new Error('The vendor and rider journeys run before the manifest journey.');
   }
   const database = stack.database.name;
-  const day = hubToday();
 
   // The pool: four confirmed requests of the demonstration vendor for the hub's day.
   expect(await arrange(database, 'add-confirmed-pickups', vendor.identifier, day, '4')).toBe(4);
