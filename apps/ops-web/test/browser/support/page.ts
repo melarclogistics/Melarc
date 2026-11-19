@@ -200,6 +200,23 @@ export function isFirefoxOwnWarning(
 }
 
 /**
+ * The one failed request of a healthy page that is not told as a problem, on Firefox: the page's own favicon, cancelled (`NS_BINDING_ABORTED`). The tab and the brand mark both ask for
+ * `/favicon.svg` (the trace of the hosted run of 18 November 2026 shows three requests for it within 50 ms) and Firefox drops one of them: a request that the engine cancels, that no
+ * code of ours asked to cancel and that the page is not the worse for, which failed "is a healthy page" now and then (main's run on the merge of #60). It is matched whole, as the
+ * two warnings above are: another file, another error, another host or another engine is a problem as before.
+ */
+export const FIREFOX_OWN_ABORT = /^http:\/\/127\.0\.0\.1:\d+\/favicon\.svg$/;
+
+/** Whether a failed request is the one Firefox cancels of its own accord (see `FIREFOX_OWN_ABORT`): on Firefox, by that error, for that file on the test origin. */
+export function isFirefoxOwnAbort(
+  engine: string | undefined,
+  url: string,
+  errorText: string | undefined,
+): boolean {
+  return engine === 'firefox' && errorText === 'NS_BINDING_ABORTED' && FIREFOX_OWN_ABORT.test(url);
+}
+
+/**
  * Records what a healthy page never does: log errors, throw, fail a request, **draw a permission key** (the runtime half of the guard that holds a key off every screen,
  * `test/no-permission-key-on-screen.test.ts`: the page watches its own text and attributes as they are built and as they change, and reports a key of the catalogue as a
  * console error, which is a problem here). Also lists its requests. Call it before the page is opened: the watch is installed in every document the page loads after that.
@@ -223,9 +240,9 @@ export function watchPage(page: Page) {
     problems.push(`uncaught: ${error.message}`);
   });
   page.on('requestfailed', (request) => {
-    problems.push(
-      `request failed: ${request.url()} (${request.failure()?.errorText ?? 'no reason given'})`,
-    );
+    const errorText = request.failure()?.errorText;
+    if (isFirefoxOwnAbort(engine, request.url(), errorText)) return;
+    problems.push(`request failed: ${request.url()} (${errorText ?? 'no reason given'})`);
   });
   page.on('response', (response) => {
     if (response.status() >= 400)

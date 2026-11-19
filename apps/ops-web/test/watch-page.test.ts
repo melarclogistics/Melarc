@@ -17,11 +17,13 @@ const SCROLL_LINKED =
   '[JavaScript Warning: "This site appears to use a scroll-linked positioning effect. This may not work well with asynchronous panning; see https://firefox-source-docs.mozilla.org/performance/scroll-linked_effects.html for further details and to join the discussion on related tools and features!" {file: "http://127.0.0.1:4274/__showcase/kit/overlays" line: 0}]';
 
 type Say = (type: 'warning' | 'error' | 'log', text: string) => void;
+type Fail = (url: string, errorText: string) => void;
 
-/** A page that is only what `watchPage` asks of one: its engine, a console that it can be told things in, and a place for an init script. */
+/** A page that is only what `watchPage` asks of one: its engine, a console that it can be told things in, requests that can fail, and a place for an init script. */
 function pageOf(engine: 'chromium' | 'firefox' | 'webkit' | null): {
   readonly page: Page;
   readonly say: Say;
+  readonly fail: Fail;
 } {
   const handlers = new Map<string, (argument: unknown) => void>();
   const fake = {
@@ -41,7 +43,10 @@ function pageOf(engine: 'chromium' | 'firefox' | 'webkit' | null): {
       location: () => ({ url: '' }),
     });
   };
-  return { page: fake as unknown as Page, say };
+  const fail: Fail = (url, errorText) => {
+    handlers.get('requestfailed')?.({ url: () => url, failure: () => ({ errorText }) });
+  };
+  return { page: fake as unknown as Page, say, fail };
 }
 
 describe('watchPage: what Firefox says of its own accord', () => {
@@ -123,6 +128,60 @@ describe('watchPage: what Firefox says of its own accord', () => {
     say('log', 'A log line is not a problem.');
 
     expect(seen.problems).toEqual(['console error: Uncaught TypeError: x is undefined ()']);
+  });
+});
+
+describe('watchPage: a request that Firefox cancels of its own accord', () => {
+  const FAVICON = 'http://127.0.0.1:4274/favicon.svg';
+
+  // Break caught: a Firefox run failing "is a healthy page" on a favicon that the engine itself cancelled when the tab and the brand mark both asked for it (main's run on the merge of #60).
+  it('does not count the cancelled request for the page’s own favicon, on Firefox', () => {
+    const { page, fail } = pageOf('firefox');
+    const seen = watchPage(page);
+
+    fail(FAVICON, 'NS_BINDING_ABORTED');
+
+    expect(seen.problems).toEqual([]);
+  });
+
+  // Break caught: a filter that has grown into "Firefox's cancelled requests are ignored": another file, another host, a query, another error, are a request that failed.
+  it('still counts every other failed request on Firefox', () => {
+    const { page, fail } = pageOf('firefox');
+    const seen = watchPage(page);
+
+    const others: [string, string][] = [
+      ['http://127.0.0.1:4274/api/v1/auth/session', 'NS_BINDING_ABORTED'],
+      ['http://127.0.0.1:4274/assets/melarc-logo-primary.svg', 'NS_BINDING_ABORTED'],
+      ['http://127.0.0.1:4274/favicon.svg?v=2', 'NS_BINDING_ABORTED'],
+      ['https://example.com/favicon.svg', 'NS_BINDING_ABORTED'],
+      [FAVICON, 'NS_ERROR_NET_RESET'],
+      [FAVICON, 'NS_ERROR_CONNECTION_REFUSED'],
+    ];
+    for (const [url, errorText] of others) fail(url, errorText);
+
+    expect(seen.problems).toEqual(
+      others.map(([url, errorText]) => `request failed: ${url} (${errorText})`),
+    );
+  });
+
+  // Break caught: the filter applied to every engine: a Chromium or a WebKit whose favicon request failed would be reporting something of ours.
+  it.each(['chromium', 'webkit'] as const)('still counts it on %s', (engine) => {
+    const { page, fail } = pageOf(engine);
+    const seen = watchPage(page);
+
+    fail(FAVICON, 'NS_BINDING_ABORTED');
+
+    expect(seen.problems).toEqual([`request failed: ${FAVICON} (NS_BINDING_ABORTED)`]);
+  });
+
+  // Break caught: a page whose engine is not known taken for Firefox.
+  it('counts it when the engine is not known', () => {
+    const { page, fail } = pageOf(null);
+    const seen = watchPage(page);
+
+    fail(FAVICON, 'NS_BINDING_ABORTED');
+
+    expect(seen.problems).toHaveLength(1);
   });
 });
 
