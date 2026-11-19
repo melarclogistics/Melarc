@@ -735,6 +735,10 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.receiving_runs',
       'melarc.missing_parcels',
       'melarc.receiving_run_codes',
+      // S1.36 (migration 0110): what an order is made from, the order with its first commitment, and the confirmation of the orders that waited for a parcel.
+      'melarc.itemization_source',
+      'melarc.itemize_order',
+      'melarc.freeze_orders',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

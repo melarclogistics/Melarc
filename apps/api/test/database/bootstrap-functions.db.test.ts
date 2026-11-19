@@ -309,6 +309,10 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.receiving_runs',
       'melarc.missing_parcels',
       'melarc.receiving_run_codes',
+      // S1.36 (migration 0110): what an order is made from, the order with its first commitment, and the confirmation of the orders that waited for a parcel.
+      'melarc.itemization_source',
+      'melarc.itemize_order',
+      'melarc.freeze_orders',
     ]);
   });
 

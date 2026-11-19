@@ -212,6 +212,14 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.receiving_runs',
     'melarc.missing_parcels',
     'melarc.receiving_run_codes',
+    // And the three operations of an itemization (migration 0110, S1.36): what an order is made from (`melarc.itemization_source`: the intake's hub, the place its request was collected at, whether the
+    // booking acknowledged the liability cap and the moment custody passed, for staff under `hub.intake.itemize` alone), the order and its first commitment (`melarc.itemize_order`: the same key, the intake's
+    // lock first, the owner writes both in the one change, freezes the price of a parcel that has arrived and moves the intake to ITEMIZING) and the confirmation of the orders that waited for a parcel
+    // (`melarc.freeze_orders`: staff under `hub.intake.count` or `hub.osd.adjudicate`, once the act that committed the arrival is made). The policies that admit the writes name the owner, and the
+    // guards of both tables hold what an order and a commitment are for every writer, so the login can write neither.
+    'melarc.itemization_source',
+    'melarc.itemize_order',
+    'melarc.freeze_orders',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

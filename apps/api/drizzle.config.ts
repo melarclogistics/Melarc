@@ -51,6 +51,9 @@ export default defineConfig({
     './src/hub/intake-parcel.schema.ts',
     // SLICE-001 (S1.34): what was found at an intake after its count: the receiver's conditions and Senior Ops's adjudications.
     './src/hub/pickup-intake-finding.schema.ts',
+    // SLICE-001 (S1.36): the order made for a parcel at itemization, and what Melarc promised for it (its first commitment is written with it).
+    './src/hub/order.schema.ts',
+    './src/hub/delivery-commitment.schema.ts',
   ],
   out: './migrations',
   strict: true,
