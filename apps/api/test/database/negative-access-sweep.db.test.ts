@@ -630,16 +630,28 @@ describe('the existence rule (a Vendor’s or Rider’s refusal tells nothing of
     await refreshSessions();
   });
 
+  // A session is allowed 120 requests a minute and each operation asks two of each principal (the record that exists, and one that does not), so a session
+  // holds the sweep for 60 operations and no more: it has 64 now, and the last four were answered `429` by the limiter, both alike, and so passed without being
+  // tested (and failed now and then, when the two `Retry-After` of those answers fell in different seconds: the nightly run of 18 November 2026). So the sessions
+  // are renewed every OPERATIONS_PER_SESSION operations, which keeps the sweep as far from the limit as the comment where they are made says it is.
+  const OPERATIONS_PER_SESSION = 25;
+  let asked = 0;
+
   // Break caught: an operation that answers another party's record differently from a missing one (a status, a code, a message, a field
   // or a header), which would let a Vendor or a Rider enumerate records by trying identifiers (errors-and-enums.md section 4).
   it.each(addressed.map((operation) => [operation.id, operation]))(
     '%s answers both alike',
     async (_id, operation) => {
+      if (asked > 0 && asked % OPERATIONS_PER_SESSION === 0) await refreshSessions();
+      asked += 1;
       const existing = theirs[kindOf(operation)] ?? '';
       for (const ask of [asVendor, asRider]) {
         const real = await ask(operation, pathOf(operation, existing));
         const missing = await ask(operation, pathOf(operation));
         expect(real.status).toBeGreaterThanOrEqual(400);
+        // Break caught: a sweep that has run out of requests. Two refusals of the limiter are alike whatever the record is, so it would tell nothing of the rule.
+        expect(real.status, `${operation.id}: the sweep reached the limiter`).not.toBe(429);
+        expect(missing.status, `${operation.id}: the sweep reached the limiter`).not.toBe(429);
         expect(comparable(real)).toEqual(comparable(missing));
       }
     },
