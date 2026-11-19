@@ -454,3 +454,17 @@ export const HUB_INTAKE_PAGE_SCHEMA = described({
     next_page_token: { type: ['string', 'null'] },
   },
 });
+
+/** The body of `closeHubIntake` (S1.38): nothing, or the approved exception to parity with its reason in words (a blank reason is `REASON_REQUIRED`, which the service says before the shape). */
+export const INTAKE_CLOSE_BODY = described({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    parity_exception: {
+      type: 'object',
+      required: ['note'],
+      additionalProperties: false,
+      properties: { note: { type: 'string', minLength: 1 } },
+    },
+  },
+});

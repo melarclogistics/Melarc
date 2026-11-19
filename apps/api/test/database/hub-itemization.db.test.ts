@@ -15,7 +15,7 @@ import {
   storedIntakeEvidence,
 } from './support/intake-evidence.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
-import { setFinancialStanding } from './support/pickups.js';
+import { insertPickupRequest, pickupRequestRow, setFinancialStanding } from './support/pickups.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { API, HUB_A, HUB_B, OPS, type Actor } from './support/staff-routes.js';
@@ -1419,5 +1419,748 @@ describe('the commercial gate (S1.37, AC-SLICE-001-65, -66)', () => {
     expect((await orderRow(clearing.id))?.commercial_state).toBe('NO_VENDOR_CHARGE');
     expect(await gateEvents(paying.id)).toEqual(['order.payment.required']);
     expect(await gateEvents(clearing.id)).toEqual(['order.commercial.cleared_no_charge']);
+  });
+});
+
+describe('the close of an intake (S1.38, AC-SLICE-001-40, -51, -52)', () => {
+  const CLOSE = (id: string): string => `${ONE(id)}/close`;
+  const closeIntake = async (
+    actor: Actor,
+    id: string,
+    body?: unknown,
+    over: { etag?: string | null; key?: string | null } = {},
+  ): Promise<TestResponse> => {
+    const etag = over.etag === undefined ? (await read(actor, id)).etag : over.etag;
+    return actor.client.post(CLOSE(id), body, {
+      origin: OPS,
+      headers: {
+        ...(etag === null ? {} : { 'If-Match': etag }),
+        ...(over.key === null ? {} : { 'Idempotency-Key': over.key ?? randomUUID() }),
+      },
+    });
+  };
+  const closedFacts = async (id: string) =>
+    (
+      await routes.rows<{
+        state: string;
+        closed_at: Date | null;
+        closed_by: string | null;
+        parity_exception_id: string | null;
+        parity_exception_note: string | null;
+      }>(
+        `select state, closed_at, closed_by, parity_exception_id, parity_exception_note from pickup_intake where id = $1`,
+        [id],
+      )
+    )[0];
+  const closeEvents = async (id: string): Promise<{ code: string; enhanced: boolean }[]> =>
+    (
+      await routes.rows<{ event_code: string; enhanced: boolean }>(
+        `select event_code, enhanced from audit_event where object_id = $1 and event_code like 'hub.intake.closed%' order by recorded_at, id`,
+        [id],
+      )
+    ).map((row) => ({ code: row.event_code, enhanced: row.enhanced }));
+
+  // Break caught: parity counted against the declaration or against the orders cleared for dispatch, so that an intake with a PAYMENT_REQUIRED order is refused, or the close made with no facts.
+  it('closes an intake whose arrived parcels each have an order, a PAYMENT_REQUIRED one included (AC-SLICE-001-51, -52)', async () => {
+    const intake = await cleared(3);
+    const [a, b, c] = intake.parcels as [Parcel, Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, { payer_override: { payer_intent: 'SENDER_PAYS_FULL' } }),
+      ),
+    );
+    orderOf(await itemize(officer, intake.id, body(c.id)));
+    expect(await intakeState(intake.id)).toBe('ITEMIZING');
+    const key = randomUUID();
+    const closed = await closeIntake(officer, intake.id, undefined, { key });
+    expect(closed.status, closed.text).toBe(200);
+    expect(closed.json()).toMatchObject({ id: intake.id, state: 'CLOSED' });
+    expect(closed.header('etag')).toMatch(/^"[A-Za-z0-9_-]{43}"$/);
+    expect(await closedFacts(intake.id)).toMatchObject({
+      state: 'CLOSED',
+      closed_by: officer.identity.id,
+      parity_exception_id: null,
+      parity_exception_note: null,
+    });
+    expect((await closedFacts(intake.id))?.closed_at).toBeInstanceOf(Date);
+    expect(await closeEvents(intake.id)).toEqual([{ code: 'hub.intake.closed', enhanced: false }]);
+    // The retry is the first answer and makes nothing twice; another key on a closed intake is the state, told by name.
+    const replay = await closeIntake(officer, intake.id, undefined, {
+      key,
+      etag: closed.header('etag') ?? '',
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.json()).toEqual(closed.json());
+    expect(await closeEvents(intake.id)).toHaveLength(1);
+    const again = await closeIntake(officer, intake.id);
+    expect(refusal(again)).toEqual([409, 'STATE_CONFLICT', 'already_closed']);
+  });
+
+  // Break caught: an intake cleared for itemizing whose orders were all made early cannot be closed because it never reached ITEMIZING (OB-S1-142).
+  it('closes an intake that is still READY_FOR_ITEMIZATION through ITEMIZING, when every order was made early', async () => {
+    const intake = await opened(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    orderOf(await itemize(officer, intake.id, body(b.id)));
+    expect((await tap(officer, a.id, true)).status).toBe(200);
+    expect((await tap(officer, b.id, true)).status).toBe(200);
+    expect((await finishAllHere(officer, intake.id, 2)).status).toBe(200);
+    expect(await intakeState(intake.id)).toBe('READY_FOR_ITEMIZATION');
+    const closed = await closeIntake(officer, intake.id);
+    expect(closed.status, closed.text).toBe(200);
+    expect(await intakeState(intake.id)).toBe('CLOSED');
+    expect((await closeEvents(intake.id))[0]).toMatchObject({ code: 'hub.intake.closed' });
+  });
+
+  // Break caught: a close that does not count the orders against the parcels the hub received, or one that goes ahead with a short count and no exception.
+  it('is refused with PARITY_NOT_MET, naming both numbers, when the orders are fewer than the parcels received', async () => {
+    const intake = await cleared(3);
+    const [a, b] = intake.parcels as [Parcel, Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    orderOf(await itemize(officer, intake.id, body(b.id)));
+    const refused = await closeIntake(officer, intake.id);
+    expect(refusal(refused)).toEqual([422, 'PARITY_NOT_MET', 'parity_not_met']);
+    expect(refused.json()).toMatchObject({
+      details: { received_count: 3, itemized_count: 2 },
+    });
+    expect(await intakeState(intake.id)).toBe('ITEMIZING');
+    expect((await closedFacts(intake.id))?.closed_at).toBeNull();
+    expect(await closeEvents(intake.id)).toEqual([]);
+  });
+
+  // Break caught: the exception open to an officer who holds the close alone, a blank reason accepted, an exception recorded for an intake that has parity, or no record of it.
+  it('closes without parity only by the approved exception: Senior Ops, a reason in words, and never for an intake that has parity', async () => {
+    const intake = await cleared(3);
+    const [a, b] = intake.parcels as [Parcel, Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    orderOf(await itemize(officer, intake.id, body(b.id)));
+    const exception = {
+      parity_exception: { note: 'The third parcel was left on the rider’s bike' },
+    };
+    // The key is held and the tier is not.
+    expect(refusal(await closeIntake(officer, intake.id, exception))).toEqual([
+      403,
+      'INSUFFICIENT_AUTHORITY',
+      'close_exception_required',
+    ]);
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    // A blank reason is told before anything else is judged.
+    expect(
+      refusal(await closeIntake(senior, intake.id, { parity_exception: { note: '   ' } }))[1],
+    ).toBe('REASON_REQUIRED');
+    expect(await intakeState(intake.id)).toBe('ITEMIZING');
+    const closed = await closeIntake(senior, intake.id, exception);
+    expect(closed.status, closed.text).toBe(200);
+    const facts = await closedFacts(intake.id);
+    expect(facts).toMatchObject({
+      state: 'CLOSED',
+      closed_by: senior.identity.id,
+      parity_exception_note: 'The third parcel was left on the rider’s bike',
+    });
+    expect(facts?.parity_exception_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await closeEvents(intake.id)).toEqual([
+      { code: 'hub.intake.closed_exception', enhanced: true },
+    ]);
+    // An exception for an intake that has parity is not what the exception is for.
+    const whole = await cleared(1);
+    const [only] = whole.parcels as [Parcel];
+    orderOf(await itemize(officer, whole.id, body(only.id)));
+    expect(firstViolation(await closeIntake(senior, whole.id, exception))).toEqual([
+      400,
+      '/parity_exception',
+      'exception_not_needed',
+    ]);
+    expect(await intakeState(whole.id)).toBe('ITEMIZING');
+  });
+
+  // Break caught: a close that skips the stale token, the key, the hub or the state it is told by.
+  it('takes the intake’s ETag and a key, keeps to the officer’s hubs, and is refused before the count is cleared', async () => {
+    const intake = await cleared(1);
+    const [only] = intake.parcels as [Parcel];
+    orderOf(await itemize(officer, intake.id, body(only.id)));
+    expect((await closeIntake(officer, intake.id, undefined, { etag: null })).status).toBe(400);
+    expect(refusal(await closeIntake(officer, intake.id, undefined, { etag: '"AAAA"' }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'stale',
+    ]);
+    expect((await closeIntake(officer, intake.id, undefined, { key: null })).status).toBe(400);
+    expect(refusal(await closeIntake(otherHub, intake.id, undefined, { etag: '"x"' }))[1]).toBe(
+      'HUB_SCOPE_VIOLATION',
+    );
+    const waiting = await opened(1);
+    expect(refusal(await closeIntake(officer, waiting.id))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'check_in_open',
+    ]);
+    expect(await intakeState(intake.id)).toBe('ITEMIZING');
+  });
+});
+
+describe('the summary of a closed intake and the read of an order (S1.38, AC-SLICE-001-46, -56)', () => {
+  const SUMMARY = (id: string): string => `${ONE(id)}/summary`;
+  const ORDER = (id: string): string => `${API}/orders/${id}`;
+  const close = async (actor: Actor, id: string): Promise<void> => {
+    const closed = await actor.client.post(`${ONE(id)}/close`, undefined, {
+      origin: OPS,
+      headers: { 'If-Match': (await read(actor, id)).etag, 'Idempotency-Key': randomUUID() },
+    });
+    expect(closed.status, closed.text).toBe(200);
+  };
+
+  // Break caught: a summary that carries a count, a declaration, a discrepancy, evidence or an adjudication; one served before the intake is closed; or one served to another vendor.
+  it('gives the vendor the orders of its closed intake and nothing of the receiving side, and nobody else’s', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    const first = orderOf(await itemize(officer, intake.id, body(a.id)));
+    orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, { payer_override: { payer_intent: 'SENDER_PAYS_FULL' } }),
+      ),
+    );
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    // Not closed: an intake that does not exist, to the vendor and to the staff alike.
+    expect((await browser.get(SUMMARY(intake.id))).status).toBe(404);
+    expect((await officer.client.get(SUMMARY(intake.id))).status).toBe(404);
+    await close(officer, intake.id);
+    const seen = await browser.get(SUMMARY(intake.id));
+    expect(seen.status, seen.text).toBe(200);
+    const summary = seen.json() as {
+      intake_id: string;
+      closed_at: string;
+      orders: Record<string, unknown>[];
+    };
+    expect(summary.intake_id).toBe(intake.id);
+    expect(summary.orders).toHaveLength(2);
+    expect(summary.orders[0]).toMatchObject({
+      id: first.id,
+      code: first.code,
+      recipient_name: 'Ama Mensah',
+      size_class: 'SMALL',
+      locked_price: { amount_minor: 3500, currency: 'GHS' },
+      commercial_state: 'NO_VENDOR_CHARGE',
+    });
+    expect(summary.orders[1]).toMatchObject({ commercial_state: 'PAYMENT_REQUIRED' });
+    // The omission is the guard: nothing of the receiving side is in what the vendor reads.
+    for (const secret of [
+      'physical_count',
+      'rider_declared_count',
+      'count_variance',
+      'condition',
+      'evidence',
+      'parity_exception',
+      'finding',
+      'adjudicat',
+      'parcel_photo',
+    ]) {
+      expect(seen.text, secret).not.toContain(secret);
+    }
+    // The staff of the hub read it too; another hub's officer is told it is another hub's.
+    const staffSees = await officer.client.get(SUMMARY(intake.id));
+    expect(staffSees.status, staffSees.text).toBe(200);
+    expect(refusal(await otherHub.client.get(SUMMARY(intake.id)))[1]).toBe('HUB_SCOPE_VIOLATION');
+    // Another vendor's browser sees an intake that does not exist.
+    const stranger = await routes.vendor();
+    const foreign = routes.browser(stranger.device.credential.token);
+    expect(
+      (await routes.signIn(foreign, stranger.row.accountIdentifier, stranger.secret)).status,
+    ).toBe(200);
+    expect((await foreign.get(SUMMARY(intake.id))).status).toBe(404);
+  });
+
+  // Break caught: an order read that shows a vendor the recipient, the serial, who judged the size or the carrier's cost, that serves another vendor's order, or whose ETag does not move with the order.
+  it('reads an order: all of it for the staff of its hub, the vendor’s part for the vendor, and another vendor’s is no order', async () => {
+    const intake = await cleared(1);
+    const [only] = intake.parcels as [Parcel];
+    const made = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(only.id, { is_serialized_goods: true, serial_imei: '356938035643809' }),
+      ),
+    );
+    const staffRead = await officer.client.get(ORDER(made.id));
+    expect(staffRead.status, staffRead.text).toBe(200);
+    expect(staffRead.json()).toMatchObject({
+      id: made.id,
+      locked_price: { amount_minor: 3500, currency: 'GHS' },
+      commercial_state: 'NO_VENDOR_CHARGE',
+      serial_imei: '356938035643809',
+      size_class_selected_by: officer.identity.id,
+      recipient: { name: 'Ama Mensah' },
+    });
+    expect(staffRead.header('etag')).toMatch(/^"[A-Za-z0-9_-]{43}"$/);
+    expect((await officer.client.get(ORDER(made.id))).header('etag')).toBe(
+      staffRead.header('etag'),
+    );
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    const vendorRead = await browser.get(ORDER(made.id));
+    expect(vendorRead.status, vendorRead.text).toBe(200);
+    const shown = vendorRead.json() as Record<string, unknown>;
+    expect(shown).toMatchObject({
+      id: made.id,
+      locked_price: { amount_minor: 3500, currency: 'GHS' },
+    });
+    for (const withheld of ['recipient', 'serial_imei', 'size_class_selected_by', 'carrier_cost']) {
+      expect(shown, withheld).not.toHaveProperty(withheld);
+    }
+    expect(vendorRead.header('etag')).not.toBe(staffRead.header('etag'));
+    const stranger = await routes.vendor();
+    const foreign = routes.browser(stranger.device.credential.token);
+    expect(
+      (await routes.signIn(foreign, stranger.row.accountIdentifier, stranger.secret)).status,
+    ).toBe(200);
+    expect((await foreign.get(ORDER(made.id))).status).toBe(404);
+    expect(refusal(await otherHub.client.get(ORDER(made.id)))[1]).toBe('HUB_SCOPE_VIOLATION');
+    expect((await officer.client.get(ORDER(randomUUID()))).status).toBe(404);
+  });
+});
+
+describe('the payer correction after the price froze (S1.39, AC-SLICE-001-55, -66)', () => {
+  const ORDER = (id: string): string => `${API}/orders/${id}`;
+  const orderEtag = async (actor: Actor, id: string): Promise<string> => {
+    const read = await actor.client.get(ORDER(id));
+    expect(read.status, read.text).toBe(200);
+    return read.header('etag') ?? '';
+  };
+  const request = async (
+    actor: Actor,
+    orderId: string,
+    given: unknown,
+    over: { etag?: string | null; key?: string | null } = {},
+  ): Promise<TestResponse> => {
+    const etag = over.etag === undefined ? await orderEtag(actor, orderId) : over.etag;
+    return actor.client.post(`${ORDER(orderId)}/payer-correction`, given, {
+      origin: OPS,
+      headers: {
+        ...(etag === null ? {} : { 'If-Match': etag }),
+        ...(over.key === null ? {} : { 'Idempotency-Key': over.key ?? randomUUID() }),
+      },
+    });
+  };
+  const decide = async (
+    actor: Actor,
+    correctionId: string,
+    given: unknown,
+    etag: string | null,
+    key: string = randomUUID(),
+  ): Promise<TestResponse> =>
+    actor.client.post(`${API}/payer-corrections/${correctionId}/decision`, given, {
+      origin: OPS,
+      headers: { ...(etag === null ? {} : { 'If-Match': etag }), 'Idempotency-Key': key },
+    });
+  const correctionEvents = async (
+    orderId: string,
+  ): Promise<{ code: string; enhanced: boolean }[]> =>
+    (
+      await routes.rows<{ event_code: string; enhanced: boolean }>(
+        `select event_code, enhanced from audit_event where object_id = $1 and event_code like 'pricing.correction.%' order by recorded_at, id`,
+        [orderId],
+      )
+    ).map((row) => ({ code: row.event_code, enhanced: row.enhanced }));
+  const proposal = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    proposed: { payer_intent: 'SENDER_PAYS_FULL' },
+    note: 'The vendor agreed to pay the whole fee on the phone',
+    ...over,
+  });
+  const frozenOrder = async (
+    intent: 'RECIPIENT_PAYS' | 'SENDER_PAYS_FULL' = 'RECIPIENT_PAYS',
+  ): Promise<Order> => {
+    const intake = await cleared(1);
+    const [only] = intake.parcels as [Parcel];
+    return orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(only.id, { payer_override: { payer_intent: intent } }),
+      ),
+    );
+  };
+
+  // Break caught: a correction that rewrites the locked price, that is not held until a checker decides, that does not re-run the gate, or whose history is incomplete.
+  it('is asked by the maker and decided by another officer: the portions move, the locked price does not, and the gate runs again from them', async () => {
+    const made = await frozenOrder('RECIPIENT_PAYS');
+    expect(made.commercial_state).toBe('NO_VENDOR_CHARGE');
+    const etagBefore = await orderEtag(officer, made.id);
+    const asked = await request(officer, made.id, proposal());
+    expect(asked.status, asked.text).toBe(201);
+    const correction = asked.json() as {
+      id: string;
+      state: string;
+      requested_by: string;
+      previous_allocation: { sender_minor: number; recipient_minor: number };
+      proposed: { payer_intent: string };
+    };
+    expect(correction).toMatchObject({
+      state: 'REQUESTED',
+      requested_by: officer.identity.id,
+      previous_allocation: { sender_minor: 0, recipient_minor: 3500 },
+      proposed: { payer_intent: 'SENDER_PAYS_FULL' },
+    });
+    // Asked, nothing has moved.
+    expect((await orderRow(made.id))?.payer_allocation).toMatchObject({
+      sender_minor: 0,
+      recipient_minor: 3500,
+    });
+    expect(await orderEtag(officer, made.id)).toBe(etagBefore);
+    // One request is open for an order at a time; the maker is not the checker's key.
+    expect(refusal(await request(officer, made.id, proposal()))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'correction_open',
+    ]);
+    const correctionEtag = asked.header('etag') ?? '';
+    expect(correctionEtag).toMatch(/^"[A-Za-z0-9_-]{43}"$/);
+    expect(
+      refusal(await decide(officer, correction.id, { decision: 'APPROVE' }, correctionEtag))[1],
+    ).toBe('PERMISSION_DENIED');
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    // A token that is not the correction's, and a decision that is not one.
+    expect(refusal(await decide(senior, correction.id, { decision: 'APPROVE' }, '"AAAA"'))).toEqual(
+      [409, 'STATE_CONFLICT', 'stale'],
+    );
+    expect(
+      (await decide(senior, correction.id, { decision: 'MAYBE' }, correctionEtag)).status,
+    ).toBe(400);
+    const decided = await decide(senior, correction.id, { decision: 'APPROVE' }, correctionEtag);
+    expect(decided.status, decided.text).toBe(200);
+    expect(decided.json()).toMatchObject({
+      state: 'APPROVED',
+      approved_by: senior.identity.id,
+      resulting_commercial_state: 'PAYMENT_REQUIRED',
+    });
+    // The locked price is the same, the portions are the new ones, and the gate ran again from them.
+    const after = await orderRow(made.id);
+    expect(after).toMatchObject({ commercial_state: 'PAYMENT_REQUIRED', locked_price_minor: 3500 });
+    expect(after?.payer_allocation).toMatchObject({ sender_minor: 3500, recipient_minor: 0 });
+    expect(await orderEtag(officer, made.id)).not.toBe(etagBefore);
+    expect(await correctionEvents(made.id)).toEqual([
+      { code: 'pricing.correction.requested', enhanced: false },
+      { code: 'pricing.correction.approved', enhanced: true },
+      { code: 'pricing.correction.applied', enhanced: false },
+    ]);
+    // Decided once.
+    expect(
+      refusal(
+        await decide(senior, correction.id, { decision: 'REJECT' }, decided.header('etag') ?? ''),
+      ),
+    ).toEqual([409, 'STATE_CONFLICT', 'already_decided']);
+    // And the history: the request keeps what the order had.
+    const kept = await routes.rows<{
+      previous_allocation: { sender_minor: number };
+      resulting_allocation: { sender_minor: number };
+    }>(`select previous_allocation, resulting_allocation from payer_correction where id = $1`, [
+      correction.id,
+    ]);
+    expect(kept[0]).toMatchObject({
+      previous_allocation: { sender_minor: 0 },
+      resulting_allocation: { sender_minor: 3500 },
+    });
+  });
+
+  // Break caught: a checker who may be the maker, or a Platform Admin who may not, or a blank reason, or a stale order token.
+  it('is not approved by its own maker unless a Platform Admin, wants a reason, and takes the order’s token', async () => {
+    const made = await frozenOrder('RECIPIENT_PAYS');
+    expect(refusal(await request(officer, made.id, proposal({ note: '   ' })))[1]).toBe(
+      'REASON_REQUIRED',
+    );
+    expect(refusal(await request(officer, made.id, proposal(), { etag: '"AAAA"' }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'stale',
+    ]);
+    expect((await request(officer, made.id, proposal(), { key: null })).status).toBe(400);
+    expect(
+      (await request(officer, made.id, { ...proposal(), proposed: { payer_intent: 'SPLIT' } }))
+        .status,
+    ).toBe(400);
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const own = await request(senior, made.id, proposal());
+    expect(own.status, own.text).toBe(201);
+    const ownId = (own.json() as { id: string }).id;
+    expect(
+      refusal(await decide(senior, ownId, { decision: 'APPROVE' }, own.header('etag') ?? '')),
+    ).toEqual([422, 'SELF_APPROVAL_FORBIDDEN', undefined]);
+    expect((await orderRow(made.id))?.commercial_state).toBe('NO_VENDOR_CHARGE');
+    // A Platform Admin may decide what it asked.
+    const admin = await routes.platformAdmin();
+    const second = await frozenOrder('RECIPIENT_PAYS');
+    const adminAsk = await request(admin, second.id, proposal());
+    expect(adminAsk.status, adminAsk.text).toBe(201);
+    const approved = await decide(
+      admin,
+      (adminAsk.json() as { id: string }).id,
+      { decision: 'APPROVE' },
+      adminAsk.header('etag') ?? '',
+    );
+    expect(approved.status, approved.text).toBe(200);
+    expect((await orderRow(second.id))?.commercial_state).toBe('PAYMENT_REQUIRED');
+  });
+
+  // Break caught: a rejection that changes the order, or one that leaves the order closed to a new request.
+  it('changes nothing when it is rejected, and the order may be asked about again', async () => {
+    const made = await frozenOrder('SENDER_PAYS_FULL');
+    expect(made.commercial_state).toBe('PAYMENT_REQUIRED');
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const asked = await request(
+      officer,
+      made.id,
+      proposal({ proposed: { payer_intent: 'RECIPIENT_PAYS' } }),
+    );
+    expect(asked.status, asked.text).toBe(201);
+    const id = (asked.json() as { id: string }).id;
+    const rejected = await decide(
+      senior,
+      id,
+      { decision: 'REJECT', note: 'The vendor pays' },
+      asked.header('etag') ?? '',
+    );
+    expect(rejected.status, rejected.text).toBe(200);
+    expect(rejected.json()).toMatchObject({ state: 'REJECTED', resulting_commercial_state: null });
+    expect(await orderRow(made.id)).toMatchObject({
+      commercial_state: 'PAYMENT_REQUIRED',
+      locked_price_minor: 3500,
+    });
+    expect((await orderRow(made.id))?.payer_allocation).toMatchObject({ sender_minor: 3500 });
+    expect((await correctionEvents(made.id)).map((event) => event.code)).toEqual([
+      'pricing.correction.requested',
+      'pricing.correction.rejected',
+    ]);
+    const again = await request(
+      officer,
+      made.id,
+      proposal({ proposed: { payer_intent: 'RECIPIENT_PAYS' } }),
+    );
+    expect(again.status, again.text).toBe(201);
+  });
+
+  // Break caught: a correction asked for an order whose price is not frozen yet (nothing to share), or portions that round down where the freeze rounds to the pesewa, half up.
+  it('is refused for an order that waits for its parcel, and shares the price to the pesewa as the freeze does', async () => {
+    const early = await opened(1);
+    const [parcel] = early.parcels as [Parcel];
+    const waiting = orderOf(await itemize(officer, early.id, body(parcel.id)));
+    expect(waiting.commercial_state).toBeNull();
+    expect(refusal(await request(officer, waiting.id, proposal()))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'order_not_frozen',
+    ]);
+    const made = await frozenOrder('RECIPIENT_PAYS');
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const asked = await request(
+      officer,
+      made.id,
+      proposal({
+        proposed: {
+          payer_intent: 'SPLIT',
+          split_basis: 'PERCENTAGE',
+          split_sender_percentage: 33.33,
+        },
+      }),
+    );
+    expect(asked.status, asked.text).toBe(201);
+    const decided = await decide(
+      senior,
+      (asked.json() as { id: string }).id,
+      { decision: 'APPROVE' },
+      asked.header('etag') ?? '',
+    );
+    expect(decided.status, decided.text).toBe(200);
+    // 33.33% of GH₵35.00 is 1166.55 pesewas: the sender's side rounds half up to 1167, the recipient's is the rest.
+    expect((await orderRow(made.id))?.payer_allocation).toMatchObject({
+      sender_minor: 1167,
+      recipient_minor: 2333,
+    });
+    expect((await orderRow(made.id))?.commercial_state).toBe('PAYMENT_REQUIRED');
+  });
+
+  // Break caught: the gate re-run by the intent and not by the resolved amount: a split that resolves to zero must clear the order with no charge, as it does at the freeze (AC-SLICE-001-66).
+  it('re-runs the gate from the resolved amount: a split that resolves to zero clears the order, the zero branch first', async () => {
+    const made = await frozenOrder('SENDER_PAYS_FULL');
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const asked = await request(
+      officer,
+      made.id,
+      proposal({
+        proposed: {
+          payer_intent: 'SPLIT',
+          split_basis: 'PERCENTAGE',
+          split_sender_percentage: 0.01,
+        },
+      }),
+    );
+    expect(asked.status, asked.text).toBe(201);
+    const decided = await decide(
+      senior,
+      (asked.json() as { id: string }).id,
+      { decision: 'APPROVE' },
+      asked.header('etag') ?? '',
+    );
+    expect(decided.status, decided.text).toBe(200);
+    expect(decided.json()).toMatchObject({ resulting_commercial_state: 'NO_VENDOR_CHARGE' });
+    expect((await orderRow(made.id))?.payer_allocation).toMatchObject({
+      sender_minor: 0,
+      recipient_minor: 3500,
+    });
+  });
+});
+
+describe('the payer edit before the price freezes (S1.39, AC-SLICE-001-55)', () => {
+  const AMEND = (id: string): string => `${API}/pickup-requests/${id}/amend`;
+  const etagOf = async (client: { get: (path: string) => Promise<TestResponse> }, id: string) => {
+    const read = await client.get(`${API}/pickup-requests/${id}`);
+    expect(read.status, read.text).toBe(200);
+    return read.header('etag') ?? '';
+  };
+  const arrange = async (state: 'PENDING' | 'CONFIRMED'): Promise<string> =>
+    (
+      await insertPickupRequest(
+        routes.admin,
+        pickupRequestRow(vendor.row.organizationId, HUB_A, { state }),
+      )
+    ).id;
+  const amendAs = async (
+    client: { post: (path: string, body: unknown, options: object) => Promise<TestResponse> },
+    origin: string | undefined,
+    id: string,
+    given: unknown,
+    etag: string,
+  ): Promise<TestResponse> =>
+    client.post(AMEND(id), given, {
+      ...(origin === undefined ? {} : { origin }),
+      headers: { 'If-Match': etag, 'Idempotency-Key': randomUUID() },
+    });
+
+  // Break caught: an edit that is refused for the people it is for, allowed for those it is not, or one that writes a portion of a price; and an origin edit that pretends to work.
+  it('lets a vendor edit its own pending request and Ops a pending or confirmed one, by intent, and refuses what is not built by name', async () => {
+    const pending = await arrange('PENDING');
+    const confirmed = await arrange('CONFIRMED');
+    const payer = { payer: { payer_intent: 'SENDER_PAYS_FULL' } };
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    // The vendor's own pending request: the arrangement is the intent, kept as it was given.
+    const vendorEdit = await amendAs(
+      browser,
+      undefined,
+      pending,
+      payer,
+      await etagOf(browser, pending),
+    );
+    expect(vendorEdit.status, vendorEdit.text).toBe(200);
+    expect(vendorEdit.json()).toMatchObject({
+      id: pending,
+      default_payer_intent: 'SENDER_PAYS_FULL',
+    });
+    expect(vendorEdit.header('etag')).toMatch(/^"[A-Za-z0-9_-]{43}"$/);
+    // A confirmed request is not the vendor's to edit: it is Ops's.
+    expect(
+      refusal(
+        await amendAs(
+          browser,
+          undefined,
+          confirmed,
+          payer,
+          await etagOf(officer.client, confirmed),
+        ),
+      )[1],
+    ).toBe('PERMISSION_DENIED');
+    const opsEdit = await amendAs(
+      officer.client,
+      OPS,
+      confirmed,
+      {
+        payer: { payer_intent: 'SPLIT', split_basis: 'PERCENTAGE', split_sender_percentage: 25 },
+        note: 'The vendor asked for a quarter on the phone',
+      },
+      await etagOf(officer.client, confirmed),
+    );
+    expect(opsEdit.status, opsEdit.text).toBe(200);
+    expect(opsEdit.json()).toMatchObject({ default_payer_intent: 'SPLIT' });
+    // Another hub's officer, a stale token, and what is not built.
+    expect(
+      refusal(
+        await amendAs(
+          otherHub.client,
+          OPS,
+          confirmed,
+          payer,
+          await etagOf(officer.client, confirmed),
+        ),
+      )[1],
+    ).toBe('HUB_SCOPE_VIOLATION');
+    expect(refusal(await amendAs(officer.client, OPS, confirmed, payer, '"AAAA"'))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      undefined,
+    ]);
+    const fresh = await etagOf(officer.client, confirmed);
+    expect(
+      firstViolation(
+        await amendAs(officer.client, OPS, confirmed, { primary_phone: '0241234567' }, fresh),
+      ),
+    ).toEqual([400, '/primary_phone', 'not_built']);
+    expect(
+      firstViolation(
+        await amendAs(
+          officer.client,
+          OPS,
+          confirmed,
+          { pickup_location: { address: 'Madina' } },
+          fresh,
+        ),
+      ),
+    ).toEqual([400, '/pickup_location', 'not_built']);
+    expect(
+      firstViolation(await amendAs(officer.client, OPS, confirmed, { note: 'x' }, fresh)),
+    ).toEqual([400, '/payer', 'required']);
+    // A stranger's request is one that does not exist to another vendor.
+    const stranger = await routes.vendor();
+    const foreign = routes.browser(stranger.device.credential.token);
+    expect(
+      (await routes.signIn(foreign, stranger.row.accountIdentifier, stranger.secret)).status,
+    ).toBe(200);
+    expect((await amendAs(foreign, undefined, pending, payer, '"AAAA"')).status).toBe(404);
+  });
+
+  // Break caught: an edit of a request whose run has started, which is no longer Ops's to change under the rider's feet.
+  it('is refused once the run that holds the request has started', async () => {
+    const intake = await opened(1);
+    const refused = await amendAs(
+      officer.client,
+      OPS,
+      intake.requestId,
+      { payer: { payer_intent: 'SENDER_PAYS_FULL' } },
+      await etagOf(officer.client, intake.requestId),
+    );
+    expect(refusal(refused)).toEqual([409, 'STATE_CONFLICT', 'run_started']);
+  });
+
+  // Break caught: an edit of the arrangement once the price is frozen, which the contract makes a correction.
+  it('is refused once an order of the request is frozen: after the freeze the same edit is a correction', async () => {
+    const intake = await cleared(1);
+    const [only] = intake.parcels as [Parcel];
+    orderOf(await itemize(officer, intake.id, body(only.id)));
+    const refused = await amendAs(
+      officer.client,
+      OPS,
+      intake.requestId,
+      { payer: { payer_intent: 'SENDER_PAYS_FULL' } },
+      await etagOf(officer.client, intake.requestId),
+    );
+    expect(refusal(refused)).toEqual([409, 'STATE_CONFLICT', 'price_frozen']);
   });
 });

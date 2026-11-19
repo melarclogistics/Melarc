@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.111.0
- *   SHA-256 2d87a42552f4184146d319932ce1dac9a8a82db4f05b7ff14e7f5b8a7026e7d4 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.113.0
+ *   SHA-256 dc665eb642ff1c1a7c646461e01f098699d27ec31f06dca18db58689a454e61b (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -503,6 +503,15 @@ export interface paths {
          *       default (21.1).
          *
          *     A request that has left the editable states is `STATE_CONFLICT`.
+         *
+         *     **As built (S1.39, 5.113.0).** The default payer arrangement is edited (`payer`, an intent and its
+         *     numbers, never a portion of a price) for a vendor's own `PENDING` request and for a `PENDING` or
+         *     `CONFIRMED` request of Ops's hubs whose run has not started, and only until an order of the request's
+         *     intake is frozen: after that it is `STATE_CONFLICT`, rule `price_frozen`, and the edit is
+         *     `requestPayerCorrection`. **The origin is not built**: a body that names `pickup_location`,
+         *     `location_overrides`, `vendor_pickup_location_id`, `primary_phone` or `secondary_phone` is
+         *     `VALIDATION_FAILED`, rule `not_built`, and a body with no `payer` is `VALIDATION_FAILED`, rule
+         *     `required`. A blank `note` is `REASON_REQUIRED`.
          */
         post: operations["amendPickupRequest"];
         delete?: never;
@@ -2054,6 +2063,19 @@ export interface paths {
          *     **Idempotency-Key added — CRIT-05 audit remediation**, for consistency with the rest of
          *     the intake sequence (`submitBlindCount`, `itemizeOrder`) that already carries it over the
          *     same connection.
+         *
+         *     **As built (S1.38, 5.112.0).** The intake is closed once it is cleared for itemizing, and only once
+         *     (`STATE_CONFLICT`, rules `check_in_open`, `intake_not_counted`, `reconciliation_open`, `already_closed`).
+         *     **Parity is the number of orders that stand for the parcels the hub received** (the parcels that arrived,
+         *     the extras that are not void, or the blind count) and never the rider's declaration; an order for a
+         *     parcel that is missing stands for nothing. An order of an arrived parcel with no locked price is
+         *     `ORDER_UNPRICED`. When parity is not met the answer is `PARITY_NOT_MET` (`details.received_count` and
+         *     `details.itemized_count`) unless the body carries `parity_exception`: that needs `hub.intake.close_exception`
+         *     (`INSUFFICIENT_AUTHORITY` for one who holds the close alone), a reason in words (`REASON_REQUIRED`), and is
+         *     refused (`VALIDATION_FAILED`, rule `exception_not_needed`) for an intake that has parity. An intake whose
+         *     orders were all made early is still `READY_FOR_ITEMIZATION` and is closed through `ITEMIZING` in the same
+         *     change. The event is `hub.intake.closed` or the enhanced `hub.intake.closed_exception`; the vendor reads
+         *     the summary with `getIntakeSummary`.
          */
         post: operations["closeHubIntake"];
         delete?: never;
@@ -15193,6 +15215,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16783,12 +16806,14 @@ export interface operations {
             /** @description Decided */
             200: {
                 headers: {
+                    ETag: components["headers"]["ETag"];
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["PayerCorrection"];
                 };
             };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -16857,12 +16882,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HubIntakePostCount"];
+                    "application/json": components["schemas"]["HubIntakeCheckIn"] | components["schemas"]["HubIntakePostCount"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];

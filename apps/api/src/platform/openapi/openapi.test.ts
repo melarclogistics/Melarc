@@ -212,10 +212,18 @@ describe('the generated description of the real application', () => {
       ['/missing-parcels', ['get'], ['listMissingParcels']],
       ['/intake-parcels/{parcel_id}/arrival', ['put'], ['recordParcelArrival']],
       ['/hub-intakes/{id}/check-in', ['post'], ['finishCheckIn']],
+      // S1.38: the close of an intake.
+      ['/hub-intakes/{id}/close', ['post'], ['closeHubIntake']],
       ['/hub-intakes/{id}/extra-parcels', ['post'], ['addExtraParcel']],
       ['/hub-intakes/{id}/correction', ['post'], ['correctIntakeCount']],
       // S1.36: the order made for a parcel (itemization).
       ['/hub-intakes/{id}/orders', ['post'], ['itemizeOrder']],
+      // S1.38: the vendor's summary of a closed intake and the read of an order.
+      ['/orders/{id}', ['get'], ['getOrder']],
+      ['/hub-intakes/{id}/summary', ['get'], ['getIntakeSummary']],
+      // S1.39: the payer correction after the price froze.
+      ['/orders/{id}/payer-correction', ['post'], ['requestPayerCorrection']],
+      ['/payer-corrections/{id}/decision', ['post'], ['approvePayerCorrection']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.
@@ -273,6 +281,8 @@ describe('the generated description of the real application', () => {
       ['/pickup-requests/{id}/cancel', ['post'], ['cancelPickupRequest']],
       ['/pickup-requests/{id}/cancellation-charge/waiver', ['post'], ['waiveCancellationCharge']],
       // S1.18: the force-extension of the attempt cap, and the escalation.
+      // S1.39: the payer edit before the price freezes.
+      ['/pickup-requests/{id}/amend', ['post'], ['amendPickupRequest']],
       ['/pickup-requests/{id}/attempt-extension', ['post'], ['extendPickupAttempts']],
       ['/pickup-requests/{id}/escalate', ['post'], ['escalatePickupRequest']],
       ['/ad-hoc-senders', ['get'], ['findAdHocSender']],

@@ -18,6 +18,8 @@ import { HubCheckIns } from './check-in.service.js';
 import { HubIntakes } from './hub-intakes.service.js';
 import { HubIntakeFindings } from './intake-findings.service.js';
 import { HubItemization } from './itemization.service.js';
+import { HubOrderReads } from './order-reads.service.js';
+import { PayerCorrections } from './payer-corrections.service.js';
 import { ReceivingReads } from './receiving-reads.service.js';
 
 /** The injection token of the service of the hub handover (S1.31), which its controller asks for. */
@@ -40,6 +42,8 @@ export const HUB_CHECK_INS = Symbol('HUB_CHECK_INS');
 
 /** The injection token of the service of `itemizeOrder` (S1.36), which its controller asks for. */
 export const HUB_ITEMIZATION = Symbol('HUB_ITEMIZATION');
+export const HUB_ORDER_READS = Symbol('HUB_ORDER_READS');
+export const HUB_PAYER_CORRECTIONS = Symbol('HUB_PAYER_CORRECTIONS');
 
 const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
@@ -128,6 +132,38 @@ export const hubProviders: readonly FactoryProvider[] = [
         ? undefined
         : new ReceivingReads({ runner, audit }),
     inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_ORDER_READS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+    ): HubOrderReads | undefined =>
+      runner === undefined || audit === undefined
+        ? undefined
+        : new HubOrderReads({ runner, audit }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_PAYER_CORRECTIONS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+    ): PayerCorrections | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined
+        ? undefined
+        : new PayerCorrections({ runner, audit, idempotency, clock }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+    ],
   },
   {
     provide: HUB_CHECK_INS,

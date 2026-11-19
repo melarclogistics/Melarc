@@ -54,6 +54,8 @@ export default defineConfig({
     // SLICE-001 (S1.36): the order made for a parcel at itemization, and what Melarc promised for it (its first commitment is written with it).
     './src/hub/order.schema.ts',
     './src/hub/delivery-commitment.schema.ts',
+    // SLICE-001 (S1.39): the maker-checker record of a payer correction after the price froze.
+    './src/hub/payer-correction.schema.ts',
   ],
   out: './migrations',
   strict: true,

@@ -739,6 +739,15 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.itemization_source',
       'melarc.itemize_order',
       'melarc.freeze_orders',
+      // S1.38 (migration 0112): the facts of a close, the close and the vendor's summary of a closed intake.
+      'melarc.intake_close_facts',
+      'melarc.close_intake',
+      'melarc.intake_summary',
+      // S1.39 (migration 0113): the portion of a locked price, the request and the decision of a payer correction and the payer edit before the freeze.
+      'melarc.payer_portion',
+      'melarc.request_payer_correction',
+      'melarc.decide_payer_correction',
+      'melarc.amend_request_payer',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

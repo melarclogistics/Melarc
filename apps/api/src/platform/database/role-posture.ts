@@ -220,6 +220,18 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.itemization_source',
     'melarc.itemize_order',
     'melarc.freeze_orders',
+    // The close of an intake (migration `0112`, S1.38): the facts the officer judges first and the close itself (staff under `hub.intake.close` or `hub.intake.close_exception`, the intake locked, its guard holding
+    // the parity, the unpriced orders and the exception for every writer), and the vendor's summary of a closed intake (a vendor or staff under `pickup.read`, nothing but what a vendor may know).
+    'melarc.intake_close_facts',
+    'melarc.close_intake',
+    'melarc.intake_summary',
+    // The payer correction and the payer edit (migration `0113`, S1.39): the portion of a locked price an arrangement gives the sender (immutable, the arithmetic of the freeze), the request and the decision of a
+    // correction (staff under `pricing.correction.create` and `pricing.correction.approve`, the order locked first, the guards of the table and of the order holding every rule), and the edit of a request's payer
+    // arrangement before the freeze (a vendor or staff under `pickup.request.create`).
+    'melarc.payer_portion',
+    'melarc.request_payer_correction',
+    'melarc.decide_payer_correction',
+    'melarc.amend_request_payer',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

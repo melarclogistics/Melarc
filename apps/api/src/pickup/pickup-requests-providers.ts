@@ -15,6 +15,7 @@ import { ReasonValidator } from '../platform/settings/reason-validator.js';
 import { AdHocSendersService } from './ad-hoc-senders.service.js';
 import { CutoffExceptionResolution } from './cutoff-exception.service.js';
 import { OnePackageExceptions } from './one-package-exception.service.js';
+import { PickupRequestAmendment } from './pickup-request-amendment.service.js';
 import { PickupRequestCancellation } from './pickup-request-cancellation.service.js';
 import { PickupRequestChain } from './pickup-request-chain.service.js';
 import { OutboxWriter } from '../platform/notifications/outbox-writer.js';
@@ -42,6 +43,7 @@ export const ONE_PACKAGE_EXCEPTIONS = Symbol('ONE_PACKAGE_EXCEPTIONS');
 
 /** The injection token of the service of the cancellation and its charge (S1.17), which its controller asks for. */
 export const PICKUP_REQUEST_CANCELLATION = Symbol('PICKUP_REQUEST_CANCELLATION');
+export const PICKUP_REQUEST_AMENDMENT = Symbol('PICKUP_REQUEST_AMENDMENT');
 
 /** The injection token of the service of the force-extension and the escalation (S1.18), which its controller asks for. */
 export const PICKUP_REQUEST_CHAIN = Symbol('PICKUP_REQUEST_CHAIN');
@@ -175,6 +177,18 @@ export const pickupRequestsProviders: readonly FactoryProvider[] = [
       optional(CLOCK),
       optional(DatabaseService),
     ],
+  },
+  {
+    provide: PICKUP_REQUEST_AMENDMENT,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+    ): PickupRequestAmendment | undefined =>
+      runner === undefined || audit === undefined || idempotency === undefined
+        ? undefined
+        : new PickupRequestAmendment({ runner, audit, idempotency }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER), optional(IDEMPOTENCY_STORE)],
   },
   {
     // The cancellation needs the runner, the audit, the idempotency store, the clock (for the identifier of a replacement) and the database

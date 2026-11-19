@@ -1032,6 +1032,189 @@ describe('the commercial gate is held by the database for every writer (S1.37)',
   });
 });
 
+describe('the close of an intake is held by the database for every writer (S1.38)', () => {
+  const closing = (id: string, principal: string, extra = ''): string =>
+    `update pickup_intake set state = 'CLOSED', closed_at = now(), closed_by = '${principal}'${extra} where id = '${id}'`;
+  const exceptionOf = (note: string | null): string =>
+    `, parity_exception_id = '${randomUUID()}', parity_exception_note = ${note === null ? 'null' : `'${note}'`}`;
+
+  // Break caught: a writer that closes with fewer orders than parcels, takes the exception without its key or its reason, writes the facts apart from the close or in another officer's name, or closes by another key.
+  it('closes only with the parity of the orders to the parcels the hub received, by the exception under its own key and a reason, once, in the officer’s name', async () => {
+    const intake = await clearedPhotoIntake(2);
+    const first = await orderFor(intake, present(intake.parcels, 0));
+    const principal = randomUUID();
+    const closer = staff('hub.intake.close', [HUB_A], principal);
+    const senior = staff('hub.intake.close_exception', [HUB_A], principal);
+    const run = (context: SecurityContext, text: string): Promise<string> =>
+      asOwner(context, [text]);
+
+    // One order for two parcels that arrived: no parity, and only the exception passes it.
+    expect(await run(closer, closing(intake.id, principal))).toMatch(
+      /^23514:.*as many as the parcels/,
+    );
+    expect(
+      await run(closer, closing(intake.id, principal, exceptionOf('Lost on the table'))),
+    ).toMatch(/^23514:.*approved exception/);
+    expect(await run(senior, closing(intake.id, principal, exceptionOf('   ')))).toMatch(
+      /^23514:.*reason in words/,
+    );
+    expect(await run(senior, closing(intake.id, principal, exceptionOf('Lost on the table')))).toBe(
+      'ran:1',
+    );
+    // The facts are one change with the move: apart from it, or in another officer's name, or by another key, they are refused.
+    expect(
+      await run(
+        closer,
+        `update pickup_intake set closed_at = now(), closed_by = '${principal}' where id = '${intake.id}'`,
+      ),
+    ).toMatch(/^23514:.*made once, with the move/);
+    expect(await run(closer, closing(intake.id, randomUUID()))).toMatch(
+      /^23514:.*in the name of the officer/,
+    );
+    expect(
+      await run(staff('hub.intake.count', [HUB_A], principal), closing(intake.id, principal)),
+    ).toMatch(/^23514:/);
+
+    // The second order gives parity: the close is made, and an exception is not what parity needs.
+    await orderFor(intake, present(intake.parcels, 1));
+    // An order of a parcel that arrived and has no locked price refuses the close whatever the count says (made unfrozen with the triggers off, as no writer can).
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query('set local session_replication_role = replica');
+      await routes.admin.query(
+        `update "order" set locked_price_minor = null, locked_at = null, payer_allocation = null, commercial_state = null where id = $1`,
+        [first.id],
+      );
+      await routes.admin.query('set local session_replication_role = origin');
+      await routes.admin.query('set local role melarc_owner');
+      for (const [name, value] of toContextSettings(closer)) {
+        await routes.admin.query('select set_config($1, $2, true)', [name, value]);
+      }
+      let message = 'closed';
+      try {
+        await routes.admin.query(closing(intake.id, principal));
+      } catch (error) {
+        message = serverErrorIn(error)?.message ?? String(error);
+      }
+      expect(message).toMatch(/has its locked price/);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+    expect(await run(closer, closing(intake.id, principal))).toBe('ran:1');
+    expect(await run(senior, closing(intake.id, principal, exceptionOf('Not needed')))).toMatch(
+      /^23514:.*not got parity/,
+    );
+  });
+});
+
+describe('the payer correction is held by the database for every writer (S1.39)', () => {
+  // Break caught: portions of a locked price that move by any writer's statement, a correction asked or decided under the other's key, and a checker that is the maker without being a Platform Admin.
+  it('moves the portions only by an approved correction, asks and decides under the right keys, and keeps the checker apart from the maker', async () => {
+    const intake = await clearedPhotoIntake(1);
+    const made = await orderFor(intake, present(intake.parcels, 0));
+    const maker = randomUUID();
+    const asking = staff('pricing.correction.create', [HUB_A], maker);
+    const deciding = staff('pricing.correction.approve', [HUB_A], maker);
+    const proposed = '{"payer_intent":"SENDER_PAYS_FULL"}';
+    const insert = (id: string, requester: string): string =>
+      `insert into payer_correction (id, order_id, responsible_hub_id, requested_by, previous_allocation, proposed, note)
+       values ('${id}', '${made.id}', '${HUB_A}', '${requester}', '{}'::jsonb, '${proposed}'::jsonb, 'The vendor agreed')`;
+    const moveAllocation = `update "order" set payer_allocation = '{"payer_intent":"SENDER_PAYS_FULL","sender_minor":3500,"recipient_minor":0}'::jsonb, commercial_state = 'PAYMENT_REQUIRED' where id = '${made.id}'`;
+
+    // The portions of a locked price move by no statement of its own.
+    expect(await asOwner(deciding, [moveAllocation])).toMatch(
+      /^23514:.*only by a payer correction/,
+    );
+    // A correction is asked under the key of the maker, in the maker's name, and the guard fills what the order says.
+    expect(await asOwner(deciding, [insert(randomUUID(), maker)])).toMatch(/^(23514|42501):/);
+    expect(await asOwner(asking, [insert(randomUUID(), randomUUID())])).toMatch(
+      /^23514:.*in the name of the officer/,
+    );
+    expect(await asOwner(asking, [insert(randomUUID(), maker)])).toBe('ran:1');
+    // Asked under one key and decided under the other, in one transaction: by its own maker it is refused, unless the transaction says the decider is a Platform Admin.
+    const id = randomUUID();
+    const decide = `update payer_correction set state = 'REJECTED', decided_by = '${maker}', decided_at = now() where id = '${id}'`;
+    const sequence = async (
+      steps: readonly [SecurityContext, string][],
+      admin: boolean,
+    ): Promise<string> => {
+      await routes.admin.query('begin');
+      try {
+        await routes.admin.query('set local role melarc_owner');
+        let last = 0;
+        for (const [context, text] of steps) {
+          for (const [name, value] of toContextSettings(context))
+            await routes.admin.query('select set_config($1, $2, true)', [name, value]);
+          if (admin)
+            await routes.admin.query(
+              "select set_config('melarc.platform_admin_decision', 'on', true)",
+            );
+          last = (await routes.admin.query(text)).rowCount ?? 0;
+        }
+        return `ran:${String(last)}`;
+      } catch (error) {
+        const server = serverErrorIn(error);
+        return `${server?.code ?? 'other'}:${server?.message ?? String(error)}`;
+      } finally {
+        await routes.admin.query('rollback');
+      }
+    };
+    expect(
+      await sequence(
+        [
+          [asking, insert(id, maker)],
+          [deciding, decide],
+        ],
+        false,
+      ),
+    ).toMatch(/^23514:.*not its requester/);
+    expect(
+      await sequence(
+        [
+          [asking, insert(id, maker)],
+          [deciding, decide],
+        ],
+        true,
+      ),
+    ).toBe('ran:1');
+    // A fabricated approval moves nothing: the portions of the locked price add up to it, and the state is the gate's, run again from them (the maker's own decision is let through here to reach the order's guard).
+    const fabricated = randomUUID();
+    const approval = (allocation: string, state: string): [SecurityContext, string][] => [
+      [asking, insert(fabricated, maker)],
+      [
+        deciding,
+        `update payer_correction set state = 'APPROVED', decided_by = '${maker}', decided_at = now(), resulting_allocation = '${allocation}'::jsonb, resulting_commercial_state = '${state}' where id = '${fabricated}'`,
+      ],
+      [
+        deciding,
+        `update "order" set payer_allocation = '${allocation}'::jsonb, commercial_state = '${state}' where id = '${made.id}'`,
+      ],
+    ];
+    expect(
+      await sequence(
+        approval('{"sender_minor":100,"recipient_minor":100}', 'PAYMENT_REQUIRED'),
+        true,
+      ),
+    ).toMatch(/^23514:.*add up to it/);
+    expect(
+      await sequence(
+        approval('{"sender_minor":3500,"recipient_minor":0}', 'NO_VENDOR_CHARGE'),
+        true,
+      ),
+    ).toMatch(/^23514:.*gate is re-run/);
+    expect(
+      await sequence(
+        approval('{"sender_minor":3500,"recipient_minor":0}', 'PAYMENT_REQUIRED'),
+        true,
+      ),
+    ).toBe('ran:1');
+    // A correction is never removed.
+    expect(
+      await asOwner(asking, [insert(id, maker), `delete from payer_correction where id = '${id}'`]),
+    ).toMatch(/^(23514|42501):|^ran:0$/);
+  });
+});
+
 describe('the portions of a frozen price (AC-SLICE-001-65, -66: the gate reads the resolved amount)', () => {
   // Break caught: the portions resolved from the intent and not from the amounts, a percentage rounded down, a fixed amount larger than the price, or the sum of the portions not the price.
   it.each([

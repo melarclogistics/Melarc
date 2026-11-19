@@ -183,3 +183,94 @@ export const ORDER_SCHEMA = described({
     },
   },
 });
+
+/** The vendor-facing intake-completed and order summary (`IntakeSummary`, S1.38): the orders of the parcels that arrived and what a vendor may know of each, and nothing else. */
+export const INTAKE_SUMMARY_SCHEMA = described({
+  type: 'object',
+  required: ['intake_id', 'pickup_request_id', 'closed_at', 'orders'],
+  additionalProperties: false,
+  properties: {
+    intake_id: UUID,
+    pickup_request_id: UUID,
+    closed_at: { type: 'string', format: 'date-time' },
+    orders: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'code', 'recipient_name', 'service_area', 'commercial_state'],
+        additionalProperties: false,
+        properties: {
+          id: UUID,
+          code: { type: 'string' },
+          recipient_name: { type: 'string' },
+          service_area: { type: 'string' },
+          size_class: SIZE_CLASS,
+          locked_price: MONEY,
+          commercial_state: { type: 'string' },
+        },
+      },
+    },
+  },
+});
+
+const PAYER_PROPOSAL = {
+  type: 'object',
+  required: ['payer_intent'],
+  additionalProperties: false,
+  properties: {
+    payer_intent: { type: 'string', enum: ['RECIPIENT_PAYS', 'SENDER_PAYS_FULL', 'SPLIT'] },
+    split_basis: { type: 'string', enum: ['FIXED_AMOUNT', 'PERCENTAGE'] },
+    split_sender_amount: MONEY,
+    split_sender_percentage: { type: 'number', minimum: 0, maximum: 100 },
+  },
+} as const;
+
+/** The body of `requestPayerCorrection` (S1.39): the intent proposed and a reason in words (a blank one is `REASON_REQUIRED`, told by the service before the shape). */
+export const PAYER_CORRECTION_REQUEST_BODY = described({
+  type: 'object',
+  required: ['proposed', 'note'],
+  additionalProperties: false,
+  properties: {
+    proposed: PAYER_PROPOSAL,
+    note: { type: 'string', minLength: 1 },
+  },
+});
+
+/** The body of `approvePayerCorrection` (S1.39). */
+export const PAYER_CORRECTION_DECISION_BODY = described({
+  type: 'object',
+  required: ['decision'],
+  additionalProperties: false,
+  properties: {
+    decision: { type: 'string', enum: ['APPROVE', 'REJECT'] },
+    note: { type: 'string' },
+  },
+});
+
+const PAYER_ALLOCATION = {
+  type: 'object',
+  required: ['sender_minor', 'recipient_minor'],
+  properties: {
+    sender_minor: { type: 'integer', minimum: 0 },
+    recipient_minor: { type: 'integer', minimum: 0 },
+  },
+} as const;
+
+/** The maker-checker record of a payer correction (`PayerCorrection`). */
+export const PAYER_CORRECTION_SCHEMA = described({
+  type: 'object',
+  required: ['id', 'order_id', 'state', 'requested_by', 'previous_allocation', 'proposed'],
+  properties: {
+    id: UUID,
+    order_id: UUID,
+    state: { type: 'string', enum: ['REQUESTED', 'APPROVED', 'REJECTED'] },
+    requested_by: UUID,
+    approved_by: NULLABLE_UUID,
+    previous_allocation: PAYER_ALLOCATION,
+    proposed: PAYER_PROPOSAL,
+    resulting_commercial_state: { type: ['string', 'null'] },
+    note: { type: 'string' },
+    created_at: { type: 'string', format: 'date-time' },
+    decided_at: { type: ['string', 'null'], format: 'date-time' },
+  },
+});

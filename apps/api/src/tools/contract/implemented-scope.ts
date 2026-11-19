@@ -119,4 +119,12 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'recordParcelArrival',
   // Stage 7, S1.36: the order made for a parcel, with its first commitment (itemization, price and promise).
   'itemizeOrder',
+  // Stage 7, S1.37 and S1.38: the close of an intake, the vendor's summary of it and the read of an order.
+  'closeHubIntake',
+  'getIntakeSummary',
+  'getOrder',
+  // Stage 7, S1.39: the payer edit before the price freezes and the maker-checker correction after it.
+  'amendPickupRequest',
+  'requestPayerCorrection',
+  'approvePayerCorrection',
 ];

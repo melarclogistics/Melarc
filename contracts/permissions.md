@@ -150,8 +150,8 @@ Legend: **A** Ops Staff · **S** Senior Ops · **P** Platform Admin · **V** Ven
 | `hub.handover.submit`| **R only**| owned completed run||
 | `hub.intake.count`| A S P| own hub · P: all hubs| Blind count. Guarded on read *and* write (§35.5.2). **As built (S1.34):** it records a condition (`recordIntakeCondition`) and declares and completes the evidence of one (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `CONDITION`). **As built (S1.33):** it commits the blind count (`submitBlindCount`: once, with the comparison made by the database). **As built (S1.32):** it takes the advisory receive lock (`acquireIntakeLock`, the two columns of the lock and no other) and reads the intakes of its hubs to show the receiver what it locked, never the declaration|
 | `hub.intake.itemize`| A S P| own hub · P: all hubs| `itemizeOrder` (S1.36). As built the key also reads what the intake's reads read, so that the `ETag` it takes as `If-Match` is recomputed as `getHubIntake` gives it, and it declares and reads the evidence of an itemization (purpose `ITEMIZATION`)|
-| `hub.intake.close`| A S P| own hub · P: all hubs| State precondition: parity met (§35.6.11)|
-| `hub.intake.close_exception`| S P| own hub · P: all hubs| The only route to closing without parity (§35.5.5)|
+| `hub.intake.close`| A S P| own hub · P: all hubs| State precondition: parity met (§35.6.11). **As built (S1.38):** `closeHubIntake`; like the key of itemizing it reads what the intake's reads read, so that the `ETag` it takes as `If-Match` is recomputed as the reads do|
+| `hub.intake.close_exception`| S P| own hub · P: all hubs| The only route to closing without parity (§35.5.5). **As built (S1.38):** the same operation, with a body that names the exception: the session holds this key as well as `hub.intake.close`, and the act then runs under this key's grant (an officer with the close alone is `INSUFFICIENT_AUTHORITY`)|
 | `hub.intake.reopen`| **P only**| all hubs| Privileged, audited (§36.6)|
 | `hub.osd.adjudicate`| S P| own hub · P: all hubs| §11.4 row 12. **Not Ops Staff**. **As built (S1.34):** `adjudicateDiscrepancy`, and the evidence of an adjudication (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `OSD`); a user without the key is `PERMISSION_DENIED` before the body is read (`AC-SLICE-001-42`, `-76`). **Designed (Run D, D-D4 and D-D8, 16 November 2026; no key is added):** the senior's decision with its outcomes ("Still searching", accept, write off) and the record "Vendor told", and `correctIntakeCount`, a senior officer's correction of a count or a check-in with a required reason, use this key|
 | `hub.setting.propose`| S| own hub| Zones, service days, boundaries (§35.10, `HUB-028`)|
@@ -161,7 +161,7 @@ Legend: **A** Ops Staff · **S** Senior Ops · **P** Platform Admin · **V** Ven
 
 | Key| Holders| Scope| Notes|
 |---|---|---|---|
-| `pricing.correction.create`| A S P| own hub · P: all hubs| §11.1's own example of the key form|
+| `pricing.correction.create`| A S P| own hub · P: all hubs| §11.1's own example of the key form. **As built (S1.39):** `requestPayerCorrection`; it also reads an order and its parcel, so that the order's `ETag` it takes as `If-Match` is recomputed as `getOrder` gives it|
 | `pricing.correction.approve`| S P| own hub · P: all hubs| Approver ≠ creator, unless the approver is a Platform Admin (§6)|
 | `pricing.reprice.request`| A S P| own hub · P: all hubs| Post-freeze correction that **changes service area or commercial mode** (§35.6.8 as amended by `MSC-DEC-207`). A crossing within one service area moves no money and must not trigger this|
 | `pricing.reprice.approve`| S P| own hub · P: all hubs| Requires affected-party notification|

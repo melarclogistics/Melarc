@@ -126,6 +126,20 @@ export const RECORD_ENTITIES: RecordEntities = Object.freeze({
     table: 'intake_parcel',
     hubScoped: true,
   },
+  // An order (S1.38, `getOrder`): hub-scoped by its responsible hub for staff under `pricing.read`, by its vendor for a vendor, with the probe policy beside its read policy (migration 0112). A staff member's
+  // miss on another hub's order is HUB_SCOPE_VIOLATION; a vendor's miss on another vendor's order and an id that matches nothing are NOT_FOUND by one code path.
+  order: {
+    schema: 'public',
+    table: 'order',
+    hubScoped: true,
+  },
+  // A payer correction (S1.39, `approvePayerCorrection`): hub-scoped by its responsible hub for staff under the keys of the maker and of the checker, with the probe policy beside its read policy (migration 0113). A staff
+  // member's miss on another hub's correction is HUB_SCOPE_VIOLATION and an id that matches nothing is NOT_FOUND.
+  payer_correction: {
+    schema: 'public',
+    table: 'payer_correction',
+    hubScoped: true,
+  },
   // A vendor organisation (S1.14, `listVendorPickupLocations`): hub-scoped by its responsible hub, with the probe policy beside its read
   // policy (migration 0049). A vendor sees its own and another's is answered as an id that matches nothing.
   vendor_organization: {

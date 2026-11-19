@@ -7,6 +7,8 @@ import { HubIntakesController } from './hub-intakes.controller.js';
 import { IntakeFindingsController } from './intake-findings.controller.js';
 import { ItemizationController } from './itemization.controller.js';
 import { hubProviders } from './hub-providers.js';
+import { OrderReadsController } from './order-reads.controller.js';
+import { PayerCorrectionsController } from './payer-corrections.controller.js';
 import { ReceivingController } from './receiving.controller.js';
 
 /**
@@ -25,6 +27,8 @@ import { ReceivingController } from './receiving.controller.js';
     ReceivingController,
     CheckInController,
     ItemizationController,
+    OrderReadsController,
+    PayerCorrectionsController,
   ],
   providers: [...hubProviders],
 })
