@@ -1,8 +1,8 @@
 # Melarc Platform API — proving-slice scope
 #
 # Status:  APPROVED
-# Version: see `info.version` below (5.109.0, Run E of SLICE-001: the corrections of the audit of 17 November 2026)
-# Date:    17 November 2026 (a working revision: see the implementation plan, section 1.1)
+# Version: see `info.version` below (5.110.0, Stage 7 of SLICE-001: itemizeOrder, S1.36)
+# Date:    19 November 2026 (a working revision: see the implementation plan, section 1.1)
 #
 # Version history of the Ops Portal redesign steps (a change of the contract raises the minor number; the commit says what changed):
 #   5.92.0  C2    lookupRecords (global lookup)
@@ -23,6 +23,7 @@
 #   5.107.0 C    The audit of 15 November 2026 of Run C (SLICE-001, Stage 6): the three discriminators on `count_phase` (`listHubIntakes`, `getHubIntake`, `acquireIntakeLock`) name their values by an explicit `mapping` (`PRE_COUNT`, `POST_COUNT`), so that the generated types can be satisfied (the generator took the schema names, which `count_phase` never carries, and the two shapes were `never`); `recordIntakeCondition` says that "once" is judged by the intake's findings and not by its `condition` (the behaviour of 5.106.0 was a defect: a second recording after `OK` was accepted; no shape changes)
 #   5.108.0 D    Run D (SLICE-001, Stage 6 reworked, the Product Owner's decisions D-D1 to D-D8 of 15 and 16 November 2026). **One version for the run.** *Part 1 (the specification) changed prose only*: `recordCollection` (a count above the booking is an `OVER` count, D-D5), `listCollectionShortfalls` (the office's count differences, short and over together), `submitHubHandover` (a photo intake opens with one expected parcel for each door photo), `getHubIntake`, `listHubIntakes`, `submitBlindCount` (blind-count intakes only, D-D3), `recordIntakeCondition` (a condition is a finding of one parcel in photo mode, once for each) and `adjudicateDiscrepancy` ("Still searching" leaves the case open; "Vendor told" is a record after a write-off) say what they will do. **The shapes and the operations follow with the code of the later parts under this same version** (S1.35a to S1.35c): the `OVER` variance and its reason catalogue, `listReceivingRuns`, `getReceivingRun`, `listMissingParcels`, `getEvidenceLimits`, `recordParcelArrival`, `finishCheckIn`, `addExtraParcel` and `correctIntakeCount`, a third intake shape beside `HubIntakePreCount` and `HubIntakePostCount`, the `STATE_CONFLICT` rules in the operations' text (OB-S1-112) and the removal of `INSUFFICIENT_AUTHORITY` from the operations that never raise it. **Part 3.0 (S1.35b-0, the contract-first step of the receiving rework: shapes only, no code)** declares the eight new operations with their schemas: `listReceivingRuns`, `getReceivingRun`, `listMissingParcels`, `getEvidenceLimits`, `recordParcelArrival`, `finishCheckIn`, `addExtraParcel` and `correctIntakeCount`; `ReceivingMode`, `IntakeParcel` (and its state, origin and condition), `IntakeFinding` (the named finding, OB-S1-109), `ReceivingLock`, `HubIntakeCheckIn` (the third intake shape, `count_phase` `CHECK_IN`), `ReceivingVendor`, `ReceivingRun`, `ReceivingRunSummary`, `MissingParcel`, `EvidenceLimits` and the bodies and answers of the acts; they are in no `IMPLEMENTED_OPERATIONS` and are built by S1.35b. **The changes to the schemas of the operations that are already implemented are not here yet, on purpose**: `pnpm run contract:check` compares an implemented operation with the application that serves it, so these are made in the same change as the application's own description by S1.35b, and the plan's S1.35b block lists each one: the third member (`HubIntakeCheckIn`, mapping `CHECK_IN`) of the intake read of `listHubIntakes`, `getHubIntake`, `acquireIntakeLock`, `recordIntakeCondition` and `adjudicateDiscrepancy`; `parcel_id` on `IntakeConditionRecord`; the two queues of `QueueId`; `INSUFFICIENT_AUTHORITY` out of `adjudicateDiscrepancy`
 #   5.109.0 E    Run E (SLICE-001, Stage 6b, the Product Owner's decisions D-E1 to D-E6 of 17 November 2026): **`stageParcelPhotos`** (`POST /pickup-stops/{id}/parcel-photos`, `pickup.collection.confirm`, the Rider host: the rider puts the parcel photos of a count that is not yet made aside in batches of one to 500 identifiers; the answer is how many are staged, never a list) so that a collection of any size reaches the server in requests the transport admits; `recordCollection` attaches **the staged photos and the ones `parcel_photo_ids` names, together** (the number is the two together; the order the photos are named in is not significant; a photo staged and named is `duplicate`) and its answer states `parcel_photo_count` (how many in all) beside `parcel_photo_ids` (the ones the request named); the staged set is closed by the count (`STATE_CONFLICT`, rule `collection_recorded`). **`maximum: 2147483647` on the five inputs that take a number of parcels** and had none (`collected_count` of `CollectionRecordCreate` and `CollectionRecord`, `physical_count` of `submitBlindCount` and of `IntakeCorrection`, `confirmed_count` of `finishCheckIn`, `declared_count` of a handover row): a larger one is `VALIDATION_FAILED` with the rule `maximum` (it was `range` or no schema rule, answered by the service)
+#   5.110.0 F    Stage 7 (SLICE-001, S1.36, the Product Owner's order of 19 November 2026): **`itemizeOrder` as built.** `OrderItemize` gains `parcel_id` (the parcel the order is made for, D-D6: required for an intake checked in against door photos, never given for one counted blind; one order for a parcel); `Order` gains `intake_parcel_id` and `intake_parcel_state`, `commercial_state` and `locked_price` become nullable (an order that waits for its parcel is calculated and not frozen: it is not in the commercial machine yet), and `payer_allocation` is present from the freeze; `EvidenceCreate.purpose` gains `ITEMIZATION` (the verification a high-value parcel needs and the photograph of a carrier's waybill, evidence of the intake: an order does not exist when its evidence is declared); `itemizeOrder` declares `NOT_FOUND`, `HUB_SCOPE_VIOLATION`, `EVIDENCE_NOT_STORED` and `SERVICE_DATE_NOT_PERMITTED` and says what it does as built; the codes of the credit gate and of the close that it does not raise (`ACCOUNT_OVERDUE`, `ALLOWANCE_DISABLED`, `CREDIT_LIMIT_EXCEEDED`, `ORDER_UNPRICED`) come out of its declaration, to be declared by the task that raises them (S1.37, S1.38), as 5.108.0 did for `INSUFFICIENT_AUTHORITY`
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -33,7 +34,7 @@ openapi: 3.1.0
 
 info:
   title: Melarc Platform API
-  version: 5.109.0
+  version: 5.110.0
   summary: Pickup request through hub itemization.
   description: |
     Authoritative FE–BE contract per §39.1. Neither frontend nor backend may independently
@@ -3117,18 +3118,18 @@ paths:
         - { $ref: '#/components/parameters/IfMatch' }
       x-error-codes:
         [
-          ACCOUNT_OVERDUE,
-          ALLOWANCE_DISABLED,
           CARRIER_COST_REQUIRED,
           COMMITMENT_SOURCE_UNRESOLVED,
-          CREDIT_LIMIT_EXCEEDED,
           CSRF_VALIDATION_FAILED,
+          EVIDENCE_NOT_STORED,
+          HUB_SCOPE_VIOLATION,
           IDEMPOTENCY_KEY_CONFLICT,
           MARGIN_NOT_CONFIGURED,
-          ORDER_UNPRICED,
+          NOT_FOUND,
           PERMISSION_DENIED,
           RATE_LIMITED,
           REASON_REQUIRED,
+          SERVICE_DATE_NOT_PERMITTED,
           SESSION_INVALID,
           SETTING_MISSING,
           SIZE_CLASS_REQUIRED,
@@ -3182,6 +3183,36 @@ paths:
         *"backend transition and idempotency controls are still required; a visual lock alone is
         not sufficient."* `submitBlindCount`, the operation immediately before this one, carried
         both guards from the start.
+
+
+        **As built (5.110.0, Stage 7, S1.36).** *The order is made for a parcel* (D-D6): `parcel_id`
+        names the parcel of an intake checked in against door photos (required there, `VALIDATION_FAILED`
+        otherwise; never given for an intake counted blind), one order for a parcel by the database
+        (`STATE_CONFLICT`, rule `parcel_ordered`; `parcel_missing`, `parcel_void`). *An order for a parcel
+        that has arrived* is made once the vendor's check-in is finished and cleared (`READY_FOR_ITEMIZATION`
+        or `ITEMIZING`; `check_in_open`, `reconciliation_open`, `intake_not_ready` otherwise), its price is
+        frozen in the same change and the first of them moves the intake to `ITEMIZING`. *An order for a
+        parcel not yet checked in* waits while the vendor's check-in is open: calculated, with its first
+        commitment, not frozen and not in the commercial machine (`commercial_state` and `locked_price`
+        are null), and confirmed (frozen, to the price that was calculated) when its parcel's arrival can no
+        longer be taken back: the vendor is finished, or the missing parcel is found or brought back. **Every
+        refusal of the price is raised when the order is made**, in this order: the size class
+        (`SIZE_CLASS_REQUIRED`), the declaration (`VALUE_DECLARATION_REQUIRED`: a declared value above
+        `value_declaration_threshold` whose booking recorded no liability-cap acknowledgement), the
+        destination (a doorstep delivery resolves to an active zone of the hub, by the server or by the
+        authorized selection it needed: `SETTING_MISSING` when none resolves, `VALIDATION_FAILED` when
+        two do and none was selected; a third-party delivery is outside the service area), the date
+        (`SERVICE_DATE_NOT_PERMITTED` for a Sunday; `VALIDATION_FAILED`, rule `requested_before_default`,
+        for a day before the next working day after pickup), the fee (`CARRIER_COST_REQUIRED`,
+        `MARGIN_NOT_CONFIGURED`, `SETTING_MISSING`) with the high-value surcharge stacked on it, and the
+        evidence of a high-value parcel (`REASON_REQUIRED`; each piece `STORED`, the intake's own and of the
+        purpose `ITEMIZATION`: `EVIDENCE_NOT_STORED`). The `422` answers are `SETTING_MISSING` (the status of a
+        hub-settings path is its operation's own, errors-and-enums.md section 4), `MARGIN_NOT_CONFIGURED`,
+        `SIZE_CLASS_REQUIRED`, `CARRIER_COST_REQUIRED`, `VALUE_DECLARATION_REQUIRED`, `REASON_REQUIRED`,
+        `SERVICE_DATE_NOT_PERMITTED`, `COMMITMENT_SOURCE_UNRESOLVED` (no order is made when the moment
+        custody passed cannot be read from the stop's collection) and `EVIDENCE_NOT_STORED`. The credit gate's
+        codes (`ACCOUNT_OVERDUE`, `ALLOWANCE_DISABLED`, `CREDIT_LIMIT_EXCEEDED`) and `ORDER_UNPRICED` are not
+        declared here: they are the gate's (S1.37, D-12) and the close's (S1.38), declared by the task that raises them.
       requestBody:
         required: true
         content:
@@ -3196,6 +3227,7 @@ paths:
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422':
           description: |
@@ -16539,6 +16571,15 @@ components:
       required: [recipient]
       additionalProperties: false
       properties:
+        parcel_id:
+          type: string
+          format: uuid
+          description: >-
+            The parcel the order is made for (D-D6, 5.110.0): required for an intake checked in against door
+            photos (`VALIDATION_FAILED`, rule `parcel_required`, otherwise), never given for an intake counted
+            blind (`parcel_not_allowed`). One order for a parcel, held by the database: a parcel of another
+            intake is `unknown_parcel`, a second order for the same parcel is `STATE_CONFLICT` (`parcel_ordered`),
+            and a missing or void parcel has none (`parcel_missing`, `parcel_void`).
         recipient:
           type: object
           required: [name, phone, location]
@@ -16637,11 +16678,37 @@ components:
         code: { type: string }
         pickup_intake_id: { type: string, format: uuid }
         responsible_hub_id: { type: string, format: uuid }
+        intake_parcel_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            The parcel the order is made for (D-D6, 5.110.0); null only for an intake counted blind, which has
+            none. One order for a parcel and one parcel for an order, by the database. The order's photo is its
+            parcel's photo, and the evidence stays the stop's (or the intake's, for an extra).
+        intake_parcel_state:
+          type: [string, 'null']
+          enum: [EXPECTED, ARRIVED, MISSING, VOID, null]
+          description: >-
+            The state of the parcel the order is made for (5.110.0). **`EXPECTED` is an order that waits for its
+            parcel** ("awaiting arrival"): calculated and not frozen. `MISSING` is an order shown as missing,
+            never priced, frozen or dispatched.
         commercial_state:
-          type: string
+          type: [string, 'null']
           enum:
-            [PRICED, PAYMENT_REQUIRED, CREDIT_RESERVED, NO_VENDOR_CHARGE, PREPAID, CLOSED, REVERSED]
+            [
+              PRICED,
+              PAYMENT_REQUIRED,
+              CREDIT_RESERVED,
+              NO_VENDOR_CHARGE,
+              PREPAID,
+              CLOSED,
+              REVERSED,
+              null,
+            ]
           description: |
+            **Null until the freeze (5.110.0): an order that waits for its parcel is not in the commercial machine
+            yet, and the freeze enters it at `PRICED`.**
+
             NO_VENDOR_CHARGE means the resolved vendor portion was zero, so the
             commercial gate had nothing to test. It is **not** a payment and **not** a
             reservation: counting it as revenue, as prepayment, or as consumed exposure is
@@ -16674,12 +16741,18 @@ components:
         is_high_value: { type: boolean }
         lane: { type: string }
         commercial_mode: { type: [string, 'null'] }
-        locked_price: { $ref: '#/components/schemas/Money' }
+        locked_price:
+          oneOf:
+            - $ref: '#/components/schemas/Money'
+            - { type: 'null' }
+          description: >-
+            Null until the freeze (5.110.0). An order that waits for its parcel is calculated and not locked.
         price_components_snapshot:
           type: object
           additionalProperties: true
           description: |
-            Each component carries HUB, setting key, effective version and value. Components:
+            **The price as calculated when the order was made, with its total (5.110.0); the lock is the freeze, which
+            makes no new calculation.** Each component carries HUB, setting key, effective version and value. Components:
             service-area base fee OR corridor off-day fee OR station-drop fee; size-class
             surcharge and carrier cost plus applied margin (third-party mode only).
 
@@ -19741,6 +19814,7 @@ components:
               PARCEL_PHOTO,
               CONDITION,
               OSD,
+              ITEMIZATION,
               HANDOFF_RECEIPT,
               DELIVERY_PROOF,
               RETURN_PROOF,
@@ -19748,6 +19822,11 @@ components:
               FUEL,
               COMPLIANCE_DOCUMENT,
             ]
+          description: >-
+            `ITEMIZATION` (5.110.0, S1.36) is the evidence an officer attaches when itemizing a parcel: the
+            verification a high-value parcel needs and the photograph of a carrier's waybill. It is evidence of the
+            intake (`owner_type` `PICKUP_INTAKE`), declared under `hub.intake.itemize`, because the order does not
+            exist yet when its evidence is declared.
         captured_at:
           type: string
           format: date-time

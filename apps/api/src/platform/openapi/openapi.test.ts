@@ -214,6 +214,8 @@ describe('the generated description of the real application', () => {
       ['/hub-intakes/{id}/check-in', ['post'], ['finishCheckIn']],
       ['/hub-intakes/{id}/extra-parcels', ['post'], ['addExtraParcel']],
       ['/hub-intakes/{id}/correction', ['post'], ['correctIntakeCount']],
+      // S1.36: the order made for a parcel (itemization).
+      ['/hub-intakes/{id}/orders', ['post'], ['itemizeOrder']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.

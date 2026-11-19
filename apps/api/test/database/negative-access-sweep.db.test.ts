@@ -561,6 +561,7 @@ describe('the existence rule is asked about records that are real (the control o
       getStaffIdentity: 'staff',
       getVendorAccount: 'vendor',
       initiateHandshake: 'pickupStop',
+      itemizeOrder: 'pickupIntake',
       listPickupStopEvidence: 'pickupStop',
       listStaffTrustedBrowsers: 'staff',
       listVendorPickupLocations: 'vendorOrganization',

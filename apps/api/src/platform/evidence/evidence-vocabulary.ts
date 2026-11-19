@@ -23,13 +23,16 @@ export type EvidenceOwnerType = (typeof EVIDENCE_OWNER_TYPES)[number];
 
 /**
  * Why it was captured (`EvidenceCreate.purpose` of the contract). `PARCEL_PHOTO` is the photo of one parcel at the door (D-A10, 12 November 2026): a collection record keeps exactly
- * one for each parcel counted (`collection_parcel_photo`), and it is told from `COLLECTION_PROOF`, the photo a failure or a short count's reason asks for.
+ * one for each parcel counted (`collection_parcel_photo`), and it is told from `COLLECTION_PROOF`, the photo a failure or a short count's reason asks for. `ITEMIZATION` (S1.36, migration 0110) is the evidence an
+ * officer attaches when itemizing a parcel: the verification a high-value parcel needs (`evidence_ids`) and the photograph of the carrier's waybill behind a transcribed cost (`carrier_waybill_evidence_id`). It is
+ * evidence of the intake, because an order does not exist yet when its evidence is declared; the contract's list names no purpose for it, so this is a reading, surfaced for the Product Owner.
  */
 export const EVIDENCE_PURPOSES = [
   'COLLECTION_PROOF',
   'PARCEL_PHOTO',
   'CONDITION',
   'OSD',
+  'ITEMIZATION',
   'HANDOFF_RECEIPT',
   'DELIVERY_PROOF',
   'RETURN_PROOF',

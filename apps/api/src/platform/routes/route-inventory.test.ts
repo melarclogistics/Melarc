@@ -107,6 +107,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/hub-intakes/:id/discrepancy' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/extra-parcels' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/lock' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/orders' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
@@ -792,6 +793,19 @@ describe('the real application', () => {
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'background',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.36: the order made for a parcel, with its first commitment (itemization, price and promise), by the officer who itemizes.
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/orders',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
           record: { entity: 'pickup_intake', param: 'id' },
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),

@@ -119,11 +119,12 @@ describe('ERROR_STATUS: one rule for every operation (errors-and-enums.md §4, A
     expect(ERROR_STATUS[ErrorCode.DeviceIntegrityFailed]).toBe(422);
   });
 
-  // Break caught: an invented status. No retained document gives these two codes one, and the platform does not choose it.
-  it('leaves the status of SETTING_MISSING and SETTING_INVALID undecided, and refuses to answer for them', () => {
-    expect(ERROR_STATUS[ErrorCode.SettingMissing]).toBeNull();
+  // Break caught: an invented status. The contract gives itemizeOrder, the one operation that raises SETTING_MISSING as a business answer, a 422 for it (decided with that operation, S1.36); no retained document
+  // gives SETTING_INVALID one, and the platform does not choose it.
+  it('answers SETTING_MISSING at 422 as itemizeOrder declares it, and leaves SETTING_INVALID undecided, refusing to answer for it', () => {
+    expect(ERROR_STATUS[ErrorCode.SettingMissing]).toBe(422);
+    expect(statusOf(ErrorCode.SettingMissing)).toBe(422);
     expect(ERROR_STATUS[ErrorCode.SettingInvalid]).toBeNull();
-    expect(() => statusOf(ErrorCode.SettingMissing)).toThrow(/No status is decided/);
     expect(() => statusOf(ErrorCode.SettingInvalid)).toThrow(/No status is decided/);
   });
 
@@ -241,6 +242,6 @@ describe('ApiException: what an error answer may carry beyond its code', () => {
 
     expect(exception.getStatus()).toBe(409);
     expect(exception.code).toBe('STATE_CONFLICT');
-    expect(() => ApiException.of(ErrorCode.SettingMissing, 'x')).toThrow(/No status is decided/);
+    expect(() => ApiException.of(ErrorCode.SettingInvalid, 'x')).toThrow(/No status is decided/);
   });
 });

@@ -16,8 +16,8 @@ import type {
  * photo is the count's and not the failure's (the policies of migration 0088 pair each purpose with its key). **The second owner is a pickup intake** (S1.34, migration 0095), whose
  * evidence is declared by staff: the photos of a condition (`CONDITION`) are the receiver's act, written under `hub.intake.count`, and the photos of an adjudication (`OSD`) are Senior
  * Ops's, written under `hub.osd.adjudicate` (and the photo of an extra parcel, Run D, is the receiver's, the same purpose written under `hub.intake.count` for a photo intake); the staff of the intake's hub
- * holding `hub.read` read all of it. A later owner (S1.36's itemisation) adds its row and its arms in the migration
- * that builds it.
+ * holding `hub.read` read all of it. **The itemisation of S1.36 is a third act of the same owner**, for the purpose `ITEMIZATION`, written under `hub.intake.itemize` (the evidence a high-value parcel needs and the
+ * photograph of a carrier's waybill). A later owner adds its row and its arms in the migration that builds it.
  */
 export interface OwnerAct {
   readonly ownerType: EvidenceOwnerType;
@@ -81,6 +81,16 @@ export const OWNER_ACTS: readonly OwnerAct[] = Object.freeze([
     write: Object.freeze({ principal: 'STAFF', key: 'hub.intake.count' } as const),
     read: Object.freeze({ principal: 'STAFF', key: 'hub.read' } as const),
     photoIntakeOnly: true,
+  }),
+  // S1.36 (`itemizeOrder`, migration 0110): the evidence an officer attaches when itemizing a parcel (the verification a high-value parcel needs, the photograph of a carrier's waybill) is evidence of the intake, which
+  // exists when the order does not yet, declared and completed under the key of the act that cites it and read under `hub.read` like the rest of the intake's.
+  Object.freeze({
+    ownerType: 'PICKUP_INTAKE',
+    purposes: Object.freeze(['ITEMIZATION'] as const),
+    accessRule: 'SUBJECT_READERS',
+    retentionPolicy: 'PICKUP_INTAKE_EVIDENCE',
+    write: Object.freeze({ principal: 'STAFF', key: 'hub.intake.itemize' } as const),
+    read: Object.freeze({ principal: 'STAFF', key: 'hub.read' } as const),
   }),
 ]);
 

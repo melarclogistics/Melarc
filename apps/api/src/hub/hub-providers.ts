@@ -7,14 +7,17 @@ import {
   type IdempotencyStore,
 } from '../platform/auth/ports/idempotency-store.port.js';
 import { OPERATION_RUNNER } from '../platform/authorization/authorization-providers.js';
+import { DatabaseService } from '../platform/database/database.service.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { RUN_ACCESS, type RunAccess } from '../platform/domain-ports/run-access.port.js';
 import { RUN_CUSTODY, type RunCustody } from '../platform/domain-ports/run-custody.port.js';
+import { ConfigurationReader } from '../platform/settings/configuration-reader.js';
 import { HubBlindCounts } from './blind-count.service.js';
 import { HubHandovers } from './hub-handover.service.js';
 import { HubCheckIns } from './check-in.service.js';
 import { HubIntakes } from './hub-intakes.service.js';
 import { HubIntakeFindings } from './intake-findings.service.js';
+import { HubItemization } from './itemization.service.js';
 import { ReceivingReads } from './receiving-reads.service.js';
 
 /** The injection token of the service of the hub handover (S1.31), which its controller asks for. */
@@ -35,7 +38,10 @@ export const HUB_RECEIVING_READS = Symbol('HUB_RECEIVING_READS');
 /** The injection token of the service of the acts of the check-in (Run D, S1.35b), which its controller asks for. */
 export const HUB_CHECK_INS = Symbol('HUB_CHECK_INS');
 
-const optional = (token: symbol) => ({ token, optional: true });
+/** The injection token of the service of `itemizeOrder` (S1.36), which its controller asks for. */
+export const HUB_ITEMIZATION = Symbol('HUB_ITEMIZATION');
+
+const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
 /**
  * The service of the hub handover, `undefined` where what it needs is missing: an application composed without a database has none, so it has no service, and the operation fails closed
@@ -142,6 +148,38 @@ export const hubProviders: readonly FactoryProvider[] = [
       optional(AUDIT_WRITER),
       optional(IDEMPOTENCY_STORE),
       optional(CLOCK),
+    ],
+  },
+  {
+    // The itemization needs the runner, the audit, the idempotency store, the clock (for the identifiers of the order and of its first commitment) and the database (for the configuration reader, which opens its own
+    // read transaction under the `configuration` capability, as the booking's does); any one missing and the operation fails closed (`503`).
+    provide: HUB_ITEMIZATION,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+      database: DatabaseService | undefined,
+    ): HubItemization | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined ||
+      database === undefined
+        ? undefined
+        : new HubItemization({
+            runner,
+            audit,
+            idempotency,
+            clock,
+            configuration: new ConfigurationReader(database),
+          }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+      optional(DatabaseService),
     ],
   },
 ];

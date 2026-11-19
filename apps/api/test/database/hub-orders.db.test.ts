@@ -769,7 +769,7 @@ describe('what the database holds of an order for every writer', () => {
       `select 1 from "order" where pickup_intake_id = '${intake.id}' and responsible_hub_id = '${HUB_A}' and created_at > now() - interval '1 minute'`,
     ]);
     expect(stray).toBe('ran:1');
-    for (const over of [
+    const beginnings: Record<string, string>[] = [
       {
         commercial_state: `'PRICED'`,
         locked_price_minor: '3500',
@@ -779,7 +779,8 @@ describe('what the database holds of an order for every writer', () => {
       { fulfilment_state: `'DELIVERED'` },
       { delivery_attempt_count: '2' },
       { delivery_date_override: `'{"by":"x"}'::jsonb` },
-    ]) {
+    ];
+    for (const over of beginnings) {
       expect((await insertAs(intake, parcel, over)).startsWith('23514'), JSON.stringify(over)).toBe(
         true,
       );

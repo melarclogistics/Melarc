@@ -5,6 +5,7 @@ import { CheckInController } from './check-in.controller.js';
 import { HubHandoverController } from './hub-handover.controller.js';
 import { HubIntakesController } from './hub-intakes.controller.js';
 import { IntakeFindingsController } from './intake-findings.controller.js';
+import { ItemizationController } from './itemization.controller.js';
 import { hubProviders } from './hub-providers.js';
 import { ReceivingController } from './receiving.controller.js';
 
@@ -23,6 +24,7 @@ import { ReceivingController } from './receiving.controller.js';
     IntakeFindingsController,
     ReceivingController,
     CheckInController,
+    ItemizationController,
   ],
   providers: [...hubProviders],
 })

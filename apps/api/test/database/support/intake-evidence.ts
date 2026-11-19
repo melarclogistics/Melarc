@@ -34,7 +34,7 @@ export interface IntakeTicket {
 /** The declaration of a record about an intake, with the body a receiver sends. */
 export function intakeEvidenceBody(
   intakeId: string,
-  purpose: 'CONDITION' | 'OSD' = 'CONDITION',
+  purpose: 'CONDITION' | 'OSD' | 'ITEMIZATION' = 'CONDITION',
   over: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
@@ -82,7 +82,7 @@ export async function storedIntakeEvidence(
   routes: VendorRoutes,
   actor: Actor,
   intakeId: string,
-  purpose: 'CONDITION' | 'OSD' = 'CONDITION',
+  purpose: 'CONDITION' | 'OSD' | 'ITEMIZATION' = 'CONDITION',
 ): Promise<string> {
   const declared = await declareIntakeEvidence(actor, intakeEvidenceBody(intakeId, purpose));
   expect(declared.status).toBe(200);
@@ -102,7 +102,7 @@ export async function pendingIntakeEvidence(
   routes: VendorRoutes,
   actor: Actor,
   intakeId: string,
-  purpose: 'CONDITION' | 'OSD' = 'CONDITION',
+  purpose: 'CONDITION' | 'OSD' | 'ITEMIZATION' = 'CONDITION',
 ): Promise<string> {
   const declared = await declareIntakeEvidence(actor, intakeEvidenceBody(intakeId, purpose));
   expect(declared.status).toBe(200);

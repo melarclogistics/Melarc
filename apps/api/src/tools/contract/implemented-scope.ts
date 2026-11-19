@@ -117,4 +117,6 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'listMissingParcels',
   'listReceivingRuns',
   'recordParcelArrival',
+  // Stage 7, S1.36: the order made for a parcel, with its first commitment (itemization, price and promise).
+  'itemizeOrder',
 ];

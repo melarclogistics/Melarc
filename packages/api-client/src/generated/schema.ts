@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.109.0
- *   SHA-256 94a368b55c16ffab573253b21df7fe960950e41a98430bb9eb5961c9d210a237 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.110.0
+ *   SHA-256 59ffd024309c6058d4bc00d595bf9c0c0bb86cb5028197d6ab11248c21cab7f9 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1907,6 +1907,36 @@ export interface paths {
          *     *"backend transition and idempotency controls are still required; a visual lock alone is
          *     not sufficient."* `submitBlindCount`, the operation immediately before this one, carried
          *     both guards from the start.
+         *
+         *
+         *     **As built (5.110.0, Stage 7, S1.36).** *The order is made for a parcel* (D-D6): `parcel_id`
+         *     names the parcel of an intake checked in against door photos (required there, `VALIDATION_FAILED`
+         *     otherwise; never given for an intake counted blind), one order for a parcel by the database
+         *     (`STATE_CONFLICT`, rule `parcel_ordered`; `parcel_missing`, `parcel_void`). *An order for a parcel
+         *     that has arrived* is made once the vendor's check-in is finished and cleared (`READY_FOR_ITEMIZATION`
+         *     or `ITEMIZING`; `check_in_open`, `reconciliation_open`, `intake_not_ready` otherwise), its price is
+         *     frozen in the same change and the first of them moves the intake to `ITEMIZING`. *An order for a
+         *     parcel not yet checked in* waits while the vendor's check-in is open: calculated, with its first
+         *     commitment, not frozen and not in the commercial machine (`commercial_state` and `locked_price`
+         *     are null), and confirmed (frozen, to the price that was calculated) when its parcel's arrival can no
+         *     longer be taken back: the vendor is finished, or the missing parcel is found or brought back. **Every
+         *     refusal of the price is raised when the order is made**, in this order: the size class
+         *     (`SIZE_CLASS_REQUIRED`), the declaration (`VALUE_DECLARATION_REQUIRED`: a declared value above
+         *     `value_declaration_threshold` whose booking recorded no liability-cap acknowledgement), the
+         *     destination (a doorstep delivery resolves to an active zone of the hub, by the server or by the
+         *     authorized selection it needed: `SETTING_MISSING` when none resolves, `VALIDATION_FAILED` when
+         *     two do and none was selected; a third-party delivery is outside the service area), the date
+         *     (`SERVICE_DATE_NOT_PERMITTED` for a Sunday; `VALIDATION_FAILED`, rule `requested_before_default`,
+         *     for a day before the next working day after pickup), the fee (`CARRIER_COST_REQUIRED`,
+         *     `MARGIN_NOT_CONFIGURED`, `SETTING_MISSING`) with the high-value surcharge stacked on it, and the
+         *     evidence of a high-value parcel (`REASON_REQUIRED`; each piece `STORED`, the intake's own and of the
+         *     purpose `ITEMIZATION`: `EVIDENCE_NOT_STORED`). The `422` answers are `SETTING_MISSING` (the status of a
+         *     hub-settings path is its operation's own, errors-and-enums.md section 4), `MARGIN_NOT_CONFIGURED`,
+         *     `SIZE_CLASS_REQUIRED`, `CARRIER_COST_REQUIRED`, `VALUE_DECLARATION_REQUIRED`, `REASON_REQUIRED`,
+         *     `SERVICE_DATE_NOT_PERMITTED`, `COMMITMENT_SOURCE_UNRESOLVED` (no order is made when the moment
+         *     custody passed cannot be read from the stop's collection) and `EVIDENCE_NOT_STORED`. The credit gate's
+         *     codes (`ACCOUNT_OVERDUE`, `ALLOWANCE_DISABLED`, `CREDIT_LIMIT_EXCEEDED`) and `ORDER_UNPRICED` are not
+         *     declared here: they are the gate's (S1.37, D-12) and the close's (S1.38), declared by the task that raises them.
          */
         post: operations["itemizeOrder"];
         delete?: never;
@@ -10699,6 +10729,11 @@ export interface components {
          *     settable price field — which would have dismantled the guard entirely.
          */
         OrderItemize: {
+            /**
+             * Format: uuid
+             * @description The parcel the order is made for (D-D6, 5.110.0): required for an intake checked in against door photos (`VALIDATION_FAILED`, rule `parcel_required`, otherwise), never given for an intake counted blind (`parcel_not_allowed`). One order for a parcel, held by the database: a parcel of another intake is `unknown_parcel`, a second order for the same parcel is `STATE_CONFLICT` (`parcel_ordered`), and a missing or void parcel has none (`parcel_missing`, `parcel_void`).
+             */
+            parcel_id?: string;
             recipient: {
                 name: string;
                 /** @description E.164, normalised. As-entered form retained server-side. */
@@ -10777,13 +10812,26 @@ export interface components {
             /** Format: uuid */
             responsible_hub_id?: string;
             /**
-             * @description NO_VENDOR_CHARGE means the resolved vendor portion was zero, so the
+             * Format: uuid
+             * @description The parcel the order is made for (D-D6, 5.110.0); null only for an intake counted blind, which has none. One order for a parcel and one parcel for an order, by the database. The order's photo is its parcel's photo, and the evidence stays the stop's (or the intake's, for an extra).
+             */
+            intake_parcel_id?: string | null;
+            /**
+             * @description The state of the parcel the order is made for (5.110.0). **`EXPECTED` is an order that waits for its parcel** ("awaiting arrival"): calculated and not frozen. `MISSING` is an order shown as missing, never priced, frozen or dispatched.
+             * @enum {string|null}
+             */
+            intake_parcel_state?: "EXPECTED" | "ARRIVED" | "MISSING" | "VOID" | null;
+            /**
+             * @description **Null until the freeze (5.110.0): an order that waits for its parcel is not in the commercial machine
+             *     yet, and the freeze enters it at `PRICED`.**
+             *
+             *     NO_VENDOR_CHARGE means the resolved vendor portion was zero, so the
              *     commercial gate had nothing to test. It is **not** a payment and **not** a
              *     reservation: counting it as revenue, as prepayment, or as consumed exposure is
              *     wrong in three different reports.
-             * @enum {string}
+             * @enum {string|null}
              */
-            commercial_state: "PRICED" | "PAYMENT_REQUIRED" | "CREDIT_RESERVED" | "NO_VENDOR_CHARGE" | "PREPAID" | "CLOSED" | "REVERSED";
+            commercial_state: "PRICED" | "PAYMENT_REQUIRED" | "CREDIT_RESERVED" | "NO_VENDOR_CHARGE" | "PREPAID" | "CLOSED" | "REVERSED" | null;
             /** @enum {string} */
             fulfilment_state: "AWAITING_RECIPIENT_CONFIRMATION" | "READY_FOR_DISPATCH" | "ASSIGNED" | "OUT_FOR_DELIVERY" | "DELIVERED" | "ATTEMPT_FAILED" | "AT_HUB_AFTER_FAILURE" | "READY_FOR_REATTEMPT" | "HANDED_TO_CARRIER" | "RETURN_TO_VENDOR_IN_PROGRESS" | "RETURNED_TO_VENDOR";
             origin_zone_snapshot?: {
@@ -10806,9 +10854,11 @@ export interface components {
             is_high_value?: boolean;
             lane: string;
             commercial_mode?: string | null;
-            locked_price?: components["schemas"]["Money"];
+            /** @description Null until the freeze (5.110.0). An order that waits for its parcel is calculated and not locked. */
+            locked_price?: components["schemas"]["Money"] | null;
             /**
-             * @description Each component carries HUB, setting key, effective version and value. Components:
+             * @description **The price as calculated when the order was made, with its total (5.110.0); the lock is the freeze, which
+             *     makes no new calculation.** Each component carries HUB, setting key, effective version and value. Components:
              *     service-area base fee OR corridor off-day fee OR station-drop fee; size-class
              *     surcharge and carrier cost plus applied margin (third-party mode only).
              *
@@ -13091,8 +13141,11 @@ export interface components {
             owner_type: "PICKUP_STOP" | "PICKUP_INTAKE" | "ORDER" | "DELIVERY_STOP" | "THIRD_PARTY_HANDOFF" | "MOTORCYCLE" | "FUEL_RECORD" | "VENDOR_ORGANIZATION" | "APPROVED_AGENT";
             /** Format: uuid */
             owner_id: string;
-            /** @enum {string} */
-            purpose: "COLLECTION_PROOF" | "PARCEL_PHOTO" | "CONDITION" | "OSD" | "HANDOFF_RECEIPT" | "DELIVERY_PROOF" | "RETURN_PROOF" | "MAINTENANCE" | "FUEL" | "COMPLIANCE_DOCUMENT";
+            /**
+             * @description `ITEMIZATION` (5.110.0, S1.36) is the evidence an officer attaches when itemizing a parcel: the verification a high-value parcel needs and the photograph of a carrier's waybill. It is evidence of the intake (`owner_type` `PICKUP_INTAKE`), declared under `hub.intake.itemize`, because the order does not exist yet when its evidence is declared.
+             * @enum {string}
+             */
+            purpose: "COLLECTION_PROOF" | "PARCEL_PHOTO" | "CONDITION" | "OSD" | "ITEMIZATION" | "HANDOFF_RECEIPT" | "DELIVERY_PROOF" | "RETURN_PROOF" | "MAINTENANCE" | "FUEL" | "COMPLIANCE_DOCUMENT";
             /**
              * Format: date-time
              * @description **Field capture time, not upload time** (3.6). The rider app works under unreliable
@@ -16552,6 +16605,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             /**
              * @description `SETTING_MISSING` when the hub has no approved base fee, or `MARGIN_NOT_CONFIGURED`

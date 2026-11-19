@@ -21,6 +21,7 @@ import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import { noteHubCrossing } from './hub-crossing.js';
 import { hubIntakeEtagMatches } from './hub-intake-etag.js';
 import type { HubIntakePostCountView } from './hub-intake-view.js';
+import { confirmWaitingOrders } from './order-confirmation.js';
 import {
   RECEIVING_INTAKE_COLUMNS,
   loadIntakes,
@@ -171,6 +172,10 @@ export class HubCheckIns {
       }
       if (moved === undefined) throw new Error('A locked parcel was not asked about its arrival');
       const after = await this.#reload(tx, intakeId, caller);
+      // A parcel found after the vendor was finished is an arrival that can no longer be taken back: the order that waited for it is confirmed (D-D6). A tap made while the vendor is open confirms nothing.
+      if (moved.parcel_previous_state === 'MISSING' && moved.parcel_resulting_state === 'ARRIVED') {
+        await confirmWaitingOrders(handle, this.#options.audit, after.row);
+      }
       if (moved.parcel_previous_state === 'MISSING' && moved.parcel_resulting_state === 'ARRIVED') {
         await this.#options.audit.write(handle, {
           code: 'hub.parcel.found',
@@ -253,6 +258,8 @@ export class HubCheckIns {
         throw receivingRefusalOf(error, '/confirmed_count') ?? error;
       }
       if (moved === undefined) throw new Error('A locked vendor was not finished');
+      // The vendor is finished: the arrivals are committed, and the orders that waited for the parcels that arrived are confirmed (D-D6).
+      await confirmWaitingOrders(handle, this.#options.audit, row);
       const after = await this.#reload(tx, id, caller);
       const declared = after.view.rider_declared_count;
       await this.#options.audit.write(handle, {
@@ -434,6 +441,8 @@ export class HubCheckIns {
         );
       }
       if (moved === undefined) throw new Error('A locked intake was not corrected');
+      // A correction that brings a parcel back commits its arrival: the order that waited for it is confirmed (D-D6). A parcel whose order is priced is never taken back (the database holds it).
+      await confirmWaitingOrders(handle, this.#options.audit, row);
       const after = await this.#reload(tx, id, caller);
       const changed = Array.isArray(moved.changed)
         ? (moved.changed as Record<string, unknown>[])
