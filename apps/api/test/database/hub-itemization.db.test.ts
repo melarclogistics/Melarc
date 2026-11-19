@@ -15,6 +15,7 @@ import {
   storedIntakeEvidence,
 } from './support/intake-evidence.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
+import { setFinancialStanding } from './support/pickups.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { API, HUB_A, HUB_B, OPS, type Actor } from './support/staff-routes.js';
@@ -394,7 +395,7 @@ describe('the body is closed and the price is the server’s (AC-SLICE-001-47)',
       lane: 'THIRD_PARTY_HANDOFF',
       commercial_mode: 'MELARC_COVERED_THIRD_PARTY_DELIVERY',
       carrier_cost: money,
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
     });
     expect(made.locked_price).toEqual({ amount_minor: 5000 + 3000 + 3000, currency: 'GHS' });
     expect(made.price_components_snapshot.components.map((component) => component.kind)).toEqual([
@@ -460,7 +461,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90, -56)', () => 
       pickup_intake_id: intake.id,
       intake_parcel_id: parcel.id,
       intake_parcel_state: 'ARRIVED',
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
       fulfilment_state: 'AWAITING_RECIPIENT_CONFIRMATION',
       size_class: 'SMALL',
       size_class_selected_by: officer.identity.id,
@@ -597,7 +598,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90, -56)', () => 
     const made = orderOf(await itemize(officer, intake.id, body(null)));
     expect(made.intake_parcel_id).toBeNull();
     expect(made.intake_parcel_state).toBeNull();
-    expect(made.commercial_state).toBe('PRICED');
+    expect(made.commercial_state).toBe('NO_VENDOR_CHARGE');
     expect(await intakeState(intake.id)).toBe('ITEMIZING');
     // Orders of a blind intake are not one-to-one with anything.
     expect(orderOf(await itemize(officer, intake.id, body(null))).id).not.toBe(made.id);
@@ -906,7 +907,7 @@ describe('an order that waits for its parcel (AC-SLICE-001-104)', () => {
     // The vendor is finished as tapped: the parcel that arrived is confirmed at the price that was calculated, the one that did not stays unpriced.
     expect((await finishAsTapped(officer, intake.id)).status).toBe(200);
     expect(await orderRow(waiting.id)).toMatchObject({
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
       locked_price_minor: 3500,
     });
     expect((await orderRow(waiting.id))?.payer_allocation).not.toBeNull();
@@ -928,7 +929,7 @@ describe('an order that waits for its parcel (AC-SLICE-001-104)', () => {
     // The parcel that was missing is found: its order is confirmed then.
     expect((await tap(officer, b.id, true)).status).toBe(200);
     expect(await orderRow(left.id)).toMatchObject({
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
       locked_price_minor: 3500,
     });
     // A parcel whose order is priced is not taken back.
@@ -1262,7 +1263,7 @@ describe('what goes with what, and what a state says before a price does', () =>
     );
     expect(corrected.status, corrected.text).toBe(200);
     expect(await orderRow(early.id)).toMatchObject({
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
       locked_price_minor: 3500,
     });
   });
@@ -1280,5 +1281,143 @@ describe('what goes with what, and what a state says before a price does', () =>
     });
     expect(await countOrders(id)).toBe(0);
     expect(await intakeState(id)).toBe('READY_FOR_ITEMIZATION');
+  });
+});
+
+describe('the commercial gate (S1.37, AC-SLICE-001-65, -66)', () => {
+  const gateEvents = async (orderId: string): Promise<string[]> =>
+    (
+      await routes.rows<{ event_code: string }>(
+        `select event_code from audit_event where object_id = $1 and event_code like 'order.%' order by recorded_at, id`,
+        [orderId],
+      )
+    ).map((row) => row.event_code);
+
+  // Break caught: the gate that asks the account before the amount, so that an overdue vendor's recipient-pays parcel is stopped for a debt nobody owes (AC-SLICE-001-65).
+  it('clears a recipient-pays order of an OVERDUE vendor with no charge: the amount is tested first and the account is never consulted', async () => {
+    await setFinancialStanding(routes.admin, vendor.row.organizationId, 'OVERDUE');
+    try {
+      const intake = await cleared(1);
+      const [parcel] = intake.parcels as [Parcel];
+      const made = orderOf(
+        await itemize(
+          officer,
+          intake.id,
+          body(parcel.id, { payer_override: { payer_intent: 'RECIPIENT_PAYS' } }),
+        ),
+      );
+      expect(made.commercial_state).toBe('NO_VENDOR_CHARGE');
+      expect(made.payer_allocation).toEqual({ sender_minor: 0, recipient_minor: 3500 });
+      expect(await gateEvents(made.id)).toEqual(['order.commercial.cleared_no_charge']);
+    } finally {
+      await setFinancialStanding(routes.admin, vendor.row.organizationId, 'GOOD');
+    }
+  });
+
+  // Break caught: the gate that reads the request's intent and not the resolved amount: a split that resolves to nothing and a parcel-level override that moves the whole fee reach the same place (AC-SLICE-001-66).
+  it('reads the resolved amount and not the intent: a split that resolves to zero and a parcel override both clear with no charge', async () => {
+    const intake = await cleared(3);
+    const [a, , c] = intake.parcels as [Parcel, Parcel, Parcel];
+    // 0.01% of GH₵35.00 is a third of a pesewa: the sender's portion rounds to zero, and no floor is applied (domain-model §5.2.1).
+    const splitToZero = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(a.id, {
+          payer_override: {
+            payer_intent: 'SPLIT',
+            split_basis: 'PERCENTAGE',
+            split_sender_percentage: 0.01,
+          },
+        }),
+      ),
+    );
+    expect(splitToZero.payer_allocation).toEqual({ sender_minor: 0, recipient_minor: 3500 });
+    expect(splitToZero.commercial_state).toBe('NO_VENDOR_CHARGE');
+    const moved = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(c.id, { payer_override: { payer_intent: 'RECIPIENT_PAYS' } }),
+      ),
+    );
+    expect(moved.commercial_state).toBe('NO_VENDOR_CHARGE');
+    for (const order of [splitToZero, moved]) {
+      expect(await gateEvents(order.id)).toEqual(['order.commercial.cleared_no_charge']);
+    }
+  });
+
+  // Break caught: a vendor portion above zero that clears, or that is reserved against an allowance that D-12 does not build: it asks for payment, and is blocked from dispatch readiness.
+  it('takes a vendor portion above zero to PAYMENT_REQUIRED, whole or split, and records it', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    const full = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(a.id, { payer_override: { payer_intent: 'SENDER_PAYS_FULL' } }),
+      ),
+    );
+    expect(full.payer_allocation).toEqual({ sender_minor: 3500, recipient_minor: 0 });
+    expect(full.commercial_state).toBe('PAYMENT_REQUIRED');
+    const split = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, {
+          payer_override: {
+            payer_intent: 'SPLIT',
+            split_basis: 'PERCENTAGE',
+            split_sender_percentage: 25,
+          },
+        }),
+      ),
+    );
+    expect(split.commercial_state).toBe('PAYMENT_REQUIRED');
+    for (const order of [full, split]) {
+      expect(await gateEvents(order.id)).toEqual(['order.payment.required']);
+    }
+    // The event states what the gate read: the resolved portions.
+    const detail = (
+      await routes.rows<{ detail: Record<string, unknown> }>(
+        `select detail from audit_event where object_id = $1 and event_code = 'order.payment.required'`,
+        [split.id],
+      )
+    )[0]?.detail;
+    expect(detail).toMatchObject({
+      commercial_state: 'PAYMENT_REQUIRED',
+      sender_minor: 875,
+      recipient_minor: 2625,
+    });
+  });
+
+  // Break caught: an order that waited for its parcel and is confirmed at the check-in with the gate left out, so that it sits at PRICED for ever.
+  it('runs when a waiting order is confirmed at the check-in, in the same change as the freeze', async () => {
+    const intake = await opened(2);
+    const [tapped, notTapped] = intake.parcels as [Parcel, Parcel];
+    const paying = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(tapped.id, { payer_override: { payer_intent: 'SENDER_PAYS_FULL' } }),
+      ),
+    );
+    const clearing = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(notTapped.id, { payer_override: { payer_intent: 'RECIPIENT_PAYS' } }),
+      ),
+    );
+    expect(paying.commercial_state).toBeNull();
+    expect(clearing.commercial_state).toBeNull();
+    expect(await gateEvents(paying.id)).toEqual([]);
+    expect((await tap(officer, tapped.id, true)).status).toBe(200);
+    expect((await tap(officer, notTapped.id, true)).status).toBe(200);
+    expect((await finishAllHere(officer, intake.id, 2)).status).toBe(200);
+    expect((await orderRow(paying.id))?.commercial_state).toBe('PAYMENT_REQUIRED');
+    expect((await orderRow(clearing.id))?.commercial_state).toBe('NO_VENDOR_CHARGE');
+    expect(await gateEvents(paying.id)).toEqual(['order.payment.required']);
+    expect(await gateEvents(clearing.id)).toEqual(['order.commercial.cleared_no_charge']);
   });
 });

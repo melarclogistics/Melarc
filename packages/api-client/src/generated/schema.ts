@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.110.0
- *   SHA-256 59ffd024309c6058d4bc00d595bf9c0c0bb86cb5028197d6ab11248c21cab7f9 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.111.0
+ *   SHA-256 2d87a42552f4184146d319932ce1dac9a8a82db4f05b7ff14e7f5b8a7026e7d4 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -10823,7 +10823,10 @@ export interface components {
             intake_parcel_state?: "EXPECTED" | "ARRIVED" | "MISSING" | "VOID" | null;
             /**
              * @description **Null until the freeze (5.110.0): an order that waits for its parcel is not in the commercial machine
-             *     yet, and the freeze enters it at `PRICED`.**
+             *     yet.** The freeze enters it at `PRICED` and the commercial gate moves it on in the same change
+             *     (5.111.0): `NO_VENDOR_CHARGE` when the resolved vendor portion is zero, `PAYMENT_REQUIRED` when it is
+             *     above zero (no allowance is built, so `CREDIT_RESERVED` is not reached in this slice). An order read
+             *     after the freeze is therefore never `PRICED`.
              *
              *     NO_VENDOR_CHARGE means the resolved vendor portion was zero, so the
              *     commercial gate had nothing to test. It is **not** a payment and **not** a

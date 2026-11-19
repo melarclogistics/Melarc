@@ -133,7 +133,7 @@ One physical parcel becomes one `Order` (§23.1, `MSC-DEC-187`).
 ### 5.5 What Stage 7 must build
 
 1. **`itemizeOrder` takes the parcel** the order is made for (S1.36, **built 19 November 2026**), judges its state (an `ARRIVED` parcel, or an `EXPECTED` one of a photo intake as an awaiting order) and gives the order the parcel's photo; one order for a parcel, held by the database.
-2. **The confirmation at check-in** (S1.36 and S1.37): the freeze and the commercial gate run for an early order when its parcel arrives. *Built (S1.36): the freeze, when the arrival is committed, not at a tap the officer may still take back (the vendor finished, a missing parcel found, a senior's correction); the gate is S1.37's.*
+2. **The confirmation at check-in** (S1.36 and S1.37): the freeze and the commercial gate run for an early order when its parcel arrives. *Built (S1.36): the freeze, when the arrival is committed, not at a tap the officer may still take back (the vendor finished, a missing parcel found, a senior's correction); the gate follows it in the same change (S1.37, built 19 November 2026: a resolved vendor portion of zero is `NO_VENDOR_CHARGE`, above zero is `PAYMENT_REQUIRED`, D-12).*
 3. **The close counts parcels** (S1.38): the parcels that arrived plus the accepted extras; the vendor's summary stays free of the check-in's internals (AC-46).
 4. **The screens** (S1.40) draw the parcel's photo beside the order form, tag an order *Awaiting arrival* or *Missing*, and show the unmatched parcels.
 
@@ -463,7 +463,7 @@ And parity at close counts the parcels that arrived plus the accepted extras.
 
 | Surface| Status| Gap|
 |---|---|---|
-| Melarc Ops| 🟡 API built in part (S1.36), no screen| **Built:** the order made for a parcel, priced, promised and, for a parcel that has arrived, frozen (`itemizeOrder`), with its first commitment; the order that waits for its parcel and its confirmation at the check-in; the high-value surcharge; the evidence of an itemization. **Owed:** the commercial gate (S1.37), the close and the vendor's summary (S1.38), the payer edit, the corrections and the origin correction (S1.39), `getOrder`, and the screens (S1.40)|
+| Melarc Ops| 🟡 API built in part (S1.36), no screen| **Built:** the order made for a parcel, priced, promised and, for a parcel that has arrived, frozen (`itemizeOrder`), with its first commitment; the order that waits for its parcel and its confirmation at the check-in; the high-value surcharge; the evidence of an itemization. **Also built (S1.37):** the commercial gate, `NO_VENDOR_CHARGE` or `PAYMENT_REQUIRED` at the freeze, with its event (no credit reservation, D-12). **Owed:** the close and the vendor's summary (S1.38), the payer edit, the corrections and the origin correction (S1.39), `getOrder`, and the screens (S1.40)|
 | Melarc Vendor| ⚪ not built| Order summary, payer edit before freeze|
 | Melarc Rider| N/A| —|
 | Recipient channel| N/A| Recipient is captured here but not yet contacted|

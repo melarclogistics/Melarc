@@ -442,7 +442,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90)', () => {
       pickup_intake_id: intake.id,
       responsible_hub_id: HUB_A,
       intake_parcel_id: parcel.id,
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
       fulfilment_state: 'AWAITING_RECIPIENT_CONFIRMATION',
       locked_price_minor: 3500,
       size_class: 'SMALL',
@@ -625,7 +625,7 @@ describe('an order that waits for its parcel (AC-SLICE-001-104)', () => {
     const confirmed = rowsOf(await attempt(staff(COUNT), freeze(intake.id)));
     expect(confirmed).toEqual([{ order_id: early.id, locked_price_minor: 4200 }]);
     expect(await orderOf(early.id)).toMatchObject({
-      commercial_state: 'PRICED',
+      commercial_state: 'NO_VENDOR_CHARGE',
       locked_price_minor: 4200,
     });
     expect(await orderOf(left.id)).toMatchObject({
@@ -962,6 +962,73 @@ describe('what the database holds of an order for every writer', () => {
     const frozen = await orderOf(pending.id);
     expect(frozen.locked_at).toBeInstanceOf(Date);
     expect(Date.now() - (frozen.locked_at?.getTime() ?? 0)).toBeLessThan(60_000);
+  });
+});
+
+describe('the commercial gate is held by the database for every writer (S1.37)', () => {
+  const stateOf = async (id: string): Promise<string | null> =>
+    (await orderOf(id)).commercial_state;
+  const move = (id: string, state: string): string =>
+    `update "order" set commercial_state = '${state}' where id = '${id}'`;
+
+  // Break caught: a gate that lets a writer choose the outcome whatever the resolved portion says, run twice, or move a gated order anywhere else.
+  it('takes an order from PRICED to the one outcome its resolved vendor portion allows, once, and nowhere else', async () => {
+    const intake = await clearedPhotoIntake(2);
+    await arrangePayer(intake.requestId, 'SENDER_PAYS_FULL');
+    const paying = await orderFor(intake, present(intake.parcels, 0));
+    const clearing = await orderFor(intake, present(intake.parcels, 1), {
+      payer_override: { payer_intent: 'RECIPIENT_PAYS' },
+    });
+    expect(await stateOf(paying.id)).toBe('PAYMENT_REQUIRED');
+    expect(await stateOf(clearing.id)).toBe('NO_VENDOR_CHARGE');
+    for (const [name, id, state] of [
+      ['a vendor portion above zero cleared with no charge', paying.id, 'NO_VENDOR_CHARGE'],
+      ['a gated order put back to PRICED', paying.id, 'PRICED'],
+      [
+        'a gated order sent to a state of the reservation, which is not built',
+        paying.id,
+        'CREDIT_RESERVED',
+      ],
+      ['a gated order closed', paying.id, 'CLOSED'],
+      ['a vendor portion of zero asked to pay', clearing.id, 'PAYMENT_REQUIRED'],
+      ['a cleared order put back to PRICED', clearing.id, 'PRICED'],
+      ['a cleared order closed', clearing.id, 'CLOSED'],
+    ] as const) {
+      const result = await asOwner(staff(COUNT), [move(id, state)]);
+      expect(result.startsWith('23514'), `${name}: ${result}`).toBe(true);
+    }
+  });
+
+  // Break caught: the gate judged by something other than the portions the freeze wrote: the statement that follows the freeze is held to them.
+  it('judges the gate by the portions the freeze wrote, in the statement that follows it', async () => {
+    const early = await photoIntake(2);
+    const [first, second] = early.parcels as [Parcel, Parcel];
+    const pending = await orderFor(early, first);
+    const other = await orderFor(early, second);
+    rowsOf(await attempt(staff(COUNT), tap(first.id, true)));
+    rowsOf(await attempt(staff(COUNT), tap(second.id, true)));
+    rowsOf(await attempt(staff(COUNT), finish(early.id, true, 2)));
+    const freezeTo = (id: string, sender: number): string =>
+      `update "order" set commercial_state = 'PRICED', locked_price_minor = 3500, locked_at = now(),
+         payer_allocation = '{"sender_minor":${String(sender)},"recipient_minor":${String(3500 - sender)}}'::jsonb where id = '${id}'`;
+    expect(
+      await asOwner(staff(COUNT), [
+        freezeTo(pending.id, 3500),
+        move(pending.id, 'NO_VENDOR_CHARGE'),
+      ]),
+    ).toMatch(/^23514/);
+    expect(
+      await asOwner(staff(COUNT), [freezeTo(pending.id, 0), move(pending.id, 'PAYMENT_REQUIRED')]),
+    ).toMatch(/^23514/);
+    expect(
+      await asOwner(staff(COUNT), [
+        freezeTo(pending.id, 3500),
+        move(pending.id, 'PAYMENT_REQUIRED'),
+      ]),
+    ).toBe('ran:1');
+    expect(
+      await asOwner(staff(COUNT), [freezeTo(other.id, 0), move(other.id, 'NO_VENDOR_CHARGE')]),
+    ).toBe('ran:1');
   });
 });
 

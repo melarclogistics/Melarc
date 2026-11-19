@@ -30,6 +30,7 @@ import { receivingRefusalOf } from './check-in.service.js';
 import { noteHubCrossing } from './hub-crossing.js';
 import { hubIntakeEtagMatches } from './hub-intake-etag.js';
 import { loadOrder, orderViewOf, type OrderView } from './order-view.js';
+import { recordCommercialGate } from './order-confirmation.js';
 import {
   RECEIVING_INTAKE_COLUMNS,
   loadIntakes,
@@ -388,6 +389,15 @@ export class HubItemization {
             sender_minor: view.payer_allocation?.sender_minor ?? null,
             recipient_minor: view.payer_allocation?.recipient_minor ?? null,
           },
+        });
+        await recordCommercialGate(handle, audit, {
+          orderId: made.order_id,
+          hubId,
+          relatedIds: related,
+          commercialState: stored.commercial_state,
+          lockedPriceMinor: stored.locked_price_minor ?? 0,
+          senderMinor: view.payer_allocation?.sender_minor ?? 0,
+          recipientMinor: view.payer_allocation?.recipient_minor ?? 0,
         });
       }
 

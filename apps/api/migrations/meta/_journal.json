@@ -778,6 +778,13 @@
       "when": 1795049594250,
       "tag": "0110_orders_and_commitments",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1795093596891,
+      "tag": "0111_commercial_gate",
+      "breakpoints": true
     }
   ]
 }
