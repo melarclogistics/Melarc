@@ -553,6 +553,10 @@ test.describe('the date field in a browser: what the one field adds', () => {
     await calendarButton(page).click();
     await page.getByRole('button', { name: /Friday, 30 October 2026/ }).click();
     await expect(field(page)).toHaveValue('30/10/2026');
+    // The calendar closes with a motion and gives focus back to its button when it is gone. The edit that follows comes after that, and not in the same instant: on the hosted WebKit run
+    // the Delete of `fill('')` was pressed just before the focus came back, so it reached the button, the field kept its date and the typing found it full (main's run 204, 19 November 2026).
+    await expect(dialog(page)).toBeHidden();
+    await expect(calendarButton(page)).toBeFocused();
 
     await field(page).fill('');
     await field(page).click();
