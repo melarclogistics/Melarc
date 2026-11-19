@@ -57,8 +57,7 @@ const money = (amountMinor: number): { amount_minor: number; currency: 'GHS' } =
 });
 
 /** The jsonb columns as the driver gave them: parsed, or the text of them. */
-const jsonOf = <T>(value: unknown): T =>
-  (typeof value === 'string' ? JSON.parse(value) : value) as T;
+const jsonOf = (value: unknown): unknown => (typeof value === 'string' ? JSON.parse(value) : value);
 
 export type OrderView = ReturnType<typeof orderViewOf>;
 
@@ -67,7 +66,7 @@ export function orderViewOf(row: OrderRow) {
   const allocation =
     row.payer_allocation === null
       ? null
-      : jsonOf<{ sender_minor: number; recipient_minor: number }>(row.payer_allocation);
+      : (jsonOf(row.payer_allocation) as { sender_minor: number; recipient_minor: number });
   return {
     id: row.id,
     code: row.code,
@@ -77,8 +76,8 @@ export function orderViewOf(row: OrderRow) {
     intake_parcel_state: row.intake_parcel_state,
     commercial_state: row.commercial_state,
     fulfilment_state: row.fulfilment_state,
-    origin_zone_snapshot: jsonOf<Record<string, unknown>>(row.origin_zone_snapshot),
-    destination_zone_snapshot: jsonOf<Record<string, unknown>>(row.destination_zone_snapshot),
+    origin_zone_snapshot: jsonOf(row.origin_zone_snapshot) as Record<string, unknown>,
+    destination_zone_snapshot: jsonOf(row.destination_zone_snapshot) as Record<string, unknown>,
     size_class: row.size_class,
     size_class_selected_by: row.size_class_selected_by,
     ...(row.carrier_cost_minor === null ? {} : { carrier_cost: money(row.carrier_cost_minor) }),
@@ -87,11 +86,13 @@ export function orderViewOf(row: OrderRow) {
     lane: row.lane,
     commercial_mode: row.commercial_mode,
     locked_price: row.locked_price_minor === null ? null : money(row.locked_price_minor),
-    price_components_snapshot: jsonOf<Record<string, unknown>>(row.price_components_snapshot),
+    price_components_snapshot: jsonOf(row.price_components_snapshot) as Record<string, unknown>,
     delivery_attempt_count: row.delivery_attempt_count,
-    recipient: jsonOf<{ name: string; phone: string; location: Record<string, unknown> }>(
-      row.recipient,
-    ),
+    recipient: jsonOf(row.recipient) as {
+      name: string;
+      phone: string;
+      location: Record<string, unknown>;
+    },
     declared_value_minor: row.declared_value_minor,
     is_serialized_goods: row.is_serialized_goods,
     serial_imei: row.serial_imei,

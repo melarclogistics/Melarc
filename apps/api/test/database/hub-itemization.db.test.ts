@@ -85,6 +85,13 @@ interface Parcel {
   readonly id: string;
   readonly state: string;
 }
+
+/** An element of a list the test has just built: absent only when the test itself is wrong. */
+const present = <T>(list: readonly T[], index: number): T => {
+  const found = list[index];
+  if (found === undefined) throw new Error(`the list has no element ${String(index)}`);
+  return found;
+};
 interface Order {
   readonly id: string;
   readonly code: string;
@@ -258,7 +265,9 @@ const refusal = (response: TestResponse): [number, string | undefined, string | 
 };
 
 /** The first violation of a refused body: where, and by which rule. */
-const firstViolation = (response: TestResponse): [number, string | undefined, string | undefined] => {
+const firstViolation = (
+  response: TestResponse,
+): [number, string | undefined, string | undefined] => {
   const parsed = response.json() as {
     details?: { violations?: { pointer?: string; rule?: string }[] };
   };
@@ -317,7 +326,7 @@ describe('the body is closed and the price is the server’s (AC-SLICE-001-47)',
     'commercial_state',
   ])('refuses a body that carries %s', async (member) => {
     const intake = await cleared(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const response = await itemize(officer, intake.id, body(parcel.id, { [member]: 100 }));
     expect(response.status).toBe(400);
     expect((response.json() as { code: string }).code).toBe('VALIDATION_FAILED');
@@ -439,7 +448,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90, -56)', () => 
   // Break caught: an order that is not frozen, a size that is not recorded with the officer, the intake left at READY_FOR_ITEMIZATION, an order with no commitment, or a commitment whose clock is not custody.
   it('is priced, frozen and recorded with the officer, moves the intake to ITEMIZING, and has its first commitment written with it', async () => {
     const intake = await cleared(3);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const made = orderOf(
       await itemize(
         officer,
@@ -495,8 +504,8 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90, -56)', () => 
     expect(commitments[0]?.committed_window_end).toBe('16:00:00');
     // The promise counts from custody: the first day after custody's day on which the hub delivers, never a Sunday.
     expect(made.derived_delivery_date).not.toBeNull();
-    expect((made.derived_delivery_date as string) > hubCalendarDate(intake.custody)).toBe(true);
-    expect(weekdayOf(made.derived_delivery_date as string)).not.toBe('SUN');
+    expect((made.derived_delivery_date ?? '') > hubCalendarDate(intake.custody)).toBe(true);
+    expect(weekdayOf(made.derived_delivery_date ?? '')).not.toBe('SUN');
   });
 
   // Break caught: the booking's estimate overwritten by the frozen price, or the frozen price shown as the estimate (AC-SLICE-001-56): both are kept and distinct.
@@ -546,9 +555,11 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90, -56)', () => 
       'STATE_CONFLICT',
       'parcel_ordered',
     ]);
-    expect(
-      refusal(await itemize(officer, intake.id, body((other.parcels[0] as Parcel).id))),
-    ).toEqual([400, 'VALIDATION_FAILED', 'unknown_parcel']);
+    expect(refusal(await itemize(officer, intake.id, body(present(other.parcels, 0).id)))).toEqual([
+      400,
+      'VALIDATION_FAILED',
+      'unknown_parcel',
+    ]);
     expect(refusal(await itemize(officer, intake.id, body(randomUUID())))).toEqual([
       400,
       'VALIDATION_FAILED',
@@ -561,7 +572,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90, -56)', () => 
     ]);
     const counted = await blind(2);
     expect(
-      refusal(await itemize(officer, counted.id, body((intake.parcels[1] as Parcel).id))),
+      refusal(await itemize(officer, counted.id, body(present(intake.parcels, 1).id))),
     ).toEqual([400, 'VALIDATION_FAILED', 'parcel_not_allowed']);
     // A missing parcel (the vendor finished as tapped) has no order, and an intake in reconciliation is not ordered from.
     const short = await opened(2);
@@ -598,7 +609,7 @@ describe('the zone, the size and the date (AC-SLICE-001-48 to -50, -58)', () => 
   it('is resolved by the server, or by the selection it needed, and refused otherwise', async () => {
     const intake = await cleared(5);
     const parcels = intake.parcels as Parcel[];
-    const at = (n: number) => parcels[n] as Parcel;
+    const at = (n: number) => present(parcels, n);
     const place = (address: string) => ({
       name: 'Ama',
       phone: '0241234567',
@@ -676,7 +687,7 @@ describe('the zone, the size and the date (AC-SLICE-001-48 to -50, -58)', () => 
   // Break caught: a default size, a size derived from anything, the size refused only after the other refusals, or an order priced with no officer behind its size (AC-SLICE-001-58).
   it('has the officer select the size, and refuses an order with none before anything else is judged', async () => {
     const intake = await cleared(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const refused = await itemize(
       officer,
       intake.id,
@@ -696,7 +707,7 @@ describe('the zone, the size and the date (AC-SLICE-001-48 to -50, -58)', () => 
     const [a, b, c, d] = intake.parcels as [Parcel, Parcel, Parcel, Parcel];
     const kasoa = { name: 'Esi', phone: '0201234567', location: { address: 'Plot 4, Kasoa' } };
     const batch = orderOf(await itemize(officer, intake.id, body(a.id, { recipient: kasoa })));
-    expect(weekdayOf(batch.derived_delivery_date as string)).toBe('FRI');
+    expect(weekdayOf(batch.derived_delivery_date ?? '')).toBe('FRI');
     expect(batch.locked_price?.amount_minor).toBe(3500);
     expect(batch.price_components_snapshot.components.map((component) => component.kind)).toEqual([
       'SERVICE_AREA_BASE_FEE',
@@ -941,7 +952,7 @@ describe('the retry, the ETag and the keys', () => {
   // Break caught: a retry that makes a second order or a second commitment, a replay that is not the first answer byte for byte, or a key reused for another request that is answered as a replay.
   it('answers a retry under the same key with the first answer and makes nothing twice', async () => {
     const intake = await cleared(2);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const key = randomUUID();
     const etag = (await read(officer, intake.id)).etag;
     const first = await itemize(officer, intake.id, body(parcel.id), { etag, key });
@@ -967,7 +978,7 @@ describe('the retry, the ETag and the keys', () => {
       'pricing.price.locked',
     ]);
     // The same key for another request is a conflict, not a replay.
-    const other = await itemize(officer, intake.id, body((intake.parcels[1] as Parcel).id), {
+    const other = await itemize(officer, intake.id, body(present(intake.parcels, 1).id), {
       etag,
       key,
     });
@@ -985,10 +996,11 @@ describe('the retry, the ETag and the keys', () => {
       refusal(await itemize(officer, intake.id, body(a.id), { etag: null })).slice(0, 2),
     ).toEqual([400, 'VALIDATION_FAILED']);
     for (const etag of [`W/${current}`, '"nonsense"', (await read(officer, other.id)).etag]) {
-      expect(
-        refusal(await itemize(officer, intake.id, body(a.id), { etag })),
-        String(etag),
-      ).toEqual([409, 'STATE_CONFLICT', 'stale']);
+      expect(refusal(await itemize(officer, intake.id, body(a.id), { etag })), etag).toEqual([
+        409,
+        'STATE_CONFLICT',
+        'stale',
+      ]);
     }
     expect((await itemize(officer, intake.id, body(a.id), { key: null })).status).toBe(400);
     // The first order moves the intake: the ETag read before it is stale for the next, and the one read again is not.
@@ -1005,7 +1017,7 @@ describe('the retry, the ETag and the keys', () => {
   // Break caught: two officers ordering one parcel at once both succeeding (two priced orders for one physical parcel).
   it('makes one order when two officers order the same parcel at once', async () => {
     const intake = await cleared(2);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const second = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
     const etag = (await read(officer, intake.id)).etag;
     const [one, two] = await Promise.all([
@@ -1019,7 +1031,7 @@ describe('the retry, the ETag and the keys', () => {
   // Break caught: an order made by a session without the key, for another hub's intake, for one that does not exist, or by a vendor.
   it('is for the officers of the hub who hold the key, and nobody else', async () => {
     const intake = await cleared(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const { etag } = await read(officer, intake.id);
     expect(refusal(await itemize(otherHub, intake.id, body(parcel.id), { etag }))[1]).toBe(
       'HUB_SCOPE_VIOLATION',
@@ -1092,7 +1104,7 @@ describe('the evidence of an itemization', () => {
     expect(declared.status).toBe(200);
     // An intake in reconciliation is not open to itemizing.
     const short = await opened(2);
-    expect((await tap(officer, (short.parcels[0] as Parcel).id, true)).status).toBe(200);
+    expect((await tap(officer, present(short.parcels, 0).id, true)).status).toBe(200);
     expect((await finishAsTapped(officer, short.id)).status).toBe(200);
     expect(
       refusal(await declareIntakeEvidence(officer, intakeEvidenceBody(short.id, 'ITEMIZATION'))),
@@ -1121,7 +1133,7 @@ describe('what goes with what, and what a state says before a price does', () =>
   // Break caught: a lane with the wrong mode accepted, which would price a doorstep order as a third-party one or the reverse; and a value the record cannot hold accepted.
   it('refuses a lane with the wrong mode, a number the record cannot hold and a blank name or address', async () => {
     const intake = await cleared(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const refused = async (over: Record<string, unknown>) =>
       refusal(await itemize(officer, intake.id, body(parcel.id, over)));
     expect(await refused({ lane: 'DOORSTEP', commercial_mode: 'STATION_DROP' })).toEqual([
@@ -1261,7 +1273,7 @@ describe('what goes with what, and what a state says before a price does', () =>
     const id = done.intakes[0]?.id ?? '';
     expect((await finishAllHere(officer, id, 1)).status).toBe(200);
     const { intake } = await read(officer, id);
-    const parcel = (intake.parcels ?? [])[0] as Parcel;
+    const parcel = present(intake.parcels ?? [], 0);
     expect(refusal(await itemize(officer, id, body(parcel.id)))[0]).toBe(422);
     expect((await itemize(officer, id, body(parcel.id))).json()).toMatchObject({
       code: 'COMMITMENT_SOURCE_UNRESOLVED',

@@ -211,7 +211,7 @@ export class HubItemization {
       await this.#judgeStates(tx, intake, id, parcelId);
 
       const source = await this.#sourceOf(tx, id);
-      const custodyAt = new Date(source.custody_at as string | Date);
+      const custodyAt = new Date(source.custody_at);
 
       // The order's price and promise, or the refusal, in the order of the pure assembly.
       const facts: OrderFacts = {
@@ -590,19 +590,22 @@ export class HubItemization {
   }
 
   /** What the order is made from, as the database says it: the moment custody passed is read from the stop's collection and never given (`COMMITMENT_SOURCE_UNRESOLVED` when it cannot be read). */
-  async #sourceOf(tx: ReturnType<typeof transactionOf>, id: string): Promise<Source> {
+  async #sourceOf(
+    tx: ReturnType<typeof transactionOf>,
+    id: string,
+  ): Promise<Source & { readonly custody_at: string | Date }> {
     const found = await tx.execute(
       sql`select responsible_hub_id, origin_location, acknowledged_at_booking, custody_at from melarc.itemization_source(${id}::uuid)`,
     );
     const source = found.rows[0] as unknown as Source | undefined;
     if (source === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
-    if (source.custody_at === null || source.custody_at === undefined) {
+    if (source.custody_at === null) {
       throw ApiException.of(
         ErrorCode.CommitmentSourceUnresolved,
         'The moment pickup custody passed cannot be read, so no delivery can be promised',
       );
     }
-    return source;
+    return { ...source, custody_at: source.custody_at };
   }
 
   /**

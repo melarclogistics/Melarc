@@ -147,6 +147,13 @@ interface Parcel {
   readonly id: string;
   readonly state: string;
 }
+
+/** An element of a list the test has just built: absent only when the test itself is wrong. */
+const present = <T>(list: readonly T[], index: number): T => {
+  const found = list[index];
+  if (found === undefined) throw new Error(`the list has no element ${String(index)}`);
+  return found;
+};
 interface IntakeRow {
   readonly state: string;
   readonly version: number;
@@ -423,7 +430,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90)', () => {
   it('is made and frozen in one change, moves the intake to ITEMIZING, and keeps who made it and what it was calculated at', async () => {
     const intake = await clearedPhotoIntake(3);
     const before = await intakeOf(intake.id);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const made = await orderFor(intake, parcel);
     expect(made).toMatchObject({
       frozen: true,
@@ -477,7 +484,7 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90)', () => {
   it('cannot be made for a parcel of another intake, or one that does not exist', async () => {
     const mine = await clearedPhotoIntake(2);
     const theirs = await clearedPhotoIntake(2);
-    const foreign = theirs.parcels[0] as Parcel;
+    const foreign = present(theirs.parcels, 0);
     expect(refusal(await attempt(itemizer, itemize(mine.id, facts(foreign.id))))).toEqual([
       '23514',
       'VALIDATION_FAILED',
@@ -521,18 +528,18 @@ describe('an order for a parcel that has arrived (AC-SLICE-001-90)', () => {
       'check_in_open',
     ]);
     const short = await photoIntake(2);
-    rowsOf(await attempt(staff(COUNT), tap((short.parcels[0] as Parcel).id, true)));
+    rowsOf(await attempt(staff(COUNT), tap(present(short.parcels, 0).id, true)));
     rowsOf(await attempt(staff(COUNT), finish(short.id, false)));
     expect((await intakeOf(short.id)).state).toBe('RECONCILIATION_REQUIRED');
     expect(
-      refusal(await attempt(itemizer, itemize(short.id, facts((short.parcels[0] as Parcel).id)))),
+      refusal(await attempt(itemizer, itemize(short.id, facts(present(short.parcels, 0).id)))),
     ).toEqual(['23514', 'STATE_CONFLICT', 'reconciliation_open']);
   });
 
   // Break caught: an order of a closed intake, made by a key that is not the officer's, or in the hubs of another grant.
   it('is made by the key to itemize alone, in the hubs of its grant', async () => {
     const intake = await clearedPhotoIntake(2);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     for (const key of [COUNT, OSD, READ]) {
       expect(refusal(await attempt(staff(key), itemize(intake.id, facts(parcel.id)))), key).toEqual(
         ['42501', undefined, undefined],
@@ -564,7 +571,7 @@ describe('an order for an intake counted blind', () => {
     expect((await orderFor(blind, null)).frozen).toBe(true);
     const photo = await clearedPhotoIntake(1);
     expect(
-      refusal(await attempt(itemizer, itemize(blind.id, facts((photo.parcels[0] as Parcel).id)))),
+      refusal(await attempt(itemizer, itemize(blind.id, facts(present(photo.parcels, 0).id)))),
     ).toEqual(['23514', 'VALIDATION_FAILED', 'parcel_not_allowed']);
     const waiting = await blindIntake(3, false);
     expect(refusal(await attempt(itemizer, itemize(waiting.id, facts(null))))).toEqual([
@@ -579,7 +586,7 @@ describe('an order that waits for its parcel (AC-SLICE-001-104)', () => {
   // Break caught: an early order that is frozen or priced before its parcel is checked in, that moves the intake, or that is confirmed by a tap the officer may still take back.
   it('exists calculated and not frozen, moves nothing of the intake, and is not confirmed by a tap that can be undone', async () => {
     const intake = await photoIntake(3);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const before = await intakeOf(intake.id);
     const made = await orderFor(intake, parcel);
     expect(made).toMatchObject({
@@ -705,7 +712,7 @@ describe('what the database holds of an order for every writer', () => {
   // flag without evidence, no sender, a size class outside the three, a price that is not an object.
   it('refuses, for the owner too, what an order cannot be', async () => {
     const intake = await clearedPhotoIntake(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     // A waybill that is stored and the intake's own, so that the guard's judgement of the evidence passes and the table's own rule is the one that refuses.
     const waybill = await intakeEvidence(intake.id);
     const cases: [string, Record<string, string>, string][] = [
@@ -758,7 +765,7 @@ describe('what the database holds of an order for every writer', () => {
   // Break caught: an order whose hub, sender or moment is the writer's; an order made frozen; an order whose first life is not the beginning of its life.
   it('takes its hub, its sender and its moment from the intake, the request and the clock, and is made unfrozen at the beginning of its life', async () => {
     const intake = await clearedPhotoIntake(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     // The writer gives another hub and a moment in the past: the guard gives the intake's hub and the clock's.
     // The same transaction reads the row back: the hub is the intake's and the moment is the clock's, whatever the writer gave (a row of another hub, or of 2020, would be found by neither question).
     const stray = await asOwner(as, [
@@ -790,7 +797,7 @@ describe('what the database holds of an order for every writer', () => {
   // Break caught: a price whose components do not add up, one that does not name the hub of the order (a frozen price that cannot be explained, §3.7), or one that is not a total and components.
   it('holds the components of a price to the hub of the order and to its total', async () => {
     const intake = await clearedPhotoIntake(1);
-    const parcel = intake.parcels[0] as Parcel;
+    const parcel = present(intake.parcels, 0);
     const price = (over: Record<string, unknown>) =>
       `'${JSON.stringify({ ...PRICE(), ...over })}'::jsonb`;
     const withComponent = (component: Record<string, unknown>) =>
@@ -855,7 +862,7 @@ describe('what the database holds of an order for every writer', () => {
     for (const [at, [name, over, expected]] of cases.entries()) {
       const result = await attempt(
         itemizer,
-        itemize(intake.id, facts((targets[at] as Parcel).id, over)),
+        itemize(intake.id, facts(present(targets, at).id, over)),
       );
       expect(refusal(result), name).toEqual(expected);
     }
@@ -897,7 +904,7 @@ describe('what the database holds of an order for every writer', () => {
   // Break caught: an order that can be changed, removed or unfrozen, a locked price that can be rewritten (§35.6.7: a correction is a linked adjustment), or a freeze that is not the price calculated.
   it('is kept as it was once frozen, and takes no change but the freeze', async () => {
     const intake = await clearedPhotoIntake(1);
-    const made = await orderFor(intake, intake.parcels[0] as Parcel);
+    const made = await orderFor(intake, present(intake.parcels, 0));
     for (const change of [
       `locked_price_minor = 1`,
       `commercial_state = 'PAYMENT_REQUIRED'`,
@@ -974,7 +981,7 @@ describe('the portions of a frozen price (AC-SLICE-001-65, -66: the gate reads t
     async (intent, split, sender, recipient) => {
       const intake = await clearedPhotoIntake(1);
       await arrangePayer(intake.requestId, intent, split);
-      const made = await orderFor(intake, intake.parcels[0] as Parcel);
+      const made = await orderFor(intake, present(intake.parcels, 0));
       const order = await orderOf(made.id);
       expect(order.payer_allocation).toMatchObject({
         sender_minor: sender,
@@ -993,7 +1000,7 @@ describe('the portions of a frozen price (AC-SLICE-001-65, -66: the gate reads t
   it('applies the order’s own arrangement over the request’s, and the request’s as it stands at the freeze', async () => {
     const intake = await clearedPhotoIntake(2);
     await arrangePayer(intake.requestId, 'SENDER_PAYS_FULL');
-    const override = await orderFor(intake, intake.parcels[0] as Parcel, {
+    const override = await orderFor(intake, present(intake.parcels, 0), {
       payer_override: { payer_intent: 'RECIPIENT_PAYS' },
     });
     const own = await orderOf(override.id);
@@ -1007,9 +1014,9 @@ describe('the portions of a frozen price (AC-SLICE-001-65, -66: the gate reads t
     // An order that waits is resolved when it is frozen: the vendor changed the arrangement in between.
     const early = await photoIntake(1);
     await arrangePayer(early.requestId, 'SENDER_PAYS_FULL');
-    const waits = await orderFor(early, early.parcels[0] as Parcel);
+    const waits = await orderFor(early, present(early.parcels, 0));
     await arrangePayer(early.requestId, 'RECIPIENT_PAYS');
-    rowsOf(await attempt(staff(COUNT), tap((early.parcels[0] as Parcel).id, true)));
+    rowsOf(await attempt(staff(COUNT), tap(present(early.parcels, 0).id, true)));
     rowsOf(await attempt(staff(COUNT), finish(early.id, true, 1)));
     rowsOf(await attempt(staff(COUNT), freeze(early.id)));
     expect((await orderOf(waits.id)).payer_allocation).toMatchObject({
@@ -1023,7 +1030,7 @@ describe('the first commitment (AC-SLICE-001-56; contract: itemizeOrder)', () =>
   // Break caught: a commitment that is not written with the order, whose SLA clock is the writer's or the moment of itemization, or whose dates are not the order's.
   it('is written with the order at sequence 1, its clock the moment custody passed and its dates the order’s own', async () => {
     const intake = await clearedPhotoIntake(1);
-    const made = await orderFor(intake, intake.parcels[0] as Parcel, {
+    const made = await orderFor(intake, present(intake.parcels, 0), {
       requested_delivery_date: '2026-11-05',
       commitment: {
         default_date: '2026-11-03',
@@ -1058,7 +1065,7 @@ describe('the first commitment (AC-SLICE-001-56; contract: itemizeOrder)', () =>
   it('is refused, with no order, when the moment custody passed cannot be read', async () => {
     const intake = await photoIntake(1, false);
     rowsOf(await attempt(staff(COUNT), finish(intake.id, true, 1)));
-    const parcel = (await parcelsOf(intake.id))[0] as Parcel;
+    const parcel = present(await parcelsOf(intake.id), 0);
     expect(refusal(await attempt(itemizer, itemize(intake.id, facts(parcel.id))))).toEqual([
       '23514',
       'COMMITMENT_SOURCE_UNRESOLVED',
@@ -1073,7 +1080,7 @@ describe('the first commitment (AC-SLICE-001-56; contract: itemizeOrder)', () =>
   // Break caught: a commitment whose dates disagree with the order's, one that can be edited or removed, a second one made with the first, or an order that can be committed without its commitment.
   it('is appended and never edited, and an order cannot be committed without it', async () => {
     const intake = await clearedPhotoIntake(1);
-    const made = await orderFor(intake, intake.parcels[0] as Parcel);
+    const made = await orderFor(intake, present(intake.parcels, 0));
     const [first] = await commitmentsOf(made.id);
     expect(first).toBeDefined();
     const at = `where id = '${first?.id ?? ''}'`;
@@ -1110,7 +1117,7 @@ describe('the first commitment (AC-SLICE-001-56; contract: itemizeOrder)', () =>
     ).toMatchObject({ code: '23514' });
     // A later sequence is not made so far, and a commitment whose dates are not the order's is refused.
     const second = await clearedPhotoIntake(1);
-    const parcel = second.parcels[0] as Parcel;
+    const parcel = present(second.parcels, 0);
     const orderId = randomUUID();
     const commitmentId = randomUUID();
     const insertOrder = `insert into "order" (id, code, pickup_intake_id, responsible_hub_id, intake_parcel_id, recipient, origin_zone_snapshot, destination_zone_snapshot, destination_zone_resolution, derived_delivery_date, size_class, size_class_selected_by, is_high_value, lane, price_components_snapshot, initial_commitment_id, created_by)
@@ -1141,7 +1148,7 @@ describe('who reads an order, and who writes none', () => {
   // Break caught: a read of an order by a key that has no act on it, a write of an order or a commitment by the application's own login, or an order read across hubs.
   it('is read by the officer who made it in the hubs of its grant, and written by the application’s login by nobody', async () => {
     const intake = await clearedPhotoIntake(1);
-    const made = await orderFor(intake, intake.parcels[0] as Parcel);
+    const made = await orderFor(intake, present(intake.parcels, 0));
     const read = (context: SecurityContext) =>
       attempt(context, `select id from "order" where id = '${made.id}'`);
     expect(rowsOf(await read(itemizer))).toHaveLength(1);
