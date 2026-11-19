@@ -363,8 +363,8 @@ The event is **not** in the list of events that record no change (§6): it chang
 
 | Code| Emitted when|
 |---|---|
-| `pricing.price.calculated`| Authoritative fee computed at itemization|
-| `pricing.price.locked`| Frozen at order confirmation|
+| `pricing.price.calculated`| Authoritative fee computed at itemization. **As built (S1.36):** written for every order when it is made, frozen or not, with the total, the kinds of its components and how its zone was resolved|
+| `pricing.price.locked`| Frozen at order confirmation. **As built (S1.36):** written when an order for a parcel that has arrived is made, and, for an order that waited, when the check-in that commits its parcel's arrival confirms it (`detail.confirmed_by_check_in`)|
 | `pricing.correction.requested`| Maker side|
 | `pricing.correction.approved`| Checker side. **Enhanced**|
 | `pricing.correction.rejected`| Checker side: Senior Ops rejected a correction. Nothing changes; the request and the decision stay on the record|

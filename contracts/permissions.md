@@ -149,7 +149,7 @@ Legend: **A** Ops Staff · **S** Senior Ops · **P** Platform Admin · **V** Ven
 |---|---|---|---|
 | `hub.handover.submit`| **R only**| owned completed run||
 | `hub.intake.count`| A S P| own hub · P: all hubs| Blind count. Guarded on read *and* write (§35.5.2). **As built (S1.34):** it records a condition (`recordIntakeCondition`) and declares and completes the evidence of one (`createEvidence` for the owner `PICKUP_INTAKE`, purpose `CONDITION`). **As built (S1.33):** it commits the blind count (`submitBlindCount`: once, with the comparison made by the database). **As built (S1.32):** it takes the advisory receive lock (`acquireIntakeLock`, the two columns of the lock and no other) and reads the intakes of its hubs to show the receiver what it locked, never the declaration|
-| `hub.intake.itemize`| A S P| own hub · P: all hubs||
+| `hub.intake.itemize`| A S P| own hub · P: all hubs| `itemizeOrder` (S1.36). As built the key also reads what the intake's reads read, so that the `ETag` it takes as `If-Match` is recomputed as `getHubIntake` gives it, and it declares and reads the evidence of an itemization (purpose `ITEMIZATION`)|
 | `hub.intake.close`| A S P| own hub · P: all hubs| State precondition: parity met (§35.6.11)|
 | `hub.intake.close_exception`| S P| own hub · P: all hubs| The only route to closing without parity (§35.5.5)|
 | `hub.intake.reopen`| **P only**| all hubs| Privileged, audited (§36.6)|

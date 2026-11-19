@@ -257,6 +257,15 @@ const refusal = (response: TestResponse): [number, string | undefined, string | 
   ];
 };
 
+/** The first violation of a refused body: where, and by which rule. */
+const firstViolation = (response: TestResponse): [number, string | undefined, string | undefined] => {
+  const parsed = response.json() as {
+    details?: { violations?: { pointer?: string; rule?: string }[] };
+  };
+  const first = parsed.details?.violations?.[0];
+  return [response.status, first?.pointer, first?.rule];
+};
+
 const orderRow = async (id: string) =>
   (
     await routes.rows<{
@@ -723,11 +732,12 @@ describe('the zone, the size and the date (AC-SLICE-001-48 to -50, -58)', () => 
         ),
       ),
     ).toEqual([400, 'VALIDATION_FAILED', 'requested_before_default']);
-    // A request that is not a calendar date is not a date.
+    // A request that is not a calendar date is not a date: the body's schema refuses it first (the service's own check is the second line).
     expect(
-      (await itemize(officer, intake.id, body(d.id, { requested_delivery_date: '2026-02-30' })))
-        .status,
-    ).toBe(400);
+      firstViolation(
+        await itemize(officer, intake.id, body(d.id, { requested_delivery_date: '2026-02-30' })),
+      ),
+    ).toEqual([400, '/requested_delivery_date', 'format']);
   });
 });
 
@@ -1087,5 +1097,176 @@ describe('the evidence of an itemization', () => {
     expect(
       refusal(await declareIntakeEvidence(officer, intakeEvidenceBody(short.id, 'ITEMIZATION'))),
     ).toEqual([409, 'STATE_CONFLICT', 'itemization_not_open']);
+  });
+});
+
+describe('what goes with what, and what a state says before a price does', () => {
+  // Break caught: a price refused before a state (an officer told to choose a size for a parcel that is missing or already has its order), the order of the repo's other services reversed.
+  it('tells a state before a reason: a parcel that has its order or is missing is told so whatever else is wrong with the body', async () => {
+    const intake = await cleared(2);
+    const [a] = intake.parcels as [Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    expect(
+      refusal(await itemize(officer, intake.id, body(a.id, { size_class: undefined }))),
+    ).toEqual([409, 'STATE_CONFLICT', 'parcel_ordered']);
+    const short = await opened(2);
+    const [tapped, notTapped] = short.parcels as [Parcel, Parcel];
+    expect((await tap(officer, tapped.id, true)).status).toBe(200);
+    expect((await finishAsTapped(officer, short.id)).status).toBe(200);
+    expect(
+      refusal(await itemize(officer, short.id, body(notTapped.id, { size_class: undefined }))),
+    ).toEqual([409, 'STATE_CONFLICT', 'parcel_missing']);
+  });
+
+  // Break caught: a lane with the wrong mode accepted, which would price a doorstep order as a third-party one or the reverse; and a value the record cannot hold accepted.
+  it('refuses a lane with the wrong mode, a number the record cannot hold and a blank name or address', async () => {
+    const intake = await cleared(1);
+    const parcel = intake.parcels[0] as Parcel;
+    const refused = async (over: Record<string, unknown>) =>
+      refusal(await itemize(officer, intake.id, body(parcel.id, over)));
+    expect(await refused({ lane: 'DOORSTEP', commercial_mode: 'STATION_DROP' })).toEqual([
+      400,
+      'VALIDATION_FAILED',
+      'not_allowed',
+    ]);
+    expect(await refused({ lane: 'THIRD_PARTY_HANDOFF' })).toEqual([
+      400,
+      'VALIDATION_FAILED',
+      'required',
+    ]);
+    expect(await refused({ declared_value_minor: 2_000_000_001 })).toEqual([
+      400,
+      'VALIDATION_FAILED',
+      'range',
+    ]);
+    expect(
+      await refused({
+        recipient: { name: '  ', phone: '0241234567', location: { address: 'Madina' } },
+      }),
+    ).toEqual([400, 'VALIDATION_FAILED', 'required']);
+    expect(
+      await refused({ recipient: { name: 'Ama', phone: '12', location: { address: 'Madina' } } }),
+    ).toEqual([400, 'VALIDATION_FAILED', 'format']);
+    expect(await refused({ carrier_waybill_evidence_id: randomUUID() })).toEqual([
+      400,
+      'VALIDATION_FAILED',
+      'not_allowed',
+    ]);
+    expect(await countOrders(intake.id)).toBe(0);
+  });
+
+  // Break caught: the parcel-level override of the payer arrangement ignored, applied as a portion of a price the client never saw, or accepted with the fields of another kind.
+  it('takes a parcel-level payer arrangement as an intent, and the server resolves it into portions of the frozen price', async () => {
+    const intake = await cleared(4);
+    const [a, b, c, d] = intake.parcels as [Parcel, Parcel, Parcel, Parcel];
+    const recipientPays = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(a.id, { payer_override: { payer_intent: 'RECIPIENT_PAYS' } }),
+      ),
+    );
+    expect(recipientPays.payer_allocation).toEqual({ sender_minor: 0, recipient_minor: 3500 });
+    const split = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, {
+          payer_override: {
+            payer_intent: 'SPLIT',
+            split_basis: 'PERCENTAGE',
+            split_sender_percentage: 25,
+          },
+        }),
+      ),
+    );
+    expect(split.payer_allocation).toEqual({ sender_minor: 875, recipient_minor: 2625 });
+    const fixed = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(c.id, {
+          payer_override: {
+            payer_intent: 'SPLIT',
+            split_basis: 'FIXED_AMOUNT',
+            split_sender_amount: { amount_minor: 1000, currency: 'GHS' },
+          },
+        }),
+      ),
+    );
+    expect(fixed.payer_allocation).toEqual({ sender_minor: 1000, recipient_minor: 2500 });
+    for (const [override, where, rule] of [
+      [{ payer_intent: 'SPLIT' }, '/payer_override/split_basis', 'required'],
+      [
+        { payer_intent: 'SPLIT', split_basis: 'PERCENTAGE' },
+        '/payer_override/split_sender_percentage',
+        'required',
+      ],
+      [
+        { payer_intent: 'SPLIT', split_basis: 'FIXED_AMOUNT' },
+        '/payer_override/split_sender_amount',
+        'required',
+      ],
+      [
+        {
+          payer_intent: 'SPLIT',
+          split_basis: 'FIXED_AMOUNT',
+          split_sender_amount: { amount_minor: 100, currency: 'GHS' },
+          split_sender_percentage: 10,
+        },
+        '/payer_override/split_sender_percentage',
+        'not_allowed',
+      ],
+      [
+        { payer_intent: 'RECIPIENT_PAYS', split_basis: 'PERCENTAGE', split_sender_percentage: 10 },
+        '/payer_override',
+        'split_not_allowed',
+      ],
+    ] as const) {
+      expect(
+        firstViolation(await itemize(officer, intake.id, body(d.id, { payer_override: override }))),
+        JSON.stringify(override),
+      ).toEqual([400, where, rule]);
+    }
+  });
+
+  // Break caught: the confirmation missing from the senior's correction, so that a parcel brought back by the senior leaves its order unpriced for ever.
+  it('confirms the order of a parcel that a senior’s correction brings back', async () => {
+    const intake = await opened(2);
+    const [tapped, notTapped] = intake.parcels as [Parcel, Parcel];
+    const early = orderOf(await itemize(officer, intake.id, body(notTapped.id)));
+    expect((await tap(officer, tapped.id, true)).status).toBe(200);
+    expect((await finishAsTapped(officer, intake.id)).status).toBe(200);
+    expect((await orderRow(early.id))?.commercial_state).toBeNull();
+    const senior = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const { etag } = await read(senior, intake.id);
+    const corrected = await senior.client.post(
+      `${ONE(intake.id)}/correction`,
+      {
+        reason: 'The parcel was on the next table',
+        parcel_changes: [{ parcel_id: notTapped.id, state: 'ARRIVED' }],
+      },
+      { origin: OPS, headers: { 'If-Match': etag, 'Idempotency-Key': randomUUID() } },
+    );
+    expect(corrected.status, corrected.text).toBe(200);
+    expect(await orderRow(early.id)).toMatchObject({
+      commercial_state: 'PRICED',
+      locked_price_minor: 3500,
+    });
+  });
+
+  // Break caught: an order promised from nothing when the moment custody passed cannot be read, or one left behind by the refusal.
+  it('is refused, with no order, when the stop’s collection was never confirmed (COMMITMENT_SOURCE_UNRESOLVED)', async () => {
+    const done = await handOver(routes, vendor, days, { collected: [1], photos: true });
+    const id = done.intakes[0]?.id ?? '';
+    expect((await finishAllHere(officer, id, 1)).status).toBe(200);
+    const { intake } = await read(officer, id);
+    const parcel = (intake.parcels ?? [])[0] as Parcel;
+    expect(refusal(await itemize(officer, id, body(parcel.id)))[0]).toBe(422);
+    expect((await itemize(officer, id, body(parcel.id))).json()).toMatchObject({
+      code: 'COMMITMENT_SOURCE_UNRESOLVED',
+    });
+    expect(await countOrders(id)).toBe(0);
+    expect(await intakeState(id)).toBe('READY_FOR_ITEMIZATION');
   });
 });
