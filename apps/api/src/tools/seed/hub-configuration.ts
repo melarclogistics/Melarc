@@ -10,9 +10,9 @@ import { HUBS } from './hubs.js';
  *
  * **Only what the document confirms, with the value it gives, and the one development value the Product Owner decided** (`intake_lock_idle_ttl_minutes`, fifteen minutes, decision D-13 of
  * 29 October 2026: `PROVISIONAL` in the document, not citable as product policy, seeded so that a development and a test database have an idle time to judge a takeover by; the launch value
- * stays the owner's). An `OPEN` key is absent (the fuel-record thresholds) and so is `MELARC_HIGH_VALUE_TIERS`, which is `CONFIRMED` but whose bands have no stated boundary
- * (the first is "GH₵500–2,000" and the second "above GH₵2,000") and whose place in the price is the owner's decision D-06; it is
- * seeded when that decision is recorded. A missing value fails visibly where it is needed (`SETTING_MISSING`); none is invented.
+ * stays the owner's). An `OPEN` key is absent (the fuel-record thresholds). `MELARC_HIGH_VALUE_TIERS` is seeded since decision D-06 (29 October 2026) made the surcharge its own component of the
+ * price (S1.36): its bands are read as the amount a declared value must be **above** (the document's "GH₵500–2,000" and "above GH₵2,000"; exactly GH₵500 is below the first band and exactly
+ * GH₵2,000 is still in it: a reading, surfaced for the Product Owner's confirmation). A missing value fails visibly where it is needed (`SETTING_MISSING`); none is invented.
  * **No zone alias is seeded**: the data that places an address in a zone is the Product Owner's to supply (OB-S1-02).
  *
  * Money is integer pesewas (GH₵35 is 3500). A per-service-area value has one row per service area, named by `scopeRef`; a base fee
@@ -116,6 +116,17 @@ export const HUB_SETTINGS: readonly HubSettingSeed[] = [
   wide('cancellation_charge_amount', 2000, 'pesewas'),
   wide('size_class_surcharges', { SMALL: 0, MEDIUM: 2000, LARGE: 3000 }, 'pesewas by size class'),
   wide('outside_accra_margin', 3000, 'pesewas'),
+  // D-06 (29 October 2026; S1.36): the high-value surcharge, its own component of the price. GH₵500–2,000 is GH₵10 and above GH₵2,000 is GH₵20: each band is the amount a declared value must be ABOVE
+  // (a reading of the document's words, as the declaration rule reads its threshold: exactly GH₵500 is below the first band and exactly GH₵2,000 is still in it), and the first is
+  // `value_declaration_threshold` ("bands begin at the threshold"). `hub-configuration.test.ts` holds both to the document.
+  wide(
+    'MELARC_HIGH_VALUE_TIERS',
+    [
+      { above_minor: 50000, surcharge_minor: 1000 },
+      { above_minor: 200000, surcharge_minor: 2000 },
+    ],
+    'pesewas, by band',
+  ),
   // 7.3 operational
   wide('vendor_credit_grace_window_minutes', 60, 'minutes'),
   wide('booking_cutoff_time', '10:00', 'time of day, Africa/Accra'),
@@ -126,6 +137,9 @@ export const HUB_SETTINGS: readonly HubSettingSeed[] = [
   wide('intake_lock_idle_ttl_minutes', 15, 'minutes'),
   wide('pickup_service_window_start', '11:00', 'time of day, Africa/Accra'),
   wide('pickup_service_window_end', '16:00', 'time of day, Africa/Accra'),
+  // The customer-facing delivery window (S1.36): the order's first commitment says it (domain-model.md DeliveryCommitment).
+  wide('delivery_service_window_start', '10:00', 'time of day, Africa/Accra'),
+  wide('delivery_service_window_end', '16:00', 'time of day, Africa/Accra'),
   wide('rider_door_wait_minutes', 10, 'minutes'),
 ];
 

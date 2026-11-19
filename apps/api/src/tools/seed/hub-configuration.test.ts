@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSettings } from '../../test-support/seed-documents.js';
 import { SERVICE_AREAS } from '../../platform/database/schema/hub-configuration.js';
 import { HUBS } from './hubs.js';
+import { SETTINGS } from './settings.js';
 import {
   HUB_SETTINGS,
   LAUNCH_HUB_ID,
@@ -31,11 +32,7 @@ const HUB_SECTION_KEYS = new Set(HUB_ROWS.map((row) => row.key));
  * here is the only way a confirmed key of sections 7.2 and 7.3 may be absent from the seed.
  */
 const NOT_SEEDED: Readonly<Record<string, string>> = {
-  MELARC_HIGH_VALUE_TIERS:
-    'confirmed, but its bands have no stated boundary and its place in the price is the owner’s decision D-06',
   doorstep_wait_minutes: 'the delivery side (SLICE-002/003) seeds it when it reads it',
-  delivery_service_window_start: 'the delivery side seeds it when it reads it',
-  delivery_service_window_end: 'the delivery side seeds it when it reads it',
   cash_reconciliation_cutoff_time: 'the cash side (SLICE-004) seeds it when it reads it',
   recipient_cash_enabled: 'the cash side seeds it when it reads it',
   merchant_momo_fallback_enabled: 'the cash side seeds it when it reads it',
@@ -184,6 +181,33 @@ describe('the launch hub’s settings (settings.md sections 7.2 and 7.3)', () =>
     }
   });
 
+  // Break caught: the high-value bands mistyped, a boundary moved (exactly GH₵500 is below the first band, exactly GH₵2,000 is still in it), the first band not beginning at the declaration threshold, or a band
+  // that is not a rise on the one before. The amounts are read from the document's cell; the reading of the boundaries is the one the cell's own words give ("above").
+  it('seeds the high-value bands at the amounts the document states, each as the value it must be above', () => {
+    const cell = valueCell('MELARC_HIGH_VALUE_TIERS');
+    // In the order the cell says them: GH₵500 (the first band begins above it), its GH₵10, GH₵2,000 (the second begins above it), its GH₵20.
+    expect(cedisIn(cell)).toEqual([500, 10, 2000, 20].map((cedis) => cedis * 100));
+    expect(cell).toMatch(/GH₵500–2,000 → GH₵10/);
+    expect(cell).toMatch(/above GH₵2,000 → GH₵20/);
+    expect(find('MELARC_HIGH_VALUE_TIERS')?.value).toEqual([
+      { above_minor: 50000, surcharge_minor: 1000 },
+      { above_minor: 200000, surcharge_minor: 2000 },
+    ]);
+    // The first band begins at the declaration threshold: the same amount, read by the same word.
+    expect(rowText('MELARC_HIGH_VALUE_TIERS')).toContain(
+      'Bands begin at `value_declaration_threshold`',
+    );
+    expect(find('MELARC_HIGH_VALUE_TIERS')?.scopeRef).toBe('');
+  });
+
+  // Break caught: the first band beginning anywhere but the declaration threshold (a parcel that must be declared and pays nothing, or one that pays and was never declared).
+  it('begins the first high-value band at the declaration threshold of the company rules', () => {
+    const threshold = SETTINGS.find((setting) => setting.key === 'value_declaration_threshold');
+    const bands = find('MELARC_HIGH_VALUE_TIERS')?.value as { above_minor: number }[] | undefined;
+    expect(threshold?.scope).toBe('COMPANY');
+    expect(bands?.[0]?.above_minor).toBe(threshold?.value);
+  });
+
   // Break caught: the two corridors' off-day fees collapsed back to one value. The owner set them apart on 29 October 2026.
   it('seeds the off-day fee of each corridor on its own, as the document states', () => {
     const cell = valueCell('corridor_off_day_fee');
@@ -206,6 +230,8 @@ describe('the launch hub’s settings (settings.md sections 7.2 and 7.3)', () =>
     ['intake_lock_idle_ttl_minutes', 15],
     ['pickup_service_window_start', '11:00'],
     ['pickup_service_window_end', '16:00'],
+    ['delivery_service_window_start', '10:00'],
+    ['delivery_service_window_end', '16:00'],
     ['rider_door_wait_minutes', 10],
   ])('seeds %s at the value the document states', (key, expected) => {
     expect(find(key)?.value).toBe(expected);

@@ -98,6 +98,12 @@ export interface Valued<T> {
   readonly reference: SettingReference;
 }
 
+/** One band of `MELARC_HIGH_VALUE_TIERS`: it applies to a declared value ABOVE `aboveMinor` (and not above the next band's), and adds `surchargeMinor`. */
+export interface HighValueTier {
+  readonly aboveMinor: number;
+  readonly surchargeMinor: number;
+}
+
 export class HubConfiguration {
   readonly hubId: string;
   /**
@@ -257,6 +263,41 @@ export class HubConfiguration {
       },
       reference: this.reference(record),
     };
+  }
+
+  /**
+   * The high-value surcharge bands of the hub (`MELARC_HIGH_VALUE_TIERS`, settings.md §7.2; decision D-06 of 29 October 2026: its own component of the price, stacked on the others). Stored as
+   * the bands in ascending order, each **the amount a declared value must be ABOVE for the band to apply and its surcharge**, both in pesewas: GH₵500–2,000 is `{ above_minor: 50000,
+   * surcharge_minor: 1000 }` and "above GH₵2,000" is `{ above_minor: 200000, surcharge_minor: 2000 }`, so that a declared value of exactly GH₵500 is below the first band and exactly GH₵2,000
+   * is still in it (the document's words, read as the declaration rule reads its own threshold: *above*). The first boundary is `value_declaration_threshold` ("bands begin at the threshold").
+   */
+  highValueTiers(): Valued<readonly HighValueTier[]> {
+    const key = 'MELARC_HIGH_VALUE_TIERS';
+    const record = this.setting(key);
+    const value = record.value;
+    const bands: HighValueTier[] = [];
+    if (!Array.isArray(value) || value.length === 0) {
+      throw new SettingInvalidError(key, 'it is not a list of bands');
+    }
+    for (const band of value as unknown[]) {
+      if (
+        !isRecord(band) ||
+        Object.keys(band).length !== 2 ||
+        !isMinor(band.above_minor) ||
+        !isMinor(band.surcharge_minor)
+      ) {
+        throw new SettingInvalidError(
+          key,
+          'a band is the amount above which it applies and its surcharge, in pesewas',
+        );
+      }
+      const previous = bands.at(-1);
+      if (previous !== undefined && band.above_minor <= previous.aboveMinor) {
+        throw new SettingInvalidError(key, 'the bands rise: each begins above the one before');
+      }
+      bands.push({ aboveMinor: band.above_minor, surchargeMinor: band.surcharge_minor });
+    }
+    return { value: bands, reference: this.reference(record) };
   }
 
   /** A company-wide business rule in pesewas (`liability_cap_amount`, `value_declaration_threshold`), or `SETTING_MISSING`. */

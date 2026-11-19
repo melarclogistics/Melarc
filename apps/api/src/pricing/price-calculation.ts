@@ -24,9 +24,11 @@ import {
  * officer’s judgement and is never defaulted: a parcel with none is refused, in every mode, because a pre-selected class quietly
  * becomes the answer. The client sends none of the money here but the carrier’s cost, an observation with a waybill behind it.
  *
- * **The high-value surcharge is not computed here.** `MELARC_HIGH_VALUE_TIERS` is confirmed, but how it enters the locked price is
- * the Product Owner’s decision D-06 and its band boundaries are unstated; it is added to this function when that decision is
- * recorded, as one more component, and not before. A price therefore never carries a surcharge nobody decided.
+ * **The high-value surcharge is its own component, stacked on the others** (decision D-06, 29 October 2026; `MELARC_HIGH_VALUE_TIERS`,
+ * settings.md §7.2; master specification §23.4: "stack additively"): a parcel whose declared value is above a band of the hub’s tiers
+ * pays that band’s surcharge on top of its fee, in every destination, and the component names the hub, key and version it was read
+ * from like any other. It is the **hub’s** value (the liability cap it sits beside is the company’s) and applies only when the parcel
+ * has a declared value: a parcel with none (the booking estimate has none) carries no surcharge and the tiers are not read.
  */
 
 /** What a destination is, for pricing. The zone and service area are resolved by the server before this is asked. */
@@ -41,6 +43,8 @@ export interface PriceInput {
   readonly deliveryDate?: string;
   /** The receiving officer’s judgement. Required in every mode. */
   readonly sizeClass?: SizeClass;
+  /** The parcel’s declared value in pesewas, when it has one: it decides the high-value surcharge (never the fee). */
+  readonly declaredValueMinor?: number;
 }
 
 export type PriceComponentKind =
@@ -49,7 +53,8 @@ export type PriceComponentKind =
   | 'STATION_DROP_FEE'
   | 'CARRIER_COST'
   | 'OUTSIDE_ACCRA_MARGIN'
-  | 'SIZE_CLASS_SURCHARGE';
+  | 'SIZE_CLASS_SURCHARGE'
+  | 'HIGH_VALUE_SURCHARGE';
 
 export interface PriceComponent {
   readonly kind: PriceComponentKind;
@@ -157,6 +162,42 @@ function inArea(
   return { kind: 'CORRIDOR_OFF_DAY_FEE', amountMinor: off.value, reference: off.reference };
 }
 
+/** A declared value is a whole number of pesewas, zero or more. */
+function requireDeclaredValue(declaredValueMinor: number): void {
+  if (!Number.isSafeInteger(declaredValueMinor) || declaredValueMinor < 0) {
+    throw new RangeError('A declared value is a whole number of pesewas, zero or more');
+  }
+}
+
+/**
+ * Whether a declared value makes a parcel **high value** (§23.4, `AC-SLICE-001-54`): it is above the first band of the hub’s tiers (the
+ * boundary is the declaration threshold, "bands begin at `value_declaration_threshold`"). The hub’s tiers decide it; a hub with none is
+ * `SETTING_MISSING`, never a default.
+ */
+export function isHighValue(config: HubConfiguration, declaredValueMinor: number): boolean {
+  requireDeclaredValue(declaredValueMinor);
+  const tiers = refuseIfMissing(() => config.highValueTiers());
+  const first = tiers.value[0];
+  return first !== undefined && declaredValueMinor > first.aboveMinor;
+}
+
+/** The surcharge of the band a declared value is in, as a component, or nothing below the first band. */
+function highValueSurcharge(
+  config: HubConfiguration,
+  declaredValueMinor: number,
+): PriceComponent | undefined {
+  requireDeclaredValue(declaredValueMinor);
+  const tiers = refuseIfMissing(() => config.highValueTiers());
+  const band = [...tiers.value].reverse().find((each) => declaredValueMinor > each.aboveMinor);
+  return band === undefined
+    ? undefined
+    : {
+        kind: 'HIGH_VALUE_SURCHARGE',
+        amountMinor: band.surchargeMinor,
+        reference: tiers.reference,
+      };
+}
+
 export function priceOf(config: HubConfiguration, input: PriceInput): Price {
   if (input.sizeClass === undefined) {
     throw new PricingRefusal(
@@ -211,6 +252,12 @@ export function priceOf(config: HubConfiguration, input: PriceInput): Price {
       );
       break;
     }
+  }
+
+  // Stacked on the fee, whatever the destination (D-06): the hub’s band for the declared value, when the parcel has one.
+  if (input.declaredValueMinor !== undefined) {
+    const surcharge = highValueSurcharge(config, input.declaredValueMinor);
+    if (surcharge !== undefined) components.push(surcharge);
   }
 
   return {
