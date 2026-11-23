@@ -259,3 +259,52 @@ p.orders-photo__none {
   font-weight: var(--text-heading-sm-weight);
   color: inherit;
 }
+
+/* The screen of a saved order of a vendor counted without photos (D-S7-3): the code is what goes on the parcel, so it is large; where the vendor stands by the count and the orders made last follow it. */
+.orders-blind {
+  display: grid;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+}
+
+.orders-blind__lead {
+  margin: 0;
+  font-size: var(--text-heading-md-size);
+  font-weight: var(--text-heading-md-weight);
+  line-height: var(--text-heading-md-line-height);
+}
+
+.orders-blind__code {
+  margin: 0;
+  font-size: var(--text-display-sm-size);
+  line-height: var(--text-display-sm-line-height);
+  overflow-wrap: anywhere;
+}
+
+.orders-blind__position {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.orders-blind__heading {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.orders-blind__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orders-blind__list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  align-items: baseline;
+}
