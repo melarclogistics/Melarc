@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
@@ -65,6 +65,13 @@ const pause = (milliseconds: number): Promise<void> =>
  * moves it on by hand when the moment has passed.
  */
 let clock = 0;
+
+// A change lands on the order's page, which is a lazy route: the first import of it is a cost of the machine and not of the page, and a test that waits a second for the landing must not pay it (nothing is waited
+// longer for: the module is simply there when the test navigates).
+beforeAll(async () => {
+  await import('./OrderRecordPage');
+});
+
 function holdTheClock(): void {
   clock = 1000;
   vi.spyOn(performance, 'now').mockImplementation(() => clock);

@@ -145,6 +145,11 @@ export const blindRow = (n: number, state: 'PREPARED' | 'ITEMIZED' = 'ITEMIZED')
 /** The preview of an order, with the figures a test changes. */
 export function termsOf(overrides: Record<string, unknown> = {}, total = 3500, token = TOKEN) {
   const base = structuredClone(captured('preview'));
+  // Who pays adds up to the price in every answer: the sender's portion is as it was captured, and the recipient's is what is left of the total (a price of another figure would otherwise carry the captured portions).
+  const payer = base.payer as {
+    sender: { amount_minor: number };
+    recipient: { amount_minor: number };
+  };
   return {
     ...base,
     intake_id: VENDOR_ID,
@@ -154,6 +159,10 @@ export function termsOf(overrides: Record<string, unknown> = {}, total = 3500, t
       components: [
         { kind: 'SERVICE_AREA_BASE_FEE', amount: { amount_minor: total, currency: 'GHS' } },
       ],
+    },
+    payer: {
+      ...payer,
+      recipient: { ...payer.recipient, amount_minor: total - payer.sender.amount_minor },
     },
     terms_token: token,
     ...overrides,

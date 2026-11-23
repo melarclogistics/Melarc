@@ -25,7 +25,7 @@ import {
   WORK_STATES,
   WORKLIST_VIEWS,
 } from '../src/platform/hub-orders/orders-shape';
-import { captured } from '../src/test-support/orders-fixture';
+import { captured, termsOf } from '../src/test-support/orders-fixture';
 
 /**
  * The guards that judge the answers of the order screens (`src/platform/hub-orders/orders-shape.ts`) are runtime checks, not a second description of the wire: the types are the generated ones. This test reads the
@@ -302,6 +302,19 @@ describe('the answers the tests are made of are the contract’s', () => {
       });
     }
   }
+});
+
+describe('who pays adds up to the price in every answer the tests are made of', () => {
+  // Break caught: a price of another figure that carries the portions it was captured with (a sender and a recipient that do not add up to the total), which a screen would draw as it was given and a test would
+  // then hold as right.
+  it.each([3500, 4000, 4500, 5000])('in the preview of a price of %i', (total) => {
+    const terms = termsOf({}, total) as {
+      price: { total: { amount_minor: number } };
+      payer: { sender: { amount_minor: number }; recipient: { amount_minor: number } };
+    };
+    expect(terms.price.total.amount_minor).toBe(total);
+    expect(terms.payer.sender.amount_minor + terms.payer.recipient.amount_minor).toBe(total);
+  });
 });
 
 describe('the vendor’s summary', () => {

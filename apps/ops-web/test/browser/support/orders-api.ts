@@ -21,9 +21,10 @@ import { PICTURE } from './receiving-api';
 
 /**
  * What the browser tests of the order screens (S1.40) put in place of the API: a small **stateful** stand-in for the operations the screens use, built from the answers the real API gave (`test/fixtures/orders`) so that
- * a shape cannot drift from the contract. It keeps what the API keeps: the vendor's version moves with every order made (a save on an older one is refused as `stale`), the price is the stand-in's server's and is
- * never the page's (a save is on the digest of the terms that were read, and a price that changed meanwhile answers the terms as they are now), a key makes an order once, a change of who pays is a request that a
- * checker decides, and a vendor is closed on the assessment the officer read. Every request is recorded as the browser sent it (method, path, query, `If-Match`, `Idempotency-Key`, body), and any other request to
+ * a shape cannot drift from the contract. It keeps what the API keeps: the vendor's version moves when its state does and not with each order (a save on an older read is refused as `stale`), the price is the stand-in's server's and is
+ * never the page's (a save is on the digest of the terms that were read, and a price that changed meanwhile answers the terms as they are now), a key makes an order once and is refused with another body (`IDEMPOTENCY_KEY_CONFLICT`), a change of
+ * who pays is a request that a checker other than the officer who asked decides (`SELF_APPROVAL_FORBIDDEN`), the recipient of a confirmed order is corrected with a reason, and a vendor is closed on the assessment
+ * the officer read. Who pays adds up to the price in every answer, and the digest of a price covers every term it was worked out from, not the size and the price alone. Every request is recorded as the browser sent it (method, path, query, `If-Match`, `Idempotency-Key`, body), and any other request to
  * `/api` is a failure of the test: it is answered with a network error and listed in `unexpected`.
  *
  * Everything in the answers is synthetic and says so.
@@ -32,10 +33,15 @@ const JSON_HEADERS = { 'content-type': 'application/json', 'cache-control': 'no-
 
 export const IDS = {
   me: '8a1d2c3e-4f50-4a6b-8c7d-9e0f1a2b3c4d',
+  /** Another officer, who decides what `me` asked: nobody decides what they asked themselves. */
+  checker: 'c4a5b6d7-e8f9-4a0b-8c1d-2e3f4a5b6c7d',
   session: '3f4c6b0e-0d8a-4a6e-9f55-1b2f0c9d7e11',
   hub: INTAKE_HUB_ID,
   vendor: VENDOR_ID,
 } as const;
+
+/** The identifier of the vendor's nth parcel (1 to 3): what the address of the form names. */
+export const parcelIdOf = (ordinal: number): string => PARCELS[ordinal - 1]?.id ?? '';
 
 export type Size = 'SMALL' | 'MEDIUM' | 'LARGE';
 
@@ -52,7 +58,13 @@ export interface StoredOrder {
   /** An early quote is changed here; a fixed price is not. */
   status: 'EARLY_QUOTE' | 'FROZEN';
   version: number;
-  amendments: { id: string; note: string; changed: string[]; at: string }[];
+  amendments: {
+    id: string;
+    note: string;
+    changed: string[];
+    at: string;
+    kind?: 'AMENDMENT' | 'RECIPIENT_CORRECTION';
+  }[];
   /** How who pays was set by a decided change, or `undefined` for as booked. */
   sender: number | undefined;
 }
@@ -64,10 +76,17 @@ export interface StoredCorrection {
   readonly intent: string;
   readonly note: string;
   version: number;
+  /** Who asked: `IDS.me` unless the world says another officer did. */
+  readonly requestedBy?: string;
+  decidedBy?: string;
 }
 
 export interface World {
   permissions: string[];
+  /** Who is signed in: the officer, or another one (the checker of what the officer asked). */
+  principal: string;
+  /** How many parcels the vendor arrived with: three, unless a test works a longer list a page at a time. */
+  parcelCount: number;
   vendorState: 'READY_FOR_ITEMIZATION' | 'ITEMIZING' | 'CLOSED';
   orders: StoredOrder[];
   corrections: StoredCorrection[];
@@ -77,8 +96,11 @@ export interface World {
   repriceOnce: number | undefined;
   /** How long the stand-in's server takes to work a price out, in milliseconds: none by default. A test that taps while a price is being checked asks for a slow one. */
   previewDelayMs: number;
-  /** Saves made under a key already seen are answered as the first was and make nothing. */
-  keys: Map<string, { status: number; body: unknown; etag: string | undefined }>;
+  /** Saves made under a key already seen are answered as the first was and make nothing, and a key seen with another body is refused. */
+  keys: Map<
+    string,
+    { status: number; body: unknown; etag: string | undefined; fingerprint: string }
+  >;
 }
 
 const SIZES: readonly Size[] = ['SMALL', 'MEDIUM', 'LARGE'];
@@ -104,6 +126,8 @@ export function storedOrder(parcel: number, over: Partial<StoredOrder> = {}): St
 
 export function world(over: Partial<World> = {}): World {
   return {
+    principal: IDS.me,
+    parcelCount: 3,
     permissions: [
       'hub.read',
       'hub.intake.itemize',
@@ -145,9 +169,38 @@ const pause = (milliseconds: number): Promise<void> =>
   milliseconds <= 0
     ? Promise.resolve()
     : new Promise((resolve) => setTimeout(resolve, milliseconds));
-/** The digest of the terms a preview worked out: the same facts at the same price give the same digest, and another price another. */
-const tokenOf = (size: Size, price: number, parcel: string | undefined): string =>
-  sha(`${size}|${String(price)}|${parcel ?? ''}`);
+/**
+ * The terms of an order beyond its size, its price and its parcel that a price is worked out from: where it goes and how, the declared value, what is high value, the carrier's charge, the date asked for, who pays and
+ * the zone an officer chose. The stand-in works none of them out, and keeps every one: a change of any is another digest.
+ */
+const TERM_MEMBERS = [
+  'lane',
+  'commercial_mode',
+  'is_high_value',
+  'declared_value_minor',
+  'is_serialized_goods',
+  'serial_imei',
+  'carrier_cost',
+  'carrier_waybill_evidence_id',
+  'requested_delivery_date',
+  'payer_override',
+  'destination_zone_authorization',
+  'evidence_ids',
+] as const;
+const termsOfBody = (body: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(
+    TERM_MEMBERS.filter((member) => body[member] !== undefined).map((member) => [
+      member,
+      body[member],
+    ]),
+  );
+/** The digest of the terms a preview worked out: the same facts at the same price give the same digest, and any other fact or price another. */
+const tokenOf = (
+  size: Size,
+  price: number,
+  parcel: string | undefined,
+  terms: Record<string, unknown> = {},
+): string => sha(`${size}|${String(price)}|${parcel ?? ''}|${JSON.stringify(terms)}`);
 
 const error = (status: number, code: string, details?: unknown) => ({
   status,
@@ -234,6 +287,7 @@ function orderWire(order: StoredOrder): Record<string, unknown> {
       amended_at: each.at,
       note: each.note,
       changed: each.changed,
+      kind: each.kind ?? 'AMENDMENT',
     })),
     reversal: null,
   };
@@ -257,28 +311,34 @@ function rowOf(w: World, ordinal: number) {
   });
 }
 
-function worklistWire(w: World, view: string | null) {
-  const rows = [1, 2, 3].map((ordinal) => rowOf(w, ordinal));
+/** The most rows a page of the worklist holds when the browser does not say (the contract's page size is smaller than a long vendor). */
+const PAGE_SIZE = 100;
+
+function worklistWire(w: World, view: string | null, pageSize: number, offset: number) {
+  const rows = Array.from({ length: w.parcelCount }, (_, index) => rowOf(w, index + 1));
   const needs = rows.filter((row) => row.work_state === 'NEEDS_ORDER').length;
   const made = w.orders.length;
-  const items = rows.filter((row) =>
+  const wanted = rows.filter((row) =>
     view === 'needs_order'
       ? row.work_state === 'NEEDS_ORDER'
       : view === 'itemized'
         ? row.work_state === 'ITEMIZED'
         : true,
   );
+  // A page at a time, from the place the token names: the token of the next page is where it begins, and there is none after the last.
+  const items = wanted.slice(offset, offset + pageSize);
+  const next = offset + pageSize < wanted.length ? String(offset + pageSize) : null;
   return worklistOf(
     items,
     {
-      received: 3,
+      received: w.parcelCount,
       needs_order: needs,
       itemized: w.orders.filter((each) => each.status === 'FROZEN').length,
       prepared: w.orders.filter((each) => each.status !== 'FROZEN').length,
       orders: made,
       payment_required: w.orders.filter((each) => (each.sender ?? 0) > 0).length,
     },
-    { intake_state: w.vendorState },
+    { intake_state: w.vendorState, next_page_token: next },
   );
 }
 
@@ -337,10 +397,11 @@ function correctionWire(w: World, stored: StoredCorrection) {
     total: money(price),
     created_at: '2026-11-03T08:10:00.000Z',
     decided_at: decided ? '2026-11-03T08:20:00.000Z' : null,
-    approved_by: decided ? IDS.me : null,
-    approved_by_name: decided ? 'Synthetic Officer' : null,
-    requested_by: IDS.me,
-    requested_by_name: 'Synthetic Officer',
+    approved_by: decided ? (stored.decidedBy ?? IDS.checker) : null,
+    approved_by_name: decided ? 'Synthetic Checker' : null,
+    requested_by: stored.requestedBy ?? IDS.me,
+    requested_by_name:
+      (stored.requestedBy ?? IDS.me) === IDS.me ? 'Synthetic Officer' : 'Synthetic Checker',
     order_commercial_state:
       sender > 0 && stored.state === 'APPROVED' ? 'PAYMENT_REQUIRED' : 'NO_VENDOR_CHARGE',
   });
@@ -374,7 +435,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
       ok({
         id: IDS.session,
         principal_type: 'STAFF',
-        principal_id: IDS.me,
+        principal_id: w.principal,
         state: 'ACTIVE',
         permissions: w.permissions,
         issued_at: '2026-11-03T06:00:00.000Z',
@@ -400,7 +461,18 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
   }
   if (method === 'GET' && path === `/api/v1/hub-intakes/${VENDOR_ID}/orders`) {
     if (await needs('hub.read')) return;
-    return route.fulfill(ok(worklistWire(w, new URLSearchParams(call.search).get('view'))));
+    const asked = new URLSearchParams(call.search);
+    const offset = Number(asked.get('page_token') ?? '0');
+    return route.fulfill(
+      ok(
+        worklistWire(
+          w,
+          asked.get('view'),
+          Number(asked.get('page_size') ?? String(PAGE_SIZE)),
+          Number.isSafeInteger(offset) && offset >= 0 ? offset : 0,
+        ),
+      ),
+    );
   }
 
   // The price, checked before anything is saved: the stand-in's server works it out and writes nothing.
@@ -408,6 +480,12 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (await needs('hub.intake.itemize')) return;
     const size = SIZES.find((each) => each === body.size_class);
     if (size === undefined) return route.fulfill(error(422, 'SIZE_CLASS_REQUIRED'));
+    const parcel = typeof body.parcel_id === 'string' ? body.parcel_id : undefined;
+    // A parcel that has an order is not priced for another: the preview refuses it as the save does.
+    const ordinal = PARCELS.findIndex((each) => each.id === parcel) + 1;
+    if (ordinal > 0 && orderForParcel(w, ordinal) !== undefined) {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'parcel_ordered' }));
+    }
     const price = w.prices[size];
     await pause(w.previewDelayMs);
     return route.fulfill(
@@ -415,7 +493,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
         termsOf(
           { parcel_id: body.parcel_id ?? null },
           price,
-          tokenOf(size, price, typeof body.parcel_id === 'string' ? body.parcel_id : undefined),
+          tokenOf(size, price, parcel, termsOfBody(body)),
         ),
       ),
     );
@@ -427,8 +505,14 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (call.idempotencyKey === undefined || call.ifMatch === undefined) {
       return route.fulfill(error(428, 'PRECONDITION_REQUIRED'));
     }
+    const fingerprint = sha(JSON.stringify(call.body));
     const earlier = w.keys.get(call.idempotencyKey);
-    if (earlier !== undefined) return route.fulfill(ok(earlier.body, earlier.status, earlier.etag));
+    if (earlier !== undefined) {
+      // The same key and the same body is the same save, answered as the first was; the same key with another body is a mistake of the client's, and nothing is made.
+      return earlier.fingerprint === fingerprint
+        ? route.fulfill(ok(earlier.body, earlier.status, earlier.etag))
+        : route.fulfill(error(409, 'IDEMPOTENCY_KEY_CONFLICT'));
+    }
     if (call.ifMatch !== vendorEtag(w)) {
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
     }
@@ -445,14 +529,15 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
       w.repriceOnce = undefined;
     }
     const price = w.prices[size];
-    if (body.reviewed_terms !== tokenOf(size, price, parcelId)) {
+    const facts = termsOfBody(body);
+    if (body.reviewed_terms !== tokenOf(size, price, parcelId, facts)) {
       return route.fulfill(
         error(409, 'STATE_CONFLICT', {
           rule: 'terms_changed',
           current_terms: termsOf(
             { parcel_id: parcelId ?? null },
             price,
-            tokenOf(size, price, parcelId),
+            tokenOf(size, price, parcelId, facts),
           ),
         }),
       );
@@ -476,6 +561,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
       status: 201,
       body: saved,
       etag: `"o${String(made.version)}"`,
+      fingerprint,
     });
     return route.fulfill(ok(saved, 201, `"o${String(made.version)}"`));
   }
@@ -494,18 +580,28 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
       if (call.idempotencyKey === undefined || call.ifMatch === undefined) {
         return route.fulfill(error(428, 'PRECONDITION_REQUIRED'));
       }
+      const fingerprint = sha(JSON.stringify(call.body));
+      const earlier = w.keys.get(call.idempotencyKey);
+      if (earlier !== undefined) {
+        return earlier.fingerprint === fingerprint
+          ? route.fulfill(ok(earlier.body, earlier.status, earlier.etag))
+          : route.fulfill(error(409, 'IDEMPOTENCY_KEY_CONFLICT'));
+      }
       if (call.ifMatch !== `"o${String(order.version)}"`) {
         return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
       }
       const size = SIZES.find((each) => each === body.size_class) ?? order.size;
-      if (body.reviewed_terms !== tokenOf(size, w.prices[size], parcelOf(order.parcel)?.id)) {
+      const facts = termsOfBody(body);
+      if (
+        body.reviewed_terms !== tokenOf(size, w.prices[size], parcelOf(order.parcel)?.id, facts)
+      ) {
         return route.fulfill(
           error(409, 'STATE_CONFLICT', {
             rule: 'terms_changed',
             current_terms: termsOf(
               {},
               w.prices[size],
-              tokenOf(size, w.prices[size], parcelOf(order.parcel)?.id),
+              tokenOf(size, w.prices[size], parcelOf(order.parcel)?.id, facts),
             ),
           }),
         );
@@ -518,9 +614,74 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
         note: typeof body.note === 'string' ? body.note : '',
         changed: Object.keys(body).filter((key) => !['note', 'reviewed_terms'].includes(key)),
         at: '2026-11-03T08:28:00.000Z',
+        kind: 'AMENDMENT',
       });
-      return route.fulfill(ok(orderWire(order), 200, `"o${String(order.version)}"`));
+      const answered = ok(orderWire(order), 200, `"o${String(order.version)}"`);
+      w.keys.set(call.idempotencyKey, {
+        status: 200,
+        body: answered.json,
+        etag: `"o${String(order.version)}"`,
+        fingerprint,
+      });
+      return route.fulfill(answered);
     }
+  }
+  // The recipient of a confirmed order, corrected with a reason (D-S7-1): the price, the zone and the date never move, and the old details are kept in the history of the order.
+  const correctsRecipient = id(/^\/api\/v1\/orders\/([0-9a-f-]{36})\/recipient-correction$/);
+  if (method === 'POST' && correctsRecipient !== undefined) {
+    if (await needs('hub.intake.itemize')) return;
+    const order = orderById(w, correctsRecipient);
+    if (order === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
+    if (call.idempotencyKey === undefined || call.ifMatch === undefined) {
+      return route.fulfill(error(428, 'PRECONDITION_REQUIRED'));
+    }
+    const fingerprint = sha(JSON.stringify(call.body));
+    const earlier = w.keys.get(call.idempotencyKey);
+    if (earlier !== undefined) {
+      return earlier.fingerprint === fingerprint
+        ? route.fulfill(ok(earlier.body, earlier.status, earlier.etag))
+        : route.fulfill(error(409, 'IDEMPOTENCY_KEY_CONFLICT'));
+    }
+    if (typeof body.note !== 'string' || body.note.trim() === '') {
+      return route.fulfill(error(422, 'REASON_REQUIRED'));
+    }
+    if (call.ifMatch !== `"o${String(order.version)}"`) {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
+    }
+    if (order.status !== 'FROZEN') {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'order_not_confirmed' }));
+    }
+    const recipient = asRecord(body.recipient);
+    const location = asRecord(recipient.location);
+    const address = typeof location.address === 'string' ? location.address : undefined;
+    // The stand-in's zone: an address that names Tema is in another zone than the order's, and moving it would move the price.
+    if (address !== undefined && /tema/i.test(address)) {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'address_changes_zone' }));
+    }
+    const changed: string[] = [];
+    if (typeof recipient.name === 'string') order.name = recipient.name;
+    if (typeof recipient.phone === 'string') order.phone = recipient.phone;
+    if (address !== undefined) order.address = address;
+    if (Object.keys(recipient).length === 0) {
+      return route.fulfill(error(400, 'VALIDATION_FAILED', { rule: 'no_change' }));
+    }
+    changed.push('recipient');
+    order.version += 1;
+    order.amendments.push({
+      id: randomUUID(),
+      note: body.note,
+      changed,
+      at: '2026-11-03T08:29:00.000Z',
+      kind: 'RECIPIENT_CORRECTION',
+    });
+    const answered = ok(orderWire(order), 200, `"o${String(order.version)}"`);
+    w.keys.set(call.idempotencyKey, {
+      status: 200,
+      body: answered.json,
+      etag: `"o${String(order.version)}"`,
+      fingerprint,
+    });
+    return route.fulfill(answered);
   }
   const amendPreview = id(/^\/api\/v1\/orders\/([0-9a-f-]{36})\/amendment-preview$/);
   if (method === 'POST' && amendPreview !== undefined) {
@@ -528,6 +689,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     const order = orderById(w, amendPreview);
     if (order === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
     const size = SIZES.find((each) => each === body.size_class) ?? order.size;
+    const facts = termsOfBody(body);
     await pause(w.previewDelayMs);
     return route.fulfill(
       ok(
@@ -543,7 +705,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
             },
           },
           w.prices[size],
-          tokenOf(size, w.prices[size], parcelOf(order.parcel)?.id),
+          tokenOf(size, w.prices[size], parcelOf(order.parcel)?.id, facts),
         ),
       ),
     );
@@ -567,6 +729,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
           : 'RECIPIENT_PAYS',
       note: typeof body.note === 'string' ? body.note : '',
       version: 1,
+      requestedBy: w.principal,
     };
     w.corrections.push(made);
     return route.fulfill(ok(correctionWire(w, made), 201, '"c1"'));
@@ -591,10 +754,15 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (await needs('pricing.correction.approve')) return;
     const found = w.corrections.find((each) => each.id === decision);
     if (found === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
+    // The maker-checker rule: the officer who asked does not decide (a Platform Admin is the API's exception, and no officer of these screens is one).
+    if ((found.requestedBy ?? IDS.me) === w.principal) {
+      return route.fulfill(error(422, 'SELF_APPROVAL_FORBIDDEN'));
+    }
     if (call.ifMatch !== `"c${String(found.version)}"` || found.state !== 'REQUESTED') {
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
     }
     found.state = body.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    found.decidedBy = w.principal;
     found.version += 1;
     if (found.state === 'APPROVED') {
       const order = orderById(w, found.orderId);

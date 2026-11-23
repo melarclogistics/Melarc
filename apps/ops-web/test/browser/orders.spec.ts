@@ -3,6 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './support/guarded-test';
 import {
   IDS,
+  parcelIdOf,
   storedOrder,
   stubOrdersApi,
   world,
@@ -392,6 +393,228 @@ test.describe('a double tap on the change of an order (D-S7-2)', () => {
   });
 });
 
+test.describe('what the stand-in keeps that the API keeps (Run F, Part 3)', () => {
+  // Break caught: a stand-in that lets the officer who asked for a change decide it, so that the answer of the screen to the API's refusal (SELF_APPROVAL_FORBIDDEN) was never seen in a browser.
+  test('the officer who asked for a change of who pays is told that a different officer decides it', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+      permissions: [
+        'hub.read',
+        'pricing.read',
+        'pricing.correction.create',
+        'pricing.correction.approve',
+      ],
+    });
+    await page.getByRole('button', { name: 'Change who pays' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByRole('radio', { name: 'The sender pays all of it' }).check();
+    await dialog.getByLabel(/Why should it change\?/).fill('The vendor will pay on the phone');
+    await dialog.getByRole('button', { name: 'Ask for the change' }).click();
+    await page.getByRole('link', { name: 'Open the correction' }).click();
+
+    // The same officer holds the key to decide, and the server's rule is that nobody decides what they asked.
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Yes, approve' }).click();
+    await expect(
+      page
+        .getByRole('alertdialog')
+        .getByText('A different officer decides a change you asked for.'),
+    ).toBeVisible();
+    expect(api.world.corrections[0]?.state).toBe('REQUESTED');
+    expect(api.unexpected).toEqual([]);
+    // The refusal is the one answer of its kind this test expects (the browser logs a refused request as a failed resource).
+    expect(watch.problems.filter((problem) => !problem.includes('422'))).toEqual([]);
+  });
+
+  // Break caught: a stand-in that prices a parcel that already has an order, so that the answer of the screen to that refusal (parcel_ordered) was never seen in a browser.
+  test('a parcel that already has an order is refused when its price is asked for, in words, and nothing is saved', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `${NEW_ORDER}?parcel=${parcelIdOf(1)}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    await fillIn(page);
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'This parcel already has an order.' }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Save the order at / })).toHaveCount(0);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
+    expect(api.world.orders).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
+  });
+
+  // Break caught: a digest that covers the size and the price alone, which accepts a save whose terms (who pays, the declared value) are not the ones that were priced; and a key seen with another body that makes a second
+  // order or is answered as the first save.
+  test('the digest of a price covers every term it was worked out from, and a key seen with another body is refused', async ({
+    page,
+  }) => {
+    const { api } = await open(page, NEW_ORDER);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    // Requests sent as the page sends them (the stand-in answers every request of the browser to the API), with the bodies of a person: not through the screen, which would never send a stale digest.
+    const result = await page.evaluate(
+      async ({ vendor, parcel }) => {
+        const headers = { 'content-type': 'application/json' };
+        const base = {
+          parcel_id: parcel,
+          recipient: {
+            name: 'Kofi Asante',
+            phone: '024 765 4321',
+            location: { address: '7 Spintex Road' },
+          },
+          size_class: 'MEDIUM',
+          lane: 'DOORSTEP',
+          is_high_value: false,
+          is_serialized_goods: false,
+        };
+        const post = async (path: string, body: unknown, extra: Record<string, string> = {}) => {
+          const response = await fetch(`/api/v1/hub-intakes/${vendor}${path}`, {
+            method: 'POST',
+            headers: { ...headers, ...extra },
+            body: JSON.stringify(body),
+          });
+          return {
+            status: response.status,
+            body: (await response.json()) as Record<string, unknown>,
+          };
+        };
+        const priced = await post('/orders/preview', base);
+        const token = priced.body.terms_token as string;
+        // Who pays is another term: the digest of the first price is not the digest of this one.
+        const key = crypto.randomUUID();
+        const changed = await post(
+          '/orders',
+          { ...base, payer_override: { payer_intent: 'RECIPIENT_PAYS' }, reviewed_terms: token },
+          { 'Idempotency-Key': key, 'If-Match': '"v1"' },
+        );
+        // The same save, as priced, is made once; the same key with the same body answers the first; with another body it is refused.
+        const made = await post(
+          '/orders',
+          { ...base, reviewed_terms: token },
+          { 'Idempotency-Key': key, 'If-Match': '"v1"' },
+        );
+        const replay = await post(
+          '/orders',
+          { ...base, reviewed_terms: token },
+          { 'Idempotency-Key': key, 'If-Match': '"v1"' },
+        );
+        const other = await post(
+          '/orders',
+          { ...base, size_class: 'SMALL', reviewed_terms: token },
+          { 'Idempotency-Key': key, 'If-Match': '"v1"' },
+        );
+        return { changed, made, replay, other };
+      },
+      { vendor: VENDOR, parcel: parcelIdOf(1) },
+    );
+    expect(result.changed.status).toBe(409);
+    expect((result.changed.body.details as { rule: string }).rule).toBe('terms_changed');
+    expect(result.made.status).toBe(201);
+    expect(result.replay.status).toBe(201);
+    expect(result.replay.body).toEqual(result.made.body);
+    expect(result.other.status).toBe(409);
+    expect(result.other.body.code).toBe('IDEMPOTENCY_KEY_CONFLICT');
+    // One order was made, whatever was asked of the key afterwards.
+    expect(api.world.orders).toHaveLength(1);
+  });
+
+  // Break caught: a long vendor read as one list, the count of a page told for the count of the vendor, or a next page that is not asked for with the token the first gave.
+  test('a vendor of 130 parcels is worked a page at a time, and its counts are the vendor’s', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, ORDERS, { parcelCount: 130 });
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Orders for Kente Crafts' }),
+    ).toBeVisible();
+    // The counts are the vendor's: 130 parcels need an order, which no page holds.
+    await expect(
+      page.getByText('Need an order', { exact: true }).locator('xpath=following-sibling::*[1]'),
+    ).toHaveText('130');
+    const rows = page.getByRole('table', { name: 'Parcels and orders' });
+    await expect(rows.getByText('Parcel 1', { exact: true })).toBeVisible();
+    const first = made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).at(-1);
+    const size = Number(new URLSearchParams(first?.search).get('page_size') ?? '100');
+    expect(size).toBeLessThan(130);
+    await expect(rows.getByText(`Parcel ${String(size)}`, { exact: true })).toBeVisible();
+    await expect(rows.getByText(`Parcel ${String(size + 1)}`, { exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Next page' }).click();
+    await expect(rows.getByText('Parcel 130', { exact: true })).toBeVisible();
+    await expect(rows.getByText('Parcel 1', { exact: true })).toHaveCount(0);
+    // The second page was asked for with the token the first one gave, and never as one list.
+    const second = made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).at(-1);
+    expect(new URLSearchParams(second?.search).get('page_token')).toBe(String(size));
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('correcting the recipient of a confirmed order (D-S7-1, Run F)', () => {
+  // Break caught: a correction with no reason, the whole recipient sent for one field, the version not sent, an order not read again, or a history that does not say a correction was made and why.
+  test('an officer corrects a phone with a reason, on the version read, and the history keeps it', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    await page.getByRole('button', { name: 'Correct the recipient' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByRole('button', { name: 'Save the correction' }).click();
+    await expect(dialog.getByText('Write why you are correcting this.')).toBeVisible();
+    await dialog.getByLabel(/Recipient’s phone/).fill('024 765 4321');
+    await dialog.getByLabel(/Why are you correcting this\?/).fill('The phone had a digit wrong');
+    await dialog.getByRole('button', { name: 'Save the correction' }).click();
+
+    await expect(
+      page.getByText(`The recipient of order ${FIRST.code} was corrected.`),
+    ).toBeVisible();
+    const request = made(api, 'POST', `/orders/${FIRST.id}/recipient-correction`)[0];
+    expect(request?.ifMatch).toBe('"o1"');
+    expect(request?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(request?.body).toEqual({
+      note: 'The phone had a digit wrong',
+      recipient: { phone: '024 765 4321' },
+    });
+    // The order is read again as it stands: the new phone is what it holds, and the history keeps the correction with its reason.
+    await expect(
+      page.getByRole('region', { name: 'What it holds' }).getByText('024 765 4321'),
+    ).toBeVisible();
+    await expect(page.getByText('Changed: the recipient.')).toBeVisible();
+    await expect(page.getByText(/Reason: The phone had a digit wrong/)).toBeVisible();
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: an address in another zone corrected as if nothing moved (the price would), or refused as "something went wrong" with the dialog lost.
+  test('an address in another zone is refused in words, and nothing changes', async ({ page }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    await page.getByRole('button', { name: 'Correct the recipient' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByLabel(/Delivery address/).fill('Community 1, Tema');
+    await dialog.getByLabel(/Why are you correcting this\?/).fill('Wrong town');
+    await dialog.getByRole('button', { name: 'Save the correction' }).click();
+    await expect(
+      dialog.getByText(/That address is in another zone, so it would change the price\./),
+    ).toBeVisible();
+    expect(api.world.orders[0]?.address).toBe('12 Madina Estate, near the market');
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
+  });
+});
+
 test.describe('closing a vendor and its summary', () => {
   // Three orders made, the vendor being worked: each test has orders of its own, which the stand-in changes.
   const ALL_MADE = (): Partial<World> => ({
@@ -495,7 +718,8 @@ test.describe('an order, and who pays for it', () => {
     await expect(page.getByText('A senior officer decides this.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Approve' })).toHaveCount(0);
 
-    // A senior officer, on another day or another device: the change is read from the server, and is decided there.
+    // Another officer, on another day or another device: the change is read from the server, and is decided there. The officer who asked does not decide it (the test after this one).
+    api.world.principal = IDS.checker;
     api.world.permissions.push('pricing.correction.approve');
     await page.reload();
     await page.getByRole('button', { name: 'Approve' }).click();
@@ -531,6 +755,7 @@ test.describe('an order, and who pays for it', () => {
           intent: 'SENDER_PAYS_FULL',
           note: 'The vendor pays by phone',
           version: 1,
+          requestedBy: IDS.checker,
         },
       ],
     });
@@ -614,6 +839,8 @@ interface Screen {
   readonly ready: (page: Page) => Locator;
   /** What is done on the page before it is read: the review of a price is a state of the form. */
   readonly then?: (page: Page) => Promise<void>;
+  /** The refusal the state is made of, as the browser logs it (the status): the one problem of the page that is expected (a price that changed at the save is a refused save). */
+  readonly refused?: string;
 }
 
 const SENIOR_KEYS = [
@@ -686,6 +913,7 @@ const SCREENS: readonly Screen[] = [
           intent: 'SENDER_PAYS_FULL',
           note: 'The vendor pays by phone',
           version: 1,
+          requestedBy: IDS.checker,
         },
       ],
     }),
@@ -738,6 +966,49 @@ const SCREENS: readonly Screen[] = [
       await fillIn(page);
     },
   },
+  {
+    // The price changed under the officer's hand: the old figure beside the new, and a save that says the new one.
+    name: 'the form of an order after its price changed at the save',
+    path: NEW_ORDER,
+    world: () => ({ ...firstMade(), repriceOnce: 5500 }),
+    refused: '409',
+    ready: (page) => page.getByRole('button', { name: 'Save at GH₵55.00' }),
+    then: async (page) => {
+      await expect(heading(page, 'Make an order for parcel 2')).toBeVisible();
+      await fillIn(page);
+      await page.getByRole('button', { name: /^Save the order at / }).click();
+    },
+  },
+  {
+    name: 'an order with the correction of its recipient open',
+    path: `/orders/${FIRST.id}`,
+    world: firstMade,
+    ready: (page) => page.getByRole('alertdialog'),
+    then: async (page) => {
+      await page.getByRole('button', { name: 'Correct the recipient' }).click();
+    },
+  },
+  {
+    // One change of who pays, with the decision to be made by a checker.
+    name: 'one change of who pays',
+    path: '/payer-corrections/0f0f0f0f-0000-4000-8000-000000000001',
+    world: () => ({
+      ...firstMade(),
+      corrections: [
+        {
+          id: '0f0f0f0f-0000-4000-8000-000000000001',
+          orderId: FIRST.id,
+          state: 'REQUESTED',
+          intent: 'SENDER_PAYS_FULL',
+          note: 'The vendor pays by phone',
+          version: 1,
+          requestedBy: IDS.checker,
+        },
+      ],
+    }),
+    // The page of a change is the checker's queue with the change open: the heading is the queue's, and the change is there by the decision it waits for.
+    ready: (page) => page.getByRole('button', { name: 'Approve' }),
+  },
 ];
 
 test.describe('the screens at the verified widths', () => {
@@ -758,7 +1029,12 @@ test.describe('the screens at the verified widths', () => {
         await expectNoTableScrollsSideways(page);
         await expect(page.getByText(DIAGNOSTIC)).toHaveCount(0);
         expect(api.unexpected).toEqual([]);
-        expect(watch.problems).toEqual([]);
+        // The one refusal a state is made of is expected, and nothing else.
+        expect(
+          watch.problems.filter(
+            (problem) => screen.refused === undefined || !problem.includes(screen.refused),
+          ),
+        ).toEqual([]);
       });
     }
   }
