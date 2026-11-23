@@ -476,7 +476,7 @@ export const ORDERS_WORDS = {
   reverse: {
     title: 'Take back the arrival',
     description: (code: string): string =>
-      `Order ${code} stays on record with its price and its history. The parcel goes back to the missing list, and the vendor goes back in review.`,
+      `Order ${code} stays on record with its price and its history. The parcel goes back to the missing list, and the vendor goes back in review. No more orders can be made for this vendor until a senior officer decides.`,
     reasonLabel: 'Why is the arrival being taken back?',
     reasonHelp: 'For example: the parcel was marked as here by mistake. It is kept with the act.',
     confirm: 'Take back the arrival',
@@ -557,7 +557,9 @@ export const ORDERS_WORDS = {
       reasonLabel: 'Why are you closing with parcels still to order?',
       reasonHelp: 'Say what happened and who follows it up. It is kept with the close.',
       reasonRequired: 'Write why you are closing with parcels still to order.',
-      mustAsk: 'A senior officer can close with parcels still to order. Ask one to open this page.',
+      mustAsk:
+        'A senior officer can close with parcels still to order. A senior officer finds this vendor under Needs a senior.',
+      seeList: 'Open the list for a senior officer',
     },
     confirm: {
       title: 'Close this vendor?',

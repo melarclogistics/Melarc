@@ -87,6 +87,17 @@ describe('an order whose price is fixed', () => {
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
   });
 
+  // Break caught: a take-back that does not say that no more orders can be made for the vendor until a senior officer decides (an officer finds out when the form refuses).
+  it('says in the take-back that no more orders can be made for the vendor until a senior officer decides', async () => {
+    const { user } = open(orderOf('frozen'), SENIOR);
+    await user.click(await screen.findByRole('button', { name: 'Take back the arrival' }));
+    expect(
+      within(await dialog()).getByText(
+        /No more orders can be made for this vendor until a senior officer decides\./,
+      ),
+    ).toBeVisible();
+  });
+
   it('offers a senior officer the arrival to take back', async () => {
     open(orderOf('frozen'), SENIOR);
     expect(await screen.findByRole('button', { name: 'Take back the arrival' })).toBeVisible();
