@@ -64,6 +64,14 @@ export function commercialText(state: string | null): string | undefined {
 
 export const GATE_WORDS: Readonly<Record<GateState, string>> = WORDS.review.gate;
 
+/** The name of a service area, in the words of the floor: its code (`ACCRA_TEMA`) is the server's and is never drawn; a code the table has no words for is told in sentence case. */
+export function areaText(code: string): string {
+  const known = (WORDS.areas as Readonly<Record<string, string>>)[code];
+  if (known !== undefined) return known;
+  const spaced = code.toLowerCase().replaceAll('_', ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** The name of a part of a price, in the words of the floor; a kind the table has no words for is told as another charge and never as its code. */
 export function componentText(component: PriceComponentView): string {
   return (

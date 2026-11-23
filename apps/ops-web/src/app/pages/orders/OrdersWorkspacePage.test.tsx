@@ -397,3 +397,28 @@ describe('the next order while the check-in is open (Run F, Part 2, item 5)', ()
     ).toBeVisible();
   });
 });
+
+describe('the count of "All" (Run F, Part 2, item 15)', () => {
+  // Break caught: "All 0" over a vendor with three parcels: the count of the view that lists every parcel was the number of orders. It is what the view lists.
+  it('counts what the view lists: the parcels of a vendor with door photos', async () => {
+    open({
+      [LIST]: () =>
+        json(
+          200,
+          worklistOf(ROWS, {
+            needs_order: 1,
+            awaiting_arrival: 1,
+            itemized: 1,
+            orders: 0,
+            missing: 1,
+          }),
+        ),
+    });
+    await table();
+    const views = within(screen.getByRole('tablist', { name: 'Views of the orders' }));
+    const all = views.getByRole('tab', { name: /^All/ });
+    expect(all).toHaveTextContent('All');
+    // The parcels that are here (the progress says one received), not here yet (one) and missing (one): three, not the zero orders.
+    expect(all).not.toHaveTextContent(/All\s*0$/);
+  });
+});

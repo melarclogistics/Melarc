@@ -37,6 +37,7 @@ import {
   summaryPath,
   CLOSED_VENDORS_PATH,
   WORK_STATE_MAP,
+  areaText,
 } from './orders-presentation';
 import { vendorFactsOf, type VendorFacts } from './vendor-facts';
 import './orders-pages.css';
@@ -52,11 +53,20 @@ const VIEW_ORDER: readonly Exclude<WorklistViewId, 'all'>[] = [
 ];
 
 /** The count the server stated for a view, from the counts of the whole vendor: a count it did not give is no count, and is never drawn as nothing. */
-function countOf(view: WorklistViewId, progress: ProgressView | undefined): number | null {
+function countOf(
+  view: WorklistViewId,
+  progress: ProgressView | undefined,
+  mode: 'PHOTO_CHECK_IN' | 'BLIND_COUNT',
+): number | null {
   if (progress === undefined) return null;
   switch (view) {
     case 'all':
-      return progress.orders;
+      // What the view lists: the orders of a vendor counted without photos, the parcels (here, not here yet and missing) of a vendor with door photos. Never the orders of the second, which is "All 0" over three parcels.
+      return mode === 'BLIND_COUNT'
+        ? progress.orders
+        : progress.received === null
+          ? null
+          : progress.received + progress.awaiting_arrival + progress.missing;
     case 'needs_order':
       return progress.needs_order;
     case 'awaiting_arrival':
@@ -88,7 +98,7 @@ function viewsOf(
       open: undefined,
       label: words.label,
       none: words.none,
-      count: countOf(view, progress),
+      count: countOf(view, progress, facts.mode),
     };
   });
   if (first === undefined) throw new Error('A vendor has views');
@@ -201,7 +211,12 @@ function ParcelPanel({
                     ]),
                 ...(item.order.service_area === null
                   ? []
-                  : [{ label: WORDS.workspace.panel.facts.area, value: item.order.service_area }]),
+                  : [
+                      {
+                        label: WORDS.workspace.panel.facts.area,
+                        value: areaText(item.order.service_area),
+                      },
+                    ]),
                 {
                   label: WORDS.workspace.panel.facts.size,
                   value: WORDS.form.sizes[item.order.size_class],

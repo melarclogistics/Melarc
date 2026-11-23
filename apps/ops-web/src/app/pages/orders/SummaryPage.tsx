@@ -1,6 +1,7 @@
 import { useParams } from 'react-router';
 
 import { DataTable, RowTitle, type DataColumn } from '../../../components/ui/data-table/DataTable';
+import { formatMinor } from '../../../components/ui/money/money-value';
 import { Link } from '../../../components/ui/link/Link';
 import { Panel } from '../../../components/ui/panel/Panel';
 import { ReadState } from '../../../components/ui/read-state/ReadState';
@@ -23,7 +24,9 @@ import {
 import { recordPath } from '../receiving/receiving-presentation';
 import { WithRecord } from '../receiving/WithRecord';
 import { Cedis } from './Cedis';
+import { SummaryOrderCard } from './SummaryOrderCard';
 import {
+  areaText,
   commercialText,
   messageLogPath,
   orderPath,
@@ -105,7 +108,7 @@ function SummaryBody({
         ),
     },
     { id: 'recipient', header: S.columns.recipient, cell: (order) => order.recipient_name },
-    { id: 'area', header: S.columns.area, cell: (order) => order.service_area },
+    { id: 'area', header: S.columns.area, cell: (order) => areaText(order.service_area) },
     {
       id: 'size',
       header: S.columns.size,
@@ -119,6 +122,21 @@ function SummaryBody({
             kind: 'count' as const,
             cell: (order: SummaryOrderView) =>
               order.locked_price === null ? '' : <Cedis money={order.locked_price} />,
+          },
+        ]
+      : []),
+    ...(showsPrices
+      ? [
+          {
+            id: 'whoPays',
+            header: S.columns.whoPays,
+            cell: (order: SummaryOrderView) =>
+              order.payer_allocation === null
+                ? ''
+                : S.whoPays(
+                    formatMinor(order.payer_allocation.sender_minor, 'GHS'),
+                    formatMinor(order.payer_allocation.recipient_minor, 'GHS'),
+                  ),
           },
         ]
       : []),
@@ -156,9 +174,8 @@ function SummaryBody({
             rowId={(order) => order.id}
             density="single"
             layout="auto"
-            card={(order) =>
-              `${order.recipient_name} · ${commercialText(order.commercial_state) ?? ''}`
-            }
+            // Where the columns do not fit the facts are a card, and a card keeps every fact the table says.
+            card={(order) => <SummaryOrderCard order={order} showsPrices={showsPrices} />}
             cardTitle={(order) => order.code}
           />
         )}

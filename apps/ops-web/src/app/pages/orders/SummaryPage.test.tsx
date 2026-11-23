@@ -1,6 +1,7 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { parseSummary } from '../../../platform/hub-orders/orders-shape';
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
 import {
@@ -17,6 +18,7 @@ import {
 import { captured, PARCELS, VENDOR_ID } from '../../../test-support/orders-fixture';
 import { checkInFixture } from '../../../test-support/receiving-fixture';
 import { renderApp } from '../../../test-support/render-app';
+import { SummaryOrderCard } from './SummaryOrderCard';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
 /**
@@ -259,4 +261,58 @@ describeInterfaceStates('the summary of a closed vendor', {
       });
     },
   },
+});
+
+describe('what the summary says of each order (Run F, Part 2, item 15 and D-S7-10)', () => {
+  const withPortions = () => {
+    const base = summaryOf() as { orders: Record<string, unknown>[] };
+    return {
+      ...base,
+      orders: base.orders.map((order, index) => ({
+        ...order,
+        payer_allocation:
+          index === 0
+            ? { sender_minor: 0, recipient_minor: 3500 }
+            : { sender_minor: 3500, recipient_minor: 0 },
+      })),
+    };
+  };
+
+  // Break caught: the area drawn as the server's code (ACCRA_TEMA), who pays left out of the summary of an account that sees the price, or a card (where the columns do not fit, 768 px) that drops the area, the size, the
+  // price and who pays and keeps only the recipient and where it stands.
+  it('names the area in the floor’s words, says who pays where the price is shown, and keeps every fact on the card', async () => {
+    open({ [SUMMARY]: () => json(200, withPortions()) });
+    const orders = within(await screen.findByRole('table', { name: 'Order' }));
+    expect(orders.getAllByText('Accra & Tema').length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(/ACCRA_TEMA/);
+    expect(orders.getByText('Sender GH₵0.00, recipient GH₵35.00')).toBeVisible();
+    expect(orders.getByText('Sender GH₵35.00, recipient GH₵0.00')).toBeVisible();
+  });
+
+  // Break caught: a card (where the columns do not fit, 768 px) that drops the area, the size, the price and who pays and keeps only the recipient and where it stands.
+  it('keeps every fact of the table on the card, and the price and who pays only where the price is shown', () => {
+    const order = (withPortions().orders[0] ?? {}) as Record<string, unknown>;
+    const parsed = parseSummary({ ...withPortions(), orders: [order] })?.orders[0];
+    if (parsed === undefined) throw new Error('the order is not one the page reads');
+    const { container, rerender } = render(<SummaryOrderCard order={parsed} showsPrices />);
+    for (const fact of [
+      'Accra & Tema',
+      'Small',
+      'GH₵35.00',
+      'Sender GH₵0.00, recipient GH₵35.00',
+    ]) {
+      expect(container.textContent).toContain(fact);
+    }
+    rerender(<SummaryOrderCard order={parsed} showsPrices={false} />);
+    expect(container.textContent).toContain('Accra & Tema');
+    expect(container.textContent).not.toContain('GH₵');
+  });
+
+  // Break caught: who pays shown to an account that is not shown the price (an amount is money: absent, never zero).
+  it('says nothing of who pays where the price is not shown', async () => {
+    open({ [SUMMARY]: () => json(200, summaryOf('no-price')) });
+    await screen.findByRole('table', { name: 'Order' });
+    expect(screen.queryByText(/Sender GH₵/)).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Who pays' })).toBeNull();
+  });
 });

@@ -5,7 +5,7 @@ import type { TermsView } from '../../../platform/hub-orders/orders-shape';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { serviceDateText } from '../pickup/pickup-presentation';
 import { Cedis } from './Cedis';
-import { componentText, GATE_WORDS, windowText } from './orders-presentation';
+import { componentText, GATE_WORDS, windowText, areaText } from './orders-presentation';
 import { termsDifferences } from './use-order-flow';
 import './orders-pages.css';
 
@@ -110,7 +110,13 @@ export function OrderReview({
               ? [{ label: R.zone, value: R.outside }]
               : [
                   { label: R.zone, value: terms.destination.zone_name ?? '' },
-                  { label: R.area, value: terms.destination.service_area ?? '' },
+                  {
+                    label: R.area,
+                    value:
+                      terms.destination.service_area === null
+                        ? ''
+                        : areaText(terms.destination.service_area),
+                  },
                   {
                     label: '',
                     value:

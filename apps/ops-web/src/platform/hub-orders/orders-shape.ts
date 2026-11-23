@@ -1169,6 +1169,8 @@ export interface SummaryOrderView {
   readonly size_class: SizeClass | null;
   /** Present only where the reader's own pricing grant reaches the hub (OB-S1-155): absent is not zero. */
   readonly locked_price: MoneyView | null;
+  /** Who pays what of the price (D-S7-10): present where the price is, absent where it is not. */
+  readonly payer_allocation: AllocationView | null;
   readonly commercial_state: string;
 }
 
@@ -1198,6 +1200,7 @@ export function parseSummary(body: unknown): SummaryView | undefined {
       isOneOf(SIZE_CLASSES, value) ? value : undefined,
     );
     const price = optional(entry.locked_price, parseMoney);
+    const allocation = optional(entry.payer_allocation, parseAllocation);
     const state = lineOf(entry.commercial_state);
     if (
       id === undefined ||
@@ -1206,6 +1209,7 @@ export function parseSummary(body: unknown): SummaryView | undefined {
       area === undefined ||
       size === undefined ||
       price === undefined ||
+      allocation === undefined ||
       state === undefined ||
       seen.has(id.toLowerCase())
     ) {
@@ -1219,6 +1223,7 @@ export function parseSummary(body: unknown): SummaryView | undefined {
       service_area: area,
       size_class: size,
       locked_price: price,
+      payer_allocation: allocation,
       commercial_state: state,
     });
   }

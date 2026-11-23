@@ -607,8 +607,12 @@ export const ORDERS_WORDS = {
       area: 'Area',
       size: 'Size',
       price: 'Price',
+      whoPays: 'Who pays',
       standing: 'Where it stands',
     },
+    /** Who pays what of an order's price, from the amounts the server gave (the vendor's portion and the recipient's: D-S7-10). */
+    whoPays: (sender: string, recipient: string): string =>
+      `Sender ${sender}, recipient ${recipient}`,
     noPrices: 'Prices are not shown to your account. You can see the orders and where each stands.',
     empty: 'This vendor closed with no orders.',
     closedAt: 'Closed',
@@ -722,6 +726,14 @@ export const ORDERS_WORDS = {
   },
 
   // The vendors a hub has cleared for their orders.
+  /** The service areas of the launch hub in the words of the floor (the master specification, section 23), and the two scopes an order's destination can have: a code the table has no words for is told in sentence case and never as its code. */
+  areas: {
+    ACCRA_TEMA: 'Accra & Tema',
+    AMASAMAN_ENVIRONS: 'Amasaman & Environs',
+    KASOA_CORRIDOR: 'Kasoa Corridor',
+    SERVICE_AREA: 'In our service area',
+    OUTSIDE_SERVICE_AREA: 'Outside our service area',
+  },
   toMake: {
     title: 'Orders to make',
     description:
