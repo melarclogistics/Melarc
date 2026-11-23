@@ -16,6 +16,7 @@ import {
   type CorrectionView,
   type OrderView,
   type SummaryView,
+  type WorkOrderView,
   type WorklistPageView,
   type WorklistViewId,
 } from './orders-shape';
@@ -77,6 +78,55 @@ export function useWorklist(
         throw unexpectedResponse(answer.status);
       }
       return page;
+    },
+  });
+}
+
+/** The most pages of a vendor's orders read to find the last of them: the list is paged and oldest first, so the last of it is the end of the pages. A vendor with more is told nothing rather than a list that is not the last. */
+const MOST_PAGES = 10;
+
+/**
+ * The last orders of a vendor counted without photos (`listIntakeOrders`, view `all`, `hub.read`; D-S7-3): the officer who has just written a code on a parcel sees the orders made before it, to check the codes of
+ * the parcels on the table against them. The server lists oldest first and gives no way to ask for the end, so the pages are read to the end (a hundred orders to a page) and the last `count` of them are kept.
+ */
+export function useLastOrders(
+  intakeId: string,
+  count: number,
+  enabled = true,
+): UseQueryResult<readonly WorkOrderView[]> {
+  const client = useApiClient();
+  return useQuery({
+    queryKey: [...worklistKey(intakeId), 'last', count] as const,
+    enabled,
+    ...NOT_KEPT,
+    queryFn: async (): Promise<readonly WorkOrderView[]> => {
+      let token: string | undefined;
+      let last: readonly WorkOrderView[] = [];
+      for (let page = 0; page < MOST_PAGES; page += 1) {
+        const answer = answerOf(
+          await client.GET('/hub-intakes/{id}/orders', {
+            params: {
+              path: { id: intakeId },
+              query: {
+                view: 'all',
+                page_size: 100,
+                ...(token === undefined ? {} : { page_token: token }),
+              },
+            },
+          }),
+        );
+        const parsed = parseWorklist(answer.data);
+        if (parsed?.intake_id.toLowerCase() !== intakeId.toLowerCase()) {
+          throw unexpectedResponse(answer.status);
+        }
+        last = [
+          ...last,
+          ...parsed.items.flatMap((item) => (item.order === null ? [] : [item.order])),
+        ].slice(-count);
+        if (parsed.nextPageToken === null) return last;
+        token = parsed.nextPageToken;
+      }
+      throw unexpectedResponse(200);
     },
   });
 }

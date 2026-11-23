@@ -268,6 +268,14 @@ export const ORDERS_WORDS = {
     checkRecord: 'Look at the orders',
     done: (code: string): string => `Order ${code} is saved.`,
     doneAmend: (code: string): string => `Order ${code} was changed.`,
+    /** After an order of a vendor counted without photos is saved (D-S7-3, 23 November 2026): the code is what the officer writes on the parcel, and the count says where the vendor stands. */
+    blindSaved: {
+      writeOnParcel: 'Write this code on the parcel.',
+      position: (made: number, received: number): string =>
+        `Order ${String(made)} of ${String(received)} for this vendor.`,
+      lastTitle: 'The last orders of this vendor',
+      lastNone: 'The last orders could not be read.',
+    },
     open: 'Open',
     another: 'Make another',
     uploading: 'A photo is still being saved. Wait for it to finish.',

@@ -203,8 +203,10 @@ describe('making an order, and checking the price first', () => {
       parcel_id: PARCELS[0]?.id,
       size_class: 'MEDIUM',
     });
-    // After a save the way on is the next parcel, with what is left counted by the server.
+    // After a save the way on is the next parcel, with what is left counted by the server. A vendor with door photos has its parcels to show the order on: nothing is said of a code to write on one.
     expect(screen.getByRole('link', { name: 'Make the next order' })).toBeVisible();
+    expect(screen.queryByText('Write this code on the parcel.')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'The last orders of this vendor' })).toBeNull();
     expect(screen.getByText('1 parcel needs an order.')).toBeVisible();
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
   });
@@ -519,6 +521,126 @@ describe('the next order of a vendor', () => {
     expect(await screen.findByLabelText(/Recipient’s name/)).toHaveValue('');
     expect(screen.queryByText('Order ACC-OR-2CD3FG is saved.')).toBeNull();
     expect(saves).toBe(1);
+  });
+});
+
+describe('after an order of a vendor counted without photos (D-S7-3, Run F)', () => {
+  const CODES = ['2CD3FG', '4HJ5KM', '6NP7QR', '8STVWX', '9ABCDE', 'FGHJKM', 'NPQRST'];
+  /** The nth order of the vendor, with a code and a recipient of its own (the shared row has three codes and then repeats the last). */
+  const orderRow = (n: number) => ({
+    ...blindRow(n),
+    order: {
+      ...blindRow(n).order,
+      code: `ACC-OR-${CODES[n - 1] ?? '2CD3FG'}`,
+      recipient_name: `Recipient ${String(n)}`,
+    },
+  });
+  const COUNTS = { received: 9, needs_order: 2, itemized: 7, orders: 7, awaiting_arrival: 0 };
+  const BLIND = { receiving_mode: 'BLIND_COUNT' };
+
+  function openBlind(listing: Handler) {
+    return open(
+      {
+        [RECORD]: () =>
+          json(
+            200,
+            {
+              ...preCountFixture({ id: VENDOR_ID }),
+              state: 'ITEMIZING',
+              count_phase: 'POST_COUNT',
+              rider_declared_count: 9,
+              physical_count: 9,
+              count_variance: 'MATCH',
+              count_difference: 0,
+              condition: 'OK',
+              condition_findings: [],
+              parcel_photo_ids: [],
+            },
+            { ETag: '"v1"' },
+          ),
+        [`GET /receiving-runs/${MANIFEST_ID}`]: () =>
+          json(200, runFixture([blindVendorFixture({ intake_id: VENDOR_ID })])),
+        [LIST]: listing,
+        [SAVE]: () =>
+          json(
+            201,
+            { ...SAVED('11111111-2222-4333-8444-555555555555'), code: 'ACC-OR-NPQRST' },
+            { ETag: '"o1"' },
+          ),
+      },
+      `/intakes/${VENDOR_ID}/orders/new`,
+    );
+  }
+
+  // Break caught: a saved order that does not say what goes on the parcel (the officer copies a code from a small line), a place in the count taken from the page and not from the server, or a list that is not the last orders
+  // (the list is oldest first and paged: the first five, or the last five of the first page, are not the last).
+  it('shows the code large with what to do with it, where the vendor stands, and the last five orders, read to the end of the pages', async () => {
+    const { user } = openBlind((request) => {
+      const url = new URL(request.url);
+      if (url.searchParams.get('view') !== 'all') {
+        return json(200, worklistOf([orderRow(1)], COUNTS, BLIND));
+      }
+      return url.searchParams.get('page_token') === null
+        ? json(
+            200,
+            worklistOf([1, 2, 3].map(orderRow), COUNTS, {
+              ...BLIND,
+              next_page_token: 'second-page',
+            }),
+          )
+        : json(200, worklistOf([4, 5, 6, 7].map(orderRow), COUNTS, BLIND));
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+
+    expect(await screen.findByText('Order ACC-OR-NPQRST is saved.')).toBeVisible();
+    const lead = screen.getByText('Write this code on the parcel.');
+    expect(lead).toBeVisible();
+    expect(lead.nextElementSibling).toHaveTextContent('ACC-OR-NPQRST');
+    // Both numbers are the server's: the orders made and the parcels counted.
+    expect(await screen.findByText('Order 7 of 9 for this vendor.')).toBeVisible();
+
+    const heading = screen.getByRole('heading', {
+      level: 2,
+      name: 'The last orders of this vendor',
+    });
+    const rows = within(heading.nextElementSibling as HTMLElement).getAllByRole('listitem');
+    expect(rows).toHaveLength(5);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'ACC-OR-6NP7QRRecipient 3Small',
+      'ACC-OR-8STVWXRecipient 4Small',
+      'ACC-OR-9ABCDERecipient 5Small',
+      'ACC-OR-FGHJKMRecipient 6Small',
+      'ACC-OR-NPQRSTRecipient 7Small',
+    ]);
+    // The pages were read to the end, a hundred orders to a page.
+    const reads = api.requests.filter(
+      (request) =>
+        request.method === 'GET' &&
+        new URL(request.url).pathname === `/api/v1/hub-intakes/${VENDOR_ID}/orders` &&
+        new URL(request.url).searchParams.get('view') === 'all',
+    );
+    expect(reads.map((read) => new URL(read.url).searchParams.get('page_token'))).toEqual([
+      null,
+      'second-page',
+    ]);
+    expect(new URL(reads[0]?.url ?? '').searchParams.get('page_size')).toBe('100');
+  });
+
+  // Break caught: a saved screen that loses the code (the one thing the officer needs) when the list of the last orders cannot be read.
+  it('says the last orders could not be read, and still shows the code and where the vendor stands', async () => {
+    const { user } = openBlind((request) =>
+      new URL(request.url).searchParams.get('view') === 'all'
+        ? refusal(500, 'INTERNAL_ERROR')
+        : json(200, worklistOf([orderRow(1)], COUNTS, BLIND)),
+    );
+    await fillIn(user);
+    await user.click(await pricedSave());
+    expect(await screen.findByText('The last orders could not be read.')).toBeVisible();
+    expect(screen.getByText('Write this code on the parcel.').nextElementSibling).toHaveTextContent(
+      'ACC-OR-NPQRST',
+    );
+    expect(await screen.findByText('Order 7 of 9 for this vendor.')).toBeVisible();
   });
 });
 

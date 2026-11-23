@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from '
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { OperationalCode } from '../../../components/ui/code/OperationalCode';
 import { useUploadGate } from '../../../components/ui/evidence-upload/UploadGate';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
@@ -22,7 +23,7 @@ import {
   previewOrder,
   type SavedOrderView,
 } from '../../../platform/hub-orders/orders-commands';
-import { useWorklist } from '../../../platform/hub-orders/use-orders-queries';
+import { useLastOrders, useWorklist } from '../../../platform/hub-orders/use-orders-queries';
 import type { IntakeRecordView } from '../../../platform/hub-receiving/use-intake-record';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { problemOf } from '../../../platform/problem/problem-copy';
@@ -49,6 +50,9 @@ import { UUID } from '../staff/WithProfile';
 import './orders-pages.css';
 
 const F = WORDS.form;
+
+/** How many of a vendor's last orders the screen of a saved order shows, when the vendor is counted without photos. */
+const LAST_ORDERS = 5;
 
 /** The parcel the form is for, as the vendor's record knows it: its place in the list and its photo. A vendor counted without photos has none. */
 interface ParcelFacts {
@@ -90,15 +94,46 @@ function Saved({
   const navigate = useNavigate();
   const box = useRef<HTMLDivElement>(null);
   const left = useWorklist(facts.id, { view: 'needs_order', pageSize: 1 });
+  const blind = facts.mode === 'BLIND_COUNT';
+  const last = useLastOrders(facts.id, LAST_ORDERS, blind);
   useEffect(() => {
     box.current?.focus();
   }, []);
   const remaining = left.data?.progress.needs_order ?? undefined;
+  const made = left.data?.progress.orders;
+  const received = left.data?.progress.received ?? null;
   return (
     <div className="orders-saved" ref={box} tabIndex={-1}>
       <Alert variant="success">
         <p>{F.done(order.code)}</p>
       </Alert>
+      {blind ? (
+        // A vendor counted without photos has no parcel to show the order on: the code is what goes on the parcel, large, with where the vendor stands by the count, and the orders made last, to check the codes of the
+        // parcels on the table against (D-S7-3). Both counts are the server's.
+        <div className="orders-blind">
+          <p className="orders-blind__lead">{F.blindSaved.writeOnParcel}</p>
+          <p className="orders-blind__code">
+            <OperationalCode>{order.code}</OperationalCode>
+          </p>
+          {made === undefined || received === null ? null : (
+            <p className="orders-blind__position">{F.blindSaved.position(made, received)}</p>
+          )}
+          <h2 className="orders-blind__heading">{F.blindSaved.lastTitle}</h2>
+          {last.status === 'error' ? (
+            <p className="orders-note">{F.blindSaved.lastNone}</p>
+          ) : last.status === 'success' ? (
+            <ul className="orders-blind__list">
+              {last.data.map((each) => (
+                <li key={each.id}>
+                  <OperationalCode>{each.code}</OperationalCode>
+                  {each.recipient_name === null ? null : <span>{each.recipient_name}</span>}
+                  <span>{F.sizes[each.size_class]}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {remaining === undefined ? null : (
         <p className="orders-note">
           {remaining > 0
