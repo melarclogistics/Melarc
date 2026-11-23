@@ -738,13 +738,34 @@ export const ORDERS_WORDS = {
         label: 'Being worked',
         none: 'No vendor has orders being made. Vendors waiting for their first order are under Ready to start.',
       },
+      NEEDS_SENIOR: {
+        label: 'Needs a senior',
+        none: 'No vendor is waiting for a senior officer.',
+      },
     },
-    columns: { vendor: 'Vendor', run: 'Run', received: 'Received', handedOver: 'Handed over' },
+    columns: {
+      vendor: 'Vendor',
+      run: 'Run',
+      received: 'Received',
+      orders: 'Orders',
+      why: 'Why a senior',
+      handedOver: 'Handed over',
+    },
+    /** What a row says of a vendor's orders, from the counts the list gives (the database's own): *3 made, 2 to make*. Nothing is said where the list gave none. */
+    ordersLine: (made: number, left: number | null): string =>
+      left === null ? `${String(made)} made` : `${String(made)} made, ${String(left)} to make`,
+    senior: {
+      CLOSE_EXCEPTION:
+        'Parcels are still to be ordered. A senior officer can close it with an exception.',
+      ARRIVAL_TAKEN_BACK: 'An arrival was taken back. A senior officer reviews it.',
+      decides: 'A senior officer decides.',
+      close: 'Close with an exception',
+      review: 'Review the vendor',
+    },
     received: (count: number | null): string => (count === null ? 'Not counted' : parcels(count)),
     missing: (count: number): string => `${String(count)} missing`,
     blind: 'Counted without photos',
     acts: { open: 'Make orders', openFor: (vendor: string): string => `Make orders for ${vendor}` },
-    note: 'How many orders are made is on the vendor’s own page.',
   },
 } as const;
 

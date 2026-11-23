@@ -253,7 +253,9 @@ export function usePayerCorrection(
 
 export interface ItemizableParams extends PagedParams {
   /** The vendors that are ready for their orders, or the ones being worked: the server's `state` filter. */
-  readonly state: 'READY_FOR_ITEMIZATION' | 'ITEMIZING';
+  readonly state?: 'READY_FOR_ITEMIZATION' | 'ITEMIZING';
+  /** The vendors that wait for a senior officer: the server's `view` (D-S7-7). Asked instead of a state, never beside one. */
+  readonly view?: 'needs_senior';
 }
 
 /** `listHubIntakes` (`hub.read`): the vendors a hub has cleared for orders (or is making them for), oldest handover first, so that an officer finds the work without remembering which vendors finished. */
@@ -262,7 +264,12 @@ export function useItemizableIntakes(
 ): UseQueryResult<WorkListPageView<ItemizableIntakeView>> {
   const client = useApiClient();
   return useQuery({
-    queryKey: ['hub-orders', 'itemizable', params.state, params.pageToken ?? null] as const,
+    queryKey: [
+      'hub-orders',
+      'itemizable',
+      params.view ?? params.state ?? null,
+      params.pageToken ?? null,
+    ] as const,
     enabled: params.enabled ?? true,
     ...NOT_KEPT,
     queryFn: async () => {
@@ -270,7 +277,8 @@ export function useItemizableIntakes(
         await client.GET('/hub-intakes', {
           params: {
             query: {
-              state: params.state,
+              ...(params.state === undefined ? {} : { state: params.state }),
+              ...(params.view === undefined ? {} : { view: params.view }),
               ...(params.pageToken === undefined ? {} : { page_token: params.pageToken }),
             },
           },

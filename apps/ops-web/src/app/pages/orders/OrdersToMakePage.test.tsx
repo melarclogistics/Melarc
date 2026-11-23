@@ -42,6 +42,13 @@ const FORBIDDEN =
 
 const pageOf = (items: readonly unknown[]) => ({ items: [...items], next_page_token: null });
 
+/** An element of a list the test has just drawn: absent only when the test itself is wrong. */
+const nth = <T,>(list: readonly T[], index: number): T => {
+  const found = list[index];
+  if (found === undefined) throw new Error(`the list has no element ${String(index)}`);
+  return found;
+};
+
 let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
@@ -95,9 +102,8 @@ describe('the vendors with orders to make', () => {
     expect(views.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Ready to start',
       'Being worked',
+      'Needs a senior',
     ]);
-    // How many orders are made is on the vendor's own page, and the page says so.
-    expect(screen.getByText('How many orders are made is on the vendor’s own page.')).toBeVisible();
     expect(rows.queryByText(/orders? made/i)).toBeNull();
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
@@ -202,4 +208,95 @@ describeInterfaceStates('the vendors with orders to make', {
       expect(screen.queryByText('Fixture Sender')).toBeNull();
     },
   },
+});
+
+describe('how many orders a vendor has, and the vendors that wait for a senior (Run F, Part 2; D-S7-6 and D-S7-7)', () => {
+  const COUNTED = { ...WORKED, orders_made: 3, parcels_needing_order: 2 };
+  const CLOSE_NEEDS_SENIOR = { ...COUNTED, senior_needed: 'CLOSE_EXCEPTION' };
+  const TAKEN_BACK = {
+    ...COUNTED,
+    id: 'c2c2c2c2-3333-4444-8555-666666666666',
+    code: 'ACC-IN-BKTQVE',
+    state: 'RECONCILIATION_REQUIRED',
+    senior_needed: 'ARRIVAL_TAKEN_BACK',
+  };
+
+  // Break caught: a row that cannot say how many orders are made and how many are left (the officer opens every vendor to find out), or a count the page works out itself instead of the list's own.
+  it('says on each row how many orders are made and how many parcels are still to order, as the list gave them', async () => {
+    const { user } = open({ [LIST]: byState([READY], [COUNTED]) });
+    await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
+    await user.click(
+      within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
+        name: 'Being worked',
+      }),
+    );
+    const rows = within(await table());
+    expect(await rows.findByText('3 made, 2 to make')).toBeVisible();
+  });
+
+  // Break caught: a vendor that waits for a senior drawn among the others, a view that is not the server's, a reason the page makes up, or an act offered to a session that does not hold the key.
+  it('lists the vendors that wait for a senior in a view of their own, says why, and offers the act only to the senior who holds the key', async () => {
+    const handlers = {
+      [LIST]: ((request) =>
+        new URL(request.url).searchParams.get('view') === 'needs_senior'
+          ? json(200, pageOf([CLOSE_NEEDS_SENIOR, TAKEN_BACK]))
+          : json(200, pageOf([READY]))) as Handler,
+    };
+    const asOfficer = open(handlers);
+    await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
+    await asOfficer.user.click(
+      within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
+        name: 'Needs a senior',
+      }),
+    );
+    await table();
+    expect(
+      await screen.findByText(
+        'Parcels are still to be ordered. A senior officer can close it with an exception.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText('An arrival was taken back. A senior officer reviews it.'),
+    ).toBeVisible();
+    expect(reads().some((read) => read.get('view') === 'needs_senior')).toBe(true);
+    // An officer is told who decides, and is given no act of the senior's.
+    await asOfficer.user.click(
+      nth(within(await table()).getAllByRole('button', { name: /Make orders for/ }), 0),
+    );
+    expect(await screen.findByText('A senior officer decides.')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Close with an exception' })).toBeNull();
+  });
+
+  // Break caught: an act offered to the wrong senior (the exception close to one who cannot decide it, the review to one who cannot adjudicate), or no act at all to the senior who can: each reason has its own act and its own key.
+  it('offers the senior the act of each reason, and the officer none', async () => {
+    const handlers = {
+      [LIST]: ((request) =>
+        new URL(request.url).searchParams.get('view') === 'needs_senior'
+          ? json(200, pageOf([CLOSE_NEEDS_SENIOR, TAKEN_BACK]))
+          : json(200, pageOf([READY]))) as Handler,
+    };
+    const { user } = open(handlers, [
+      ...OFFICER,
+      'hub.intake.close_exception',
+      'hub.osd.adjudicate',
+    ]);
+    await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
+    await user.click(
+      within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
+        name: 'Needs a senior',
+      }),
+    );
+    await screen.findByText('An arrival was taken back. A senior officer reviews it.');
+    const buttons = within(await table()).getAllByRole('button', { name: /Make orders for/ });
+    await user.click(nth(buttons, 0));
+    expect(await screen.findByRole('link', { name: 'Close with an exception' })).toHaveAttribute(
+      'href',
+      `/intakes/${VENDOR}/close`,
+    );
+    await user.click(nth(buttons, 1));
+    expect(await screen.findByRole('link', { name: 'Review the vendor' })).toHaveAttribute(
+      'href',
+      '/intakes/c2c2c2c2-3333-4444-8555-666666666666/discrepancy',
+    );
+  });
 });

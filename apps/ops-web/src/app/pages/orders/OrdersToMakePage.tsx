@@ -19,8 +19,8 @@ import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
 import { waitedText } from '../../../platform/time/waited';
 import { WorkList, type WorkView } from '../pickup-work/WorkList';
-import { recordPath, runPath } from '../receiving/receiving-presentation';
-import { ordersPath } from './orders-presentation';
+import { decisionPath, recordPath, runPath } from '../receiving/receiving-presentation';
+import { closePath, ordersPath } from './orders-presentation';
 import './orders-pages.css';
 
 const K = WORDS.toMake;
@@ -29,6 +29,7 @@ const K = WORDS.toMake;
 const VIEWS: readonly [WorkView, ...WorkView[]] = [
   { id: 'READY_FOR_ITEMIZATION', open: undefined, ...K.views.READY_FOR_ITEMIZATION },
   { id: 'ITEMIZING', open: undefined, ...K.views.ITEMIZING },
+  { id: 'NEEDS_SENIOR', open: undefined, ...K.views.NEEDS_SENIOR },
 ];
 
 const refusalWords = (problem: Problem): string =>
@@ -36,7 +37,14 @@ const refusalWords = (problem: Problem): string =>
 
 function useQueue(params: WorkListParams) {
   return useItemizableIntakes({
-    state: params.view === 'ITEMIZING' ? 'ITEMIZING' : 'READY_FOR_ITEMIZATION',
+    ...(params.view === 'NEEDS_SENIOR'
+      ? { view: 'needs_senior' as const }
+      : {
+          state:
+            params.view === 'ITEMIZING'
+              ? ('ITEMIZING' as const)
+              : ('READY_FOR_ITEMIZATION' as const),
+        }),
     ...(params.pageToken === undefined ? {} : { pageToken: params.pageToken }),
     ...(params.enabled === undefined ? {} : { enabled: params.enabled }),
   });
@@ -47,7 +55,7 @@ const nameOf = (item: ItemizableIntakeView): string => item.vendor_name ?? item.
 /**
  * Orders to make (surfaces/ops-portal.md section 7, `/orders-to-make`; S1.40; `listHubIntakes`, `hub.read`): **the vendors a hub has cleared for their orders**, oldest handover first, in the server's views (ready
  * to start, being worked), so that an officer finds the work without remembering which vendors finished checking in. A row opens the vendor beside the list with the one act that is next, *Make orders*, which goes
- * to the vendor's orders, where the work that is really left is counted. **How many orders are made is not on a row**: the list does not state it, and the page draws no figure it was not given.
+ * to the vendor's orders, where the work that is really left is counted. **A row says how many orders are made and how many parcels are still to order** as the list gives them (the database's own count of the whole vendor: D-S7-6), and draws no figure it was not given; **a third view lists the vendors that wait for a senior officer** (D-S7-7), with the reason, and offers the act only to the senior who holds its key.
  */
 export function OrdersToMakePage() {
   const me = useSignedInSession();
@@ -74,6 +82,23 @@ export function OrdersToMakePage() {
       ),
     },
     {
+      id: 'why',
+      header: K.columns.why,
+      priority: 2,
+      cell: (item) => (item.senior_needed === null ? '' : K.senior[item.senior_needed]),
+    },
+    {
+      id: 'orders',
+      header: K.columns.orders,
+      kind: 'count',
+      cell: (item) =>
+        item.orders_made === null ? (
+          ''
+        ) : (
+          <NoWrap>{K.ordersLine(item.orders_made, item.parcels_needing_order)}</NoWrap>
+        ),
+    },
+    {
       id: 'handedOver',
       header: K.columns.handedOver,
       kind: 'date',
@@ -96,7 +121,6 @@ export function OrdersToMakePage() {
         refusal={refusalWords}
         useList={useQueue}
         rowId={(item) => item.id}
-        note={K.note}
         table={{
           columns,
           density: 'touch',
@@ -130,15 +154,41 @@ export function OrdersToMakePage() {
                         },
                       ]),
                   { label: K.columns.received, value: K.received(item.received) },
+                  ...(item.orders_made === null
+                    ? []
+                    : [
+                        {
+                          label: K.columns.orders,
+                          value: K.ordersLine(item.orders_made, item.parcels_needing_order),
+                        },
+                      ]),
+                  ...(item.senior_needed === null
+                    ? []
+                    : [{ label: K.columns.why, value: K.senior[item.senior_needed] }]),
                   ...(item.missing === null || item.missing === 0
                     ? []
                     : [{ label: WORDS.workspace.progress.missing, value: String(item.missing) }]),
                   { label: K.columns.handedOver, value: formatInstant(item.handed_over_at) ?? '' },
                 ]}
               />
-              <p className="orders-note">{K.note}</p>
+              {item.senior_needed === 'CLOSE_EXCEPTION' &&
+              me.holds('hub.intake.close_exception') ? (
+                <ButtonLink to={closePath(item.id)} size="lg">
+                  {K.senior.close}
+                </ButtonLink>
+              ) : item.senior_needed === 'ARRIVAL_TAKEN_BACK' && me.holds('hub.osd.adjudicate') ? (
+                <ButtonLink to={decisionPath(item.id)} size="lg">
+                  {K.senior.review}
+                </ButtonLink>
+              ) : item.senior_needed !== null ? (
+                <p className="orders-note">{K.senior.decides}</p>
+              ) : null}
               {me.holds('hub.intake.itemize') || me.holds('hub.read') ? (
-                <ButtonLink to={ordersPath(item.id)} size="lg">
+                <ButtonLink
+                  to={ordersPath(item.id)}
+                  size="lg"
+                  {...(item.senior_needed === null ? {} : { variant: 'secondary' as const })}
+                >
                   {K.acts.open}
                 </ButtonLink>
               ) : null}

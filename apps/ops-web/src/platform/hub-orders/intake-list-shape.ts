@@ -22,17 +22,42 @@ export interface ItemizableIntakeView {
   /** What the hub received: the parcels that arrived, or the count. */
   readonly received: number | null;
   readonly missing: number | null;
+  /** The orders that stand, and the received parcels that still need one: the database's own count of the whole vendor (D-S7-6), null where the list did not say. */
+  readonly orders_made: number | null;
+  readonly parcels_needing_order: number | null;
+  /** Why a senior officer is needed (D-S7-7), when one is. */
+  readonly senior_needed: 'CLOSE_EXCEPTION' | 'ARRIVAL_TAKEN_BACK' | null;
 }
 
 const MAX_PAGE_ITEMS = 500;
 const MAX_TOKEN = 2048;
 const READY: readonly IntakeState[] = ['READY_FOR_ITEMIZATION', 'ITEMIZING'];
 
+const countOf = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+
+/** The reason a senior is needed as the list says it: absent is none, and a value that is not one of the two is a refusal of the row (undefined). */
+function seniorOf(value: unknown): ItemizableIntakeView['senior_needed'] | undefined {
+  if (value === undefined) return null;
+  return value === 'CLOSE_EXCEPTION' || value === 'ARRIVAL_TAKEN_BACK' ? value : undefined;
+}
+
+/** A vendor is in the list in the states where orders are made, and in reconciliation only when a senior is needed for it (an arrival that was taken back). */
+const inThisList = (state: IntakeState, senior: ItemizableIntakeView['senior_needed']): boolean =>
+  READY.includes(state) || (senior !== null && state === 'RECONCILIATION_REQUIRED');
+
 function parseItem(entry: unknown): ItemizableIntakeView | undefined {
   if (!isRecord(entry)) return undefined;
+  const senior = seniorOf(entry.senior_needed);
+  if (senior === undefined) return undefined;
+  const counts = {
+    orders_made: countOf(entry.orders_made),
+    parcels_needing_order: countOf(entry.parcels_needing_order),
+    senior_needed: senior,
+  };
   if (entry.count_phase === 'CHECK_IN') {
     const view = parseCheckIn(entry);
-    if (view === undefined || !READY.includes(view.state)) return undefined;
+    if (view === undefined || !inThisList(view.state, senior)) return undefined;
     return {
       id: view.id,
       code: view.code,
@@ -44,10 +69,11 @@ function parseItem(entry: unknown): ItemizableIntakeView | undefined {
       handed_over_at: view.handed_over_at,
       received: view.arrived_count,
       missing: view.missing_count,
+      ...counts,
     };
   }
   const intake = parseIntake(entry);
-  if (intake?.count_phase !== 'POST_COUNT' || !READY.includes(intake.state)) return undefined;
+  if (intake?.count_phase !== 'POST_COUNT' || !inThisList(intake.state, senior)) return undefined;
   return {
     id: intake.id,
     code: intake.code,
@@ -59,6 +85,7 @@ function parseItem(entry: unknown): ItemizableIntakeView | undefined {
     handed_over_at: intake.handed_over_at,
     received: intake.physical_count,
     missing: null,
+    ...counts,
   };
 }
 
