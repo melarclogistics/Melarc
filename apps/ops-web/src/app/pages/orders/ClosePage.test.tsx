@@ -262,6 +262,38 @@ describe('closing with parcels still to order (a senior officer’s exception)',
     expect(screen.queryByLabelText(/Why are you closing/)).toBeNull();
   });
 
+  // Break caught (the review of 23 November 2026, item 13): the reason a senior wrote lost when what closing finds changed and a parcel is still to order, so that the senior writes it again. The reason stays, whichever
+  // way the close was refused.
+  it('keeps the reason a senior wrote when what closing finds changed and a parcel is still to order', async () => {
+    const { user } = open(
+      {
+        [CLOSURE]: () => json(200, withParcelLeft()),
+        [CLOSE]: () =>
+          json(409, {
+            code: 'STATE_CONFLICT',
+            message: 'Diagnostic text that must never reach a screen.',
+            request_id: 'r2',
+            details: {
+              rule: 'assessment_changed',
+              current_assessment: withParcelLeft({ assessment_token: NEW_ASSESSMENT }),
+            },
+          }),
+      },
+      SENIOR,
+    );
+    const reason = 'One parcel is on the rider’s bike';
+    await user.type(
+      await screen.findByLabelText(/Why are you closing with parcels still to order?/),
+      reason,
+    );
+    await user.click(screen.getByRole('button', { name: 'Close with a reason' }));
+    await user.click(within(await dialog()).getByRole('button', { name: 'Yes, close it' }));
+    await screen.findByText('What closing finds has changed');
+    expect(screen.getByLabelText(/Why are you closing with parcels still to order?/)).toHaveValue(
+      reason,
+    );
+  });
+
   // Break caught: a vendor with a surplus of orders closed over, with the exception or without it.
   it('does not offer a close over a surplus of orders, and says why', async () => {
     open(
