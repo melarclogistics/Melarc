@@ -370,7 +370,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**209 operations: 120 `CRITICAL_WRITE` · 0 `ASYNC` · 89 `NORMAL`.**
+**218 operations: 122 `CRITICAL_WRITE` · 0 `ASYNC` · 96 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -392,6 +392,15 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `listVendorPickupLocations`| `NORMAL`| — A read|
 | `recordIntakeCondition`| `CRITICAL_WRITE`| the condition is authoritative once recorded and routes liability to Senior Ops|
 | `requestPayerCorrection`| `CRITICAL_WRITE`| money — asks to change who pays a frozen price|
+| `amendOrder`| `CRITICAL_WRITE`| money — corrects an order before its price freezes, and the server recalculates the price from the corrected facts (Stage 7, the review of 19 November 2026)|
+| `reverseOrderArrival`| `CRITICAL_WRITE`| privileged correction of custody and money — takes back the arrival of a parcel whose order is confirmed, keeping its price and trail (Stage 7)|
+| `previewOrder`| `NORMAL`| — A POST that writes nothing: the price, the promise and who pays, from the same statements as `itemizeOrder`, with the token the save is given back (Stage 7)|
+| `previewOrderAmendment`| `NORMAL`| — A POST that writes nothing: what an amendment of an order that is not confirmed would give, beside the quote the order holds (the review of 20 November 2026)|
+| `getIntakeClosure`| `NORMAL`| — A read: what a close would find, in one snapshot (Stage 7)|
+| `listClosedIntakeExceptions`| `NORMAL`| — A read: the intakes closed with the approved exception that still have received parcels without an order, cursor-paged, in one snapshot (the review of 20 November 2026)|
+| `listIntakeOrders`| `NORMAL`| — A read: the parcel worklist with the counts of the whole intake, cursor-paged, in one snapshot (Stage 7)|
+| `listPayerCorrections`| `NORMAL`| — A read: the corrections of the hubs of the grant, cursor-paged, with each one's order and names (Stage 7)|
+| `getPayerCorrection`| `NORMAL`| — A read, and the `ETag` source `approvePayerCorrection` takes (Stage 7)|
 | `resolveCutoffException`| `NORMAL`| —|
 | `resolveHandshake`| `CRITICAL_WRITE`| authorised resolution of a verification gate by hand|
 | `acceptRunCustodyHandover`| `CRITICAL_WRITE`| custody transfer completes|

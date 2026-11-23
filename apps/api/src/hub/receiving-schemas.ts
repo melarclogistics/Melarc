@@ -455,16 +455,38 @@ export const HUB_INTAKE_PAGE_SCHEMA = described({
   },
 });
 
-/** The body of `closeHubIntake` (S1.38): nothing, or the approved exception to parity with its reason in words (a blank reason is `REASON_REQUIRED`, which the service says before the shape). */
+/** The `assessment_token` of the closure the officer read (the review of 20 November 2026, finding 6). */
+const REVIEWED_ASSESSMENT = {
+  type: 'string',
+  pattern: '^[0-9a-f]{64}$',
+  description: 'The `assessment_token` of the closure the officer read.',
+} as const;
+
+/**
+ * The body of `closeHubIntake` (S1.38; the review of 21 November 2026, finding 4): **a close that has parity, or the approved exception to it**. The first takes nothing, or the `assessment_token` the officer read (judged when
+ * it is given); the second takes the senior's reason in words **and** the `assessment_token` of the closure the exception is written for, which it requires, and a token that is not what a close would find now is `STATE_CONFLICT`,
+ * rule `assessment_changed`, with the assessment as it is. A blank reason is `REASON_REQUIRED`, which the service says before the shape.
+ */
 export const INTAKE_CLOSE_BODY = described({
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    parity_exception: {
+  oneOf: [
+    {
       type: 'object',
-      required: ['note'],
       additionalProperties: false,
-      properties: { note: { type: 'string', minLength: 1 } },
+      properties: { reviewed_assessment: REVIEWED_ASSESSMENT },
     },
-  },
+    {
+      type: 'object',
+      required: ['parity_exception', 'reviewed_assessment'],
+      additionalProperties: false,
+      properties: {
+        reviewed_assessment: REVIEWED_ASSESSMENT,
+        parity_exception: {
+          type: 'object',
+          required: ['note'],
+          additionalProperties: false,
+          properties: { note: { type: 'string', minLength: 1 } },
+        },
+      },
+    },
+  ],
 });

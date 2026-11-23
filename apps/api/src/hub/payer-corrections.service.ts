@@ -6,14 +6,21 @@ import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { Clock } from '../platform/auth/ports/clock.port.js';
 import type { IdempotencyStore } from '../platform/auth/ports/idempotency-store.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
-import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import {
+  hubOutsideStaffGrant,
+  type AuthorizedRequest,
+} from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { meetsTier } from '../platform/authorization/tier-policy.js';
 import { guardReasonIn, guardRuleIn } from '../platform/database/database-failures.js';
+import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
+import { decodePageToken, encodePageToken } from '../platform/http/page-token.js';
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
+import { primaryHubOfStaff } from '../platform/lookup/primary-hub.js';
 import { loadOrder, orderViewOf } from './order-view.js';
 import { orderEtagMatches, orderEtagOf } from './order-reads.service.js';
 
@@ -35,27 +42,62 @@ export interface PayerCorrectionDecisionBody {
   readonly note?: string;
 }
 
+export interface Allocation {
+  readonly sender_minor: number;
+  readonly recipient_minor: number;
+}
+
+/** The record of a correction as its row says it: the history is complete, with what was approved (`resulting_allocation`) stored beside what the order had and what was proposed. */
 export interface PayerCorrectionView {
   readonly id: string;
   readonly order_id: string;
   readonly state: 'REQUESTED' | 'APPROVED' | 'REJECTED';
   readonly requested_by: string;
   readonly approved_by: string | null;
-  readonly previous_allocation: { readonly sender_minor: number; readonly recipient_minor: number };
+  readonly previous_allocation: Allocation;
   readonly proposed: PayerProposal;
+  /** What the approval wrote to the order, in actual amounts; null until approved (and for a rejection). */
+  readonly resulting_allocation: Allocation | null;
   readonly resulting_commercial_state: string | null;
   readonly note: string;
   readonly created_at: string;
   readonly decided_at: string | null;
 }
 
+/**
+ * What a checker needs to decide, and what a history needs to show, from one read: the correction with its order's code and unchanged total, **the proposal resolved into actual amounts** (never a
+ * percentage the reader must work out), the commercial state the order would reach, and the names of the maker and of the checker.
+ */
+export interface PayerCorrectionDetailView extends PayerCorrectionView {
+  readonly order_code: string;
+  readonly total: { readonly amount_minor: number; readonly currency: 'GHS' };
+  readonly proposed_allocation: Allocation;
+  readonly proposed_commercial_state: 'NO_VENDOR_CHARGE' | 'PAYMENT_REQUIRED';
+  readonly order_commercial_state: string | null;
+  readonly requested_by_name: string | null;
+  readonly approved_by_name: string | null;
+}
+
 export interface CorrectionAnswer {
-  readonly correction: PayerCorrectionView;
+  readonly correction: PayerCorrectionDetailView;
   readonly etag: string;
 }
 
+export interface CorrectionListFilter {
+  readonly state?: string;
+  readonly orderId?: string;
+  readonly hubId?: string;
+  readonly pageSize?: number;
+  readonly pageToken?: string;
+}
+
+export interface CorrectionPage {
+  readonly items: readonly PayerCorrectionDetailView[];
+  readonly next_page_token: string | null;
+}
+
 export interface PayerCorrectionsOptions {
-  readonly runner: Pick<OperationRunner, 'mutate'>;
+  readonly runner: Pick<OperationRunner, 'mutate' | 'read'>;
   readonly audit: AuditWriter;
   readonly idempotency: IdempotencyStore;
   readonly clock: Pick<Clock, 'now'>;
@@ -78,6 +120,15 @@ interface CorrectionRow {
   readonly version: number | string;
 }
 
+/** A correction row joined to its order, for the detail: the order's code and locked price, and the sender's portion the proposal resolves to. */
+interface DetailRow extends CorrectionRow {
+  readonly order_code: string;
+  readonly locked_price_minor: number;
+  readonly order_commercial_state: string | null;
+  readonly proposed_sender_minor: number | null;
+  readonly position_text: string;
+}
+
 const MAX_PESEWAS = 2_000_000_000;
 const jsonOf = (value: unknown): unknown => (typeof value === 'string' ? JSON.parse(value) : value);
 const isoOf = (value: string | Date): string =>
@@ -87,6 +138,17 @@ const invalid = (pointer: string, rule: string): ApiException =>
   new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
     violations: [{ in: 'body', pointer, rule }],
   });
+
+const invalidQuery = (name: string, rule: string): ApiException =>
+  new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+    violations: [{ in: 'query', pointer: `/${name}`, rule }],
+  });
+
+/** The columns of a correction with its order's code, locked price and state, and the sender's portion the proposal resolves to (the arithmetic of the freeze: `melarc.payer_portion`). */
+const DETAIL_COLUMNS = sql.raw(
+  `c.id, c.order_id, c.responsible_hub_id, c.state, c.requested_by, c.decided_by, c.previous_allocation, c.proposed, c.resulting_allocation, c.resulting_commercial_state, c.note, c.created_at, c.decided_at, c.version,
+   c.created_at::text AS position_text, o.code AS order_code, o.locked_price_minor, o.commercial_state AS order_commercial_state, melarc.payer_portion(o.locked_price_minor, c.proposed) AS proposed_sender_minor`,
+);
 
 const CORRECTION_COLUMNS = sql.raw(
   'id, order_id, responsible_hub_id, state, requested_by, decided_by, previous_allocation, proposed, resulting_allocation, resulting_commercial_state, note, created_at, decided_at, version',
@@ -129,10 +191,39 @@ export function correctionViewOf(row: CorrectionRow): PayerCorrectionView {
         ? {}
         : { split_sender_percentage: proposed.split_sender_percentage }),
     },
+    resulting_allocation:
+      row.resulting_allocation === null || row.resulting_allocation === undefined
+        ? null
+        : allocationOf(jsonOf(row.resulting_allocation)),
     resulting_commercial_state: row.resulting_commercial_state,
     note: row.note,
     created_at: isoOf(row.created_at),
     decided_at: row.decided_at === null ? null : isoOf(row.decided_at),
+  };
+}
+
+const allocationOf = (value: unknown): Allocation => {
+  const given = value as { sender_minor: number; recipient_minor: number };
+  return { sender_minor: given.sender_minor, recipient_minor: given.recipient_minor };
+};
+
+/** The detail of a correction: its record, its order's code and unchanged total, the proposal in actual amounts and the names of the officers. */
+export function correctionDetailOf(
+  row: DetailRow,
+  names: ReadonlyMap<string, string>,
+): PayerCorrectionDetailView {
+  const base = correctionViewOf(row);
+  const sender = Number(row.proposed_sender_minor);
+  const total = row.locked_price_minor;
+  return {
+    ...base,
+    order_code: row.order_code,
+    total: { amount_minor: total, currency: 'GHS' },
+    proposed_allocation: { sender_minor: sender, recipient_minor: total - sender },
+    proposed_commercial_state: sender === 0 ? 'NO_VENDOR_CHARGE' : 'PAYMENT_REQUIRED',
+    order_commercial_state: row.order_commercial_state,
+    requested_by_name: names.get(row.requested_by) ?? null,
+    approved_by_name: row.decided_by === null ? null : (names.get(row.decided_by) ?? null),
   };
 }
 
@@ -195,7 +286,8 @@ export class PayerCorrections {
       const row = await loadOrder(tx, orderId);
       if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
       const view = orderViewOf(row);
-      if (!orderEtagMatches(request.ifMatch, orderEtagOf(view, Number(held.version)))) {
+      // The version of the row that was read with it, never a second read (review finding D); the database re-checks it under the row's lock.
+      if (!orderEtagMatches(request.ifMatch, orderEtagOf(view, Number(row.version)))) {
         throw ApiException.of(ErrorCode.StateConflict, 'The order has changed since it was read', {
           rule: 'stale',
         });
@@ -203,12 +295,11 @@ export class PayerCorrections {
       const id = randomUUIDv7(this.#options.clock);
       try {
         await tx.execute(
-          sql`select melarc.request_payer_correction(${id}::uuid, ${orderId}::uuid, ${JSON.stringify(proposed)}::jsonb, ${note}::text, ${Number(held.version)}::integer)`,
+          sql`select melarc.request_payer_correction(${id}::uuid, ${orderId}::uuid, ${JSON.stringify(proposed)}::jsonb, ${note}::text, ${Number(row.version)}::integer)`,
         );
       } catch (error) {
         throw this.#refusal(error) ?? error;
       }
-      const correction = await this.#read(tx, id);
       await this.#options.audit.write(handle, {
         code: 'pricing.correction.requested',
         enhanced: false,
@@ -222,10 +313,7 @@ export class PayerCorrections {
           previous_recipient_minor: view.payer_allocation?.recipient_minor ?? null,
         },
       });
-      const answer: CorrectionAnswer = {
-        correction: correctionViewOf(correction),
-        etag: correctionEtagOf(correction),
-      };
+      const answer = await this.#present(tx, id);
       await this.#complete(handle, scope, 201, answer);
       return answer;
     });
@@ -290,9 +378,8 @@ export class PayerCorrections {
         );
       }
       try {
-        await tx.execute(
-          sql`select set_config('melarc.platform_admin_decision', ${platformAdmin ? 'on' : 'off'}, true)`,
-        );
+        // The database asks the decider's own bundle for the tier P that lets a Platform Admin decide the correction they asked for (`melarc.staff_holds_at_tier_p`, migration 0118, as 0032 does for a staff
+        // identity): it believes no setting this service writes. The name above is the service's own answer, told before the database's.
         await tx.execute(
           sql`select melarc.decide_payer_correction(${correctionId}::uuid, ${decision}::text, ${Number(before.version)}::integer)`,
         );
@@ -349,13 +436,150 @@ export class PayerCorrections {
           },
         });
       }
-      const answer: CorrectionAnswer = {
-        correction: correctionViewOf(after),
-        etag: correctionEtagOf(after),
-      };
+      const answer = await this.#present(tx, correctionId);
       await this.#complete(handle, scope, 200, answer);
       return answer;
     });
+  }
+
+  /**
+   * `listPayerCorrections`: the corrections of the hubs of the grant, a checker's queue (`state=REQUESTED`, the default, oldest first) or a history (`state=APPROVED`, `REJECTED` or `all`, and `order_id` for one
+   * order's own), each with what it takes to decide it. A hub outside the grant is an empty page and no statement.
+   */
+  async list(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    filter: CorrectionListFilter,
+  ): Promise<CorrectionPage> {
+    this.#requireStaff(authorized);
+    const size = filter.pageSize ?? DEFAULT_PAGE_SIZE;
+    if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE_SIZE) {
+      throw invalidQuery('page_size', 'range');
+    }
+    const state = filter.state ?? 'REQUESTED';
+    if (!['REQUESTED', 'APPROVED', 'REJECTED', 'all'].includes(state)) {
+      throw invalidQuery('state', 'enum');
+    }
+    if (filter.orderId !== undefined && !isUuid(filter.orderId)) {
+      throw invalidQuery('order_id', 'format');
+    }
+    if (filter.hubId !== undefined && !isUuid(filter.hubId)) throw invalidQuery('hub_id', 'format');
+    const after = filter.pageToken === undefined ? undefined : decodePageToken(filter.pageToken);
+    if (filter.pageToken !== undefined && after === undefined) {
+      throw invalidQuery('page_token', 'format');
+    }
+    if (filter.hubId !== undefined && hubOutsideStaffGrant(authorized, filter.hubId)) {
+      return { items: [], next_page_token: null };
+    }
+    return this.#options.runner.read(
+      authorized,
+      correlationId,
+      async (handle) => {
+        const tx = transactionOf(handle);
+        const hubId = filter.hubId ?? null;
+        const orderId = filter.orderId ?? null;
+        const afterAt = after?.createdAt ?? null;
+        const afterId = after?.id ?? null;
+        const read = (
+          await tx.execute(sql`
+            select ${DETAIL_COLUMNS}
+              from payer_correction as c join "order" as o on o.id = c.order_id
+             where (${state}::text = 'all' or c.state = ${state}::text)
+               and (${orderId}::uuid is null or c.order_id = ${orderId}::uuid)
+               and (${hubId}::uuid is null or c.responsible_hub_id = ${hubId}::uuid)
+               and (${afterAt}::timestamptz is null or (c.created_at, c.id) > (${afterAt}::timestamptz, ${afterId}::uuid))
+             order by c.created_at, c.id
+             limit ${size + 1}`)
+        ).rows as unknown as DetailRow[];
+        const page = read.slice(0, size);
+        await this.#noteForeignHubs(handle, authorized, page, 'listPayerCorrections');
+        const names = await this.#namesOf(tx, page);
+        const last = page.at(-1);
+        return {
+          items: page.map((row) => correctionDetailOf(row, names)),
+          next_page_token:
+            read.length > size && last !== undefined
+              ? encodePageToken({ createdAt: last.position_text, id: last.id })
+              : null,
+        };
+      },
+      { isolation: 'REPEATABLE READ' },
+    );
+  }
+
+  /** `getPayerCorrection`: one correction in full, with the `ETag` that `approvePayerCorrection` takes as `If-Match`, so that the checker opens it after a reload or on another device. */
+  async get(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    correctionId: string,
+  ): Promise<CorrectionAnswer> {
+    this.#requireStaff(authorized);
+    return this.#options.runner.read(authorized, correlationId, async (handle) => {
+      const tx = transactionOf(handle);
+      const found = await this.#detailRow(tx, correctionId);
+      if (found === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+      await this.#noteForeignHubs(handle, authorized, [found], 'getPayerCorrection');
+      const names = await this.#namesOf(tx, [found]);
+      return { correction: correctionDetailOf(found, names), etag: correctionEtagOf(found) };
+    });
+  }
+
+  async #detailRow(
+    tx: ReturnType<typeof transactionOf>,
+    id: string,
+  ): Promise<DetailRow | undefined> {
+    const found = await tx.execute(sql`
+      select ${DETAIL_COLUMNS}
+        from payer_correction as c join "order" as o on o.id = c.order_id
+       where c.id = ${id}::uuid`);
+    return found.rows[0] as unknown as DetailRow | undefined;
+  }
+
+  /** The answer of an act: the correction in full and the `ETag` of the row as it now stands. */
+  async #present(tx: ReturnType<typeof transactionOf>, id: string): Promise<CorrectionAnswer> {
+    const row = await this.#detailRow(tx, id);
+    if (row === undefined) throw new Error('A correction that was made could not be read');
+    const names = await this.#namesOf(tx, [row]);
+    return { correction: correctionDetailOf(row, names), etag: correctionEtagOf(row) };
+  }
+
+  async #namesOf(
+    tx: ReturnType<typeof transactionOf>,
+    rows: readonly CorrectionRow[],
+  ): Promise<Map<string, string>> {
+    const book = new Map<string, string>();
+    if (rows.length === 0) return book;
+    const ids = rows.map((row) => sql`${row.id}::uuid`);
+    const found = await tx.execute(
+      sql`select staff_id, display_name from melarc.correction_names(array[${sql.join(ids, sql`, `)}]::uuid[])`,
+    );
+    for (const row of found.rows as unknown as { staff_id: string; display_name: string }[]) {
+      book.set(row.staff_id, row.display_name);
+    }
+    return book;
+  }
+
+  /** A read of a correction in a hub that is not the actor's own is audited without contents, as every staff read is. */
+  async #noteForeignHubs(
+    handle: TransactionHandle,
+    authorized: AuthorizedRequest,
+    rows: readonly CorrectionRow[],
+    operation: string,
+  ): Promise<void> {
+    const baseline = await primaryHubOfStaff(handle, authorized.session.principalId);
+    const foreign = [
+      ...new Set(rows.map((row) => row.responsible_hub_id).filter((hub) => hub !== baseline)),
+    ].toSorted();
+    for (const hubId of foreign) {
+      await this.#options.audit.write(handle, {
+        code: 'auth.hub_boundary.crossed',
+        enhanced: true,
+        outcome: 'SUCCEEDED',
+        object: { type: 'HUB', id: hubId },
+        responsibleHubId: hubId,
+        relatedIds: { operation_id: operation },
+      });
+    }
   }
 
   #requireStaff(authorized: AuthorizedRequest): void {

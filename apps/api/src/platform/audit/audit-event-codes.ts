@@ -171,6 +171,8 @@ export const AUDIT_EVENT_CODES = [
   'pricing.size_class.selected',
   'pricing.carrier_cost.captured',
   'order.delivery_date.overridden',
+  'order.amendment.recorded',
+  'order.arrival.reversed',
   'order.credit.reserved',
   'order.payment.required',
   'order.commercial.cleared_no_charge',

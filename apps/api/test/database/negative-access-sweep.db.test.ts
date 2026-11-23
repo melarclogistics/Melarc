@@ -243,10 +243,13 @@ beforeAll(async () => {
     );
     orderE = await routes.admin.query<{ id: string }>(
       `insert into "order" (id, code, pickup_intake_id, vendor_organization_id, responsible_hub_id, recipient, origin_zone_snapshot, destination_zone_snapshot, destination_zone_resolution,
-                            derived_delivery_date, size_class, size_class_selected_by, is_high_value, lane, price_components_snapshot, initial_commitment_id, created_by)
+                            derived_delivery_date, size_class, size_class_selected_by, is_high_value, lane, price_components_snapshot, initial_commitment_id, created_by,
+                            locked_price_minor, locked_at, commercial_state, payer_allocation)
        values (gen_random_uuid(), 'ACC-OR-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 6)), $1, $2, $3, '{"name":"Ama","phone":"0241234567","location":{"address":"Madina"}}'::jsonb,
                '{"scope":"UNRESOLVED"}'::jsonb, '{"scope":"SERVICE_AREA"}'::jsonb, 'SERVER_RESOLVED', current_date, 'SMALL', gen_random_uuid(), false, 'DOORSTEP',
-               '{"total_minor":3500,"components":[]}'::jsonb, gen_random_uuid(), gen_random_uuid()) returning id`,
+               '{"total_minor":3500,"components":[]}'::jsonb, gen_random_uuid(), gen_random_uuid(),
+               -- A payer correction is of an order whose price is frozen (the guard says so for every writer), so the order this fixture makes for the correction is one.
+               3500, now(), 'NO_VENDOR_CHARGE', '{"payer_intent":"RECIPIENT_PAYS","sender_minor":0,"recipient_minor":3500}'::jsonb) returning id`,
       [intakeE.rows[0]?.id, vendorC.organizationId, HUB_A],
     );
     // S1.39: a payer correction of that order (`approvePayerCorrection` is addressed by one).
@@ -566,6 +569,13 @@ describe('the existence rule is asked about records that are real (the control o
       closeHubIntake: 'pickupIntake',
       getIntakeSummary: 'pickupIntake',
       getOrder: 'order',
+      amendOrder: 'order',
+      previewOrderAmendment: 'order',
+      reverseOrderArrival: 'order',
+      getPayerCorrection: 'payerCorrection',
+      previewOrder: 'pickupIntake',
+      listIntakeOrders: 'pickupIntake',
+      getIntakeClosure: 'pickupIntake',
       addExtraParcel: 'pickupIntake',
       adjudicateDiscrepancy: 'pickupIntake',
       approveStaffIdentity: 'staff',

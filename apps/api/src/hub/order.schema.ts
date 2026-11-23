@@ -108,7 +108,14 @@ export const orderRecord = pgTable(
     carrierCostMinor: integer('carrier_cost_minor'),
     /** The photograph of the carrier's waybill behind `carrier_cost_minor`: present exactly with it. */
     carrierWaybillEvidenceId: uuid('carrier_waybill_evidence_id'),
+    /** Whether the order is high-value: the officer's own flag or the declared value above the first band, whichever says so (recomputed whenever the declaration changes). */
     isHighValue: boolean('is_high_value').notNull(),
+    /**
+     * The officer's own flag, kept apart from what the declared value says (the review of 20 November 2026, finding 4): an amendment of the declaration recomputes the second and never loses the first,
+     * and a flag the officer withdraws is not made again by a value that came and went. **Null for an order made before the flag was kept apart** (migration `0118`): whether it was the officer's is then
+     * not known, and the service reads it as the officer's own only where nothing the declared value says explains the status.
+     */
+    isHighValueManual: boolean('is_high_value_manual'),
     /** The stored evidence that verified a high-value parcel at itemization: at least one exactly when `is_high_value`. */
     highValueEvidenceIds: uuid('high_value_evidence_ids')
       .array()
@@ -157,7 +164,10 @@ export const orderRecord = pgTable(
     // The key a commitment's composite foreign key names: a commitment can never name another hub than its order's.
     uniqueIndex('order_id_hub_key').on(table.id, table.responsibleHubId),
     // One order for a parcel (a null is no parcel: the blind-count intakes' orders are not duplicates of one another).
-    uniqueIndex('order_parcel_key').on(table.intakeParcelId),
+    // One order for a parcel **that stands**: a reversed order (the arrival it stood on was taken back) is history and does not hold the parcel, so that a parcel that is found again can be ordered afresh.
+    uniqueIndex('order_parcel_key')
+      .on(table.intakeParcelId)
+      .where(sql`${table.commercialState} IS DISTINCT FROM 'REVERSED'`),
     index('order_intake_idx').on(table.pickupIntakeId, table.createdAt),
     index('order_hub_idx').on(table.responsibleHubId, table.createdAt),
     check(
@@ -171,6 +181,11 @@ export const orderRecord = pgTable(
       sql.raw(`"order"."fulfilment_state" IN (${quoted(ORDER_FULFILMENT_STATES)})`),
     ),
     check('order_lane_closed', sql.raw(`"order"."lane" IN (${quoted(ORDER_LANES)})`)),
+    // The officer's own flag makes the order high-value: it is never true beside an order that is not (the review of 20 November 2026, finding 4).
+    check(
+      'order_manual_flag_is_high_value',
+      sql.raw(`"order"."is_high_value_manual" IS NOT TRUE OR "order"."is_high_value"`),
+    ),
     check(
       'order_commercial_mode_closed',
       sql.raw(

@@ -20,9 +20,9 @@ import {
  * else (migration 0042). The result is a plain snapshot (`HubConfiguration`); the operation then does its own work in the caller's
  * context with the snapshot in hand, and no vendor or rider context ever reads a table it is denied.
  *
- * It reads once, in one statement per table, at one instant: the version of each key and scope **in force at `at`** (the greatest
- * `effective_from` not after it, then the greatest version), so a value changed at a later date does not alter a snapshot taken
- * earlier. It never asks for a row of another hub: every statement names the hub.
+ * It reads once, in one statement per table, at one instant and **in one snapshot** (`REPEATABLE READ`): the version of each key and
+ * scope **in force at `at`** (the greatest `effective_from` not after it, then the greatest version), so a value changed at a later
+ * date does not alter a snapshot taken earlier. It never asks for a row of another hub: every statement names the hub.
  *
  * This file is one of the few places that may open the capability (`CAPABILITY_ACCESS.configuration.openedUnder`); the architecture
  * test enforces it.
@@ -43,7 +43,7 @@ export class ConfigurationReader {
    * (`effective_from` is its transaction time), so it is the one clock that can say what is in force, and an application whose clock runs
    * a little behind it never reads a value a moment too old. A caller that asks about another instant (a price as it stood on a date) states it.
    */
-  async forHub(hubId: string, at?: Date): Promise<HubConfiguration> {
+  async forHub(hubId: string, at?: Date, withFingerprint = false): Promise<HubConfiguration> {
     const context: SecurityContext = {
       principalType: 'SYSTEM',
       principalId: CONFIGURATION_PRINCIPAL_ID,
@@ -51,65 +51,83 @@ export class ConfigurationReader {
       taskCapability: 'configuration',
       correlationId: 'configuration-read',
     };
-    return this.#database.transactionWithContext(context, async (tx) => {
-      const moment =
-        at ??
-        new Date(
-          String((await tx.execute(sql`select transaction_timestamp() as now`)).rows[0]?.now),
-        );
-      const instant = moment.toISOString();
-      const settings = await tx.execute(sql`
+    // One snapshot for every statement below (the transaction's first statement fixes it): the digest and the rows it stands for are of the same committed state, so a change that commits while the reader runs is in
+    // both or in neither, and never in one (the review of 22 November 2026, finding 5, the second case).
+    return this.#database.transactionWithContext(
+      context,
+      async (tx) => {
+        const moment =
+          at ??
+          new Date(
+            String((await tx.execute(sql`select transaction_timestamp() as now`)).rows[0]?.now),
+          );
+        const instant = moment.toISOString();
+        // The fingerprint (asked of a save, which asks it again once it holds its locks) is the digest of the configuration IN FORCE at this very instant (`0120`): the versions the rates below are selected at, the hub's
+        // zones and aliases and the company rules, in one statement. A save that finds another digest, because a version took effect or committed meanwhile, reads the configuration again.
+        const fingerprint = withFingerprint
+          ? String(
+              (
+                await tx.execute(
+                  sql`select melarc.hub_configuration_fingerprint(${hubId}::uuid, ${instant}::timestamptz) as fingerprint`,
+                )
+              ).rows[0]?.fingerprint,
+            )
+          : undefined;
+        const settings = await tx.execute(sql`
         select distinct on (setting_key, scope_ref)
                hub_id, setting_key, scope_ref, version, value, unit, effective_from
           from hub_setting
          where hub_id = ${hubId}::uuid and effective_from <= ${instant}::timestamptz
          order by setting_key, scope_ref, effective_from desc, version desc`);
-      const zones = await tx.execute(sql`
+        const zones = await tx.execute(sql`
         select id, hub_id, code, name, service_area, active
           from service_zone where hub_id = ${hubId}::uuid order by code`);
-      const aliases = await tx.execute(sql`
+        const aliases = await tx.execute(sql`
         select id, hub_id, zone_id, alias, kind
           from service_zone_alias where hub_id = ${hubId}::uuid order by alias`);
-      const company = await tx.execute(sql`
+        const company = await tx.execute(sql`
         select key, value_type, value, unit from setting where scope = 'COMPANY' order by key`);
-      const hub = await tx.execute(sql`select name from hub where id = ${hubId}::uuid`);
-      const hubName = hub.rows[0]?.name;
+        const hub = await tx.execute(sql`select name from hub where id = ${hubId}::uuid`);
+        const hubName = hub.rows[0]?.name;
 
-      return new HubConfiguration({
-        hubId,
-        ...(typeof hubName === 'string' ? { hubName } : {}),
-        at: moment,
-        settings: settings.rows.map((row): HubSettingRecord => ({
-          hubId: String(row.hub_id),
-          key: String(row.setting_key),
-          scopeRef: String(row.scope_ref),
-          version: Number(row.version),
-          value: row.value,
-          unit: String(row.unit),
-          effectiveFrom: new Date(row.effective_from as string | Date),
-        })),
-        zones: zones.rows.map((row): ServiceZoneRecord => ({
-          id: String(row.id),
-          hubId: String(row.hub_id),
-          code: String(row.code),
-          name: String(row.name),
-          serviceArea: String(row.service_area),
-          active: row.active === true,
-        })),
-        aliases: aliases.rows.map((row): ZoneAliasRecord => ({
-          id: String(row.id),
-          hubId: String(row.hub_id),
-          zoneId: String(row.zone_id),
-          alias: String(row.alias),
-          kind: row.kind === 'LANDMARK' ? 'LANDMARK' : 'AREA',
-        })),
-        company: company.rows.map((row): CompanyRuleRecord => ({
-          key: String(row.key),
-          valueType: String(row.value_type),
-          value: row.value,
-          unit: String(row.unit),
-        })),
-      });
-    });
+        return new HubConfiguration({
+          hubId,
+          ...(typeof hubName === 'string' ? { hubName } : {}),
+          at: moment,
+          ...(fingerprint === undefined ? {} : { fingerprint }),
+          settings: settings.rows.map((row): HubSettingRecord => ({
+            hubId: String(row.hub_id),
+            key: String(row.setting_key),
+            scopeRef: String(row.scope_ref),
+            version: Number(row.version),
+            value: row.value,
+            unit: String(row.unit),
+            effectiveFrom: new Date(row.effective_from as string | Date),
+          })),
+          zones: zones.rows.map((row): ServiceZoneRecord => ({
+            id: String(row.id),
+            hubId: String(row.hub_id),
+            code: String(row.code),
+            name: String(row.name),
+            serviceArea: String(row.service_area),
+            active: row.active === true,
+          })),
+          aliases: aliases.rows.map((row): ZoneAliasRecord => ({
+            id: String(row.id),
+            hubId: String(row.hub_id),
+            zoneId: String(row.zone_id),
+            alias: String(row.alias),
+            kind: row.kind === 'LANDMARK' ? 'LANDMARK' : 'AREA',
+          })),
+          company: company.rows.map((row): CompanyRuleRecord => ({
+            key: String(row.key),
+            valueType: String(row.value_type),
+            value: row.value,
+            unit: String(row.unit),
+          })),
+        });
+      },
+      { isolation: 'REPEATABLE READ' },
+    );
   }
 }

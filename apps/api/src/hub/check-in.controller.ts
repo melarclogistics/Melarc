@@ -168,6 +168,8 @@ export class CheckInController {
     surfaces: ['OPS_PORTAL'],
     activity: 'qualifying',
     record: { entity: 'pickup_intake', param: 'id' },
+    // The close writes the envelope of the vendor's or the sender's text (`intake.completed`, OB-S1-143; migration 0116), so the route carries the sub-ceiling of the operations that can cause an outbound text.
+    providerInitiating: true,
   })
   async close(
     @Authorized() authorized: AuthorizedRequest,

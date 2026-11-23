@@ -56,6 +56,8 @@ export default defineConfig({
     './src/hub/delivery-commitment.schema.ts',
     // SLICE-001 (S1.39): the maker-checker record of a payer correction after the price froze.
     './src/hub/payer-correction.schema.ts',
+    // SLICE-001 (Stage 7, the review of 19 November 2026): the record of an edit of an order that is not yet confirmed, and of the reversal of one that is.
+    './src/hub/order-change.schema.ts',
   ],
   out: './migrations',
   strict: true,

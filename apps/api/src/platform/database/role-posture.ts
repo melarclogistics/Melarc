@@ -232,6 +232,25 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.request_payer_correction',
     'melarc.decide_payer_correction',
     'melarc.amend_request_payer',
+    // The reads of Stage 7's worklist (migration `0114`): the parcels and orders of an intake with no price (`melarc.intake_worklist`) and the counts of the whole intake (`melarc.intake_progress`), for staff
+    // under `hub.read`; what a close would find (`melarc.intake_closure_assessment`, staff under the keys of the close); the names of the officers on the corrections a reader may see
+    // (`melarc.correction_names`, staff under the keys of the correction, for the one statement that reads the names under the capability of `0106`).
+    'melarc.intake_worklist',
+    'melarc.intake_progress',
+    'melarc.intake_closure_assessment',
+    'melarc.correction_names',
+    // The controlled changes of an order (migration `0115`): the correction of an order before its price freezes (`melarc.amend_order`, staff under `hub.intake.itemize`: the intake locked first and the order second, the
+    // record of the amendment written first and demanded by the guards), the reversal of a mistaken arrival (`melarc.reverse_order_arrival`, staff under `hub.osd.adjudicate`: the record of the reversal beside the move of the
+    // order, the parcel and the intake) and the payer arrangement resolved into portions for the preview (`melarc.payer_preview`, read-only, staff under `hub.intake.itemize`).
+    'melarc.amend_order',
+    'melarc.reverse_order_arrival',
+    'melarc.payer_preview',
+    // The review of 20 November 2026 (migration `0118`): the lock the service takes on the request's payer arrangement before it calculates who pays (`melarc.hold_request_payer`, staff under `hub.intake.itemize`:
+    // the lock the freeze takes, for share), and the condition the guard of the order applies to the evidence an order cites, asked before the order is made (`melarc.evidence_citable`, read-only, staff under the same key).
+    'melarc.hold_request_payer',
+    'melarc.evidence_citable',
+    // The intakes closed with the approved exception that still have work left (`melarc.closed_intake_exceptions`, read-only, staff under `hub.intake.close_exception`).
+    'melarc.closed_intake_exceptions',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

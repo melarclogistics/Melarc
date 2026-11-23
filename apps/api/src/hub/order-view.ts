@@ -33,6 +33,8 @@ export interface OrderRow {
   readonly size_class_selected_by: string | null;
   readonly carrier_cost_minor: number | null;
   readonly is_high_value: boolean;
+  /** The officer's own flag, apart from what the declared value says (the review of 20 November 2026, finding 4). */
+  readonly is_high_value_manual: boolean | null;
   readonly lane: string;
   readonly commercial_mode: string | null;
   readonly payer_allocation: { sender_minor: number; recipient_minor: number } | null;
@@ -40,6 +42,12 @@ export interface OrderRow {
   readonly locked_price_minor: number | null;
   readonly delivery_attempt_count: number;
   readonly recipient: { name: string; phone: string; location: Record<string, unknown> };
+  /** What an amendment restates and a reader cannot rebuild: the order's own payer arrangement (null when the request's stands) and the evidence it cites. */
+  readonly payer_override: Record<string, unknown> | null;
+  readonly high_value_evidence_ids: readonly string[];
+  readonly carrier_waybill_evidence_id: string | null;
+  /** The durable version of the row, read **in the same statement** as the rest of it, so that the `ETag` built from the two always names one coherent record (review finding D). */
+  readonly version: number | string;
 }
 
 /** The columns of an order and the state of its parcel, for a read in the caller's transaction. */
@@ -47,8 +55,8 @@ export const ORDER_SELECT = sql.raw(`
   o.id, o.code, o.pickup_intake_id, o.responsible_hub_id, o.intake_parcel_id, p.state AS intake_parcel_state, o.commercial_state, o.fulfilment_state,
   o.origin_zone_snapshot, o.destination_zone_snapshot, o.destination_zone_resolution, o.declared_value_minor, o.is_serialized_goods, o.serial_imei, o.service_level,
   o.requested_delivery_date::text AS requested_delivery_date, o.derived_delivery_date::text AS derived_delivery_date, o.delivery_date_override,
-  o.size_class, o.size_class_selected_by, o.carrier_cost_minor, o.is_high_value, o.lane, o.commercial_mode, o.payer_allocation, o.price_components_snapshot,
-  o.locked_price_minor, o.delivery_attempt_count, o.recipient
+  o.size_class, o.size_class_selected_by, o.carrier_cost_minor, o.is_high_value, o.is_high_value_manual, o.lane, o.commercial_mode, o.payer_allocation, o.price_components_snapshot,
+  o.locked_price_minor, o.delivery_attempt_count, o.recipient, o.payer_override, o.high_value_evidence_ids, o.carrier_waybill_evidence_id, o.version
   FROM "order" AS o LEFT JOIN intake_parcel AS p ON p.id = o.intake_parcel_id`);
 
 const money = (amountMinor: number): { amount_minor: number; currency: 'GHS' } => ({
@@ -58,6 +66,37 @@ const money = (amountMinor: number): { amount_minor: number; currency: 'GHS' } =
 
 /** The jsonb columns as the driver gave them: parsed, or the text of them. */
 const jsonOf = (value: unknown): unknown => (typeof value === 'string' ? JSON.parse(value) : value);
+
+/** The order's own payer arrangement as the API states it (a portion in money, never the column's internal name), or null when the request's stands. */
+export function payerOverrideViewOf(stored: unknown): {
+  payer_intent: string;
+  split_basis?: string;
+  split_sender_amount?: { amount_minor: number; currency: 'GHS' };
+  split_sender_percentage?: number;
+} | null {
+  if (stored === null || stored === undefined) return null;
+  const given = jsonOf(stored) as {
+    payer_intent: string;
+    split_basis?: string | null;
+    split_sender_amount_minor?: number | null;
+    split_sender_percentage?: number | string | null;
+  };
+  return {
+    payer_intent: given.payer_intent,
+    ...(given.split_basis == null ? {} : { split_basis: given.split_basis }),
+    ...(given.split_sender_amount_minor == null
+      ? {}
+      : {
+          split_sender_amount: {
+            amount_minor: given.split_sender_amount_minor,
+            currency: 'GHS' as const,
+          },
+        }),
+    ...(given.split_sender_percentage == null
+      ? {}
+      : { split_sender_percentage: Number(given.split_sender_percentage) }),
+  };
+}
 
 export type OrderView = ReturnType<typeof orderViewOf>;
 
@@ -83,8 +122,11 @@ export function orderViewOf(row: OrderRow) {
     ...(row.carrier_cost_minor === null ? {} : { carrier_cost: money(row.carrier_cost_minor) }),
     derived_delivery_date: row.derived_delivery_date,
     is_high_value: row.is_high_value,
+    is_high_value_manual: row.is_high_value_manual,
     lane: row.lane,
     commercial_mode: row.commercial_mode,
+    // What the price is, in a word: an early quote (calculated, kept as calculated until the order is amended or confirmed) or the frozen price. A preview is neither, and says so itself.
+    price_status: row.locked_price_minor === null ? ('EARLY_QUOTE' as const) : ('FROZEN' as const),
     locked_price: row.locked_price_minor === null ? null : money(row.locked_price_minor),
     price_components_snapshot: jsonOf(row.price_components_snapshot) as Record<string, unknown>,
     delivery_attempt_count: row.delivery_attempt_count,
@@ -100,6 +142,9 @@ export function orderViewOf(row: OrderRow) {
     service_level: row.service_level,
     destination_zone_resolution: row.destination_zone_resolution,
     delivery_date_override: row.delivery_date_override,
+    payer_override: payerOverrideViewOf(row.payer_override),
+    high_value_evidence_ids: row.high_value_evidence_ids,
+    carrier_waybill_evidence_id: row.carrier_waybill_evidence_id ?? null,
     ...(allocation === null
       ? {}
       : {

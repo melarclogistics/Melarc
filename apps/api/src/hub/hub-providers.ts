@@ -18,7 +18,9 @@ import { HubCheckIns } from './check-in.service.js';
 import { HubIntakes } from './hub-intakes.service.js';
 import { HubIntakeFindings } from './intake-findings.service.js';
 import { HubItemization } from './itemization.service.js';
+import { IntakeWorklist } from './intake-worklist.service.js';
 import { HubOrderReads } from './order-reads.service.js';
+import { OrderReversals } from './order-reversals.service.js';
 import { PayerCorrections } from './payer-corrections.service.js';
 import { ReceivingReads } from './receiving-reads.service.js';
 
@@ -44,6 +46,10 @@ export const HUB_CHECK_INS = Symbol('HUB_CHECK_INS');
 export const HUB_ITEMIZATION = Symbol('HUB_ITEMIZATION');
 export const HUB_ORDER_READS = Symbol('HUB_ORDER_READS');
 export const HUB_PAYER_CORRECTIONS = Symbol('HUB_PAYER_CORRECTIONS');
+/** The injection token of the parcel worklist and the closure assessment (Stage 7), which its controller asks for. */
+export const HUB_INTAKE_WORKLIST = Symbol('HUB_INTAKE_WORKLIST');
+/** The injection token of the reversal of an arrival (Stage 7), which its controller asks for. */
+export const HUB_ORDER_REVERSALS = Symbol('HUB_ORDER_REVERSALS');
 
 const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
@@ -143,6 +149,38 @@ export const hubProviders: readonly FactoryProvider[] = [
         ? undefined
         : new HubOrderReads({ runner, audit }),
     inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_INTAKE_WORKLIST,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+    ): IntakeWorklist | undefined =>
+      runner === undefined || audit === undefined
+        ? undefined
+        : new IntakeWorklist({ runner, audit }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_ORDER_REVERSALS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+    ): OrderReversals | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined
+        ? undefined
+        : new OrderReversals({ runner, audit, idempotency, clock }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+    ],
   },
   {
     provide: HUB_PAYER_CORRECTIONS,

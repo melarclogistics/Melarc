@@ -25,8 +25,13 @@ import { currentRequestContext } from '../platform/logging/request-context.js';
 import { DescribeErrors } from '../platform/openapi/described-errors.js';
 import { RequiresPermission } from '../platform/routes/access-declaration.js';
 import { HUB_ITEMIZATION } from './hub-providers.js';
-import type { HubItemization, ItemizeBody } from './itemization.service.js';
-import { ORDER_ITEMIZE_BODY, ORDER_SCHEMA } from './order-schemas.js';
+import type { HubItemization, ItemizeBody, OrderPreviewView } from './itemization.service.js';
+import {
+  ORDER_ITEMIZE_BODY,
+  ORDER_ITEMIZE_PREVIEW_BODY,
+  ORDER_PREVIEW_SCHEMA,
+  ORDER_SCHEMA,
+} from './order-schemas.js';
 import type { OrderView } from './order-view.js';
 
 const correlation = (): string => currentRequestContext()?.requestId ?? randomUUID();
@@ -91,5 +96,45 @@ export class ItemizationController {
       idempotencyKey,
       fingerprint: fingerprintOfRequest(request, 'itemizeOrder'),
     });
+  }
+
+  @Post(':id/orders/preview')
+  @HttpCode(200)
+  @ContractOperation('previewOrder')
+  @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
+  @ApiBody({ schema: ORDER_ITEMIZE_PREVIEW_BODY })
+  @ApiResponse({ status: 200, schema: ORDER_PREVIEW_SCHEMA })
+  @DescribeErrors(
+    ErrorCode.CarrierCostRequired,
+    ErrorCode.CommitmentSourceUnresolved,
+    ErrorCode.CsrfValidationFailed,
+    ErrorCode.EvidenceNotStored,
+    ErrorCode.HubScopeViolation,
+    ErrorCode.MarginNotConfigured,
+    ErrorCode.NotFound,
+    ErrorCode.PermissionDenied,
+    ErrorCode.ReasonRequired,
+    ErrorCode.ServiceDateNotPermitted,
+    ErrorCode.SessionInvalid,
+    ErrorCode.SettingMissing,
+    ErrorCode.SizeClassRequired,
+    ErrorCode.StateConflict,
+    ErrorCode.ValidationFailed,
+    ErrorCode.ValueDeclarationRequired,
+  )
+  @RequiresPermission('hub.intake.itemize', {
+    surfaces: ['OPS_PORTAL'],
+    activity: 'qualifying',
+    record: { entity: 'pickup_intake', param: 'id' },
+  })
+  preview(
+    @Authorized() authorized: AuthorizedRequest,
+    @Param('id') id: string,
+    @Body() body: ItemizeBody,
+  ): Promise<OrderPreviewView> {
+    if (this.itemization === undefined) {
+      return Promise.reject(new OperationUnavailableError('previewOrder'));
+    }
+    return this.itemization.preview(authorized, correlation(), id, body);
   }
 }

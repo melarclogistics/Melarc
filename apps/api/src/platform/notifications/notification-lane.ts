@@ -16,6 +16,7 @@ import {
   parametersOf,
   type AggregateFacts,
   type HandshakeFacts,
+  type MessageDefinition,
 } from './message-list.js';
 import {
   LeaseLostError,
@@ -28,7 +29,15 @@ import {
 import type { MetricName } from '../metrics/metric-catalogue.js';
 import { NOTIFICATION_BATCH, SEND_RECORD_MARGIN_MS } from './notification-parameters.js';
 import { GUARD_REFUSALS, type SuppressionReason } from './notification-vocabulary.js';
-import { render, spokenDate, templateOf, TemplateError, type Template } from './templates.js';
+import {
+  isApproved,
+  render,
+  spokenDate,
+  templateFor,
+  templateOf,
+  TemplateError,
+  type Template,
+} from './templates.js';
 
 /**
  * The notification lane of the delivery worker (S1.12a to S1.12e; BACKGROUND_JOBS_AND_EVENTS.md §3; SECURITY_DESIGN.md §14.7). One tick of
@@ -97,8 +106,15 @@ export interface NotificationLaneOptions {
    * left in the lease; a message whose lease is about to end is left for the next claim and not sent under a lease another lane may take.
    */
   readonly providerTimeoutMs?: number;
-  /** The wording of a message by its kind and version: the product's templates, unless a test gives drafts. */
-  readonly templates?: (kind: string, version: number) => Template | undefined;
+  /**
+   * The wording of a message by its kind and version: the product's templates, unless a test gives drafts. A feed entry is asked for with its parameters as well, since some kind has a second wording for
+   * a case (`templateFor`), and an approval is bound to the wording that case says.
+   */
+  readonly templates?: (
+    kind: string,
+    version: number,
+    parameters?: Readonly<Record<string, string>>,
+  ) => Template | undefined;
   /**
    * The codes of the collection handshake, for the messages that carry one (S1.27): the lane makes the code of a stop's generation at the send, in
    * memory, from the key it holds, and the text is the only place it goes. Absent where the lane holds no such key: a message that carries a code
@@ -302,25 +318,39 @@ export class NotificationLane {
         }
         let count = 0;
         let planned = 0;
+        let held = 0;
         for (const message of messages) {
           if (!messageApplies(message, loaded)) continue;
           planned += 1;
+          const parameters = parametersOf(message, envelope.payload);
+          // A feed entry is words said to a person on a screen as a text is said on a phone, and no provider stands in front of it: **its wording is approved too**, in every environment (the review of
+          // 20 November 2026, finding 1). An entry whose words nobody approved is written as held back, with its reason, and is never shown; approving the words later does not send what was held.
+          const unapproved =
+            message.channel === 'FEED' && !this.#wordingApproved(message, parameters);
           const inserted = await scope.insertNotification({
             messageKind: message.kind,
             templateVersion: message.templateVersion,
             audience: message.audience,
             channel: message.channel,
-            state: message.channel === 'FEED' ? 'DELIVERED' : 'QUEUED',
+            state: unapproved ? 'SUPPRESSED' : message.channel === 'FEED' ? 'DELIVERED' : 'QUEUED',
+            ...(unapproved ? { suppressionReason: 'WORDING_NOT_APPROVED' as const } : {}),
             timeToLiveMs: message.timeToLiveMs,
-            parameters: parametersOf(message, envelope.payload),
+            parameters,
           });
-          if (inserted === 'INSERTED') count += 1;
+          if (inserted === 'INSERTED') {
+            count += 1;
+            if (unapproved) held += 1;
+          }
         }
         await scope.relayed(planned > 0 ? 'MATERIALISED' : 'NOTHING_TO_SEND');
-        return { count, planned };
+        return { count, planned, held };
       });
       report.relayed += 1;
       report.notificationsWritten += written.count;
+      report.suppressed += written.held;
+      for (let each = 0; each < written.held; each += 1) {
+        this.#count('notification_suppressed_total', { reason: 'WORDING_NOT_APPROVED' });
+      }
       this.#count('notification_relay_total', {
         outcome: written.planned > 0 ? 'MATERIALISED' : 'NOTHING_TO_SEND',
       });
@@ -356,6 +386,19 @@ export class NotificationLane {
       }
       throw error;
     }
+  }
+
+  /** Whether the words a feed entry would say, in the case its parameters make, are words the Product Owner approved. */
+  #wordingApproved(
+    message: Pick<MessageDefinition, 'kind' | 'templateVersion'>,
+    parameters: Readonly<Record<string, string>>,
+  ): boolean {
+    const template = (this.#options.templates ?? templateFor)(
+      message.kind,
+      message.templateVersion,
+      parameters,
+    );
+    return template !== undefined && isApproved(template);
   }
 
   // ---- the send ------------------------------------------------------------------------------------------------------------

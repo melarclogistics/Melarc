@@ -322,6 +322,17 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.request_payer_correction',
       'melarc.decide_payer_correction',
       'melarc.amend_request_payer',
+      // S1.39b and S1.39c (migrations 0114 to 0118): the parcel worklist, the counts of the whole intake and what a close would find, the names of a correction, the change and the reversal of an order, the payer preview, the lock on the request's payer, the judgement of cited evidence and the queue of the closes that left work.
+      'melarc.intake_worklist',
+      'melarc.intake_progress',
+      'melarc.intake_closure_assessment',
+      'melarc.correction_names',
+      'melarc.amend_order',
+      'melarc.reverse_order_arrival',
+      'melarc.payer_preview',
+      'melarc.hold_request_payer',
+      'melarc.evidence_citable',
+      'melarc.closed_intake_exceptions',
     ]);
   });
 

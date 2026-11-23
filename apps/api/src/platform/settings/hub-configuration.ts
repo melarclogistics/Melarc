@@ -112,6 +112,12 @@ export class HubConfiguration {
    */
   readonly hubName: string | undefined;
   readonly at: Date;
+  /**
+   * The digest of the configuration **in force at `at`** (`melarc.hub_configuration_fingerprint`, migration `0120`: the version in force of each setting, the hub's zones and aliases, and the company rules), taken in
+   * the snapshot the rest was read in: a save that holds its locks asks for the digest of the moment it holds them, and another answer is a configuration that moved (a version took effect, a change committed) while the
+   * save waited. Undefined for a snapshot that is built and not read.
+   */
+  readonly fingerprint: string | undefined;
   readonly zones: readonly ServiceZoneRecord[];
   readonly aliases: readonly ZoneAliasRecord[];
   readonly #settings: ReadonlyMap<string, HubSettingRecord>;
@@ -121,6 +127,7 @@ export class HubConfiguration {
     readonly hubId: string;
     readonly hubName?: string;
     readonly at: Date;
+    readonly fingerprint?: string;
     readonly zones: readonly ServiceZoneRecord[];
     readonly aliases: readonly ZoneAliasRecord[];
     /** The version in force at `at` for each key and scope: the reader's `distinct on`, not a history. */
@@ -130,6 +137,7 @@ export class HubConfiguration {
     this.hubId = input.hubId;
     this.hubName = input.hubName;
     this.at = input.at;
+    this.fingerprint = input.fingerprint;
     this.zones = input.zones;
     this.aliases = input.aliases;
     const settings = new Map<string, HubSettingRecord>();

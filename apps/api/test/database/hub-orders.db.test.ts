@@ -4,14 +4,18 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { serverErrorIn } from '../../src/platform/database/database-failures.js';
+import { BUNDLE_IDS } from '../../src/tools/seed/bundles.js';
 import {
   toContextSettings,
   type SecurityContext,
 } from '../../src/platform/database/transaction-context.js';
 import { handOver } from './support/handed-over.js';
+import { waitUntilBlockedBy } from './support/lock-wait.js';
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
+import { holdingPickupRequest } from './support/pickups.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { HUB_A, HUB_B } from './support/staff-routes.js';
+import { clientFor } from './support/test-database.js';
 import {
   startVendorRoutes,
   type ArrangedVendor,
@@ -580,6 +584,54 @@ describe('an order for an intake counted blind', () => {
       'intake_not_counted',
     ]);
   });
+
+  // Break caught (the review of 21 November 2026, finding 1): an order for a place that is not there, which the close then accepts with the approved exception as a shortage of nothing.
+  it('has an order for no more parcels than the hub received, whatever the count', async () => {
+    const small = await blindIntake(2);
+    await orderFor(small, null);
+    await orderFor(small, null);
+    expect(refusal(await attempt(itemizer, itemize(small.id, facts(null))))).toEqual([
+      '23514',
+      'STATE_CONFLICT',
+      'orders_exceed_received',
+    ]);
+    // The limit is the count, not a number: every one of two hundred parcels received has its order, and the next has none.
+    const large = await blindIntake(200);
+    for (let each = 0; each < 200; each += 1) await orderFor(large, null);
+    expect(refusal(await attempt(itemizer, itemize(large.id, facts(null))))).toEqual([
+      '23514',
+      'STATE_CONFLICT',
+      'orders_exceed_received',
+    ]);
+  }, 120_000);
+
+  // Break caught (the same): a close that accepts a surplus, with the exception or without it, because it counts the orders against the count only for parity.
+  it('is not closed over a surplus, with the exception or without it', async () => {
+    const blind = await blindIntake(2);
+    await orderFor(blind, null);
+    await orderFor(blind, null);
+    // A surplus the application cannot make any more (a count lowered under its orders), arranged as the other tests arrange a world the application cannot make.
+    await routes.admin.query('begin');
+    await routes.admin.query('set local session_replication_role = replica');
+    await routes.admin.query(`update pickup_intake set physical_count = 1 where id = $1`, [
+      blind.id,
+    ]);
+    await routes.admin.query('commit');
+    const closer = (key: string) => staff(key, [HUB_A], randomUUID());
+    const withException = `select previous_state from melarc.close_intake('${blind.id}', '${randomUUID()}', 'One order too many')`;
+    const without = `select previous_state from melarc.close_intake('${blind.id}', null, null)`;
+    expect(refusal(await attempt(closer('hub.intake.close_exception'), withException))).toEqual([
+      '23514',
+      'STATE_CONFLICT',
+      'orders_exceed_received',
+    ]);
+    expect(refusal(await attempt(closer('hub.intake.close'), without))).toEqual([
+      '23514',
+      'STATE_CONFLICT',
+      'orders_exceed_received',
+    ]);
+    expect((await intakeOf(blind.id)).state).toBe('ITEMIZING');
+  });
 });
 
 describe('an order that waits for its parcel (AC-SLICE-001-104)', () => {
@@ -665,13 +717,38 @@ describe('an order that waits for its parcel (AC-SLICE-001-104)', () => {
     for (const parcel of intake.parcels) rowsOf(await attempt(staff(COUNT), tap(parcel.id, true)));
     rowsOf(await attempt(staff(COUNT), finish(intake.id, true, 3)));
     expect(rowsOf(await attempt(staff(COUNT), freeze(intake.id)))).toHaveLength(2);
-    // Now both are priced: neither goes back, by the senior's correction either.
+    // Now both are priced, and the first confirmation began the itemizing (OB-S1-142): neither goes back, by the senior's correction either.
+    expect((await intakeOf(intake.id)).state).toBe('ITEMIZING');
+    const result = await attempt(
+      staff(OSD),
+      correct(intake.id, 'counted again', [{ parcel_id: priced.id, state: 'MISSING' }]),
+    );
+    expect(refusal(result)).toEqual(['23514', 'STATE_CONFLICT', 'itemization_started']);
+    expect((await parcelsOf(intake.id)).every((parcel) => parcel.state === 'ARRIVED')).toBe(true);
+  });
+
+  // Break caught: a parcel that leaves ARRIVED under an order that is priced while the intake is still in reconciliation, where no state of the intake forbids it: the parcel's own guard holds it for every writer.
+  it('does not let a parcel whose order is priced be taken back while the intake is still in reconciliation', async () => {
+    const intake = await photoIntake(3);
+    const [priced, waiting] = intake.parcels as [Parcel, Parcel, Parcel];
+    await orderFor(intake, priced);
+    await orderFor(intake, waiting);
+    rowsOf(await attempt(staff(COUNT), tap(priced.id, true)));
+    rowsOf(await attempt(staff(COUNT), tap(waiting.id, true)));
+    // The third parcel never arrived: the vendor is finished as tapped, and the intake is in reconciliation with a missing parcel.
+    rowsOf(await attempt(staff(COUNT), finish(intake.id, false)));
+    expect((await intakeOf(intake.id)).state).toBe('RECONCILIATION_REQUIRED');
+    expect(rowsOf(await attempt(staff(COUNT), freeze(intake.id)))).toHaveLength(2);
+    // The confirmation does not begin the itemizing of an intake that is not cleared.
+    expect((await intakeOf(intake.id)).state).toBe('RECONCILIATION_REQUIRED');
     const result = await attempt(
       staff(OSD),
       correct(intake.id, 'counted again', [{ parcel_id: priced.id, state: 'MISSING' }]),
     );
     expect(refusal(result)).toEqual(['23514', 'STATE_CONFLICT', 'parcel_has_order']);
-    expect((await parcelsOf(intake.id)).every((parcel) => parcel.state === 'ARRIVED')).toBe(true);
+    expect(
+      (await parcelsOf(intake.id)).filter((parcel) => parcel.state === 'ARRIVED'),
+    ).toHaveLength(2);
   });
 });
 
@@ -707,6 +784,20 @@ describe('what the database holds of an order for every writer', () => {
   const as = staff(ITEMIZE, [HUB_A], randomUUID());
   const insertAs = (intake: Arranged, parcel: Parcel | null, over: Record<string, string> = {}) =>
     asOwner(as, [direct(intake, parcel, as.principalId, over)]);
+
+  // Break caught (the review of 21 November 2026, finding 1): the places of a blind count held by the operation and not by the table, so that a direct insert makes the order that has no place.
+  it('refuses, for the owner too, an order of a blind count for which no place is left, and takes the last one', async () => {
+    const blind = await blindIntake(2);
+    const first = await insertAs(blind, null);
+    expect(first).toBe('ran:1');
+    // The first insert was rolled back with its transaction: put two orders there as the operation does, then try a third as the owner.
+    await orderFor(blind, null);
+    expect(await insertAs(blind, null)).toBe('ran:1');
+    await orderFor(blind, null);
+    expect(await insertAs(blind, null)).toMatch(
+      /^23514:an intake that is counted blind has an order for no more parcels than it received/,
+    );
+  });
 
   // Break caught: a constraint of the table that the owner's own insert slips past: the carrier's cost on a doorstep order, a lane with the wrong mode, serialized goods without a serial, a high-value
   // flag without evidence, no sender, a size class outside the three, a price that is not an object.
@@ -1134,6 +1225,10 @@ describe('the payer correction is held by the database for every writer (S1.39)'
     // Asked under one key and decided under the other, in one transaction: by its own maker it is refused, unless the transaction says the decider is a Platform Admin.
     const id = randomUUID();
     const decide = `update payer_correction set state = 'REJECTED', decided_by = '${maker}', decided_at = now() where id = '${id}'`;
+    /**
+     * `admin` says, as the service used to before the review of 20 November 2026, that the decider is a Platform Admin: **the database no longer believes it** and asks the decider's own bundle
+     * (`melarc.staff_holds_at_tier_p`), so the setting changes nothing.
+     */
     const sequence = async (
       steps: readonly [SecurityContext, string][],
       admin: boolean,
@@ -1168,6 +1263,7 @@ describe('the payer correction is held by the database for every writer (S1.39)'
         false,
       ),
     ).toMatch(/^23514:.*not its requester/);
+    // The setting is no longer believed: a decider who is no Platform Admin is refused whatever the transaction says (the review of 20 November 2026).
     expect(
       await sequence(
         [
@@ -1176,36 +1272,76 @@ describe('the payer correction is held by the database for every writer (S1.39)'
         ],
         true,
       ),
+    ).toMatch(/^23514:.*not its requester/);
+    // A Platform Admin, by the grant of the bundle the database holds for them, decides the correction they asked for, with no setting at all.
+    const boss = await routes.platformAdmin();
+    const bossAsks = staff('pricing.correction.create', 'ALL', boss.identity.id);
+    const bossDecides = staff('pricing.correction.approve', 'ALL', boss.identity.id);
+    const bossId = randomUUID();
+    expect(
+      await sequence(
+        [
+          [bossAsks, insert(bossId, boss.identity.id)],
+          [
+            bossDecides,
+            `update payer_correction set state = 'REJECTED', decided_by = '${boss.identity.id}', decided_at = now() where id = '${bossId}'`,
+          ],
+        ],
+        false,
+      ),
     ).toBe('ran:1');
-    // A fabricated approval moves nothing: the portions of the locked price add up to it, and the state is the gate's, run again from them (the maker's own decision is let through here to reach the order's guard).
+    // An Ops Staff member, whose bundle holds the key of the maker alone, is refused whatever the transaction says; so is a Senior Ops member, who holds the checker's key below tier P.
+    for (const bundle of [BUNDLE_IDS.opsStaff, BUNDLE_IDS.seniorOps]) {
+      const member = await routes.actor(bundle, HUB_A);
+      const memberId = randomUUID();
+      expect(
+        await sequence(
+          [
+            [
+              staff('pricing.correction.create', [HUB_A], member.identity.id),
+              insert(memberId, member.identity.id),
+            ],
+            [
+              staff('pricing.correction.approve', [HUB_A], member.identity.id),
+              `update payer_correction set state = 'REJECTED', decided_by = '${member.identity.id}', decided_at = now() where id = '${memberId}'`,
+            ],
+          ],
+          true,
+        ),
+        bundle,
+      ).toMatch(/^(23514|42501):/);
+    }
+    // A fabricated approval moves nothing: the portions of the locked price add up to it, and the state is the gate's, run again from them (decided by a checker who is not the maker, to reach the order's guard).
     const fabricated = randomUUID();
+    const checker = randomUUID();
+    const checking = staff('pricing.correction.approve', [HUB_A], checker);
     const approval = (allocation: string, state: string): [SecurityContext, string][] => [
       [asking, insert(fabricated, maker)],
       [
-        deciding,
-        `update payer_correction set state = 'APPROVED', decided_by = '${maker}', decided_at = now(), resulting_allocation = '${allocation}'::jsonb, resulting_commercial_state = '${state}' where id = '${fabricated}'`,
+        checking,
+        `update payer_correction set state = 'APPROVED', decided_by = '${checker}', decided_at = now(), resulting_allocation = '${allocation}'::jsonb, resulting_commercial_state = '${state}' where id = '${fabricated}'`,
       ],
       [
-        deciding,
+        checking,
         `update "order" set payer_allocation = '${allocation}'::jsonb, commercial_state = '${state}' where id = '${made.id}'`,
       ],
     ];
     expect(
       await sequence(
         approval('{"sender_minor":100,"recipient_minor":100}', 'PAYMENT_REQUIRED'),
-        true,
+        false,
       ),
     ).toMatch(/^23514:.*add up to it/);
     expect(
       await sequence(
         approval('{"sender_minor":3500,"recipient_minor":0}', 'NO_VENDOR_CHARGE'),
-        true,
+        false,
       ),
     ).toMatch(/^23514:.*gate is re-run/);
     expect(
       await sequence(
         approval('{"sender_minor":3500,"recipient_minor":0}', 'PAYMENT_REQUIRED'),
-        true,
+        false,
       ),
     ).toBe('ran:1');
     // A correction is never removed.
@@ -1245,6 +1381,48 @@ describe('the portions of a frozen price (AC-SLICE-001-65, -66: the gate reads t
       ).toBe(order.locked_price_minor);
     },
   );
+
+  // Break caught: a freeze that reads the request's arrangement without the lock an edit holds (the review of 20 November 2026, finding 2). Asked of the function itself, with an edit in flight on another connection and
+  // nothing of the application between them: the freeze waits for the edit and freezes with the arrangement it leaves.
+  it('makes the freeze wait for an edit of the request that is in flight, and freeze with what the edit leaves', async () => {
+    const intake = await photoIntake(2);
+    const parcels = await parcelsOf(intake.id);
+    const early = await orderFor(intake, present(parcels, 0));
+    expect(early.frozen).toBe(false);
+    rowsOf(await attempt(staff(COUNT), finish(intake.id, true, 2)));
+    const holder = await holdingPickupRequest(routes.database, intake.requestId);
+    const caller = clientFor(routes.database.urlFor('postgres'));
+    await caller.connect();
+    let freezing: Promise<unknown> | undefined;
+    try {
+      await holder.client.query(
+        `update pickup_request set default_payer_intent = 'SENDER_PAYS_FULL' where id = $1`,
+        [intake.requestId],
+      );
+      await caller.query('begin');
+      await caller.query('set local role melarc_owner');
+      for (const [name, value] of toContextSettings(staff(COUNT, [HUB_A], randomUUID()))) {
+        await caller.query('select set_config($1, $2, true)', [name, value]);
+      }
+      freezing = caller.query(freeze(intake.id));
+      await waitUntilBlockedBy(routes.admin, holder.pid, 'the freeze', freezing);
+      await holder.client.query('commit');
+      await freezing;
+      await caller.query('commit');
+    } catch (error) {
+      await holder.client.query('rollback').catch(() => undefined);
+      await caller.query('rollback').catch(() => undefined);
+      await Promise.allSettled([freezing]);
+      throw error;
+    } finally {
+      await holder.client.end();
+      await caller.end();
+    }
+    expect((await orderOf(early.id)).payer_allocation).toMatchObject({
+      sender_minor: 3500,
+      recipient_minor: 0,
+    });
+  });
 
   // Break caught: the request's arrangement used when the order carries its own (a parcel-level override), or the arrangement read when the order was made and not when it was frozen (the vendor edits it until the freeze).
   it('applies the order’s own arrangement over the request’s, and the request’s as it stands at the freeze', async () => {
@@ -1334,12 +1512,14 @@ describe('the first commitment (AC-SLICE-001-56; contract: itemizeOrder)', () =>
     const [first] = await commitmentsOf(made.id);
     expect(first).toBeDefined();
     const at = `where id = '${first?.id ?? ''}'`;
-    // No policy admits an edit or a removal of a commitment, so the owner is shown nothing to change; a writer that the policies do not bind meets the guard.
+    // The policy that admits the amendment of an order that is not confirmed reaches the guard, which keeps the promise of a confirmed order as it was.
     expect(
       await asOwner(staff(ITEMIZE), [
         `update delivery_commitment set committed_date = '2026-12-01' ${at}`,
       ]),
-    ).toBe('ran:0');
+    ).toMatch(
+      /^23514:the promise of an order is rewritten only by the amendment of an order that is not confirmed/,
+    );
     for (const change of [
       `committed_date = '2026-12-01'`,
       `default_date = '2026-12-01'`,
@@ -1402,7 +1582,14 @@ describe('who reads an order, and who writes none', () => {
     const read = (context: SecurityContext) =>
       attempt(context, `select id from "order" where id = '${made.id}'`);
     expect(rowsOf(await read(itemizer))).toHaveLength(1);
-    for (const denied of [staff(COUNT), staff(OSD), staff(READ), staff(ITEMIZE, [HUB_B])]) {
+    // The senior who reverses an arrival reads the order in its own hubs (to hold the version of what it read), and nowhere else; no other key reads it.
+    expect(rowsOf(await read(staff(OSD)))).toHaveLength(1);
+    for (const denied of [
+      staff(COUNT),
+      staff(READ),
+      staff(ITEMIZE, [HUB_B]),
+      staff(OSD, [HUB_B]),
+    ]) {
       expect(rowsOf(await read(denied)), denied.authorizationKey).toHaveLength(0);
     }
     expect(
@@ -1441,5 +1628,45 @@ describe('who reads an order, and who writes none', () => {
       expect(refusal(await attempt(denied, source))[0], denied.authorizationKey).toBe('42501');
     }
     expect(rowsOf(await attempt(staff(ITEMIZE, [HUB_B]), source))).toEqual([]);
+  });
+});
+
+describe('the records of an amendment and of a reversal, for every writer (the review of 19 November 2026)', () => {
+  const amendment = (orderId: string, version: number): string =>
+    `insert into order_amendment (id, order_id, responsible_hub_id, amended_by, order_version, note, before, after)
+     values ('${randomUUID()}', '${orderId}', '${HUB_A}', '${randomUUID()}', ${String(version)}, 'a note', '{}'::jsonb, '{"size_class":"LARGE"}'::jsonb)`;
+
+  // Break caught: a record of an amendment that can be written for an order that is confirmed, so that its edit would have a record to stand beside.
+  it('refuses a record of an amendment for an order that is confirmed, and for a version that was not read', async () => {
+    const intake = await clearedPhotoIntake(1);
+    const made = await orderFor(intake, present(intake.parcels, 0));
+    const confirmed = await asOwner(staff(ITEMIZE), [amendment(made.id, 1)]);
+    expect(confirmed).toMatch(
+      /^23514:an order whose price is frozen is confirmed: it is not amended/,
+    );
+    // An order that waits: a version the officer did not read is refused too.
+    const waiting = await photoIntake(1);
+    const early = await orderFor(waiting, present(waiting.parcels, 0));
+    expect(await asOwner(staff(ITEMIZE), [amendment(early.id, 99)])).toMatch(
+      /^23514:the order has changed since it was read/,
+    );
+    // And no other key writes one.
+    expect(await asOwner(staff(COUNT), [amendment(early.id, 1)])).toMatch(/^(42501|23514):/);
+  });
+
+  // Break caught: a reversal recorded for an order that was never confirmed, or by a key that does not adjudicate.
+  it('refuses a record of a reversal for an order that is not confirmed, and by a key that does not adjudicate', async () => {
+    const waiting = await photoIntake(1);
+    const early = await orderFor(waiting, present(waiting.parcels, 0));
+    const reversal = (orderId: string, parcelId: string, intakeId: string): string =>
+      `insert into order_reversal (id, order_id, intake_parcel_id, pickup_intake_id, responsible_hub_id, reversed_by, order_version, previous_commercial_state, previous_parcel_state, resulting_parcel_state, note)
+       values ('${randomUUID()}', '${orderId}', '${parcelId}', '${intakeId}', '${HUB_A}', '${randomUUID()}', 1, 'PRICED', 'ARRIVED', 'MISSING', 'a note')`;
+    const parcel = present(waiting.parcels, 0);
+    expect(await asOwner(staff(OSD), [reversal(early.id, parcel.id, waiting.id)])).toMatch(
+      /^23514:only a confirmed order that has not been paid for, reserved or dispatched is reversed/,
+    );
+    expect(await asOwner(staff(ITEMIZE), [reversal(early.id, parcel.id, waiting.id)])).toMatch(
+      /^(42501|23514):/,
+    );
   });
 });

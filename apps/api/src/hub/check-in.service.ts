@@ -24,6 +24,7 @@ import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import { noteHubCrossing } from './hub-crossing.js';
 import { hubIntakeEtagMatches } from './hub-intake-etag.js';
 import type { HubIntakePostCountView } from './hub-intake-view.js';
+import { closureTokenOf, closureViewOf, readClosureRow } from './intake-worklist.service.js';
 import { confirmWaitingOrders } from './order-confirmation.js';
 import {
   RECEIVING_INTAKE_COLUMNS,
@@ -78,6 +79,8 @@ export interface CheckedIntake {
 
 /** The body of `closeHubIntake`: nothing, or the approved exception to parity with its reason (S1.38). */
 export interface IntakeCloseBody {
+  /** The `assessment_token` of the closure the officer read: required with the exception, and when given it must be what a close would find now. */
+  readonly reviewed_assessment?: string;
   readonly parity_exception?: { readonly note: string };
 }
 
@@ -587,6 +590,10 @@ export class HubCheckIns {
         );
       }
       acting = held;
+      // A reason is written for what the officer read: the exception is closed against that assessment (the review of 20 November 2026, finding 6). Told after the authority, which is the senior's.
+      if (request.body?.reviewed_assessment === undefined) {
+        throw invalid('/reviewed_assessment', 'required');
+      }
     }
     return this.#options.runner.mutate(acting, correlationId, async (handle) => {
       const tx = transactionOf(handle);
@@ -627,7 +634,34 @@ export class HubCheckIns {
           },
         );
       }
+      // What the officer read is what a close would find now, or the close is refused with what it would find, for the officer to read again. The orders move under the intake's lock and not under its
+      // version (the `ETag` above does not change when an order is added), so the assessment is read here, after the lock, and compared.
+      const given = request.body?.reviewed_assessment;
+      if (given !== undefined) {
+        const assessed = await readClosureRow(tx, id);
+        if (assessed === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+        if (given !== closureTokenOf(id, assessed)) {
+          throw ApiException.of(
+            ErrorCode.StateConflict,
+            'What a close would find is not what was reviewed: the assessment is shown again',
+            { rule: 'assessment_changed', current_assessment: closureViewOf(id, assessed) },
+          );
+        }
+      }
       const received = facts.received ?? 0;
+      // More orders than parcels received is never closed over, with the exception or without it: the exception is for parcels that are missing an order, and an order with no parcel is corrected first (the review of
+      // 21 November 2026, finding 1). The database holds the same for every writer.
+      if (facts.ordered > received) {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'The orders are more than the parcels the hub received: the surplus is corrected before the intake is closed',
+          {
+            rule: 'orders_exceed_received',
+            received_count: received,
+            itemized_count: facts.ordered,
+          },
+        );
+      }
       if (facts.unpriced > 0) {
         throw ApiException.of(
           ErrorCode.OrderUnpriced,

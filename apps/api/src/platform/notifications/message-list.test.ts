@@ -295,6 +295,22 @@ describe('the wording', () => {
     }
   });
 
+  // Break caught (the review of 20 November 2026, finding 1): words that say more than the act that raises them. The same envelope is written by a close with every order and by a close with the
+  // approved exception, so the words say that the hub has finished checking in the pickup and nothing that the second makes untrue (that each parcel has an order, that anything is paid or cleared, that
+  // delivery has begun) and promise no link or summary that the entry cannot lead to.
+  it('says of the completion of an intake that the hub has finished checking in the pickup, and nothing that a close with an exception makes untrue', () => {
+    for (const kind of ['INTAKE_COMPLETED_SENDER', 'INTAKE_COMPLETED_VENDOR_FEED']) {
+      const template = templateOf(kind, messageOfKind(kind)?.templateVersion ?? 0);
+      expect(template, kind).toBeDefined();
+      const words = `${template?.title ?? ''} ${template?.wording ?? ''}`;
+      expect(words, kind).toMatch(/finished checking in pickup \{code\}\./);
+      expect(words, kind).not.toMatch(
+        /\b(orders?|parcels?|listed|delivery|delivered|paid|payment|cleared|summary|link)\b/i,
+      );
+      expect(template?.placeholders, kind).toEqual(['code']);
+    }
+  });
+
   // Break caught: a wording approved in code without the owner's word, or approved words that were edited. The Product Owner approved the first
   // two, exactly as they stand, on 30 October 2026 (OQ-037), the rider's run text on 2 November 2026 (OB-S1-06), and on 12 November 2026 (D-A5) the seven drafts that stood in
   // this file (the skipped stop's feed entry, the two texts of the handshake code, the three entries and the text of a failure, the office's entry for a short count) and, as
@@ -372,11 +388,29 @@ describe('the wording', () => {
         digest: 'c1bfcb12d2a9112df7354269441253bd57b90b095c3ff7ba18087f18b3a86185',
         wording: 'Pickup request {code} for {date} was counted {n} over the booking ({reason}).',
       },
+      // OB-S1-153, approved by the Product Owner on 22 November 2026 for exactly these words and this title: the completion of an intake, which says that the hub has finished checking in the pickup and nothing a
+      // close with the exception makes untrue (the digest is that of kind, version, title, wording and placeholders).
+      'INTAKE_COMPLETED_SENDER@2': {
+        on: '2026-11-22',
+        digest: '1729bee0dab85c55d527c17b6caf141d7a17e72a74f4f30e2398a965af7e5b3f',
+        wording: 'Melarc: our hub has finished checking in pickup {code}.',
+      },
+      'INTAKE_COMPLETED_VENDOR_FEED@2': {
+        on: '2026-11-22',
+        digest: '930ab9ac820171dd78ffea2906ed0c402c91e4fbc9b09d953ac231a608699cd6',
+        wording: 'Our hub has finished checking in pickup {code}.',
+      },
     };
     const approved = TEMPLATES.filter(isApproved);
     expect(approved.map(keyOfTemplate).toSorted()).toEqual(Object.keys(APPROVED).toSorted());
-    // No template is left a draft: every wording of the list is one the Product Owner has approved.
-    expect(TEMPLATES.filter((template) => !isApproved(template))).toEqual([]);
+    // The only drafts are the first words of the completion of an intake (version 1, superseded by the words of 20 November 2026 and never approved: they said that each parcel was listed for delivery, which a close
+    // with the exception does not say). They stay so that a notification recorded under version 1 reads back as it was said; the lane holds an unapproved wording back, a text and a feed entry alike. Every other
+    // wording of the list is one the Product Owner has approved.
+    expect(
+      TEMPLATES.filter((template) => !isApproved(template))
+        .map(keyOfTemplate)
+        .toSorted(),
+    ).toEqual(['INTAKE_COMPLETED_SENDER@1', 'INTAKE_COMPLETED_VENDOR_FEED@1']);
     for (const template of approved) {
       const held = APPROVED[keyOfTemplate(template)];
       expect(template.approvedBy, template.kind).toBe('Mathias Elorm, Product Owner');

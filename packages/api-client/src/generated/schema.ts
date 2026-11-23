@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.113.0
- *   SHA-256 dc665eb642ff1c1a7c646461e01f098699d27ec31f06dca18db58689a454e61b (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.118.0
+ *   SHA-256 059d7b348de1583442821af9ddeaf0850bc5c118140248cd49c4f00b0b8897f6 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1703,7 +1703,9 @@ export interface paths {
          *     typed), its variance and its difference against the **expected** number (the door photos), the officer and the moment, and **the System moves the
          *     intake**: to `READY_FOR_ITEMIZATION` only when no parcel is missing, no extra stands, no condition other than `OK` was found and the rider's
          *     declaration is above zero; to `RECONCILIATION_REQUIRED` otherwise, **a missing parcel and an extra of equal number included**
-         *     (state-machines.md section 7). `hub.intake.counted` is written once, and `hub.osd.opened` when a case opens.
+         *     (state-machines.md section 7). **An intake that is cleared and whose finish confirms an order that was made before its parcel arrived goes on to
+         *     `ITEMIZING` in the same act** (5.115.0, OB-S1-142: the state says what the work is; an intake in reconciliation stays there). `hub.intake.counted` is
+         *     written once, and `hub.osd.opened` when a case opens.
          *
          *     A vendor is finished once: another finish, with another key, of a vendor that is finished is `STATE_CONFLICT` (`check_in_finished`); a stale
          *     `ETag`, or none, is `STATE_CONFLICT` (`stale`); itemizing begun is `itemization_started`. The same key with another body is
@@ -1849,8 +1851,87 @@ export interface paths {
          *     only once the intake is `CLOSED` (`intake.completed`, 23.10); before that it is answered as one
          *     that does not exist. **Field-filtered by construction**: the schema carries no blind count, no
          *     declaration, no discrepancy, no evidence and no adjudication (22.9), so no code path can leak one.
+         *
+         *     **5.118.0 (the Product Owner's decision of 22 November 2026, OB-S1-155).** The summary is the operational read of
+         *     `pickup.read`; **the money needs the grant of the money.** The owning vendor reads the prices of its own orders as
+         *     always. **Staff are shown a `locked_price` only where their own `pricing.read` grant also reaches the intake's hub**:
+         *     for any other staff reader the member is left out of every order, on the server. A `locked_price` of zero is a price
+         *     that is zero; an absent member means that the reader's grants do not show prices.
          */
         get: operations["getIntakeSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub-intake-exceptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The intakes closed with the approved exception that still have work left
+         * @description **5.116.0 (the external review of 20 November 2026, OB-S1-151).** Permission `hub.intake.close_exception` (the senior
+         *     who may close with the exception), **hub-scoped**: the hubs of the session's grant, for staff of the Ops Portal alone.
+         *     A routine close is final and an exception close is final too, but **the work it left behind must be found again**, by
+         *     another officer, after a reload or on the next shift. This is the queue: the intakes that were closed with the approved
+         *     exception and **still have received parcels without an order**, newest close first, each with what the hub received, how
+         *     many orders stand for those parcels, `outstanding_count`, the reason that was given, who closed it and when. What is
+         *     left is counted now, so an intake with nothing left is not in the queue. A page follows another by `next_page_token`.
+         *     **Nothing here resolves the work**: the reopen of a closed intake, the report of a parcel found after the close and the
+         *     adjustment of an order that payment or dispatch made irreversible are not built (OB-S1-151). A hub that is not the
+         *     caller's own is audited without contents, as every staff read is.
+         */
+        get: operations["listClosedIntakeExceptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub-intakes/{id}/closure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * What closing this intake would find
+         * @description **5.114.0.** Permission `hub.intake.close`, **hub-scoped**, for staff of the Ops Portal alone. Read before
+         *     `closeHubIntake`, the act that cannot be taken back: what the hub received (`received`), how many orders
+         *     stand for those parcels (`ordered`: an order of a parcel that is missing or taken back stands for nothing),
+         *     how many have no locked price (`unpriced`), how many wait for payment (`payment_required`), the parcels
+         *     that are missing, and **the received parcels that still have no order, named** (`outstanding_parcels`, at
+         *     most 100, with `outstanding_count` the whole number: a blind-count intake has a count and no parcels to name).
+         *
+         *     `can_close` is true when the intake can be closed now with no exception; `needs_exception` when only the
+         *     approved exception (`hub.intake.close_exception`, a reason in words) can close it, because the orders are
+         *     not as many as the parcels received; `blockers` names what stops a close by rule (`intake_not_ready`,
+         *     `order_unpriced`). **`payment_still_required` says that closing an intake is not payment clearance and not a
+         *     dispatch authorization**: an order that waits for payment stays blocked from dispatch after the close.
+         *     The database repeats every rule when it closes; this read is a view of the facts the act will judge, and
+         *     is not a reservation of them. For a closed intake it answers the facts as they stood at the close
+         *     (`closed_at`, and the reason of an exception, `parity_exception_note`).
+         *
+         *     **5.116.0 (the external review of 20 November 2026, finding 6).** `received` and `outstanding_count` are `null`
+         *     for an intake counted blind whose count is not committed. The hundred parcels named are **a display limit**:
+         *     every outstanding parcel is reached through `listIntakeOrders` with `view=needs_order`, a page at a time.
+         *     **`assessment_token` is the digest of what this assessment found, with the identity of every outstanding parcel**,
+         *     and `closeHubIntake` takes it as `reviewed_assessment`: the reason of the approved exception is closed against
+         *     what the senior read.
+         */
+        get: operations["getIntakeClosure"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1869,7 +1950,39 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * The parcel worklist of an intake, with the counts of the whole intake
+         * @description **5.114.0 (the external review of 19 November 2026, OB-S1-147).** Permission `hub.read`, **hub-scoped**, for
+         *     staff of the Ops Portal alone. A screen that shows which parcels have an order, and what is left to do,
+         *     reads this and nothing it has to remember: after a reload, on another device or after an interruption it
+         *     finds the same truth.
+         *
+         *     `progress` is **the counts of the whole intake, never of the page** (a page of 20 is no evidence of how many
+         *     orders an intake holds): `received` (parcels the hub accepted), `awaiting_arrival` (parcels still expected),
+         *     `needs_order` (received parcels with no order), `prepared` (orders whose price is not yet frozen: an order
+         *     made before its parcel's arrival is committed), `itemized` (received parcels whose order is frozen),
+         *     `payment_required` (orders whose commercial gate is `PAYMENT_REQUIRED`), `missing` and `orders`.
+         *
+         *     `items` is a page of one row for each parcel that is not void (an intake checked in against door photos) or
+         *     for each order (an intake counted blind: `parcel` is `null`), in the order of the parcels (`ordinal`), each
+         *     with the order made for it (`order`, `null` until one is) and **`work_state`**: `NEEDS_ORDER` (arrived, no
+         *     order), `AWAITING_ARRIVAL` (expected, no order), `PREPARED` (an order whose price is not frozen), `ITEMIZED`
+         *     (an order whose price is frozen) or `MISSING`. `view` filters by it (`payment_required` filters by the gate).
+         *     **A row carries no price, no portion of one and no phone number**: `hub.read` does not open the money, which
+         *     is `getOrder`'s under `pricing.read`; `payment_required` and `commercial_state` say only where the order
+         *     stands. The counts and the page are one snapshot. A `view` that is not one, a `page_size` out of range and
+         *     a `page_token` that is not one are `VALIDATION_FAILED`. An authorised read of another hub's intake is
+         *     audited without contents, as every staff read is.
+         *
+         *     **5.116.0 (the external review of 20 November 2026, finding 5).** **Each count of `progress` is the number of
+         *     rows the `view` of its name opens.** `awaiting_arrival` opens every parcel still expected, with an order made
+         *     early or without (a parcel with one is also in `prepared`, so the counts of an arrival and of the work are two
+         *     views of the parcels and not one partition); `payment_required` leaves out a parcel that is missing. `received` and
+         *     `needs_order` are `null` for an intake counted blind whose count is not committed: nothing is known to have been
+         *     received, which is not zero, and a screen says that the count is awaited. The pages follow one another for any
+         *     number of parcels: there is no cap on a package or a photo.
+         */
+        get: operations["listIntakeOrders"];
         put?: never;
         /**
          * Itemize one order from an intake
@@ -1946,8 +2059,90 @@ export interface paths {
          *     custody passed cannot be read from the stop's collection) and `EVIDENCE_NOT_STORED`. The credit gate's
          *     codes (`ACCOUNT_OVERDUE`, `ALLOWANCE_DISABLED`, `CREDIT_LIMIT_EXCEEDED`) and `ORDER_UNPRICED` are not
          *     declared here: they are the gate's (S1.37, D-12) and the close's (S1.38), declared by the task that raises them.
+         *
+         *     **5.116.0 (the external review of 20 November 2026).** An order is made only on terms the officer was shown. The
+         *     body carries **`reviewed_terms`**, the `terms_token` of the `previewOrder` the officer read (absent: `VALIDATION_FAILED`,
+         *     rule `required`). The server calculates the terms again **in the transaction that makes the order, under the lock on the
+         *     request's payer arrangement that the freeze takes** (so that a payer edit and the first freeze meet one after the other),
+         *     and compares: a rate, a payer arrangement, a promise, a high-value status or a piece of evidence that is not what the
+         *     preview said is `STATE_CONFLICT`, rule `terms_changed`, with `details.current_terms` (the answer of a preview) for the
+         *     officer to read and confirm again, and nothing is made. It is judged after the price and the evidence and before anything
+         *     is written.
+         *
+         *     **5.117.0 (the third external review of 21 November 2026).** The terms are of **the records the order cites, by
+         *     identity** (`OrderPreview.cited_evidence`), not of the fact that they are valid. They are judged on the hub's rates, zones
+         *     and aliases **as they are once the save holds the intake** (a configuration that moved while the save waited is read
+         *     again, and a rate that moved is `terms_changed`). **An order of a blind-count intake has a place only while the orders
+         *     that stand are fewer than the parcels received**: otherwise `STATE_CONFLICT`, rule `orders_exceed_received`, here and in
+         *     `previewOrder` (the screen offers "Create order" against the remaining quantity, `received` less `ordered`).
+         *
+         *     **5.118.0 (the fourth external review of 22 November 2026, finding 5; OB-S1-163).** The terms are judged on **the
+         *     configuration in force at the moment the save holds both its locks**, the intake first and then the request's payer
+         *     arrangement: the version in force of each of the hub's settings (a version that took effect while the save waited
+         *     counts, though nothing stored changed), the hub's zones and aliases, and the company-wide rules the price reads (the
+         *     declaration threshold among them). A configuration that moved meanwhile is read again and the save is made again, up
+         *     to three times: a rate that moved is `STATE_CONFLICT`, rule `terms_changed`, with `details.current_terms` (the figure
+         *     shown is the new one) for the officer to read and confirm again, and a rule that now refuses the order refuses it with
+         *     its own code (`VALUE_DECLARATION_REQUIRED`, for one). **If the configuration will not hold still** (three changes in the
+         *     milliseconds of one save) the answer is `STATE_CONFLICT`, rule `configuration_changing`, with nothing made and nothing
+         *     recorded: the screen keeps the form and offers a new preview, and a retry under the same `Idempotency-Key` begins
+         *     afresh. An early order keeps its protected quote (`quote_policy: PROTECTED_UNTIL_AMENDED`) until an amendment
+         *     explicitly recalculates it.
          */
         post: operations["itemizeOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hub-intakes/{id}/orders/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What confirming an order would give, calculated by the server and written nowhere
+         * @description **5.115.0 (the external review of 19 November 2026, step 3 of the officer's flow).** Permission
+         *     `hub.intake.itemize`, **hub-scoped**, for staff of the Ops Portal alone. The body is exactly that of
+         *     `itemizeOrder`; the answer is what that order would be, **and nothing is written** (no order, no
+         *     commitment, no record, no `Idempotency-Key`, no `If-Match`; only the audit of a read of another hub's
+         *     intake). The browser never calculates a price: this is how an officer sees it before the act that freezes it.
+         *
+         *     It judges the body and the states exactly as `itemizeOrder` does, so a preview that is answered is an
+         *     order that would be made, and every refusal an officer would meet (the size class, the declaration, the
+         *     destination, the date, the fee, the evidence, a parcel that has an order already or is missing) is met
+         *     here first, with the same code and rule. It answers `price` (the total and each component), whether the
+         *     parcel is high value and **the surcharge it adds**, how the destination resolves, **the promise** (the
+         *     default date, the date asked for, the date committed and the window), **who pays each amount**
+         *     (`payer`: the sender's portion and the recipient's in actual amounts, from the order's own arrangement or
+         *     the request's, and the state the commercial gate would take the order to), and **when the order would be
+         *     confirmed**: `ON_CONFIRMATION` for a parcel that has arrived or an intake counted blind, `WHEN_ARRIVAL_IS_COMMITTED`
+         *     for a parcel that is still expected, whose calculated price is then kept as it was calculated whatever the
+         *     rates become meanwhile (`quote_policy: PROTECTED_UNTIL_AMENDED`; `amendOrder` is the explicit refresh).
+         *     **5.116.0.** The preview also judges the evidence the order cites as the database will (`EVIDENCE_NOT_STORED`;
+         *     `validation.evidence` is `VERIFIED` or `NONE_CITED`), says what it is (`status: CURRENT_PREVIEW`, beside an early quote
+         *     and a frozen price) and answers **`terms_token`**, the digest of the terms. A preview is of one moment: the order that is
+         *     made later is calculated again, and when its terms are not those of the token the save is refused (`itemizeOrder`,
+         *     `STATE_CONFLICT`, rule `terms_changed`). A parcel that already has an order is previewed with `previewOrderAmendment`
+         *     (here it is `parcel_ordered`).
+         *
+         *     **5.118.0 (the screens of S1.40; a description only).** A refusal for an address that matches more than one zone
+         *     (`VALIDATION_FAILED`, rule `destination_zone_ambiguous`, at `/recipient/location`) names the zones it matched in
+         *     `details.candidates`, an array of `{ zone_id, name }` (the hub's own zones, by identifier and display name and
+         *     nothing else), so that the officer can choose one and say why (`destination_zone_authorization`). An address that
+         *     matches no zone (`SETTING_MISSING`, rule `destination_zone_unresolved`) names none: the officer is asked to add the
+         *     area or a landmark to the address. `itemizeOrder`, `previewOrderAmendment` and `amendOrder` judge the zone as
+         *     this does and answer these refusals with the same details.
+         */
+        post: operations["previewOrder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1971,10 +2166,147 @@ export interface paths {
          *     its inputs: `recipient`, `serial_imei`, `size_class_selected_by` and `carrier_cost` are absent for
          *     a vendor session, and another vendor's order is answered as one that does not exist (37.6).
          *     The authoritative price is shown visibly distinct from the booking estimate (AC-SLICE-001-56).
+         *
+         *     **5.116.0.** The read is **one snapshot**: the order, its history and its `ETag` are one moment, so that an
+         *     amendment or a reversal that commits while it is read is never shown as the history of an order that does not
+         *     have it yet. An order whose arrival was reversed is the hub's history of its own mistake: **a vendor's read of it
+         *     is one that does not exist** (as the vendor's summary of the closed intake leaves it out), and the staff's shows
+         *     `commercial_state: REVERSED` and the reversal. `price_status` says what the price is: `EARLY_QUOTE` (calculated
+         *     when the order was made, and kept as calculated until the order is amended or confirmed) or `FROZEN`.
          */
         get: operations["getOrder"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Correct an order that is not yet confirmed
+         * @description **5.115.0 (the external review of 19 November 2026, findings B and C).** Permission `hub.intake.itemize`,
+         *     **hub-scoped**, for staff of the Ops Portal alone. **An order is prepared before it is confirmed**: while its
+         *     price is not frozen (an order that waits for its parcel, `commercial_state: null`), an officer corrects
+         *     what was transcribed - the recipient, the size class, the carrier's cost, the declared value, the serial,
+         *     the requested date, the authorization of a destination, the evidence, the lane, **and the payer
+         *     arrangement of this one order** (`payer_override`; `null` returns it to the request's) - on the version of
+         *     the order that was read (`If-Match`, the `ETag` of `getOrder`: `STATE_CONFLICT`, rule `stale`), with **a
+         *     reason in words** (`note`, a blank one is `REASON_REQUIRED`). A member that is not named is kept; `null`
+         *     clears one that may be empty.
+         *
+         *     **The server recalculates the price, the zone and the promise from the corrected facts** and writes them
+         *     with the change: the body carries none of them (the amendment is the explicit refresh of a calculated
+         *     price, which is otherwise kept as it was calculated until the order is confirmed). Every refusal of
+         *     `itemizeOrder` is met here with its code and rule, and an amendment that changes nothing is
+         *     `VALIDATION_FAILED`, rule `no_change`.
+         *
+         *     **A confirmed order is never edited here** (`STATE_CONFLICT`, rule `order_confirmed`): its payer
+         *     arrangement is a correction (`requestPayerCorrection`), and a mistaken arrival is a reversal
+         *     (`reverseOrderArrival`). Nor is an order of a closed intake (`intake_closed`) or of a parcel that is
+         *     missing (`parcel_missing`) or taken back (`parcel_void`). **The edit and the freeze take the same row
+         *     lock** and the edit judges the freeze after it holds it, so they cannot disagree about which price or
+         *     payer arrangement won. The change is recorded with what it was and what it became (the members, in
+         *     `amendments` of `getOrder`) and in the enhanced event `order.amendment.recorded`. A retry under the same
+         *     `Idempotency-Key` makes nothing twice. The answer is the order as it now stands, with the `ETag` that
+         *     `getOrder` gives of it.
+         *
+         *     **5.116.0 (the external review of 20 November 2026).** The amendment is previewed with `previewOrderAmendment`
+         *     and saved with its `terms_token` as `reviewed_terms`, as an order is (`STATE_CONFLICT`, rule `terms_changed`, with
+         *     `details.current_terms`; absent: `VALIDATION_FAILED`, rule `required`, as is `note`). **The status that a declared
+         *     value gives is recomputed whenever the declaration changes, and the officer's own flag (`is_high_value_manual`) is
+         *     kept apart from it**: lowering a declaration below the band leaves the parcel high-value only if the officer flagged
+         *     it, and an officer's flag is withdrawn with `is_high_value: false`. **The choice of a zone belongs to the address it
+         *     was made for**: an amendment that changes the address resolves it afresh and asks for a new choice
+         *     (`SETTING_MISSING`, rule `destination_zone_unresolved`, or `VALIDATION_FAILED`, rule `destination_zone_ambiguous`) only
+         *     where the server cannot place it, and a choice is never kept against an address that the server places itself.
+         *
+         *     **5.117.0 (the third external review of 21 November 2026).** **An amendment confirms nothing**: the order stays an early
+         *     quote (`Order.price_status`) until the act that commits the arrival (`finishCheckIn`, a found parcel, a count
+         *     correction) confirms it, which is what the preview says (`will_confirm: WHEN_ARRIVAL_IS_COMMITTED`), while the parcel
+         *     is expected, tapped or untapped. The intake is held **before** the order is read, the rates and the payer arrangement are
+         *     those of the moment the save holds its locks, and the amendment holds the request's payer as the save of an order does. The
+         *     body names what the evidence is by identity in the terms (`cited_evidence`).
+         *
+         *     **5.118.0 (the fourth external review of 22 November 2026, finding 5; OB-S1-163).** The amendment is judged as
+         *     `itemizeOrder` is: on the configuration in force once the save holds the intake **and the request's payer arrangement**
+         *     (the settings in force at that moment, the zones, the aliases and the company-wide rules), read again and the save made
+         *     again when it moved. A rate that moved is `STATE_CONFLICT`, rule `terms_changed`, with `details.current_terms`; a
+         *     configuration that will not hold still is `STATE_CONFLICT`, rule `configuration_changing`, with nothing changed, and the
+         *     screen keeps the form and the reason typed and offers a new preview. The order keeps the quote it holds until an
+         *     amendment succeeds.
+         */
+        patch: operations["amendOrder"];
+        trace?: never;
+    };
+    "/orders/{id}/amendment-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What an amendment of an order that is not yet confirmed would give, calculated by the server and written nowhere
+         * @description **5.116.0 (the external review of 20 November 2026, finding 3).** Permission `hub.intake.itemize`,
+         *     **hub-scoped**, for staff of the Ops Portal alone. The body is that of `amendOrder` without the reason (`note` and
+         *     `reviewed_terms` are the save's): a patch of what was transcribed, in which a member that is not named is kept
+         *     and `null` clears one that may be empty. The answer is what the order would be if it were amended so, **and
+         *     nothing is written** (no record, no version, no `Idempotency-Key`, no `If-Match`; only the audit of a read of
+         *     another hub's order).
+         *
+         *     It judges the order and the patch exactly as `amendOrder` does, so every refusal an officer would meet (an
+         *     order that is confirmed, `order_confirmed`; an intake that is closed; a parcel that is missing or taken back;
+         *     the size class, the declaration, the destination, the date, the fee, the evidence) is met here first, with the
+         *     same code and rule. It answers what `previewOrder` answers of an order that is not made yet, **with the early quote
+         *     the order holds now** (`current`) beside it, `order_id` and the `order_version` it was made on, and
+         *     **`terms_token`**, which `amendOrder` takes as `reviewed_terms`. The prices of an early quote, of a preview and of
+         *     a frozen price are three different things (`Order.price_status`, `OrderPreview.status`).
+         */
+        post: operations["previewOrderAmendment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orders/{id}/arrival-reversal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A senior officer takes back the arrival of a parcel whose order is confirmed
+         * @description **5.115.0 (the external review of 19 November 2026, finding E).** Permission `hub.osd.adjudicate`: a
+         *     senior officer and the Platform Admin, never Ops Staff; **hub-scoped**, for staff of the Ops Portal alone.
+         *     **A mistaken arrival is corrected, never erased.** An officer finishes a check-in with the wrong parcel
+         *     marked present, the price freezes, and a senior discovers the parcel is not there: the order **keeps its
+         *     locked price, its portions and its trail** and moves to `REVERSED`; the parcel moves to `MISSING` (a door
+         *     parcel) or `VOID` (an extra), so that it is searched for as any missing parcel is; the intake's count is
+         *     recomputed from its parcels and **the intake goes back to `RECONCILIATION_REQUIRED`**, even from
+         *     `ITEMIZING`. A parcel that is found again is ordered afresh (one order for a parcel that stands).
+         *
+         *     **A reason in words is mandatory** (`note`; blank is `REASON_REQUIRED`), on the version of the order that
+         *     was read (`If-Match`, the `ETag` of `getOrder`: rule `stale`), with an `Idempotency-Key`. **Only while
+         *     nothing downstream has happened** (`STATE_CONFLICT`, each rule named): the order is confirmed
+         *     (`order_not_confirmed`: an unconfirmed order is amended) and still `PRICED`, `NO_VENDOR_CHARGE` or
+         *     `PAYMENT_REQUIRED` (`order_progressed`: never paid for or reserved; `order_dispatched`), it is not already
+         *     reversed (`already_reversed`), has no payer correction waiting (`correction_open`), and its intake is not
+         *     closed (`intake_closed`) or counted blind (`blind_count_intake`, which has no parcel to take back).
+         *     The database holds all of it for every writer: the record of the reversal must stand beside the move of
+         *     the order, of the parcel and of the intake, whose guards refuse each of the three without it. The event
+         *     `order.arrival.reversed` is enhanced and records the states before and after.
+         */
+        post: operations["reverseOrderArrival"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2002,6 +2334,62 @@ export interface paths {
          *     `STATE_CONFLICT`.
          */
         post: operations["requestPayerCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/payer-corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The payer corrections of the hubs of the grant
+         * @description **5.114.0 (the external review of 19 November 2026, finding A).** `pricing.correction.create` (every
+         *     bundle that holds `pricing.correction.approve` holds it too, so the maker and the checker both read),
+         *     **hub-scoped**, for staff of the Ops Portal alone. The checker's queue and every order's history, so that
+         *     a correction can be opened, examined and decided after a reload or on another device. `state` is
+         *     `REQUESTED` (the default: the queue, oldest first), `APPROVED`, `REJECTED` or `all`; `order_id` asks for
+         *     the corrections of one order; `hub_id` narrows and never widens, and a hub outside the caller's grant
+         *     matches nothing. Each item is the same `PayerCorrection` the detail read answers.
+         */
+        get: operations["listPayerCorrections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/payer-corrections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read one payer correction, with its ETag
+         * @description **5.114.0.** The read that returns the correction's `ETag`, which `approvePayerCorrection` takes as
+         *     `If-Match`. It shows what a checker decides on: the order (`order_code`), **its unchanged total**
+         *     (`total`), the allocation it has (`previous_allocation`), **the proposal in actual amounts**
+         *     (`proposed_allocation`: never a percentage the reader must work out), the commercial state the order
+         *     would reach (`proposed_commercial_state`), who asked and why (`requested_by`, `requested_by_name`,
+         *     `note`), and, once decided, who decided and **what was approved** (`approved_by`, `resulting_allocation`,
+         *     `resulting_commercial_state`), so that the history is complete and the browser never rebuilds it from
+         *     today's order.
+         */
+        get: operations["getPayerCorrection"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2076,6 +2464,29 @@ export interface paths {
          *     orders were all made early is still `READY_FOR_ITEMIZATION` and is closed through `ITEMIZING` in the same
          *     change. The event is `hub.intake.closed` or the enhanced `hub.intake.closed_exception`; the vendor reads
          *     the summary with `getIntakeSummary`.
+         *
+         *     **5.116.0 (the external review of 20 November 2026, finding 6).** The approved exception is closed **against what
+         *     the senior read**: the body carries `reviewed_assessment`, the `assessment_token` of `getIntakeClosure` (required
+         *     with `parity_exception`: `VALIDATION_FAILED`, rule `required`; optional for a close that has parity, and judged when
+         *     given). It is compared with what a close would find once the intake's lock is held, **with the identity of every
+         *     outstanding parcel**: an order added, a parcel found, a count corrected or an outstanding parcel replaced by another is
+         *     `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`, and the senior reads it and writes the
+         *     reason again. The `ETag` of the intake does not move when an order is added, which is why the token exists. A close
+         *     with every order and a close with the exception write the same envelope `intake.completed`, whose message says only that the
+         *     hub has finished checking in the pickup.
+         *
+         *     **5.117.0 (the third external review of 21 November 2026).** Three answers a screen meets besides parity. (1)
+         *     `STATE_CONFLICT`, rule `orders_exceed_received` (with `details.received_count` and `details.itemized_count`), when the
+         *     orders are more than the parcels the hub received (a blind count with a surplus): **with the exception or without it**,
+         *     because the exception is for parcels that are missing an order and an order with no parcel is corrected first;
+         *     `getIntakeClosure` says so beforehand (`excess_count`, the blocker `orders_exceed_received`). (2) `STATE_CONFLICT`,
+         *     rule `stale`: **the intake's own version is judged before the assessment**, so a senior who read both and finds that
+         *     the intake changed in both (another officer closed it, or an arrival was reversed) is told `stale` and is given no
+         *     replacement assessment: the screen reads `getHubIntake` and `getIntakeClosure` again, keeps the typed reason as a
+         *     draft and asks the senior to confirm the revised figures; an intake that another officer closed reads as `CLOSED`,
+         *     with `closed_at` and `parity_exception_note` in the closure. (3) `assessment_changed`, with
+         *     `details.current_assessment`, is the answer when the version is current and the assessment is not. The body is a close
+         *     that has parity or the exception with its token (`IntakeClose`).
          */
         post: operations["closeHubIntake"];
         delete?: never;
@@ -9858,9 +10269,17 @@ export interface components {
             sender_minor: number;
             recipient_minor: number;
         };
-        IntakeClose: {
+        /** @description The body of `closeHubIntake` (5.117.0): **a close that has parity, or the approved exception to it**. A close with parity takes nothing, or the `assessment_token` the officer read (judged when it is given). The exception takes the reason in words **and** the `assessment_token` of the closure it is written for. */
+        IntakeClose: components["schemas"]["IntakeCloseWithParity"] | components["schemas"]["IntakeCloseWithException"];
+        IntakeCloseWithParity: {
+            /** @description The `assessment_token` of the `getIntakeClosure` the officer read. Optional; when it is given it must be what a close would find now (`STATE_CONFLICT`, rule `assessment_changed`). */
+            reviewed_assessment?: string;
+        };
+        IntakeCloseWithException: {
+            /** @description The `assessment_token` of the `getIntakeClosure` the senior read, which the reason is written for. When it is not what a close would find now the close is refused, `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`. */
+            reviewed_assessment: string;
             /** @description Present only to close without parity (23.10, 35.5.5). The caller must hold hub.intake.close_exception; one who holds only hub.intake.close is refused INSUFFICIENT_AUTHORITY, because the key is held and the tier is not. */
-            parity_exception?: {
+            parity_exception: {
                 /** @description A substantive reason; blank is REASON_REQUIRED. */
                 note: string;
             };
@@ -9909,7 +10328,7 @@ export interface components {
             decision: "APPROVE" | "REJECT";
             note?: string;
         };
-        /** @description The maker-checker record of a payer correction after the price froze (23.5, 35.6.7). The locked price is never rewritten; approval re-evaluates the commercial gate from the new allocation. */
+        /** @description The maker-checker record of a payer correction after the price froze (23.5, 35.6.7). The locked price is never rewritten; approval re-evaluates the commercial gate from the new allocation. 5.114.0 adds what a checker decides on and the history it leaves: the order's code and unchanged `total`, **the proposal in actual amounts** (`proposed_allocation`), the state it would reach, the names of the officers, and the `resulting_allocation` an approval wrote. */
         PayerCorrection: {
             /** Format: uuid */
             id: string;
@@ -9923,6 +10342,8 @@ export interface components {
             approved_by?: string | null;
             previous_allocation: components["schemas"]["PayerAllocation"];
             proposed: components["schemas"]["PayerAllocationInput"];
+            /** @description What the approval wrote to the order, in actual amounts; null until approved and for a rejection (5.114.0). */
+            resulting_allocation?: components["schemas"]["PayerAllocation"] | null;
             /** @description The commercial state the re-run gate gave the order; null until approved. */
             resulting_commercial_state?: string | null;
             note?: string;
@@ -9930,6 +10351,139 @@ export interface components {
             created_at?: string;
             /** Format: date-time */
             decided_at?: string | null;
+            /** @description The order the correction is for (5.114.0). */
+            order_code?: string;
+            total?: components["schemas"]["Money"];
+            proposed_allocation?: components["schemas"]["PayerAllocation"];
+            /**
+             * @description The commercial state the order reaches if the proposal is approved (zero is tested first).
+             * @enum {string}
+             */
+            proposed_commercial_state?: "NO_VENDOR_CHARGE" | "PAYMENT_REQUIRED";
+            order_commercial_state?: string | null;
+            requested_by_name?: string | null;
+            approved_by_name?: string | null;
+        };
+        PayerCorrectionPage: {
+            items: components["schemas"]["PayerCorrection"][];
+            next_page_token: string | null;
+        };
+        /** @description The counts of the whole intake, never of a page (5.114.0). */
+        IntakeProgress: {
+            /** @description Null for an intake counted blind whose count is not committed (5.116.0): nothing is known to have been received, which is not zero. */
+            received: number | null;
+            awaiting_arrival: number;
+            needs_order: number | null;
+            prepared: number;
+            itemized: number;
+            payment_required: number;
+            missing: number;
+            orders: number;
+        };
+        /** @description The parcel worklist of an intake with the counts of the whole intake beside the page (5.114.0). No price, no portion of a price and no phone number: `hub.read` does not open the money. */
+        IntakeOrderList: {
+            /** Format: uuid */
+            intake_id: string;
+            intake_state: string;
+            /** @enum {string} */
+            receiving_mode: "PHOTO_CHECK_IN" | "BLIND_COUNT";
+            progress: components["schemas"]["IntakeProgress"];
+            items: {
+                /** @enum {string} */
+                work_state: "NEEDS_ORDER" | "AWAITING_ARRIVAL" | "PREPARED" | "ITEMIZED" | "MISSING";
+                /** @description The order of this parcel whose arrival was reversed, kept as history; the parcel may stand with another order now (5.115.0). */
+                reversed_order: {
+                    /** Format: uuid */
+                    id: string;
+                    code: string;
+                } | null;
+                parcel: {
+                    /** Format: uuid */
+                    id: string;
+                    ordinal: number;
+                    /** @enum {string} */
+                    origin: "DOOR_PHOTO" | "HUB_EXTRA";
+                    /** @enum {string} */
+                    state: "EXPECTED" | "ARRIVED" | "MISSING" | "VOID";
+                    /** Format: uuid */
+                    door_photo_evidence_id?: string | null;
+                    /** Format: uuid */
+                    hub_photo_evidence_id?: string | null;
+                } | null;
+                order: {
+                    /** Format: uuid */
+                    id: string;
+                    code: string;
+                    recipient_name?: string | null;
+                    service_area?: string | null;
+                    /** @enum {string} */
+                    size_class: "SMALL" | "MEDIUM" | "LARGE";
+                    commercial_state?: string | null;
+                    confirmed: boolean;
+                    payment_required: boolean;
+                } | null;
+            }[];
+            next_page_token: string | null;
+        };
+        /** @description What closing an intake would find (5.114.0): the facts the close judges, the received parcels that still have no order (named), and the statement that closing is not payment clearance and not a dispatch authorization. */
+        IntakeClosureAssessment: {
+            /** Format: uuid */
+            intake_id: string;
+            intake_state: string;
+            /** @enum {string} */
+            receiving_mode: "PHOTO_CHECK_IN" | "BLIND_COUNT";
+            /** @description Null for an intake counted blind whose count is not committed (5.116.0). */
+            received: number | null;
+            ordered: number;
+            unpriced: number;
+            payment_required: number;
+            missing: number;
+            outstanding_count: number | null;
+            /** @description The orders there are beyond the parcels the hub received (a blind count with more orders than its count; always 0 for a photo intake). **Never closed over, with the exception or without it** (5.117.0): the surplus is corrected first, and the close is `STATE_CONFLICT`, rule `orders_exceed_received`. */
+            excess_count: number;
+            /** @description The digest of what this assessment found, with the identity of every outstanding parcel (not only the first hundred): the approved exception is closed against it (`closeHubIntake`, `reviewed_assessment`). */
+            assessment_token: string;
+            outstanding_parcels: {
+                /** Format: uuid */
+                parcel_id: string;
+                ordinal: number;
+                /** @enum {string} */
+                origin: "DOOR_PHOTO" | "HUB_EXTRA";
+                /** Format: uuid */
+                door_photo_evidence_id?: string | null;
+                /** Format: uuid */
+                hub_photo_evidence_id?: string | null;
+            }[];
+            /** Format: date-time */
+            closed_at?: string | null;
+            parity_exception_note?: string | null;
+            can_close: boolean;
+            needs_exception: boolean;
+            blockers: ("intake_not_ready" | "orders_exceed_received" | "order_unpriced")[];
+            payment_still_required: boolean;
+        };
+        /** @description The intakes closed with the approved exception that still have received parcels without an order (5.116.0, OB-S1-151), newest close first, with what remained and the reason that was given. */
+        ClosedIntakeExceptionPage: {
+            items: {
+                /** Format: uuid */
+                intake_id: string;
+                intake_code: string;
+                /** Format: uuid */
+                pickup_request_id: string;
+                /** Format: uuid */
+                responsible_hub_id: string;
+                /** @enum {string} */
+                receiving_mode: "PHOTO_CHECK_IN" | "BLIND_COUNT";
+                /** Format: date-time */
+                closed_at: string;
+                /** Format: uuid */
+                closed_by: string;
+                exception_note: string | null;
+                received: number;
+                ordered: number;
+                outstanding_count: number;
+            }[];
+            next_page_token: string | null;
         };
         /** @description Amends a request before the price is frozen: its one origin (the origin zone is re-resolved once for the request and is no longer a pricing input) and its default payer arrangement, which applies to parcels not yet itemized. After itemization a payer change is a correction (requestPayerCorrection). Overrides never rewrite saved sender defaults (21.1). */
         PickupRequestAmend: {
@@ -10751,6 +11305,8 @@ export interface components {
          *     settable price field — which would have dismantled the guard entirely.
          */
         OrderItemize: {
+            /** @description The `terms_token` of the `previewOrder` the officer read. **Required** (`VALIDATION_FAILED`, rule `required`); a token that is not the terms as they are now is `STATE_CONFLICT`, rule `terms_changed`. */
+            reviewed_terms: string;
             /**
              * Format: uuid
              * @description The parcel the order is made for (D-D6, 5.110.0): required for an intake checked in against door photos (`VALIDATION_FAILED`, rule `parcel_required`, otherwise), never given for an intake counted blind (`parcel_not_allowed`). One order for a parcel, held by the database: a parcel of another intake is `unknown_parcel`, a second order for the same parcel is `STATE_CONFLICT` (`parcel_ordered`), and a missing or void parcel has none (`parcel_missing`, `parcel_void`).
@@ -10821,6 +11377,272 @@ export interface components {
             carrier_waybill_evidence_id?: string;
         };
         /**
+         * @description **No price and no destination zone.** Both are server-derived (§35.6.6, §42.3). A client
+         *     that could send either could set its own price.
+         *
+         *     `carrier_cost` is the one monetary value a client may submit, and it is deliberately not
+         *     an exception to that rule. A price is a decision; a carrier cost is an observation with a
+         *     waybill behind it. The client cannot influence the margin, the size surcharge or the total
+         *     — the server applies the hub's configured margin to whatever cost is submitted, and the
+         *     submitted figure is audited against the evidence.
+         *
+         *     Had outside-Accra been quoted freely, as first proposed, this schema would have needed a
+         *     settable price field — which would have dismantled the guard entirely.
+         */
+        OrderItemizePreview: {
+            /**
+             * Format: uuid
+             * @description The parcel the order is made for (D-D6, 5.110.0): required for an intake checked in against door photos (`VALIDATION_FAILED`, rule `parcel_required`, otherwise), never given for an intake counted blind (`parcel_not_allowed`). One order for a parcel, held by the database: a parcel of another intake is `unknown_parcel`, a second order for the same parcel is `STATE_CONFLICT` (`parcel_ordered`), and a missing or void parcel has none (`parcel_missing`, `parcel_void`).
+             */
+            parcel_id?: string;
+            recipient: {
+                name: string;
+                /** @description E.164, normalised. As-entered form retained server-side. */
+                phone: string;
+                location: components["schemas"]["Location"];
+            };
+            /**
+             * @description Optional in the schema so that an omitted class reaches the rule and is refused with
+             *     `SIZE_CLASS_REQUIRED` (AC-SLICE-001-58) instead of a bare schema rejection; pricing
+             *     needs it. Selected by the receiving officer, not derived. MSC-DEC-209 establishes no weight or
+             *     dimension thresholds, so no server rule can compute this. Surcharges apply only in
+             *     MELARC_COVERED_THIRD_PARTY_DELIVERY; SMALL is always GH0.
+             * @enum {string}
+             */
+            size_class?: "SMALL" | "MEDIUM" | "LARGE";
+            /**
+             * @description The third-party carrier's ACTUAL charge, transcribed from their waybill. Required
+             *     exactly when commercial_mode is MELARC_COVERED_THIRD_PARTY_DELIVERY; rejected otherwise.
+             *     This is an OBSERVED COST, not a price. The server still computes the price by applying
+             *     the hub's configured margin. See the schema description below.
+             */
+            carrier_cost?: components["schemas"]["Money"];
+            /** @default false */
+            is_high_value?: boolean;
+            /** @enum {string} */
+            lane?: "DOORSTEP" | "THIRD_PARTY_HANDOFF";
+            /**
+             * @description Required exactly when lane is THIRD_PARTY_HANDOFF.
+             * @enum {string}
+             */
+            commercial_mode?: "STATION_DROP" | "MELARC_COVERED_THIRD_PARTY_DELIVERY";
+            /** @description Parcel-level override of the request's default intent (§5.2). Resolved into actual vendor and recipient portions by the server. */
+            payer_override?: components["schemas"]["PayerAllocationInput"];
+            /** @description Declared value of this parcel in pesewas (23.2). Auto-flags high value at the first tier of MELARC_HIGH_VALUE_TIERS; above `value_declaration_threshold` it must have been declared at booking (VALUE_DECLARATION_REQUIRED). */
+            declared_value_minor?: number;
+            /** @default false */
+            is_serialized_goods?: boolean;
+            /** @description Mandatory when is_serialized_goods is true (VALIDATION_FAILED otherwise, 23.2, 23.4). */
+            serial_imei?: string;
+            /**
+             * Format: date
+             * @description A sender or recipient requested date; it applies over the derived date (MSC-DEC-213).
+             */
+            requested_delivery_date?: string;
+            /**
+             * @description Version 1 has one level and no express service (23.7).
+             * @default STANDARD
+             * @enum {string}
+             */
+            service_level?: "STANDARD";
+            /** @description An explicit authorized selection, sent only when the server's resolution is silent or ambiguous (23.3). The order then records destination_zone_resolution EXPLICITLY_AUTHORIZED. The client never sends a zone otherwise. */
+            destination_zone_authorization?: {
+                /** Format: uuid */
+                zone_id: string;
+                note: string;
+            };
+            /** @description The verified itemization-time evidence a high-value parcel requires (23.4); absent on one that is flagged high value is REASON_REQUIRED. Each id must name a STORED record. */
+            evidence_ids?: string[];
+            /**
+             * Format: uuid
+             * @description The waybill photograph behind carrier_cost; required with it (CARRIER_COST_REQUIRED).
+             */
+            carrier_waybill_evidence_id?: string;
+        };
+        /** @description A patch of what was transcribed on an order that is not yet confirmed (5.115.0), and the reason. A member that is not named is kept; `null` clears one that may be empty. **No price, no zone, no date derived by the server and no parcel**: the price, the destination zone and the promise are recalculated from the corrected facts, and the parcel an order is made for never changes. */
+        OrderAmend: {
+            /** @description A substantive reason; blank is REASON_REQUIRED. */
+            note: string;
+            /** @description The `terms_token` of the `previewOrderAmendment` the officer read. **Required** (`VALIDATION_FAILED`, rule `required`). */
+            reviewed_terms: string;
+            recipient?: {
+                name: string;
+                /** @description E.164, normalised. As-entered form retained server-side. */
+                phone: string;
+                location: components["schemas"]["Location"];
+            };
+            /** @enum {string} */
+            size_class?: "SMALL" | "MEDIUM" | "LARGE";
+            carrier_cost?: components["schemas"]["Money"] | null;
+            /** Format: uuid */
+            carrier_waybill_evidence_id?: string | null;
+            is_high_value?: boolean;
+            /** @enum {string} */
+            lane?: "DOORSTEP" | "THIRD_PARTY_HANDOFF";
+            /** @enum {string|null} */
+            commercial_mode?: "STATION_DROP" | "MELARC_COVERED_THIRD_PARTY_DELIVERY" | null;
+            /** @description This order's own payer arrangement; `null` returns it to the request's. */
+            payer_override?: components["schemas"]["PayerAllocationInput"] | null;
+            declared_value_minor?: number | null;
+            is_serialized_goods?: boolean;
+            serial_imei?: string | null;
+            /** Format: date */
+            requested_delivery_date?: string | null;
+            destination_zone_authorization?: {
+                /** Format: uuid */
+                zone_id: string;
+                note: string;
+            } | null;
+            evidence_ids?: string[];
+        };
+        /** @description What an amendment changes on an order that is not yet confirmed (5.117.0): the body of `previewOrderAmendment`, without the reason and the token that are the save's (`OrderAmend`). A member that is not named is kept; `null` clears one that may be empty. **No price, no zone, no date derived by the server and no parcel**: the price, the destination zone and the promise are recalculated from the corrected facts, and the parcel an order is made for never changes. */
+        OrderAmendPreview: {
+            recipient?: {
+                name: string;
+                /** @description E.164, normalised. As-entered form retained server-side. */
+                phone: string;
+                location: components["schemas"]["Location"];
+            };
+            /** @enum {string} */
+            size_class?: "SMALL" | "MEDIUM" | "LARGE";
+            carrier_cost?: components["schemas"]["Money"] | null;
+            /** Format: uuid */
+            carrier_waybill_evidence_id?: string | null;
+            is_high_value?: boolean;
+            /** @enum {string} */
+            lane?: "DOORSTEP" | "THIRD_PARTY_HANDOFF";
+            /** @enum {string|null} */
+            commercial_mode?: "STATION_DROP" | "MELARC_COVERED_THIRD_PARTY_DELIVERY" | null;
+            /** @description This order's own payer arrangement; `null` returns it to the request's. */
+            payer_override?: components["schemas"]["PayerAllocationInput"] | null;
+            declared_value_minor?: number | null;
+            is_serialized_goods?: boolean;
+            serial_imei?: string | null;
+            /** Format: date */
+            requested_delivery_date?: string | null;
+            destination_zone_authorization?: {
+                /** Format: uuid */
+                zone_id: string;
+                note: string;
+            } | null;
+            evidence_ids?: string[];
+        };
+        OrderArrivalReversalRequest: {
+            /** @description A substantive reason; blank is REASON_REQUIRED. */
+            note: string;
+        };
+        /** @description What a reversal of an arrival did (5.115.0): the order is `REVERSED` and keeps its locked price and portions, the parcel is missing or taken back, the count is what the parcels now say, and the intake is back in reconciliation. */
+        OrderArrivalReversal: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            order_id: string;
+            /** Format: uuid */
+            intake_id: string;
+            /** Format: uuid */
+            parcel_id: string;
+            previous_commercial_state: string;
+            /** @enum {string} */
+            commercial_state: "REVERSED";
+            /** @enum {string} */
+            parcel_state: "MISSING" | "VOID";
+            previous_intake_state: string;
+            intake_state: string;
+            received_before: number;
+            received_after: number;
+            note: string;
+            /** Format: date-time */
+            reversed_at: string;
+        };
+        /** @description What confirming an order would give, calculated by the server and written nowhere (5.115.0): the price with its components, the surcharge of a high-value parcel, how the destination resolves, the promise, who pays each amount, and when the order would be confirmed. */
+        OrderPreview: {
+            /** Format: uuid */
+            intake_id: string;
+            /** Format: uuid */
+            parcel_id: string | null;
+            /**
+             * Format: uuid
+             * @description The order the preview is of an amendment of; null for an order that is not made yet.
+             */
+            order_id: string | null;
+            /** @description The version of that order the preview was made on. */
+            order_version: number | null;
+            /**
+             * @description What this is, beside an early quote and a frozen price: the terms as they are calculated now.
+             * @enum {string}
+             */
+            status: "CURRENT_PREVIEW";
+            validation: {
+                /**
+                 * @description VERIFIED means every piece of evidence cited is stored, belongs to the intake and is of the purpose of an itemization (a piece that is not is EVIDENCE_NOT_STORED).
+                 * @enum {string}
+                 */
+                evidence: "NONE_CITED" | "VERIFIED";
+            };
+            /** @description The records the order cites, **by identity** (5.117.0): the evidence of a high-value parcel (sorted) and the photograph of the carrier's waybill. The `terms_token` is of them, so that an officer who is shown another record, though each is as valid as the one before it, confirms again and can tell which attachment changed. */
+            cited_evidence: {
+                high_value: string[];
+                /** Format: uuid */
+                carrier_waybill: string | null;
+            };
+            /**
+             * @description When the order becomes final. A new order for a parcel that has arrived (or for a blind count) is `ON_CONFIRMATION`; one for a parcel not yet checked in, and **every amendment** (an amendment confirms nothing and leaves the quote an early quote), is `WHEN_ARRIVAL_IS_COMMITTED`: the act that commits the arrival confirms it (5.117.0).
+             * @enum {string}
+             */
+            will_confirm: "ON_CONFIRMATION" | "WHEN_ARRIVAL_IS_COMMITTED";
+            /** @enum {string} */
+            quote_policy: "PROTECTED_UNTIL_AMENDED";
+            price: {
+                total: components["schemas"]["Money"];
+                components: {
+                    kind: string;
+                    amount: components["schemas"]["Money"];
+                }[];
+            };
+            is_high_value: boolean;
+            high_value_surcharge: components["schemas"]["Money"] | null;
+            destination_zone_snapshot: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            destination_zone_resolution: "SERVER_RESOLVED" | "EXPLICITLY_AUTHORIZED";
+            delivery: {
+                /** Format: date */
+                default_date: string;
+                /** Format: date */
+                requested_date: string | null;
+                /** Format: date */
+                committed_date: string;
+                window_start: string | null;
+                window_end: string | null;
+            };
+            payer: {
+                /** @enum {string} */
+                source: "ORDER" | "REQUEST";
+                payer_intent: string;
+                sender: components["schemas"]["Money"];
+                recipient: components["schemas"]["Money"];
+                /** @enum {string} */
+                commercial_state_after_confirmation: "NO_VENDOR_CHARGE" | "PAYMENT_REQUIRED";
+            };
+            /** @description Of the preview of an amendment, the early quote the order holds now, so that the difference is shown and not rebuilt; not part of the terms the token is of. */
+            current: {
+                total: components["schemas"]["Money"];
+                is_high_value: boolean;
+                /** Format: date */
+                derived_delivery_date: string | null;
+                destination_zone_resolution: string;
+                /** @description The evidence the order cites now, to be read beside the evidence of the amendment. */
+                cited_evidence: {
+                    high_value: string[];
+                    /** Format: uuid */
+                    carrier_waybill: string | null;
+                };
+            } | null;
+            /** @description The digest of the terms above (all but `current`), which the save is given back as `reviewed_terms`. */
+            terms_token: string;
+        };
+        /**
          * @description Two orthogonal state fields, not one (domain-model §5.9). An order may be commercially
          *     `PREPAID` while physically `AT_HUB_AFTER_FAILURE`; its commercial standing does not move
          *     as it travels.
@@ -10877,6 +11699,13 @@ export interface components {
             /** Format: date */
             derived_delivery_date?: string | null;
             is_high_value?: boolean;
+            /** @description Staff only (5.116.0). The flag the officer gave, kept apart from what the declared value says; is_high_value is the two together. Null for an order made before the flag was kept apart: it is not known. */
+            is_high_value_manual?: boolean | null;
+            /**
+             * @description What the price is (5.116.0): an early quote (calculated, kept as calculated until the order is amended or confirmed) or the frozen price.
+             * @enum {string}
+             */
+            price_status?: "EARLY_QUOTE" | "FROZEN";
             lane: string;
             commercial_mode?: string | null;
             /** @description Null until the freeze (5.110.0). An order that waits for its parcel is calculated and not locked. */
@@ -10914,6 +11743,36 @@ export interface components {
             destination_zone_resolution?: "SERVER_RESOLVED" | "EXPLICITLY_AUTHORIZED";
             /** @description Ops-moved date with actor, reason and timestamp; null at itemization (the derived date stands). */
             delivery_date_override?: Record<string, never> | null;
+            /** @description Staff only (5.115.0). This order's own payer arrangement, or null when the request's stands; what an amendment restates. Absent for a vendor session. */
+            payer_override?: components["schemas"]["PayerAllocationInput"] | null;
+            /** @description Staff only (5.115.0). The itemization evidence the order cites. */
+            high_value_evidence_ids?: string[];
+            /**
+             * Format: uuid
+             * @description Staff only (5.115.0). The waybill photograph behind the carrier cost.
+             */
+            carrier_waybill_evidence_id?: string | null;
+            /** @description Staff only (5.115.0), on `getOrder`. How the order was corrected before it froze: who, when, why and the members that changed (never their values, which hold a person's details). */
+            amendments?: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                amended_by: string;
+                /** Format: date-time */
+                amended_at: string;
+                note: string;
+                changed: string[];
+            }[];
+            /** @description Staff only (5.115.0), on `getOrder`. Present when the order's arrival was reversed (`commercial_state` `REVERSED`): who, when and why. The locked price and portions are kept. */
+            reversal?: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                reversed_by: string;
+                /** Format: date-time */
+                reversed_at: string;
+                note: string;
+            } | null;
             payer_allocation?: components["schemas"]["PayerAllocation"];
         };
         /**
@@ -16566,6 +17425,92 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    listClosedIntakeExceptions: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The queue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClosedIntakeExceptionPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getIntakeClosure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The assessment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeClosureAssessment"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listIntakeOrders: {
+        parameters: {
+            query?: {
+                view?: "all" | "needs_order" | "awaiting_arrival" | "prepared" | "itemized" | "payment_required" | "missing";
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The worklist */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntakeOrderList"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     itemizeOrder: {
         parameters: {
             query?: never;
@@ -16650,6 +17595,40 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    previewOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderItemizePreview"];
+            };
+        };
+        responses: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderPreview"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getOrder: {
         parameters: {
             query?: never;
@@ -16675,6 +17654,183 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    amendOrder: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderAmend"];
+            };
+        };
+        responses: {
+            /** @description Amended */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    previewOrderAmendment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderAmendPreview"];
+            };
+        };
+        responses: {
+            /** @description The preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderPreview"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    reverseOrderArrival: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated. **Required for every operation whose contract declares this parameter**;
+                 *     **all rider mutation commands declare it** unless an operation states otherwise. Same key
+                 *     and same payload replays the original result; same key with a different payload returns
+                 *     409 `IDEMPOTENCY_KEY_CONFLICT`.
+                 *
+                 *     **Rider commands carry it for connection resilience, not because the command is
+                 *     offline-capable** (see rule 4). Ops commands carry it where a repeated submission would
+                 *     otherwise repeat a side effect - `reassignPickupRequestHub`, `cancelPickupRequest`,
+                 *     `escalatePickupRequest`, `extendPickupAttempts`, `submitBlindCount`, `closeHubIntake`
+                 *     and `setManifestStopOrder` are the current examples (the last two added for their new
+                 *     audit events under CRIT-05/CRIT-09, not a repeatable business effect) - and it is why
+                 *     this description no longer says *rider* alone: **a parameter description narrower than
+                 *     the parameter's declared use is a contract disagreeing with itself.**
+                 *
+                 *     **Not every Ops mutation carries it, and the omission is deliberate where a guarded
+                 *     state transition creates no second record and repeats no charge** -
+                 *     `confirmPickupRequest` is the current example: `If-Match` alone already makes a stale
+                 *     retry fail cleanly, and confirmation reserves no credit and moves no money (§5.2.1).
+                 *
+                 *     **The key is scoped to the calling principal and the operation**, so a
+                 *     key chosen by one caller can never match another's. Clients need no coordination and
+                 *     may reuse any value they like across operations.
+                 *
+                 *     **R0 scoped it globally, and the consequence was not a collision.** Two vendors
+                 *     choosing `retry-1` on the same operation is expected behaviour for two independent
+                 *     clients; the second did not get an error, it got a **replay of the first vendor's
+                 *     stored result** - one caller receiving another's response body, through the mechanism
+                 *     that exists to make retries safe.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderArrivalReversalRequest"];
+            };
+        };
+        responses: {
+            /** @description Reversed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderArrivalReversal"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["RuleViolation"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16747,6 +17903,65 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["RuleViolation"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listPayerCorrections: {
+        parameters: {
+            query?: {
+                state?: "REQUESTED" | "APPROVED" | "REJECTED" | "all";
+                order_id?: string;
+                /** @description Only the items of this hub: the hub the record answered to when the act was done (task C3, `AC-HUBF-01`). It is a filter that can narrow what the caller may see and never widens it: authorization-checked, never trusted, and a hub outside the caller's grant, or that names no hub, matches nothing (an empty page, never `HUB_SCOPE_VIOLATION`). Combined with the other filters as "and". */
+                hub_id?: components["parameters"]["WorkListHubId"];
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Corrections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayerCorrectionPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getPayerCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID v7. The human-readable `code` is an attribute, never a path parameter. */
+                id: components["parameters"]["Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayerCorrection"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };

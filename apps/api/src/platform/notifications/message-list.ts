@@ -312,6 +312,37 @@ export const MESSAGES: readonly MessageDefinition[] = [
     carries: ['reason', COUNT_PARAMETER],
     source: `${SPEC_31_2}: "Pickup counted over (D-D5)" (Ops feed); pickup-collection.md; D-D5`,
   },
+  {
+    // Stage 7 (OB-S1-143, OB-S1-153): `closeHubIntake` writes the envelope `intake.completed` in its own transaction (migration 0116), so that the close and the message are atomic and a provider's outage never
+    // reopens an intake. **The same envelope is written by a close with every order and by a close with the approved exception**, so the words say only that the hub has finished checking in the pickup: no
+    // order, no count, no amount and no link, and nothing that says that anything is cleared or paid. A DRAFT until the Product Owner approves its words (OQ-037): a real provider is never asked to send an
+    // unapproved wording (version 2, the review of 20 November 2026).
+    kind: 'INTAKE_COMPLETED_SENDER',
+    event: 'intake.completed',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'AD_HOC_SENDER',
+    channel: 'SMS',
+    templateVersion: 2,
+    timeToLiveMs: DAY_MS,
+    appliesTo: (facts) => facts.adHocSenderId !== null,
+    stillTrue: () => true,
+    source: `${SPEC_31_2}: "Intake completed" (ad-hoc tracking SMS); itemization.md section 5.2; OB-S1-143`,
+  },
+  {
+    // Stage 7: the registered vendor's feed entry, in the same words and for the same reason. The summary of a closed intake is `getIntakeSummary`, keyed by the intake: the entry's subject is the pickup
+    // request and its parameters are closed tokens, so the intake's identifier is not on it, and **the words promise no link** until the vendor can reach its summary from the entry (OB-S1-153). A feed entry is
+    // shown only when its wording is approved, as a text is sent only then (the review of 20 November 2026).
+    kind: 'INTAKE_COMPLETED_VENDOR_FEED',
+    event: 'intake.completed',
+    aggregateType: 'PICKUP_REQUEST',
+    audience: 'VENDOR_FEED',
+    channel: 'FEED',
+    templateVersion: 2,
+    timeToLiveMs: 90 * DAY_MS,
+    appliesTo: (facts) => facts.vendorOrganizationId !== null,
+    stillTrue: () => true,
+    source: `${SPEC_31_2}: "Intake completed" (registered vendor in-app order summary); itemization.md section 5.2; OB-S1-143`,
+  },
 ];
 
 /** A message the documents ask for whose event no operation raises yet: the task that builds the operation wires it. */
@@ -358,22 +389,6 @@ export const PLANNED_MESSAGES: readonly PlannedMessage[] = [
     channel: 'FEED',
     raisedBy: 'the hub handover (Stage 5): the Ops receive queue',
     source: `${SPEC_31_2}: "Hub handover submitted" (Ops receive queue)`,
-  },
-  {
-    kind: 'INTAKE_COMPLETED_SENDER',
-    event: 'intake.completed',
-    audience: 'AD_HOC_SENDER',
-    channel: 'SMS',
-    raisedBy: 'the completion of an intake (Stage 5): the order reference, no link',
-    source: `${SPEC_31_2}: "Intake completed" (ad-hoc tracking SMS)`,
-  },
-  {
-    kind: 'INTAKE_COMPLETED_VENDOR_FEED',
-    event: 'intake.completed',
-    audience: 'VENDOR_FEED',
-    channel: 'FEED',
-    raisedBy: 'the completion of an intake (Stage 5): the order summary',
-    source: `${SPEC_31_2}: "Intake completed" (registered vendor in-app order summary)`,
   },
   {
     kind: 'RECIPIENT_HEADS_UP',

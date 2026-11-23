@@ -748,6 +748,20 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.request_payer_correction',
       'melarc.decide_payer_correction',
       'melarc.amend_request_payer',
+      // Stage 7 (migrations 0114 and 0115): the worklist, the counts and the assessment of a close (no money in any of them), the names a correction shows, the amendment and the
+      // reversal of an arrival, and the preview of a price.
+      'melarc.intake_worklist',
+      'melarc.intake_progress',
+      'melarc.intake_closure_assessment',
+      'melarc.correction_names',
+      'melarc.amend_order',
+      'melarc.reverse_order_arrival',
+      'melarc.payer_preview',
+      // The review of 20 November 2026 (migration 0118): the lock on the request's payer arrangement taken before the payer is calculated, and the condition on the evidence an order cites, asked before the order is made.
+      'melarc.hold_request_payer',
+      'melarc.evidence_citable',
+      // The intakes closed with the approved exception that still have work left (OB-S1-151).
+      'melarc.closed_intake_exceptions',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

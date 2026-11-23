@@ -448,8 +448,9 @@ describe('the lane makes the messages of a failure for the audience the request 
     expect(JSON.stringify(notices)).not.toContain('parcels were not packed');
   });
 
-  // Break caught: a real provider asked to send words the owner has not approved (words are the owner's to approve, OQ-037), or a feed entry held back with them.
-  it('holds the text back from a real provider while its words are a draft, and still writes the feed entries', async () => {
+  // Break caught: a real provider asked to send words the owner has not approved (words are the owner's to approve, OQ-037), or a feed entry shown with words nobody approved (the review of
+  // 20 November 2026, finding 1: a feed entry is words said to a person on a screen, so it is held back with its reason like a text, in every environment).
+  it('holds the text back from a real provider while its words are a draft, and holds back the feed entry whose words are a draft as well', async () => {
     const arranged = await adHocStop();
     expect((await fail(arranged)).status).toBe(200);
     const sent = await relay(
@@ -463,7 +464,7 @@ describe('the lane makes the messages of a failure for the audience the request 
         (each) => `${each.message_kind}:${each.state}:${each.suppression_reason ?? 'none'}`,
       ),
     ).toEqual([
-      'PICKUP_FAILED_OPS_FEED:DELIVERED:none',
+      'PICKUP_FAILED_OPS_FEED:SUPPRESSED:WORDING_NOT_APPROVED',
       'PICKUP_FAILED_SENDER:SUPPRESSED:WORDING_NOT_APPROVED',
     ]);
   });

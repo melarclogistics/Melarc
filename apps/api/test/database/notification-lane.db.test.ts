@@ -30,7 +30,7 @@ import {
   LeaseLostError,
   NotificationStore,
 } from '../../src/platform/notifications/notification-store.js';
-import { createLanePolicy } from '../../src/platform/notifications/lane-policy.js';
+import { createLanePolicy, OPEN_SETTINGS } from '../../src/platform/notifications/lane-policy.js';
 import {
   DatabaseNotificationSettings,
   DatabaseSettingsReader,
@@ -1520,5 +1520,100 @@ describe('a send starts only with time left in its lease (review m4)', () => {
       state: 'SENT',
       attempt_count: 2,
     });
+  });
+});
+
+describe('a feed entry is words said to a person: its wording is approved too (the review of 20 November 2026, finding 1)', () => {
+  /**
+   * The same words as a draft: nobody approved them. The words of the completion of an intake were approved on 22 November 2026 (OB-S1-153), so the mechanism that holds a draft back is shown with the same words
+   * stripped of that approval, and what is delivered is shown with the real words.
+   */
+  const asDraft = (kind: string, version: number): Template | undefined => {
+    const found = templateOf(kind, version);
+    return found === undefined
+      ? undefined
+      : { ...found, approvedBy: null, approvedOn: null, approvedDigest: null };
+  };
+  /** The envelope of a close, as the close writes it (the intake's identifier in its payload), made due a minute ago. */
+  const completionEnvelope = async (
+    requestId: string,
+    vendorOrganizationId: string | null,
+  ): Promise<void> => {
+    await admin.query(
+      `insert into outbox (id, event_type, aggregate_type, aggregate_id, responsible_hub_id, vendor_organization_id, originating_principal_type, originating_principal_id,
+                           operation_id, correlation_id, payload, next_attempt_at)
+       values ($1, 'intake.completed', 'PICKUP_REQUEST', $2, $3, $4, 'STAFF', $5, 'closeHubIntake', $6, $7::jsonb, clock_timestamp() - interval '1 minute')`,
+      [
+        randomUUID(),
+        requestId,
+        HUB_A,
+        vendorOrganizationId,
+        '5eed0000-0000-4000-8000-0000000000e1',
+        randomUUID(),
+        JSON.stringify({ intake: randomUUID() }),
+      ],
+    );
+  };
+
+  // Break caught: a draft shown to a registered vendor in its feed because the feed has no sender to ask: the approval of the words stood in front of the text message alone.
+  it('holds back a feed entry whose wording nobody approved, with its reason, and delivers one the owner approved', async () => {
+    const request = await insertPickupRequest(
+      admin,
+      pickupRequestRow(vendor1.organizationId, HUB_A, { state: 'CONFIRMED' }),
+    );
+    await completionEnvelope(request.id, vendor1.organizationId);
+    await relayOnly({ templates: asDraft }).lane.runOnce(NEVER);
+    expect(await notificationsOf(request.id)).toMatchObject([
+      {
+        message_kind: 'INTAKE_COMPLETED_VENDOR_FEED',
+        audience: 'VENDOR_FEED',
+        channel: 'FEED',
+        state: 'SUPPRESSED',
+        suppression_reason: 'WORDING_NOT_APPROVED',
+      },
+    ]);
+    // The same entry in the words the owner approved (22 November 2026): delivered.
+    const approved = await insertPickupRequest(
+      admin,
+      pickupRequestRow(vendor1.organizationId, HUB_A, { state: 'CONFIRMED' }),
+    );
+    await completionEnvelope(approved.id, vendor1.organizationId);
+    await relayOnly().lane.runOnce(NEVER);
+    expect(await notificationsOf(approved.id)).toMatchObject([
+      {
+        message_kind: 'INTAKE_COMPLETED_VENDOR_FEED',
+        state: 'DELIVERED',
+        suppression_reason: null,
+      },
+    ]);
+  });
+
+  // Break caught: a text that says more than the close that raised it (that each parcel was listed for delivery) sent to a sender after a close with the exception; an unapproved wording given to a real provider.
+  it('texts a sender, in a real provider’s hands, only the words the owner approved, which say that the hub has finished checking in the pickup and nothing else', async () => {
+    const real = createLanePolicy({ realProvider: true, settings: OPEN_SETTINGS });
+    const draft = await adHocPickup();
+    await completionEnvelope(draft.id, null);
+    const held = new ScriptedSender();
+    await laneWith({ sender: held, policy: real, templates: asDraft }).lane.runOnce(NEVER);
+    expect(held.sent).toHaveLength(0);
+    expect(await notificationsOf(draft.id)).toMatchObject([
+      {
+        message_kind: 'INTAKE_COMPLETED_SENDER',
+        audience: 'AD_HOC_SENDER',
+        channel: 'SMS',
+        state: 'SUPPRESSED',
+        suppression_reason: 'WORDING_NOT_APPROVED',
+      },
+    ]);
+    // The owner approved those words (22 November 2026): the text goes, and it is exactly what the approved words say.
+    const approved = await adHocPickup();
+    await completionEnvelope(approved.id, null);
+    const sent = new ScriptedSender();
+    await laneWith({ sender: sent, policy: real }).lane.runOnce(NEVER);
+    expect(sent.sent).toHaveLength(1);
+    expect(sent.sent[0]?.text).toBe(
+      `Melarc: our hub has finished checking in pickup ${approved.code}.`,
+    );
+    expect(sent.sent[0]?.text).not.toMatch(/order|parcel|listed|paid|cleared|delivery/i);
   });
 });
