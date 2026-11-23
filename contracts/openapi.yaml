@@ -32,7 +32,7 @@
 #   5.117.0 I    Stage 7 (SLICE-001, the third external review of 21 November 2026): **a blind intake never holds more orders than the parcels it received; what an officer confirms names the records it cites; an amendment says when the quote is final; the request types say what the API requires.** `itemizeOrder` and `previewOrder` refuse an order for which the blind count has no place left (`STATE_CONFLICT`, rule `orders_exceed_received`), and `closeHubIntake` refuses to close over a surplus that already stands, with the exception or without it (the same rule); `IntakeClosureAssessment` gains `excess_count` and the blocker `orders_exceed_received`. `OrderPreview` gains `cited_evidence` (the identities of the records the order cites, which the `terms_token` is of) and `current.cited_evidence`; `will_confirm` of the preview of an amendment is `WHEN_ARRIVAL_IS_COMMITTED` whatever the parcel's state, because an amendment confirms nothing. The write and the preview of an order or an amendment have request types of their own (`OrderItemizePreview`, `OrderAmendPreview`; `OrderItemize` requires `reviewed_terms`, `OrderAmend` requires `note` and `reviewed_terms`), and `IntakeClose` is a close that has parity or the exception with its token. A save is judged on the rates and the payer of the moment it holds its locks. The review is judged by the database before it is judged by the screen: an intake that is out of date in both its version and its assessment is `stale` (migration 0119).
 #   5.116.0 I    Stage 7 (SLICE-001, the external review of 20 November 2026 and the Product Owner's approval of it): **what the officer confirms is what the officer was shown, and what a senior closes against is what the senior read.** `previewOrderAmendment` (`POST /orders/{id}/amendment-preview`, `hub.intake.itemize`) previews an amendment as `previewOrder` previews an order. `listClosedIntakeExceptions` (`GET /hub-intake-exceptions`, `hub.intake.close_exception`) lists the intakes closed with the approved exception that still have received parcels without an order, so that the work is found again after a reload or on the next shift (OB-S1-151). `OrderPreview` gains `terms_token` (the digest of the terms), `validation`, `status`, `order_id`, `order_version` and `current`, and the preview judges the evidence an order cites as the save does (`EVIDENCE_NOT_STORED`). `itemizeOrder` and `amendOrder` take `reviewed_terms` (required of a save: `VALIDATION_FAILED`, rule `required`) and answer `STATE_CONFLICT`, rule `terms_changed`, with `details.current_terms` when what confirming gives is not what was reviewed; the `note` of `OrderAmend` is required of the save and not of the preview. `Order` gains `is_high_value_manual` and `price_status`: an amendment recomputes the high-value status the declaration gives and keeps the officer's own flag, and keeps the choice of a zone for the address it was made for. `IntakeProgress` and `IntakeClosureAssessment` say null, not zero, for a blind count that is not committed; each count of the progress is the number of rows of the view of its name (`awaiting_arrival` opens every parcel still expected); the assessment carries `assessment_token`, which `closeHubIntake` takes as `reviewed_assessment` (required with the exception; `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`). `getOrder` is one snapshot, and a vendor reads no order whose arrival was reversed. The payer edit and the first freeze take one lock (migration 0118).
 #   5.118.0 I    Stage 7 (SLICE-001, the fourth external review of 22 November 2026 and the Product Owner's decisions of the same day): **a save is judged on the configuration in force once it holds both its locks, and the staff's summary shows a price only where the staff's own pricing grant reaches the hub.** `itemizeOrder` and `amendOrder` judge the order on the version in force of each of the hub's settings, its zones and aliases and the company-wide rules, at the moment the save holds the intake and the request's payer arrangement; a configuration that keeps moving is `STATE_CONFLICT`, rule `configuration_changing` (declared, with what a screen does about it). `getIntakeSummary` leaves `locked_price` out for a staff reader whose `pricing.read` does not reach the intake's hub (OB-S1-155). No operation is added or removed.
-#   5.119.0 J    Run F (SLICE-001, Stage 7: the fifth external review, of the order screens, 23 November 2026, and the Product Owner's decisions D-S7-1 to D-S7-10 of the same day). **One version for the run.** *Part 1, item 1:* `itemizeOrder`'s `201` carries `Intake-ETag`, the vendor's version after the order (the first order of a cleared vendor moves it from ready to being worked, so the token the screen read is stale for the next order; a retry under the same key answers the vendor's version as it is then); the lock of a check-in is not part of that version (migrations `0093` and `0103`, held now by a test), so the page that renews it every minute makes no early order stale. *Item 3:* the sentence of 5.116.0 (every count is the number of rows of its view) is corrected for an intake counted blind: `needs_order` there is the orders still to be made, a number, and its view opens no rows (there is no parcel to list). *Item 4:* `destination_zone_snapshot` of `Order` and `OrderPreview` is declared (`DestinationZoneSnapshot`: the scope, and for a zone its identifier, code, name and `service_area` as a code, the alias that placed the parcel, the officer's note) instead of a free object that the screens read members from. *D-S7-10 and D-S7-4:* the vendor's summary of a closed intake carries `payer_allocation` where it shows the price, `getOrder` says that a vendor sees the portions of its own orders and is told the state of its own order's parcel (`MISSING` for a parcel that was written off: no price, nothing to pay; migration `0122`). *D-S7-5:* `listDestinationZones` (`GET /hub-intakes/{id}/destination-zones`, `hub.intake.itemize`, hub-scoped) lists the hub's own zones as `{ zone_id, name }` for the form's choice of a zone for an address no zone matches. *D-S7-6 and D-S7-7:* the items of `listHubIntakes` for a vendor in a state where orders are made carry `orders_made`, `parcels_needing_order` and, when a senior officer is needed, `senior_needed`; the read gains `view=needs_senior` (migration `0123`)
+#   5.119.0 J    Run F (SLICE-001, Stage 7: the fifth external review, of the order screens, 23 November 2026, and the Product Owner's decisions D-S7-1 to D-S7-10 of the same day). **One version for the run.** *Part 1, item 1:* `itemizeOrder`'s `201` carries `Intake-ETag`, the vendor's version after the order (the first order of a cleared vendor moves it from ready to being worked, so the token the screen read is stale for the next order; a retry under the same key answers the vendor's version as it is then); the lock of a check-in is not part of that version (migrations `0093` and `0103`, held now by a test), so the page that renews it every minute makes no early order stale. *Item 3:* the sentence of 5.116.0 (every count is the number of rows of its view) is corrected for an intake counted blind: `needs_order` there is the orders still to be made, a number, and its view opens no rows (there is no parcel to list). *Item 4:* `destination_zone_snapshot` of `Order` and `OrderPreview` is declared (`DestinationZoneSnapshot`: the scope, and for a zone its identifier, code, name and `service_area` as a code, the alias that placed the parcel, the officer's note) instead of a free object that the screens read members from. *D-S7-10 and D-S7-4:* the vendor's summary of a closed intake carries `payer_allocation` where it shows the price, `getOrder` says that a vendor sees the portions of its own orders and is told the state of its own order's parcel (`MISSING` for a parcel that was written off: no price, nothing to pay; migration `0122`). *D-S7-5:* `listDestinationZones` (`GET /hub-intakes/{id}/destination-zones`, `hub.intake.itemize`, hub-scoped) lists the hub's own zones as `{ zone_id, name }` for the form's choice of a zone for an address no zone matches. *D-S7-6 and D-S7-7:* the items of `listHubIntakes` for a vendor in a state where orders are made carry `orders_made`, `parcels_needing_order` and, when a senior officer is needed, `senior_needed`; the read gains `view=needs_senior` (migration `0123`). *D-S7-1:* `correctOrderRecipient` (`POST /orders/{id}/recipient-correction`, `hub.intake.itemize`) corrects the recipient's name, phone and, when the zone and the price come out as they are, address of a confirmed order with a reason, kept as an amendment record of the kind `RECIPIENT_CORRECTION` (migration `0124`); the change of an address that moves the zone or the price, decided by a checker, is not built (S1.39g)
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -3790,6 +3790,72 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OrderPreview' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/RuleViolation' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /orders/{id}/recipient-correction:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: correctOrderRecipient
+      x-permission: hub.intake.itemize
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
+          IDEMPOTENCY_KEY_CONFLICT,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          REASON_REQUIRED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [orders]
+      summary: Correct the recipient of a confirmed order
+      description: |
+        **5.119.0 (Run F, D-S7-1: the Product Owner's decision of 23 November 2026).** Permission
+        `hub.intake.itemize` (no new key), **hub-scoped**, for staff of the Ops Portal alone. **The recipient's name and
+        phone of a confirmed order are corrected, with a reason in words** (`note`; blank is `REASON_REQUIRED`), on the
+        version of the order that was read (`If-Match`, the `ETag` of `getOrder`: rule `stale`), with an
+        `Idempotency-Key`. A member of `recipient` that is not sent stays as it was; at least one is sent.
+
+        **The old and the new recipient are kept** in the order's history as an amendment keeps its values
+        (`amendments` of `getOrder`, with `kind` `RECIPIENT_CORRECTION`), and **the enhanced event
+        `order.amendment.recorded` names the fields that changed and never their values.**
+
+        **An address** is corrected the same way **when its zone and its price come out as they are**: the order is
+        delivered to the door, the server placed it in a zone in the first place, and the new address still resolves to
+        that zone (`STATE_CONFLICT`, rule `address_changes_zone` otherwise: a change that moves the zone or the price
+        is a request decided by a checker, on the pattern of the payer correction, which is **not built yet** (S1.39g)
+        and nothing changes). The price, the zone, the promise and every other member of the order never move.
+
+        Refused (`STATE_CONFLICT`, each rule named): an order that is not confirmed is amended with the order
+        (`order_not_confirmed`); an order whose arrival was taken back (`order_reversed`); an order that has been paid for
+        or reserved (`order_progressed`) or dispatched (`order_dispatched`), **none of which exists yet**, so that today no
+        confirmed order is past a correction. A request that changes nothing is `VALIDATION_FAILED` (rule `no_change`).
+        The database repeats the rules for every writer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRecipientCorrection' }
+      responses:
+        '200':
+          description: The order as it is now, with its new `ETag`
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
         '400': { $ref: '#/components/responses/ValidationFailed' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -18008,6 +18074,30 @@ components:
         with its components, the surcharge of a high-value parcel, how the destination resolves, the promise,
         who pays each amount, and when the order would be confirmed.
 
+    OrderRecipientCorrection:
+      type: object
+      required: [note, recipient]
+      additionalProperties: false
+      properties:
+        note: { type: string, minLength: 1, description: A substantive reason; blank is REASON_REQUIRED. }
+        recipient:
+          type: object
+          additionalProperties: false
+          properties:
+            name: { type: string }
+            phone: { type: string }
+            location:
+              type: object
+              required: [address]
+              properties:
+                address: { type: string }
+                landmark: { type: string }
+                map_link: { type: string, format: uri }
+                latitude: { type: number }
+                longitude: { type: number }
+      description: >-
+        The body of `correctOrderRecipient` (5.119.0): the recipient's name, phone and address as they are now to be, any of the three.
+
     DestinationZoneList:
       type: object
       required: [items]
@@ -18178,13 +18268,17 @@ components:
             the members that changed (never their values, which hold a person's details).
           items:
             type: object
-            required: [id, amended_by, amended_at, note, changed]
+            required: [id, amended_by, amended_at, note, changed, kind]
             properties:
               id: { type: string, format: uuid }
               amended_by: { type: string, format: uuid }
               amended_at: { type: string, format: date-time }
               note: { type: string }
               changed: { type: array, items: { type: string } }
+              kind:
+                type: string
+                enum: [AMENDMENT, RECIPIENT_CORRECTION]
+                description: 'What the record is of (5.119.0, D-S7-1): an amendment before the price froze, or the correction of the recipient of a confirmed order (`correctOrderRecipient`).'
         reversal:
           description: >-
             Staff only (5.115.0), on `getOrder`. Present when the order's arrival was reversed (`commercial_state`

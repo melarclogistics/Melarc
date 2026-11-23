@@ -140,4 +140,5 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'previewOrderAmendment',
   'amendOrder',
   'reverseOrderArrival',
+  'correctOrderRecipient',
 ];

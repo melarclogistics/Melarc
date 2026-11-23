@@ -6574,3 +6574,284 @@ describe('the rows of Orders to make say how many orders are made, and which ven
     );
   }, 180_000);
 });
+
+describe('the recipient of a confirmed order is corrected (Run F, Part 1, D-S7-1)', () => {
+  const ORDER = (id: string): string => `${API}/orders/${id}`;
+  const etagOf = async (actor: Actor, id: string): Promise<string> =>
+    (await actor.client.get(ORDER(id))).header('etag') ?? '';
+  const correct = async (
+    actor: Actor,
+    id: string,
+    sent: unknown,
+    over: { etag?: string; key?: string } = {},
+  ): Promise<TestResponse> =>
+    actor.client.post(`${ORDER(id)}/recipient-correction`, sent, {
+      origin: OPS,
+      headers: {
+        'If-Match': over.etag ?? (await etagOf(actor, id)),
+        'Idempotency-Key': over.key ?? randomUUID(),
+      },
+    });
+  const confirmed = async (): Promise<Order> => {
+    const intake = await cleared(1);
+    return orderOf(await itemize(officer, intake.id, body(present(intake.parcels, 0).id)));
+  };
+  type Seen = Order & {
+    amendments: { kind: string; note: string; changed: string[] }[];
+  };
+
+  // Break caught: a typo in a recipient's name or phone that cannot be put right once the price is fixed; a correction without a reason or one made on a version that was not read; a correction that moves the price, the
+  // portions or the state of the order; one that keeps no record of what was and what became; one whose audit event carries the values of a person's details instead of the names of the fields; a retry that
+  // corrects twice.
+  it('corrects the name and the phone with a reason, moves nothing else, keeps both recipients, and names only the fields in the event', async () => {
+    const made = await confirmed();
+    expect(made.commercial_state).toBe('NO_VENDOR_CHARGE');
+    const before = (await officer.client.get(ORDER(made.id))).json() as Seen;
+    const staleEtag = await etagOf(officer, made.id);
+    const key = randomUUID();
+    const sent = {
+      note: 'The surname was typed wrongly at the door',
+      recipient: { name: 'Ama Mensah-Boateng', phone: '055 765 4321' },
+    };
+    const done = await correct(officer, made.id, sent, { key });
+    expect(done.status, done.text).toBe(200);
+    const after = done.json() as Order;
+    expect(after.recipient.name).toBe('Ama Mensah-Boateng');
+    expect(after.recipient.phone).toMatch(/557654321$/);
+    expect(after.recipient.location).toEqual(before.recipient.location);
+    // Nothing else of the order moved: the price, the portions, the state, the zone and the promise.
+    for (const member of [
+      'locked_price',
+      'payer_allocation',
+      'commercial_state',
+      'fulfilment_state',
+      'destination_zone_snapshot',
+      'derived_delivery_date',
+      'size_class',
+    ] as const) {
+      expect(after[member], member).toEqual(before[member]);
+    }
+    expect(done.header('etag')).toBe(await etagOf(officer, made.id));
+
+    // What the order's page shows: one correction, its reason, and the member that changed; the record holds the old and the new recipient.
+    const seen = (await officer.client.get(ORDER(made.id))).json() as Seen;
+    expect(seen.amendments).toEqual([
+      expect.objectContaining({
+        kind: 'RECIPIENT_CORRECTION',
+        note: 'The surname was typed wrongly at the door',
+        changed: ['recipient'],
+      }),
+    ]);
+    const record = (
+      await routes.rows<{
+        before: { recipient: { name: string } };
+        after: { recipient: { name: string } };
+      }>(
+        `select before, after from order_amendment where order_id = $1 and kind = 'RECIPIENT_CORRECTION'`,
+        [made.id],
+      )
+    )[0];
+    expect(record?.before.recipient.name).toBe('Ama Mensah');
+    expect(record?.after.recipient.name).toBe('Ama Mensah-Boateng');
+
+    // The audit event names the fields and never a value of them.
+    const events = await routes.rows<{ note: string | null; detail: Record<string, unknown> }>(
+      `select note, detail from audit_event where object_id = $1 and event_code = 'order.amendment.recorded'`,
+      [made.id],
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]?.detail).toMatchObject({
+      kind: 'RECIPIENT_CORRECTION',
+      changed: 'recipient.name,recipient.phone',
+      after_confirmation: true,
+    });
+    const written = JSON.stringify(events[0]);
+    for (const value of ['Ama Mensah', '024 123 4567', '0241234567', '557654321', '12 Madina']) {
+      expect(written).not.toContain(value);
+    }
+
+    // A retry under the same key answers the same and corrects nothing twice; a version that was not read, no reason, nothing to change and an empty body are refused.
+    const again = await correct(officer, made.id, sent, { key });
+    expect(again.status).toBe(200);
+    expect(again.text).toBe(done.text);
+    expect(
+      (
+        await routes.rows<{ n: string }>(
+          `select count(*)::text as n from order_amendment where order_id = $1`,
+          [made.id],
+        )
+      )[0]?.n,
+    ).toBe('1');
+    expect(refusal(await correct(officer, made.id, sent, { etag: staleEtag })).slice(0, 3)).toEqual(
+      [409, 'STATE_CONFLICT', 'stale'],
+    );
+    expect(
+      refusal(await correct(officer, made.id, { note: '  ', recipient: { name: 'X' } }))[1],
+    ).toBe('REASON_REQUIRED');
+    expect(
+      refusal(
+        await correct(officer, made.id, {
+          note: 'Nothing',
+          recipient: { name: 'Ama Mensah-Boateng' },
+        }),
+      ),
+    ).toEqual([400, 'VALIDATION_FAILED', 'no_change']);
+    expect(
+      refusal(await correct(officer, made.id, { note: 'Empty', recipient: {} })).slice(0, 2),
+    ).toEqual([400, 'VALIDATION_FAILED']);
+    expect(
+      refusal(await correct(officer, made.id, { note: 'Bad phone', recipient: { phone: '12' } })),
+    ).toEqual([400, 'VALIDATION_FAILED', 'format']);
+  });
+
+  // Break caught: an address that moves the order to another zone, or that no zone matches, accepted as a correction (the price and the promise would be of the old zone), or an address of the same zone refused; and an
+  // order delivered by a carrier, whose price is the carrier's, corrected as if the address could not move it.
+  it('corrects an address when the zone and the price come out as they are, and refuses one that moves the zone, one no zone matches and a carrier’s order', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    const made = orderOf(await itemize(officer, intake.id, body(a.id)));
+    const before = (await officer.client.get(ORDER(made.id))).json() as Seen;
+    const same = await correct(officer, made.id, {
+      note: 'The house number was wrong',
+      recipient: { location: { address: '7 Madina Estate, behind the clinic' } },
+    });
+    expect(same.status, same.text).toBe(200);
+    const moved = same.json() as Order;
+    expect(moved.recipient.location.address).toBe('7 Madina Estate, behind the clinic');
+    expect(moved.destination_zone_snapshot).toEqual(before.destination_zone_snapshot);
+    expect(moved.locked_price).toEqual(before.locked_price);
+    expect(moved.derived_delivery_date).toEqual(before.derived_delivery_date);
+
+    for (const address of ['5 Adenta Housing Down', 'Kumasi, Adum']) {
+      const refused = await correct(officer, made.id, {
+        note: 'The vendor said it is elsewhere',
+        recipient: { location: { address } },
+      });
+      expect(refusal(refused), address).toEqual([409, 'STATE_CONFLICT', 'address_changes_zone']);
+    }
+    expect(
+      ((await officer.client.get(ORDER(made.id))).json() as Order).recipient.location.address,
+    ).toBe('7 Madina Estate, behind the clinic');
+
+    // An order delivered by a carrier has a price that is the carrier's: its address is never provably the same.
+    const waybill = await storedIntakeEvidence(routes, officer, intake.id, 'ITEMIZATION');
+    const carrier = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, {
+          lane: 'THIRD_PARTY_HANDOFF',
+          commercial_mode: 'MELARC_COVERED_THIRD_PARTY_DELIVERY',
+          recipient: { name: 'Kofi', phone: '0201112233', location: { address: 'Adum, Kumasi' } },
+          carrier_cost: { amount_minor: 5000, currency: 'GHS' },
+          carrier_waybill_evidence_id: waybill,
+        }),
+      ),
+    );
+    expect(
+      refusal(
+        await correct(officer, carrier.id, {
+          note: 'Another street of Adum',
+          recipient: { location: { address: 'Adum market, Kumasi' } },
+        }),
+      ),
+    ).toEqual([409, 'STATE_CONFLICT', 'address_changes_zone']);
+    // The carrier's recipient may be named again: no address moves.
+    expect(
+      (
+        await correct(officer, carrier.id, {
+          note: 'The name was misspelt',
+          recipient: { name: 'Kofi Boateng' },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  // Break caught: a correction of an order that is not confirmed (it is amended with the order), of one whose arrival was taken back, by a session without the key or in another hub or a vendor, and an edit of a
+  // confirmed order's recipient by any other writer, with no record beside it.
+  it('is for the officers of the hub who hold the key, for a confirmed order only, and is held by the database for every writer', async () => {
+    const intake = await opened(2);
+    const [a] = intake.parcels as [Parcel, Parcel];
+    const early = orderOf(await itemize(officer, intake.id, body(a.id)));
+    expect(
+      refusal(await correct(officer, early.id, { note: 'Typo', recipient: { name: 'Ama B' } })),
+    ).toEqual([409, 'STATE_CONFLICT', 'order_not_confirmed']);
+
+    const made = await confirmed();
+    const reader = await routes.actor(
+      await newBundle(routes.admin, [grant('hub.read', 'own'), grant('pricing.read', 'own')]),
+      HUB_A,
+    );
+    expect(
+      refusal(await correct(reader, made.id, { note: 'Typo', recipient: { name: 'Ama B' } }))[1],
+    ).toBe('PERMISSION_DENIED');
+    expect(
+      refusal(await correct(otherHub, made.id, { note: 'Typo', recipient: { name: 'Ama B' } }))[1],
+    ).toBe('HUB_SCOPE_VIOLATION');
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    const asVendor = await browser.post(
+      `${ORDER(made.id)}/recipient-correction`,
+      { note: 'Typo', recipient: { name: 'Ama B' } },
+      { headers: { 'If-Match': '"x"', 'Idempotency-Key': randomUUID() } },
+    );
+    expect(asVendor.status).toBe(403);
+
+    // The database holds it for every writer: the recipient of a confirmed order does not change with no record beside it.
+    await expect(
+      routes.admin.query(
+        `update "order" set recipient = jsonb_set(recipient, '{name}', '"Somebody else"') where id = $1`,
+        [made.id],
+      ),
+    ).rejects.toThrow(/corrected only while it has not been paid for/);
+    // With the record beside it, the recipient is the one thing that moves: a size changed in the same statement is refused all the same.
+    const current = await routes.rows<{ version: number; recipient: Record<string, unknown> }>(
+      `select version, recipient from "order" where id = $1`,
+      [made.id],
+    );
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `select set_config('melarc.authorization_key', 'hub.intake.itemize', true), set_config('melarc.principal_type', 'STAFF', true), set_config('melarc.principal_id', $1, true)`,
+        [randomUUID()],
+      );
+      await routes.admin.query(
+        `insert into order_amendment (id, order_id, responsible_hub_id, amended_by, order_version, note, before, after, kind)
+         values ($1, $2, $3, $4, $5, 'A typo', $6::jsonb, $7::jsonb, 'RECIPIENT_CORRECTION')`,
+        [
+          randomUUID(),
+          made.id,
+          HUB_A,
+          randomUUID(),
+          current[0]?.version,
+          JSON.stringify({ recipient: current[0]?.recipient }),
+          JSON.stringify({ recipient: { ...current[0]?.recipient, name: 'Somebody' } }),
+        ],
+      );
+      await expect(
+        routes.admin.query(
+          `update "order" set recipient = jsonb_set(recipient, '{name}', '"Somebody"'), size_class = 'LARGE' where id = $1`,
+          [made.id],
+        ),
+      ).rejects.toThrow(/changes the recipient and nothing else/);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+    // And an order whose arrival was taken back is history: a correction of it is refused.
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const reversed = await boss.client.post(
+      `${ORDER(made.id)}/arrival-reversal`,
+      { note: 'The wrong parcel was ticked' },
+      {
+        origin: OPS,
+        headers: { 'If-Match': await etagOf(boss, made.id), 'Idempotency-Key': randomUUID() },
+      },
+    );
+    expect(reversed.status, reversed.text).toBe(200);
+    expect(
+      refusal(await correct(officer, made.id, { note: 'Typo', recipient: { name: 'Ama B' } })),
+    ).toEqual([409, 'STATE_CONFLICT', 'order_reversed']);
+  });
+});

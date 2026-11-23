@@ -32,10 +32,12 @@ import type {
   AmendPreviewBody,
   HubItemization,
   OrderPreviewView,
+  RecipientCorrectionBody,
 } from './itemization.service.js';
 import {
   ORDER_AMEND_BODY,
   ORDER_AMEND_PREVIEW_BODY,
+  ORDER_RECIPIENT_CORRECTION_BODY,
   ORDER_PREVIEW_SCHEMA,
   ORDER_REVERSAL_BODY,
   ORDER_REVERSAL_SCHEMA,
@@ -116,6 +118,51 @@ export class OrderChangesController {
       ifMatch,
       idempotencyKey,
       fingerprint: fingerprintOfRequest(request, 'amendOrder'),
+    });
+    response.setHeader('ETag', done.etag);
+    return done.order;
+  }
+
+  @Post('orders/:id/recipient-correction')
+  @HttpCode(200)
+  @ContractOperation('correctOrderRecipient')
+  @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
+  @ApiHeader({ name: 'If-Match', required: true, schema: IF_MATCH_SCHEMA })
+  @ApiBody({ schema: ORDER_RECIPIENT_CORRECTION_BODY })
+  @ApiResponse({ status: 200, schema: ORDER_SCHEMA, headers: ETAG_HEADERS })
+  @DescribeErrors(
+    ErrorCode.CsrfValidationFailed,
+    ErrorCode.HubScopeViolation,
+    ErrorCode.IdempotencyKeyConflict,
+    ErrorCode.NotFound,
+    ErrorCode.PermissionDenied,
+    ErrorCode.ReasonRequired,
+    ErrorCode.SessionInvalid,
+    ErrorCode.StateConflict,
+    ErrorCode.ValidationFailed,
+  )
+  @RequiresPermission('hub.intake.itemize', {
+    surfaces: ['OPS_PORTAL'],
+    activity: 'qualifying',
+    record: { entity: 'order', param: 'id' },
+  })
+  async correctRecipient(
+    @Authorized() authorized: AuthorizedRequest,
+    @Param('id') id: string,
+    @Body() body: RecipientCorrectionBody,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<OrderView> {
+    if (this.itemization === undefined)
+      throw new OperationUnavailableError('correctOrderRecipient');
+    const done = await this.itemization.correctRecipient(authorized, correlation(), id, {
+      body,
+      ifMatch,
+      idempotencyKey,
+      fingerprint: fingerprintOfRequest(request, 'correctOrderRecipient'),
     });
     response.setHeader('ETag', done.etag);
     return done.order;

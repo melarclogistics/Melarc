@@ -572,6 +572,7 @@ describe('the existence rule is asked about records that are real (the control o
       amendOrder: 'order',
       previewOrderAmendment: 'order',
       reverseOrderArrival: 'order',
+      correctOrderRecipient: 'order',
       getPayerCorrection: 'payerCorrection',
       previewOrder: 'pickupIntake',
       listIntakeOrders: 'pickupIntake',

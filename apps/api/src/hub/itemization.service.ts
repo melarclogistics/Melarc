@@ -139,6 +139,18 @@ export interface AmendBody {
   readonly evidence_ids?: readonly string[];
 }
 
+/**
+ * The body of `correctOrderRecipient` (Run F, D-S7-1): the recipient's name, phone and address as they are now to be, any of the three, and the reason in words. A member that is not given stays as it was.
+ */
+export interface RecipientCorrectionBody {
+  readonly note: string;
+  readonly recipient: {
+    readonly name?: string;
+    readonly phone?: string;
+    readonly location?: LocationText;
+  };
+}
+
 /** The order as it now stands and the `ETag` of what `getOrder` shows of it. */
 export interface AmendResult {
   readonly order: OrderView;
@@ -1118,6 +1130,176 @@ export class HubItemization {
         return answer;
       }),
     );
+  }
+
+  /**
+   * `correctOrderRecipient` (Run F, D-S7-1; `hub.intake.itemize`): **the recipient's name and phone of a CONFIRMED order are corrected, with a reason in words**, on the version of the order that was read (`If-Match`,
+   * the `ETag` of `getOrder`: `stale`), with an `Idempotency-Key`. The old and the new recipient are kept in the amendment record, as an amendment keeps its values; **the audit event names the fields that changed and
+   * never their values**. An **address** is corrected the same way when the server finds that its zone and its price come out as they are (the address still resolves to the zone the order was priced for, for an order
+   * delivered to the door and placed by the server); one that moves the zone or the price is a request decided by a checker, on the pattern of the payer correction, which is **not built**: it is refused
+   * (`STATE_CONFLICT`, rule `address_changes_zone`) and nothing changes. Refused once an order is paid for, reserved or dispatched (`order_progressed`, `order_dispatched`: none of the three exists yet), for an order
+   * whose arrival was taken back (`order_reversed`) and for one that is not confirmed, which is amended with the order (`order_not_confirmed`). The database repeats every rule for every writer (migration 0124).
+   */
+  async correctRecipient(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    orderId: string,
+    request: {
+      readonly body: RecipientCorrectionBody;
+      readonly ifMatch: string | undefined;
+      readonly idempotencyKey: string;
+      readonly fingerprint: string;
+    },
+  ): Promise<AmendResult> {
+    const { runner, audit, idempotency, clock } = this.#options;
+    this.#requireStaff(authorized);
+    if (!isIdempotencyKey(request.idempotencyKey)) {
+      throw new ApiException(ErrorCode.ValidationFailed, 400, 'The request is not valid', {
+        violations: [{ in: 'header', pointer: 'Idempotency-Key', rule: 'format' }],
+      });
+    }
+    if ((request.body as { note?: string }).note === undefined) throw invalid('/note', 'required');
+    const note = requiredNote(request.body.note, '/note');
+    const patch = request.body.recipient;
+    if (patch.name === undefined && patch.phone === undefined && patch.location === undefined) {
+      throw invalid('/recipient', 'required');
+    }
+    if (patch.name?.trim() === '') throw invalid('/recipient/name', 'required');
+    if (patch.location?.address.trim() === '') {
+      throw invalid('/recipient/location/address', 'required');
+    }
+    const phone = patch.phone === undefined ? undefined : normalisePhone(patch.phone);
+    if (patch.phone !== undefined && phone === undefined)
+      throw invalid('/recipient/phone', 'format');
+    const staff = authorized.session.principalId.toLowerCase();
+    const hubId = await runner.mutate(authorized, correlationId, (handle) =>
+      this.#hubOfOrder(handle, orderId),
+    );
+    return this.#whileConfigurationHolds(hubId, (config) =>
+      runner.mutate(authorized, correlationId, async (handle) => {
+        const tx = transactionOf(handle);
+        const scope = {
+          principalType: 'STAFF',
+          principalId: staff,
+          operationId: 'correctOrderRecipient',
+          key: request.idempotencyKey,
+        } as const;
+        const begun = await idempotency.begin(handle, scope, request.fingerprint);
+        if (begun.outcome === 'REPLAY') {
+          return JSON.parse(Buffer.from(begun.response.body).toString('utf8')) as AmendResult;
+        }
+        if (begun.outcome === 'CONFLICT') {
+          throw ApiException.of(
+            ErrorCode.IdempotencyKeyConflict,
+            'That Idempotency-Key was used with a different request',
+          );
+        }
+        if (begun.outcome !== 'NEW')
+          throw new Error('An idempotency record of this command is stranded');
+
+        // The intake first, as every act on an order holds it; the rates only matter to an address, and are compared once the lock is held.
+        await this.#holdIntakeOfOrder(tx, orderId);
+        const row = await loadOrder(tx, orderId);
+        if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+        if (
+          !orderEtagMatches(request.ifMatch, orderEtagOf(orderViewOf(row), Number(row.version)))
+        ) {
+          throw conflict('stale', 'The order has changed since it was read');
+        }
+        if (patch.location !== undefined) {
+          await this.#requireConfigurationCurrent(tx, hubId, config);
+          this.#requireSameZone(config, row, patch.location);
+        }
+        await noteHubCrossing(audit, handle, authorized, {
+          id: row.pickup_intake_id,
+          responsible_hub_id: row.responsible_hub_id,
+        });
+        const stored = row.recipient as unknown as {
+          name: string;
+          phone: string;
+          phone_as_entered?: string;
+          location: LocationText;
+        };
+        const corrected = {
+          ...stored,
+          ...(patch.name === undefined ? {} : { name: patch.name.trim() }),
+          ...(patch.phone === undefined || phone === undefined
+            ? {}
+            : { phone, phone_as_entered: patch.phone }),
+          ...(patch.location === undefined ? {} : { location: patch.location }),
+        };
+        const record = randomUUIDv7(clock);
+        let done: { version: number | string; changed: string[] } | undefined;
+        try {
+          const result = await tx.execute(
+            sql`select version, changed from melarc.correct_order_recipient(${orderId}::uuid, ${Number(row.version)}::integer, ${record}::uuid, ${note}::text, ${JSON.stringify(corrected)}::jsonb)`,
+          );
+          done = result.rows[0] as unknown as
+            { version: number | string; changed: string[] } | undefined;
+        } catch (error) {
+          throw receivingRefusalOf(error, '/note') ?? error;
+        }
+        if (done === undefined) throw new Error('A correction that was made left no version');
+        const after = await loadOrder(tx, orderId);
+        if (after === undefined) throw new Error('A corrected order is not there to be read');
+        const view = orderViewOf(after);
+        // The fields that changed are named; their values are in the record, never in the event.
+        await audit.write(handle, {
+          code: 'order.amendment.recorded',
+          enhanced: true,
+          outcome: 'SUCCEEDED',
+          note,
+          object: { type: 'Order', id: orderId },
+          responsibleHubId: hubId,
+          relatedIds: { pickup_intake_id: row.pickup_intake_id, order_amendment_id: record },
+          // An enhanced event states a before and an after: for the details of a person it states that the field was corrected and where the old and the new are (the amendment record), never the values.
+          beforeAfter: Object.fromEntries(
+            done.changed.map((field) => [
+              `recipient_${field}`,
+              { before: 'on record', after: 'corrected, both kept in the amendment record' },
+            ]),
+          ),
+          detail: {
+            kind: 'RECIPIENT_CORRECTION',
+            changed: done.changed.map((field) => `recipient.${field}`).join(','),
+            after_confirmation: true,
+          },
+        });
+        const answer: AmendResult = { order: view, etag: orderEtagOf(view, Number(after.version)) };
+        await idempotency.complete(handle, scope, {
+          status: 200,
+          body: new TextEncoder().encode(JSON.stringify(answer)),
+        });
+        return answer;
+      }),
+    );
+  }
+
+  /**
+   * An address is corrected on a confirmed order only when the server finds that its zone and its price come out as they are: the order is delivered to the door, the server placed it in the first place, and the new
+   * address still resolves to that very zone (the flat fee of a zone's service area does not depend on the address). Anything else moves the zone or the price, which a checker decides and which is not built.
+   */
+  #requireSameZone(config: HubConfiguration, row: OrderRow, location: LocationText): void {
+    const snapshot = row.destination_zone_snapshot as { zone_id?: string };
+    const unchanged =
+      (row.recipient as unknown as { location?: LocationText }).location?.address ===
+        location.address &&
+      ((row.recipient as unknown as { location?: LocationText }).location?.landmark ?? '') ===
+        (location.landmark ?? '');
+    if (unchanged) return;
+    const placed = resolveZone(config, location);
+    if (
+      row.lane !== 'DOORSTEP' ||
+      row.destination_zone_resolution !== 'SERVER_RESOLVED' ||
+      snapshot.zone_id === undefined ||
+      placed.kind !== 'RESOLVED' ||
+      placed.zone.id !== snapshot.zone_id
+    ) {
+      throw conflict(
+        'address_changes_zone',
+        'This address is not provably in the zone the order was priced for: a change that moves the zone or the price is decided by a checker',
+      );
+    }
   }
 
   /** The intake of an order, held for update: an order is changed and ordered one act after another, the intake being the lock they share. An order that is not in the caller's hubs is one that does not exist. */

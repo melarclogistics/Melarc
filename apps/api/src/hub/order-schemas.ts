@@ -194,6 +194,21 @@ export const ORDER_AMEND_BODY = described({
   },
 });
 
+/** The body of `correctOrderRecipient` (Run F, D-S7-1): the recipient's name, phone and address as they are now to be (any of the three), and the reason in words, which a blank one is `REASON_REQUIRED`. */
+export const ORDER_RECIPIENT_CORRECTION_BODY = described({
+  type: 'object',
+  required: ['note', 'recipient'],
+  additionalProperties: false,
+  properties: {
+    note: { type: 'string', minLength: 1 },
+    recipient: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { name: { type: 'string' }, phone: { type: 'string' }, location: LOCATION },
+    },
+  },
+});
+
 /** The body of `reverseOrderArrival` (Stage 7): the reason in words, which a blank one is `REASON_REQUIRED`, told by the service before the shape. */
 export const ORDER_REVERSAL_BODY = described({
   type: 'object',
@@ -440,13 +455,14 @@ export const ORDER_SCHEMA = described({
       type: 'array',
       items: {
         type: 'object',
-        required: ['id', 'amended_by', 'amended_at', 'note', 'changed'],
+        required: ['id', 'amended_by', 'amended_at', 'note', 'changed', 'kind'],
         properties: {
           id: UUID,
           amended_by: UUID,
           amended_at: { type: 'string', format: 'date-time' },
           note: { type: 'string' },
           changed: { type: 'array', items: { type: 'string' } },
+          kind: { type: 'string', enum: ['AMENDMENT', 'RECIPIENT_CORRECTION'] },
         },
       },
     },

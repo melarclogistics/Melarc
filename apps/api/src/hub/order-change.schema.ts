@@ -40,6 +40,11 @@ export const orderAmendment = pgTable(
     note: text('note').notNull(),
     before: jsonb('before').notNull(),
     after: jsonb('after').notNull(),
+    /**
+     * What the record is of (Run F, D-S7-1; migration `0124`): `AMENDMENT`, the correction of an order that is not yet confirmed (`melarc.amend_order`), or `RECIPIENT_CORRECTION`, the correction of the
+     * recipient's name, phone or address of an order that is confirmed (`melarc.correct_order_recipient`: its `before` and `after` hold the recipient as it was and as it became, and the audit event names the fields and never the values).
+     */
+    kind: text('kind').notNull().default('AMENDMENT'),
   },
   (table) => [
     foreignKey({
@@ -49,6 +54,10 @@ export const orderAmendment = pgTable(
     }),
     index('order_amendment_order_idx').on(table.orderId, table.amendedAt),
     check('order_amendment_note_present', sql`btrim(${table.note}) <> ''`),
+    check(
+      'order_amendment_kind_closed',
+      sql`${table.kind} IN ('AMENDMENT', 'RECIPIENT_CORRECTION')`,
+    ),
   ],
 );
 

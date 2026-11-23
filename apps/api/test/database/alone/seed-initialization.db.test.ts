@@ -766,6 +766,9 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.vendor_order_parcel_state',
       // Whether a vendor waits for a senior officer (migration 0123, D-S7-7).
       'melarc.intake_senior_needed',
+      // The correction of the recipient of a confirmed order (migration 0124, D-S7-1).
+      'melarc.correct_order_recipient',
+      'melarc.order_recipient_corrected_here',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

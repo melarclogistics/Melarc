@@ -58,6 +58,8 @@ export interface OrderHistory {
     readonly amended_at: string;
     readonly note: string;
     readonly changed: readonly string[];
+    /** What the record is of (D-S7-1): an amendment before the price froze, or the correction of the recipient of a confirmed order. */
+    readonly kind: 'AMENDMENT' | 'RECIPIENT_CORRECTION';
   }[];
   readonly reversal: {
     readonly id: string;
@@ -208,7 +210,7 @@ export class HubOrderReads {
   async #historyOf(tx: ReturnType<typeof transactionOf>, id: string): Promise<OrderHistory> {
     const amended = (
       await tx.execute(
-        sql`select id, amended_by, amended_at, note, after from order_amendment where order_id = ${id}::uuid order by amended_at, id`,
+        sql`select id, amended_by, amended_at, note, after, kind from order_amendment where order_id = ${id}::uuid order by amended_at, id`,
       )
     ).rows as unknown as {
       id: string;
@@ -216,6 +218,7 @@ export class HubOrderReads {
       amended_at: string | Date;
       note: string;
       after: unknown;
+      kind: 'AMENDMENT' | 'RECIPIENT_CORRECTION';
     }[];
     const reversed = (
       await tx.execute(
@@ -229,6 +232,7 @@ export class HubOrderReads {
         amended_by: row.amended_by,
         amended_at: timestampOf(row.amended_at).toISOString(),
         note: row.note,
+        kind: row.kind,
         changed: Object.keys(
           (typeof row.after === 'string' ? JSON.parse(row.after) : row.after) as Record<
             string,
