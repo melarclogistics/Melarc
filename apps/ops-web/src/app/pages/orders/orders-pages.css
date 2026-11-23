@@ -247,10 +247,6 @@ p.orders-photo__none {
   line-height: var(--text-heading-sm-line-height);
 }
 
-.orders-price__body:focus-visible {
-  outline-offset: var(--space-1);
-}
-
 /* What was typed, above the one save: a line the officer reads before pressing it. */
 .orders-typed {
   flex-basis: 100%;
