@@ -75,6 +75,8 @@ export interface World {
   prices: Record<Size, number>;
   /** The next save finds the price of its size changed to this figure, once: the terms the officer read are then no longer the terms. */
   repriceOnce: number | undefined;
+  /** How long the stand-in's server takes to work a price out, in milliseconds: none by default. A test that taps while a price is being checked asks for a slow one. */
+  previewDelayMs: number;
   /** Saves made under a key already seen are answered as the first was and make nothing. */
   keys: Map<string, { status: number; body: unknown; etag: string | undefined }>;
 }
@@ -115,6 +117,7 @@ export function world(over: Partial<World> = {}): World {
     corrections: [],
     prices: { SMALL: 3500, MEDIUM: 4000, LARGE: 5000 },
     repriceOnce: undefined,
+    previewDelayMs: 0,
     keys: new Map(),
     ...over,
   };
@@ -138,6 +141,10 @@ export interface OrdersApi {
 }
 
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+const pause = (milliseconds: number): Promise<void> =>
+  milliseconds <= 0
+    ? Promise.resolve()
+    : new Promise((resolve) => setTimeout(resolve, milliseconds));
 /** The digest of the terms a preview worked out: the same facts at the same price give the same digest, and another price another. */
 const tokenOf = (size: Size, price: number, parcel: string | undefined): string =>
   sha(`${size}|${String(price)}|${parcel ?? ''}`);
@@ -402,6 +409,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     const size = SIZES.find((each) => each === body.size_class);
     if (size === undefined) return route.fulfill(error(422, 'SIZE_CLASS_REQUIRED'));
     const price = w.prices[size];
+    await pause(w.previewDelayMs);
     return route.fulfill(
       ok(
         termsOf(
@@ -520,6 +528,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     const order = orderById(w, amendPreview);
     if (order === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
     const size = SIZES.find((each) => each === body.size_class) ?? order.size;
+    await pause(w.previewDelayMs);
     return route.fulfill(
       ok(
         termsOf(

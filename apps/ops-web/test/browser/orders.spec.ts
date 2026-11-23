@@ -14,13 +14,14 @@ import { menuEntry } from './support/shell';
 import { expectNoTableScrollsSideways } from './support/tables';
 
 /**
- * The order screens (S1.40) in a real browser: from the queue of the vendors with orders to make to the first order (the price checked before anything is saved), a price that changes while the officer looks, the
- * close of a vendor and its summary, a change of an order that is not confirmed, and a request to change who pays with the checker's decision. What jsdom cannot show is here: the layout at the verified widths
- * with axe (WCAG 2.2 A and AA), no sideways scrolling at 320 px, the form and the review by keyboard alone, and the picture beside the form really drawn.
+ * The order screens (S1.40) in a real browser: from the queue of the vendors with orders to make to the first order (the price is beside the form by itself, and the one save is at that price), a price that changes
+ * while the officer looks, a double tap at each point where a price appears or changes, the close of a vendor and its summary, a change of an order that is not confirmed, and a request to change who pays with the
+ * checker's decision. What jsdom cannot show is here: the layout at the verified widths with axe (WCAG 2.2 A and AA), no sideways scrolling at 320 px, the form by keyboard alone, and the picture beside the form
+ * really drawn.
  *
- * **The API is a stateful stand-in that keeps what the API keeps** (`support/orders-api.ts`): the vendor's version moves with every order, so a save on an older read is refused; the price is the stand-in's
- * server's and the page sends none (a save is on the digest of the terms that were read, and a price that changed meanwhile answers the terms as they are now); a key makes an order once; a change of who pays is
- * a request a checker decides. Every request is recorded as the browser sent it.
+ * **The API is a stateful stand-in that keeps what the API keeps** (`support/orders-api.ts`): the vendor's version moves when its state does and not with each order, so a save on an older read is refused; the price
+ * is the stand-in's server's and the page sends none (a save is on the digest of the terms that were read, and a price that changed meanwhile answers the terms as they are now); a key makes an order once; a change
+ * of who pays is a request a checker decides. Every request is recorded as the browser sent it.
  *
  * The same file runs against the production build and against the development server (strict mode runs every effect twice).
  */
@@ -36,6 +37,8 @@ const NEW_ORDER = `${ORDERS}/new`;
 const FIRST = storedOrder(1);
 const EARLY_ID = storedOrder(2).id;
 const DIAGNOSTIC = 'Diagnostic text that must never reach a screen.';
+/** D-S7-2: a press in the moment after the price changed at the save is ignored (about 600 ms); a press that is meant comes after it. */
+const GUARD_WAIT_MS = 750;
 
 async function open(
   page: Page,
@@ -83,14 +86,15 @@ function clippedControls(page: Page): Promise<string[]> {
 }
 
 test.describe('making the orders of a vendor', () => {
-  // Break caught: a vendor that cannot be found again from the queue, an order form that works the price out itself or saves before the officer has read it, a save with no key or no version, or a parcel without its photo.
-  test('from the queue to a saved order: the price is checked first, and the save is on the terms that were read', async ({
+  // Break caught: a vendor that cannot be found again from the queue, an order form that works the price out itself, a price that is not there for the officer to read before the one save, a save with no key or no
+  // version, or a parcel without its photo.
+  test('from the queue to a saved order: the price is beside the form by itself, and the save is on the terms that were read', async ({
     page,
   }) => {
     const { api, watch } = await open(page, '/orders-to-make');
     await expect(page.getByRole('heading', { level: 1, name: 'Orders to make' })).toBeVisible();
-    await page.getByRole('button', { name: 'Make orders for Kente Crafts' }).click();
-    await page.getByRole('link', { name: 'Make orders', exact: true }).click();
+    // The vendor's name is the link to its orders: a row opens the page it leads to, with no panel between (item 16 of the review of 23 November 2026).
+    await page.getByRole('link', { name: 'Kente Crafts' }).click();
 
     await expect(page).toHaveURL(ORDERS);
     await expect(
@@ -114,20 +118,23 @@ test.describe('making the orders of a vendor', () => {
     await expect.poll(() => api.images.length).toBeGreaterThan(0);
 
     await fillIn(page);
-    await page.getByRole('button', { name: 'Check the price' }).click();
-    await expect(page.getByRole('heading', { level: 2, name: 'Check the order' })).toBeVisible();
+    // The price comes by itself, a moment after the last key, beside the form; the one save says it, and a line above it says what was typed.
+    const saveAt = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
+    await expect(saveAt).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'The price' })).toBeVisible();
     await expect(page.getByText('GH₵40.00').first()).toBeVisible();
-    // Nothing is saved until the officer confirms, and what was sent to check carries no price of the page's own.
+    await expect(
+      page.getByText(/Kofi Asante · 024 765 4321 · 7 Spintex Road, near the mall · Medium/),
+    ).toBeVisible();
+    // Nothing is saved until the officer presses the save, and what was sent to price carries no price of the page's own.
     expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
-    const preview = made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`)[0]?.body as Record<
-      string,
-      unknown
-    >;
+    const preview = made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`).at(-1)
+      ?.body as Record<string, unknown>;
     expect(preview).toMatchObject({ size_class: 'MEDIUM', lane: 'DOORSTEP' });
     for (const never of ['price', 'total', 'zone', 'locked_price', 'reviewed_terms'])
       expect(preview).not.toHaveProperty(never);
 
-    await page.getByRole('button', { name: 'Confirm the order' }).click();
+    await saveAt.click();
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Make the next order' })).toBeVisible();
 
@@ -145,15 +152,13 @@ test.describe('making the orders of a vendor', () => {
     expect(watch.problems).toEqual([]);
   });
 
-  // Break caught: an order saved at a price the officer did not read; the earlier figure lost; a second confirmation that does not name the new figure; an order made twice.
-  test('a price that changed while the officer looked is shown beside the old one and confirmed again', async ({
+  // Break caught: an order saved at a price the officer did not read; the earlier figure lost; a second save that does not name the new figure; the focus left where the new figure is not read; an order made twice.
+  test('a price that changed while the officer looked is shown beside the old one and saved again at the new figure', async ({
     page,
   }) => {
     const { api, watch } = await open(page, NEW_ORDER, { repriceOnce: 4500 });
     await fillIn(page);
-    await page.getByRole('button', { name: 'Check the price' }).click();
-    await expect(page.getByText('GH₵40.00').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Confirm the order' }).click();
+    await page.getByRole('button', { name: 'Save the order at GH₵40.00' }).click();
 
     const alert = page
       .getByRole('alert')
@@ -161,7 +166,12 @@ test.describe('making the orders of a vendor', () => {
     await expect(alert).toBeVisible();
     await expect(alert).toContainText('Price: GH₵40.00 before, GH₵45.00 now.');
     expect(api.world.orders).toHaveLength(0);
-    await page.getByRole('button', { name: 'Confirm at GH₵45.00' }).click();
+    // The save is now a button of its own that says the new figure, and the focus is on the price beside the form, so that the new figure is read before it is pressed.
+    const again = page.getByRole('button', { name: 'Save at GH₵45.00' });
+    await expect(again).toBeVisible();
+    await expect(page.locator('.orders-price__body')).toBeFocused();
+    await page.waitForTimeout(GUARD_WAIT_MS);
+    await again.click();
 
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     // Two saves were sent (the first refused with the terms as they now are), one order was made, and what the officer typed was never asked for again.
@@ -174,8 +184,8 @@ test.describe('making the orders of a vendor', () => {
     expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
   });
 
-  // Break caught: a form that cannot be completed without a pointer, a review that takes focus nowhere, or a saved order that leaves the officer to look for what happened.
-  test('the form, the review and the save can all be done from the keyboard, and focus follows the officer', async ({
+  // Break caught: a form that cannot be completed without a pointer, a save that cannot be reached with the Tab key, or a saved order that leaves the officer to look for what happened.
+  test('the form and the save can all be done from the keyboard, and focus follows the officer', async ({
     page,
   }) => {
     const { api, watch } = await open(page, NEW_ORDER);
@@ -196,13 +206,10 @@ test.describe('making the orders of a vendor', () => {
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('radio', { name: 'Medium' })).toBeChecked();
 
-    const check = page.getByRole('button', { name: 'Check the price' });
-    await tabTo(page, check);
-    await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 2, name: 'Check the order' })).toBeVisible();
-
-    const confirm = page.getByRole('button', { name: 'Confirm the order' });
-    await tabTo(page, confirm);
+    // The price comes by itself, and the one save is the next stop of the Tab key that matters.
+    const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
+    await expect(save).toBeVisible();
+    await tabTo(page, save, 24);
     await page.keyboard.press('Enter');
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     // Focus is on what happened, so that it is read out and the officer is not left on a button that is gone.
@@ -219,25 +226,22 @@ test.describe('making the orders of a vendor', () => {
   }) => {
     const { api } = await open(page, NEW_ORDER);
     await fillIn(page, 'Small');
-    await page.getByRole('button', { name: 'Check the price' }).click();
-    await page.getByRole('button', { name: 'Confirm the order' }).click();
+    await page.getByRole('button', { name: /^Save the order at / }).click();
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     await page.getByRole('link', { name: 'Make the next order' }).click();
     await expect(
       page.getByRole('heading', { level: 1, name: 'Make an order for parcel 2' }),
     ).toBeVisible();
     await fillIn(page, 'Medium');
-    await page.getByRole('button', { name: 'Check the price' }).click();
-    await page.getByRole('button', { name: 'Confirm the order' }).click();
+    await page.getByRole('button', { name: /^Save the order at / }).click();
     await expect(page.getByText(/^Order ACC-OR-4HJ5KM is saved\.$/)).toBeVisible();
     await page.getByRole('link', { name: 'Make the next order' }).click();
     await expect(
       page.getByRole('heading', { level: 1, name: 'Make an order for parcel 3' }),
     ).toBeVisible();
     await fillIn(page, 'Large');
-    await page.getByRole('button', { name: 'Check the price' }).click();
     await expect(page.getByText('GH₵50.00').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Confirm the order' }).click();
+    await page.getByRole('button', { name: 'Save the order at GH₵50.00' }).click();
     await expect(page.getByText(/^Order ACC-OR-6NP7QR is saved\.$/)).toBeVisible();
 
     // Every parcel has its order, and the page leads to the close and not to another order. No save was refused as stale, and no officer was asked to check a price again.
@@ -250,6 +254,141 @@ test.describe('making the orders of a vendor', () => {
     await expect(page.getByText(/This vendor changed while you were working/)).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Close this vendor' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Make the next order' })).toHaveCount(0);
+  });
+});
+
+/**
+ * Two taps of one finger, a moment apart (less than 200 ms), on the place where the control is when the first lands: what a double tap is, and what the review of 23 November 2026 reproduced saving an order that
+ * had not been read (the second tap landed on the control that had taken the first one's place). The place is read once, as a finger would find it, and the second tap goes to the same place wherever the control has
+ * gone.
+ */
+async function doubleTap(page: Page, target: Locator, gap = 120): Promise<void> {
+  // A finger taps what it can see: the control is brought into view first, and its place is read after that.
+  await target.scrollIntoViewIfNeeded();
+  const box = await target.boundingBox();
+  if (box === null) throw new Error('the control to tap has no place on the screen');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.click(x, y);
+  await page.waitForTimeout(gap);
+  await page.mouse.click(x, y);
+}
+
+test.describe('a double tap never saves what was not read (D-S7-2, item 2 of the review of 23 November 2026)', () => {
+  // Break caught: a double tap on the save of an order that makes the order twice, or a price that changed at the save taken by the second tap of the same finger (the two steps of the old form: the second tap landed on
+  // "Confirm the order" in the place of "Check the price", reproduced in Chromium).
+  test('at the save, where the price changes under the finger: one refused save, and the second tap saves nothing', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER, { repriceOnce: 4500 });
+    await fillIn(page);
+    const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
+    await expect(save).toBeVisible();
+
+    await doubleTap(page, save);
+    // The first tap was refused with the terms as they now are (GH₵45.00), and the button that says the new figure is in the same place: the second tap, 120 ms after the first, did not press it.
+    const again = page.getByRole('button', { name: 'Save at GH₵45.00' });
+    await expect(again).toBeVisible();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Price: GH₵40.00 before' }),
+    ).toBeVisible();
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(1);
+    expect(api.world.orders).toHaveLength(0);
+
+    // A press that is meant, after the figure was read, saves at the new price.
+    await page.waitForTimeout(GUARD_WAIT_MS);
+    await again.click();
+    await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
+    expect(api.world.orders).toHaveLength(1);
+    expect(api.world.orders[0]?.price).toBe(4500);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(2);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
+  });
+
+  // Break caught: the save pressable while the price is being worked out (a tap on it saves on a price that is not the price of what is on the screen), or a double tap that makes an order twice.
+  test('where the price first appears: taps on the button while the price is being checked save nothing', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER, { previewDelayMs: 900 });
+    await fillIn(page);
+    const checking = page.getByRole('button', { name: 'Checking the price…' });
+    await expect(checking).toBeVisible();
+    await expect(checking).toBeDisabled();
+
+    await doubleTap(page, checking);
+    // The price arrives (the stand-in is slow on purpose): nothing was saved by the taps, and the save is there for a press that is meant.
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible();
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
+    expect(api.world.orders).toHaveLength(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a price that changed because an entry was changed (the size) that the save is pressable on while the new price is being worked out, so that a tap saves the old price for the new size.
+  test('where the price changes with an entry: taps while the new price is being checked save nothing, and the new price is the one shown', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER);
+    await fillIn(page, 'Small');
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵35.00' })).toBeVisible();
+
+    // The price of a bigger parcel is slow to come (the stand-in is slow on purpose, from now on).
+    api.world.previewDelayMs = 900;
+    await page.getByRole('radio', { name: 'Large' }).check();
+    const checking = page.getByRole('button', { name: 'Checking the price…' });
+    await expect(checking).toBeVisible();
+    await expect(checking).toBeDisabled();
+
+    await doubleTap(page, checking);
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵50.00' })).toBeVisible();
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
+    expect(api.world.orders).toHaveLength(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a double tap on a save that is pressable that makes two orders (the second tap is the same press: the command takes one at a time and a retry would be under the same key).
+  test('on a save that is ready: two taps make one order', async ({ page }) => {
+    const { api, watch } = await open(page, NEW_ORDER);
+    await fillIn(page);
+    const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
+    await expect(save).toBeVisible();
+
+    await doubleTap(page, save);
+    await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
+    expect(api.world.orders).toHaveLength(1);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('a double tap on the change of an order (D-S7-2)', () => {
+  const early = () => storedOrder(2, { status: 'EARLY_QUOTE', size: 'SMALL', price: 3500 });
+
+  // Break caught: the change saved on a price that is not the price of what is on the screen, by taps while the new price is being worked out.
+  test('taps while the price of the change is being checked save nothing', async ({ page }) => {
+    const order = early();
+    const { api, watch } = await open(page, `/orders/${order.id}/amend`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1), order],
+      previewDelayMs: 900,
+    });
+    await page.getByRole('radio', { name: 'Large' }).check();
+    await page
+      .getByLabel(/Why are you changing this order\?/)
+      .fill('The parcel is bigger than its photo showed');
+    const checking = page.getByRole('button', { name: 'Checking the price…' });
+    await expect(checking).toBeVisible();
+    await expect(checking).toBeDisabled();
+
+    await doubleTap(page, checking);
+    await expect(page.getByRole('button', { name: 'Save the change at GH₵50.00' })).toBeVisible();
+    expect(made(api, 'PATCH', `/orders/${order.id}`)).toHaveLength(0);
+    expect(api.world.orders[1]?.size).toBe('SMALL');
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
   });
 });
 
@@ -310,9 +449,13 @@ test.describe('closing a vendor and its summary', () => {
     await expect(page.getByRole('button', { name: 'Close this vendor' })).toHaveCount(0);
     await expect(
       page.getByText(
-        /A senior officer can close with parcels still to order\. Ask one to open this page\./,
+        /A senior officer can close with parcels still to order\. A senior officer finds this vendor under Needs a senior\./,
       ),
     ).toBeVisible();
+    // The way on is the senior officers' list, and not a request to ask one of them to open this page.
+    await expect(
+      page.getByRole('link', { name: 'Open the list for a senior officer' }),
+    ).toHaveAttribute('href', '/orders-to-make?view=NEEDS_SENIOR');
     expect(made(api, 'POST', `/hub-intakes/${VENDOR}/close`)).toHaveLength(0);
   });
 });
@@ -430,15 +573,14 @@ test.describe('changing an order that is not confirmed', () => {
     await page
       .getByLabel(/Why are you changing this order\?/)
       .fill('The parcel is bigger than its photo showed');
-    await page.getByRole('button', { name: 'Check the price' }).click();
-    await expect(page.getByRole('heading', { level: 2, name: 'Check the order' })).toBeVisible();
+    // The price of the change comes by itself, beside the one the order holds now; the reason is the save's, never the price's.
     await expect(page.getByText('Price it holds now')).toBeVisible();
     await expect(page.getByText('GH₵50.00').first()).toBeVisible();
-    expect(made(api, 'POST', `/orders/${EARLY.id}/amendment-preview`)[0]?.body).toEqual({
+    expect(made(api, 'POST', `/orders/${EARLY.id}/amendment-preview`).at(-1)?.body).toEqual({
       size_class: 'LARGE',
     });
 
-    await page.getByRole('button', { name: 'Save the change' }).click();
+    await page.getByRole('button', { name: 'Save the change at GH₵50.00' }).click();
     await expect(page).toHaveURL(`/orders/${EARLY.id}`);
     await expect(page.getByText(`Order ${EARLY.code} was changed.`)).toBeVisible();
     // The order is read again as it now stands, with the change in its history and no word of the values.
@@ -586,15 +728,14 @@ const SCREENS: readonly Screen[] = [
     ready: (page) => heading(page, 'Make an order for parcel 2'),
   },
   {
-    // The review of the price is the screen an officer reads most carefully.
-    name: 'the review of a price',
+    // The price beside the form is what an officer reads most carefully before the one save.
+    name: 'the form of an order with its price beside it',
     path: NEW_ORDER,
     world: firstMade,
-    ready: (page) => page.getByRole('heading', { level: 2, name: 'Check the order' }),
+    ready: (page) => page.getByRole('button', { name: /^Save the order at / }),
     then: async (page) => {
       await expect(heading(page, 'Make an order for parcel 2')).toBeVisible();
       await fillIn(page);
-      await page.getByRole('button', { name: 'Check the price' }).click();
     },
   },
 ];
