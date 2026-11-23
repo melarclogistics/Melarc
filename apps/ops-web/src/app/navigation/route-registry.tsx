@@ -305,7 +305,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     menu: {
       place: 'sidebar',
       group: 'hub',
-      label: 'Still to order',
+      label: 'Closed with parcels left',
       icon: 'closed-vendors',
       order: 4,
       description: 'Find the vendors that were closed while parcels received still had no order.',

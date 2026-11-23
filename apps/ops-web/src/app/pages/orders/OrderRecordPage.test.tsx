@@ -391,6 +391,20 @@ describe('an order that is not there', () => {
   });
 });
 
+describe('where the order page starts (Run F, Part 2, item 16)', () => {
+  // Break caught: the breadcrumb of an order starting at Receiving (the check-in's page) when the officer came from Orders to make, the place the work starts.
+  it('starts its breadcrumb at Orders to make', async () => {
+    open(orderOf('frozen'));
+    await screen.findByRole('heading', { level: 1, name: ORDER_CODE });
+    const trail = within(screen.getByRole('navigation', { name: 'Breadcrumb' }));
+    expect(trail.getByRole('link', { name: 'Orders to make' })).toHaveAttribute(
+      'href',
+      '/orders-to-make',
+    );
+    expect(trail.queryByRole('link', { name: 'Receiving' })).toBeNull();
+  });
+});
+
 describe('the order changed after it was opened (Run F, Part 2, item 4)', () => {
   // Break caught: every order page telling every officer that the order changed after they opened it, with a Reload, the moment it opens, when nothing has said so (the page passed its conflict to the template
   // whatever had happened).

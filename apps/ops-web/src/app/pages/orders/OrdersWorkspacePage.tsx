@@ -30,14 +30,15 @@ import { recordPath, runPath } from '../receiving/receiving-presentation';
 import { WithRecord } from '../receiving/WithRecord';
 import { OrderPhoto } from './OrderPhoto';
 import {
+  areaText,
+  CLOSED_VENDORS_PATH,
   closePath,
   isWorklistView,
   newOrderPath,
   orderPath,
   summaryPath,
-  CLOSED_VENDORS_PATH,
+  TO_MAKE_CRUMB,
   WORK_STATE_MAP,
-  areaText,
 } from './orders-presentation';
 import { vendorFactsOf, type VendorFacts } from './vendor-facts';
 import './orders-pages.css';
@@ -411,7 +412,7 @@ function Workspace({
   ];
 
   const breadcrumb = [
-    { label: WORDS.common.receiving, to: '/receiving' },
+    TO_MAKE_CRUMB,
     { label: name ?? facts.code, to: recordPath(facts.id) },
   ] as const;
 
@@ -502,7 +503,7 @@ export function OrdersWorkspacePage() {
         ),
         documentTitle: WORDS.workspace.title(vendor),
       })}
-      breadcrumb={() => [{ label: WORDS.common.receiving, to: '/receiving' }]}
+      breadcrumb={() => [TO_MAKE_CRUMB]}
     >
       {(record) => <NamedWorkspace record={record} />}
     </WithRecord>

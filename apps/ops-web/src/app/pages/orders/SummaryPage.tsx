@@ -31,7 +31,7 @@ import {
   messageLogPath,
   orderPath,
   ordersPath,
-  RECEIVING_PATH,
+  TO_MAKE_CRUMB,
 } from './orders-presentation';
 import { vendorFactsOf } from './vendor-facts';
 import './orders-pages.css';
@@ -152,7 +152,7 @@ function SummaryBody({
         title={S.title(name)}
         description={S.description}
         breadcrumb={[
-          { label: WORDS.common.receiving, to: RECEIVING_PATH },
+          TO_MAKE_CRUMB,
           { label: name ?? code, to: recordPath(summary.intake_id) },
           { label: WORDS.form.breadcrumbOrders, to: ordersPath(summary.intake_id) },
         ]}
@@ -229,7 +229,7 @@ export function SummaryPage() {
       ownsHeading
       named
       heading={(_record, vendor) => ({ title: S.title(vendor), documentTitle: S.documentTitle })}
-      breadcrumb={() => [{ label: WORDS.common.receiving, to: RECEIVING_PATH }]}
+      breadcrumb={() => [TO_MAKE_CRUMB]}
     >
       {(record) => (
         <Summarizing

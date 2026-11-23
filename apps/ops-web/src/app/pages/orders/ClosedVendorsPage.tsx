@@ -37,7 +37,7 @@ function useQueue(params: WorkListParams) {
 }
 
 /**
- * Closed with parcels still to order (surfaces/ops-portal.md section 7, `/closed-vendors`; S1.40; `listClosedIntakeExceptions`, `hub.intake.close_exception`; OB-S1-151): **the work a close left behind is found
+ * Closed with parcels left (surfaces/ops-portal.md section 7, `/closed-vendors`; S1.40; `listClosedIntakeExceptions`, `hub.intake.close_exception`; OB-S1-151): **the work a close left behind is found
  * again**, by another officer, after a reload or on the next shift. Each row is a vendor that was closed with the approved exception and **still has received parcels without an order**, newest close first, with
  * what the hub received, how many orders stand, how many parcels are left and the reason that was given. A vendor with nothing left is not in the list. **Nothing here adds the missing orders**: a closed vendor
  * cannot take more, the reopening and the report of a parcel found after the close are scheduled and not built, and the page says so in words and draws no act it does not have.

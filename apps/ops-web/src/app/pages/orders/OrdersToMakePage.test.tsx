@@ -42,13 +42,6 @@ const FORBIDDEN =
 
 const pageOf = (items: readonly unknown[]) => ({ items: [...items], next_page_token: null });
 
-/** An element of a list the test has just drawn: absent only when the test itself is wrong. */
-const nth = <T,>(list: readonly T[], index: number): T => {
-  const found = list[index];
-  if (found === undefined) throw new Error(`the list has no element ${String(index)}`);
-  return found;
-};
-
 let api: FakeApi;
 afterEach(() => {
   expect(api.unhandled).toEqual([]);
@@ -127,19 +120,13 @@ describe('the vendors with orders to make', () => {
     expect(rows.queryByText('Fixture Sender')).toBeNull();
   });
 
-  // Break caught: the act that leads on missing, leading to the wrong place, or offered to an account that may not see the vendor.
-  it('opens the vendor beside the list with the one act that is next, which leads to its orders', async () => {
-    const { user } = open();
-    await user.click(
-      within(await table()).getByRole('button', { name: 'Make orders for Fixture Sender' }),
-    );
-    const act = await screen.findByRole('link', { name: 'Make orders' });
-    expect(act).toHaveAttribute('href', `/intakes/${VENDOR}/orders`);
-    expect(screen.getByRole('link', { name: 'Fixture Sender' })).toHaveAttribute(
-      'href',
-      `/intakes/${VENDOR}`,
-    );
-    expect(screen.getByRole('link', { name: 'ACC-MF-SMU5WW' })).toBeVisible();
+  // Break caught (the review of 23 November 2026, item 16): a row that opens a panel holding less than the page it leads to, so that an officer opens a row to find the link to the row. The vendor's name is the
+  // link to its orders, and no panel is drawn.
+  it('opens the vendor’s orders from its name, with no panel between', async () => {
+    open();
+    const link = within(await table()).getByRole('link', { name: 'Fixture Sender' });
+    expect(link).toHaveAttribute('href', `/intakes/${VENDOR}/orders`);
+    expect(screen.queryByRole('button', { name: /Make orders for/ })).toBeNull();
   });
 });
 
@@ -260,11 +247,9 @@ describe('how many orders a vendor has, and the vendors that wait for a senior (
     ).toBeVisible();
     expect(reads().some((read) => read.get('view') === 'needs_senior')).toBe(true);
     // An officer is told who decides, and is given no act of the senior's.
-    await asOfficer.user.click(
-      nth(within(await table()).getAllByRole('button', { name: /Make orders for/ }), 0),
-    );
-    expect(await screen.findByText('A senior officer decides.')).toBeVisible();
-    expect(screen.queryByRole('link', { name: 'Close with an exception' })).toBeNull();
+    expect(within(await table()).getAllByText('A senior officer decides.')).toHaveLength(2);
+    expect(screen.queryByRole('link', { name: /Close with an exception/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Review the vendor/ })).toBeNull();
   });
 
   // Break caught: an act offered to the wrong senior (the exception close to one who cannot decide it, the review to one who cannot adjudicate), or no act at all to the senior who can: each reason has its own act and its own key.
@@ -287,14 +272,12 @@ describe('how many orders a vendor has, and the vendors that wait for a senior (
       }),
     );
     await screen.findByText('An arrival was taken back. A senior officer reviews it.');
-    const buttons = within(await table()).getAllByRole('button', { name: /Make orders for/ });
-    await user.click(nth(buttons, 0));
-    expect(await screen.findByRole('link', { name: 'Close with an exception' })).toHaveAttribute(
+    const rows = within(await table());
+    expect(await rows.findByRole('link', { name: /Close with an exception/ })).toHaveAttribute(
       'href',
       `/intakes/${VENDOR}/close`,
     );
-    await user.click(nth(buttons, 1));
-    expect(await screen.findByRole('link', { name: 'Review the vendor' })).toHaveAttribute(
+    expect(rows.getByRole('link', { name: /Review the vendor/ })).toHaveAttribute(
       'href',
       '/intakes/c2c2c2c2-3333-4444-8555-666666666666/discrepancy',
     );

@@ -565,7 +565,7 @@ const SCREENS: readonly Screen[] = [
     name: 'the closes that left work',
     path: '/closed-vendors',
     world: allMade,
-    ready: (page) => heading(page, 'Closed with parcels still to order'),
+    ready: (page) => heading(page, 'Closed with parcels left'),
   },
   {
     name: 'the change of an order that is not confirmed',

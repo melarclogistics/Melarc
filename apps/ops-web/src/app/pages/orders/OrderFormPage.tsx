@@ -38,7 +38,7 @@ import {
   newOrderPath,
   orderPath,
   ordersPath,
-  RECEIVING_PATH,
+  TO_MAKE_CRUMB,
 } from './orders-presentation';
 import { useOrderFlow } from './use-order-flow';
 import { vendorFactsOf, type VendorFacts } from './vendor-facts';
@@ -311,7 +311,7 @@ function OrderForm({
         title,
         description: F.description,
         breadcrumb: [
-          { label: WORDS.common.receiving, to: RECEIVING_PATH },
+          TO_MAKE_CRUMB,
           { label: vendorName ?? facts.code, to: recordPath(facts.id) },
           { label: F.breadcrumbOrders, to: ordersPath(facts.id) },
         ],
@@ -453,7 +453,7 @@ export function OrderFormPage() {
         documentTitle: vendor === undefined ? F.documentTitle : `${F.documentTitle} · ${vendor}`,
         ...(record === undefined ? {} : {}),
       })}
-      breadcrumb={() => [{ label: WORDS.common.receiving, to: RECEIVING_PATH }]}
+      breadcrumb={() => [TO_MAKE_CRUMB]}
     >
       {(record, query) => (
         <Entry record={record} reload={async () => (await query.refetch()).data} />

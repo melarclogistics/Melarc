@@ -30,6 +30,8 @@ export const correctionPath = (id: string): string => `/payer-corrections/${id}`
 export const CLOSED_VENDORS_PATH = '/closed-vendors';
 export const ORDERS_TO_MAKE_PATH = '/orders-to-make';
 export const RECEIVING_PATH = '/receiving';
+/** The first crumb of every order page: where an officer finds the work, and the page they came from (Orders to make), never Receiving, which is the check-in's. */
+export const TO_MAKE_CRUMB = { label: WORDS.toMake.title, to: ORDERS_TO_MAKE_PATH } as const;
 export const messageLogPath = (requestId: string): string =>
   `/messages?subject=${requestId}&subject_type=PICKUP_REQUEST`;
 

@@ -34,7 +34,7 @@ import {
   correctionPath,
   ORDER_STANDING_MAP,
   ordersPath,
-  RECEIVING_PATH,
+  TO_MAKE_CRUMB,
   type OrderStanding,
 } from './orders-presentation';
 import './orders-pages.css';
@@ -314,7 +314,7 @@ function RecordBody({
     <>
       <RecordPage
         breadcrumb={[
-          { label: WORDS.common.receiving, to: RECEIVING_PATH },
+          TO_MAKE_CRUMB,
           ...(order.pickup_intake_id === null
             ? []
             : [{ label: WORDS.form.breadcrumbOrders, to: ordersPath(order.pickup_intake_id) }]),

@@ -25,10 +25,11 @@ import { recordPath } from '../receiving/receiving-presentation';
 import { WithRecord } from '../receiving/WithRecord';
 import { OrderPhoto } from './OrderPhoto';
 import {
-  ordersPath,
   ORDERS_TO_MAKE_PATH,
+  ordersPath,
   RECEIVING_PATH,
   summaryPath,
+  TO_MAKE_CRUMB,
 } from './orders-presentation';
 import { vendorFactsOf, type VendorFacts } from './vendor-facts';
 import './orders-pages.css';
@@ -320,7 +321,7 @@ function CloseForm({
           title: C.title(vendorName),
           description: C.description,
           breadcrumb: [
-            { label: WORDS.common.receiving, to: RECEIVING_PATH },
+            TO_MAKE_CRUMB,
             { label: vendorName ?? facts.code, to: recordPath(facts.id) },
             { label: WORDS.form.breadcrumbOrders, to: ordersPath(facts.id) },
           ],
@@ -441,7 +442,7 @@ export function ClosePage() {
         title: C.title(vendor),
         documentTitle: C.documentTitle,
       })}
-      breadcrumb={() => [{ label: WORDS.common.receiving, to: RECEIVING_PATH }]}
+      breadcrumb={() => [TO_MAKE_CRUMB]}
     >
       {(record, query) => <Closing record={record} query={query} />}
     </WithRecord>

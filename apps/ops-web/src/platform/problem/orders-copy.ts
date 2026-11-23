@@ -80,7 +80,7 @@ export const ORDERS_WORDS = {
       earlyOrders: 'Make orders from the photos',
       close: 'Close this vendor',
       summary: 'See the summary',
-      closedExceptions: 'Closed with parcels still to order',
+      closedExceptions: 'Closed with parcels left',
       openVendor: 'Open the vendor',
     },
     progress: {
@@ -696,7 +696,7 @@ export const ORDERS_WORDS = {
 
   // The closes that left work, found again on the next shift.
   closedExceptions: {
-    title: 'Closed with parcels still to order',
+    title: 'Closed with parcels left',
     description:
       'Vendors that were closed while parcels received had no order. They are listed so that they are not lost.',
     tableLabel: 'Vendors closed with parcels still to order',

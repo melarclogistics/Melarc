@@ -31,7 +31,7 @@ import { OrderFields } from './OrderFields';
 import { FlowActions, FlowAlerts } from './OrderFlowParts';
 import { OrderReview } from './OrderReview';
 import { refusedFields } from './order-refusal-fields';
-import { orderPath, ordersPath, RECEIVING_PATH } from './orders-presentation';
+import { orderPath, ordersPath, TO_MAKE_CRUMB } from './orders-presentation';
 import { useOrderFlow } from './use-order-flow';
 import './orders-pages.css';
 
@@ -201,7 +201,7 @@ function AmendForm({
         title: F.amendTitle(order.code),
         description: F.amendDescription,
         breadcrumb: [
-          { label: WORDS.common.receiving, to: RECEIVING_PATH },
+          TO_MAKE_CRUMB,
           ...(order.pickup_intake_id === null
             ? []
             : [{ label: F.breadcrumbOrders, to: ordersPath(order.pickup_intake_id) }]),

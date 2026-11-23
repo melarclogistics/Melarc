@@ -64,7 +64,7 @@ describe('the vendors closed with parcels still to order', () => {
   it('lists each vendor with what is left, as the server counted it, and the reason that was given', async () => {
     open();
     expect(
-      await screen.findByRole('heading', { level: 1, name: 'Closed with parcels still to order' }),
+      await screen.findByRole('heading', { level: 1, name: 'Closed with parcels left' }),
     ).toBeVisible();
     const rows = within(await table());
     expect(rows.getByText(CODE)).toBeVisible();

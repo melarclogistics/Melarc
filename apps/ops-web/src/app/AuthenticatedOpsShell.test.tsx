@@ -466,7 +466,10 @@ describe('the authenticated Ops shell: where it is not', () => {
     expect(groups).toEqual([
       ['Today', ['My work', 'Decisions', 'Handshakes']],
       ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes']],
-      ['Hub', ['Receiving', 'Missing parcels', 'Orders to make', 'Who pays', 'Still to order']],
+      [
+        'Hub',
+        ['Receiving', 'Missing parcels', 'Orders to make', 'Who pays', 'Closed with parcels left'],
+      ],
       ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
       ['System', ['Message log']],
     ]);
