@@ -1292,7 +1292,10 @@ export class HubItemization {
     stored: StoredLocation,
     patch: { readonly address: string; readonly landmark?: string },
   ): StoredLocation {
-    const { address: _address, landmark: _landmark, ...place } = stored;
+    // The place the order holds: every member of the location but its text.
+    const place = Object.fromEntries(
+      Object.entries(stored).filter(([member]) => member !== 'address' && member !== 'landmark'),
+    );
     return {
       ...place,
       address: patch.address,
