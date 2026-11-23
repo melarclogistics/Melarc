@@ -224,10 +224,17 @@ p.orders-photo__none {
     overflow-y: auto;
   }
 
+  /* Inside the column the photo and the price are the two rows of the column's own grid. They carry the names of the cells of the layout around it, and left named both were put in one cell, the photo drawn over the top
+     of the price (the title, the total, the zone) where nothing could be read. */
   .orders-layout__photo {
+    grid-area: auto;
     position: static;
     padding-block: 0;
     background: none;
+  }
+
+  .orders-layout__price {
+    grid-area: auto;
   }
 
   .orders-layout__photo img {

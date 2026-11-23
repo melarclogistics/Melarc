@@ -185,6 +185,29 @@ test.describe('making the orders of a vendor', () => {
     expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
   });
 
+  // Break caught (found by looking at the pictures of Run F, which the checks of text and of axe could not see): the photo and the price put in one cell of the column beside the form, the photo drawn over the top of
+  // the price, so that its title and its total were on the page and nowhere to be read.
+  for (const viewport of VIEWPORTS) {
+    test(`the price beside the form is not covered by the photo, at ${String(viewport.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      const { api, watch } = await open(page, NEW_ORDER);
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+      ).toBeVisible();
+      await fillIn(page);
+      await expect(page.getByRole('button', { name: /^Save the order at / })).toBeVisible();
+      // A trial click does everything a click does but the press, and fails when another element would receive it: what is drawn over the price is found, and not only what exists.
+      await page
+        .getByRole('heading', { level: 2, name: 'The price' })
+        .click({ trial: true, timeout: 4000 });
+      await page.locator('.orders-review__total').click({ trial: true, timeout: 4000 });
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
+
   // Break caught: a form that cannot be completed without a pointer, a save that cannot be reached with the Tab key, or a saved order that leaves the officer to look for what happened.
   test('the form and the save can all be done from the keyboard, and focus follows the officer', async ({
     page,
