@@ -1,3 +1,4 @@
+import { SERVICE_AREAS } from '../platform/database/schema/hub-configuration.js';
 import { described } from '../platform/openapi/described-schema.js';
 
 /**
@@ -10,6 +11,24 @@ import { described } from '../platform/openapi/described-schema.js';
  */
 const UUID = { type: 'string', format: 'uuid' } as const;
 const NULLABLE_UUID = { type: ['string', 'null'], format: 'uuid' } as const;
+/**
+ * What an order keeps of its destination's zone (`DestinationZoneSnapshot` of the contract, Run F, 5.119.0; `DestinationSnapshot` of `pricing/order-pricing.ts` is what is written): the scope, and for a destination the server
+ * placed or an officer chose, the zone as it was named and the service area **as a code** (the words of an area are the screens').
+ */
+const DESTINATION_ZONE_SNAPSHOT = {
+  type: 'object',
+  required: ['scope'],
+  properties: {
+    scope: { type: 'string', enum: ['SERVICE_AREA', 'OUTSIDE_SERVICE_AREA'] },
+    zone_id: UUID,
+    zone_code: { type: 'string' },
+    zone_name: { type: 'string' },
+    service_area: { type: 'string', enum: [...SERVICE_AREAS] },
+    alias: { type: 'string' },
+    authorization_note: { type: 'string' },
+  },
+  additionalProperties: false,
+} as const;
 const SIZE_CLASS = { type: 'string', enum: ['SMALL', 'MEDIUM', 'LARGE'] } as const;
 const MONEY = {
   type: 'object',
@@ -273,7 +292,7 @@ export const ORDER_PREVIEW_SCHEMA = described({
     },
     is_high_value: { type: 'boolean' },
     high_value_surcharge: orNull(MONEY),
-    destination_zone_snapshot: { type: 'object', additionalProperties: true },
+    destination_zone_snapshot: DESTINATION_ZONE_SNAPSHOT,
     destination_zone_resolution: {
       type: 'string',
       enum: ['SERVER_RESOLVED', 'EXPLICITLY_AUTHORIZED'],
@@ -374,7 +393,7 @@ export const ORDER_SCHEMA = described({
       ],
     },
     origin_zone_snapshot: { type: 'object', additionalProperties: true },
-    destination_zone_snapshot: { type: 'object', additionalProperties: true },
+    destination_zone_snapshot: DESTINATION_ZONE_SNAPSHOT,
     size_class: SIZE_CLASS,
     size_class_selected_by: { type: ['string', 'null'], format: 'uuid' },
     carrier_cost: MONEY,

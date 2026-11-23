@@ -32,7 +32,7 @@
 #   5.117.0 I    Stage 7 (SLICE-001, the third external review of 21 November 2026): **a blind intake never holds more orders than the parcels it received; what an officer confirms names the records it cites; an amendment says when the quote is final; the request types say what the API requires.** `itemizeOrder` and `previewOrder` refuse an order for which the blind count has no place left (`STATE_CONFLICT`, rule `orders_exceed_received`), and `closeHubIntake` refuses to close over a surplus that already stands, with the exception or without it (the same rule); `IntakeClosureAssessment` gains `excess_count` and the blocker `orders_exceed_received`. `OrderPreview` gains `cited_evidence` (the identities of the records the order cites, which the `terms_token` is of) and `current.cited_evidence`; `will_confirm` of the preview of an amendment is `WHEN_ARRIVAL_IS_COMMITTED` whatever the parcel's state, because an amendment confirms nothing. The write and the preview of an order or an amendment have request types of their own (`OrderItemizePreview`, `OrderAmendPreview`; `OrderItemize` requires `reviewed_terms`, `OrderAmend` requires `note` and `reviewed_terms`), and `IntakeClose` is a close that has parity or the exception with its token. A save is judged on the rates and the payer of the moment it holds its locks. The review is judged by the database before it is judged by the screen: an intake that is out of date in both its version and its assessment is `stale` (migration 0119).
 #   5.116.0 I    Stage 7 (SLICE-001, the external review of 20 November 2026 and the Product Owner's approval of it): **what the officer confirms is what the officer was shown, and what a senior closes against is what the senior read.** `previewOrderAmendment` (`POST /orders/{id}/amendment-preview`, `hub.intake.itemize`) previews an amendment as `previewOrder` previews an order. `listClosedIntakeExceptions` (`GET /hub-intake-exceptions`, `hub.intake.close_exception`) lists the intakes closed with the approved exception that still have received parcels without an order, so that the work is found again after a reload or on the next shift (OB-S1-151). `OrderPreview` gains `terms_token` (the digest of the terms), `validation`, `status`, `order_id`, `order_version` and `current`, and the preview judges the evidence an order cites as the save does (`EVIDENCE_NOT_STORED`). `itemizeOrder` and `amendOrder` take `reviewed_terms` (required of a save: `VALIDATION_FAILED`, rule `required`) and answer `STATE_CONFLICT`, rule `terms_changed`, with `details.current_terms` when what confirming gives is not what was reviewed; the `note` of `OrderAmend` is required of the save and not of the preview. `Order` gains `is_high_value_manual` and `price_status`: an amendment recomputes the high-value status the declaration gives and keeps the officer's own flag, and keeps the choice of a zone for the address it was made for. `IntakeProgress` and `IntakeClosureAssessment` say null, not zero, for a blind count that is not committed; each count of the progress is the number of rows of the view of its name (`awaiting_arrival` opens every parcel still expected); the assessment carries `assessment_token`, which `closeHubIntake` takes as `reviewed_assessment` (required with the exception; `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`). `getOrder` is one snapshot, and a vendor reads no order whose arrival was reversed. The payer edit and the first freeze take one lock (migration 0118).
 #   5.118.0 I    Stage 7 (SLICE-001, the fourth external review of 22 November 2026 and the Product Owner's decisions of the same day): **a save is judged on the configuration in force once it holds both its locks, and the staff's summary shows a price only where the staff's own pricing grant reaches the hub.** `itemizeOrder` and `amendOrder` judge the order on the version in force of each of the hub's settings, its zones and aliases and the company-wide rules, at the moment the save holds the intake and the request's payer arrangement; a configuration that keeps moving is `STATE_CONFLICT`, rule `configuration_changing` (declared, with what a screen does about it). `getIntakeSummary` leaves `locked_price` out for a staff reader whose `pricing.read` does not reach the intake's hub (OB-S1-155). No operation is added or removed.
-#   5.119.0 J    Run F (SLICE-001, Stage 7: the fifth external review, of the order screens, 23 November 2026, and the Product Owner's decisions D-S7-1 to D-S7-10 of the same day). **One version for the run.** *Part 1, item 1:* `itemizeOrder`'s `201` carries `Intake-ETag`, the vendor's version after the order (the first order of a cleared vendor moves it from ready to being worked, so the token the screen read is stale for the next order; a retry under the same key answers the vendor's version as it is then); the lock of a check-in is not part of that version (migrations `0093` and `0103`, held now by a test), so the page that renews it every minute makes no early order stale. *Item 3:* the sentence of 5.116.0 (every count is the number of rows of its view) is corrected for an intake counted blind: `needs_order` there is the orders still to be made, a number, and its view opens no rows (there is no parcel to list)
+#   5.119.0 J    Run F (SLICE-001, Stage 7: the fifth external review, of the order screens, 23 November 2026, and the Product Owner's decisions D-S7-1 to D-S7-10 of the same day). **One version for the run.** *Part 1, item 1:* `itemizeOrder`'s `201` carries `Intake-ETag`, the vendor's version after the order (the first order of a cleared vendor moves it from ready to being worked, so the token the screen read is stale for the next order; a retry under the same key answers the vendor's version as it is then); the lock of a check-in is not part of that version (migrations `0093` and `0103`, held now by a test), so the page that renews it every minute makes no early order stale. *Item 3:* the sentence of 5.116.0 (every count is the number of rows of its view) is corrected for an intake counted blind: `needs_order` there is the orders still to be made, a number, and its view opens no rows (there is no parcel to list). *Item 4:* `destination_zone_snapshot` of `Order` and `OrderPreview` is declared (`DestinationZoneSnapshot`: the scope, and for a zone its identifier, code, name and `service_area` as a code, the alias that placed the parcel, the officer's note) instead of a free object that the screens read members from
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -17886,7 +17886,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Money'
             - { type: 'null' }
-        destination_zone_snapshot: { type: object, additionalProperties: true }
+        destination_zone_snapshot: { $ref: '#/components/schemas/DestinationZoneSnapshot' }
         destination_zone_resolution: { type: string, enum: [SERVER_RESOLVED, EXPLICITLY_AUTHORIZED] }
         delivery:
           type: object
@@ -17934,6 +17934,28 @@ components:
         What confirming an order would give, calculated by the server and written nowhere (5.115.0): the price
         with its components, the surcharge of a high-value parcel, how the destination resolves, the promise,
         who pays each amount, and when the order would be confirmed.
+
+    DestinationZoneSnapshot:
+      type: object
+      required: [scope]
+      additionalProperties: false
+      description: |
+        What an order keeps of its destination's zone (5.119.0, Run F: the schema was a free object, and the screens
+        relied on members it did not declare). `scope` is `SERVICE_AREA` for a destination the server placed in a
+        zone of the hub, or that an officer chose for an address it could not place (`destination_zone_resolution`
+        says which), and `OUTSIDE_SERVICE_AREA` for a parcel that goes by a third party, which carries `scope`
+        alone. A zone carries its identifier, its `zone_code` and `zone_name` as they were when the price was
+        calculated, and its `service_area`, **a code** (`ACCRA_TEMA`, `AMASAMAN_ENVIRONS`, `KASOA_CORRIDOR`): the
+        words an officer reads for it are the screens'. `alias` is the address text that placed the parcel, when the
+        server placed it, and `authorization_note` the reason the officer gave, when the officer chose the zone.
+      properties:
+        scope: { type: string, enum: [SERVICE_AREA, OUTSIDE_SERVICE_AREA] }
+        zone_id: { type: string, format: uuid }
+        zone_code: { type: string }
+        zone_name: { type: string }
+        service_area: { type: string, enum: [ACCRA_TEMA, AMASAMAN_ENVIRONS, KASOA_CORRIDOR] }
+        alias: { type: string }
+        authorization_note: { type: string }
 
     Order:
       type: object
@@ -17998,7 +18020,7 @@ components:
               RETURNED_TO_VENDOR,
             ]
         origin_zone_snapshot: { type: object, additionalProperties: true }
-        destination_zone_snapshot: { type: object, additionalProperties: true }
+        destination_zone_snapshot: { $ref: '#/components/schemas/DestinationZoneSnapshot' }
         size_class: { type: string, enum: [SMALL, MEDIUM, LARGE] }
         size_class_selected_by:
           { type: [string, 'null'], format: uuid, description: 'Staff only. Absent for a vendor session.' }

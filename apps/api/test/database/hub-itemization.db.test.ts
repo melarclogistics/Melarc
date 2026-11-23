@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
 import { sql } from 'drizzle-orm';
+import { parse } from 'yaml';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { SystemClock } from '../../src/platform/auth/clock/system.clock.adapter.js';
+import { locateContract } from '../../src/platform/contract/locate-contract.js';
 import type { TextMessageSender } from '../../src/platform/auth/ports/text-message-sender.port.js';
 import { WORKER_RUNTIME_ROLE } from '../../src/platform/database/technical-roles.js';
 import { ConfigurationReader } from '../../src/platform/settings/configuration-reader.js';
@@ -6008,5 +6012,95 @@ describe('what the counts of an intake counted blind say (Run F, Part 1, item 3)
     orderOf(await itemize(officer, intake.id, body(null)));
     orderOf(await itemize(officer, intake.id, body(null)));
     expect((await listed(intake.id, 'all')).progress).toMatchObject({ needs_order: 0, orders: 4 });
+  });
+});
+
+describe('the zone an order keeps is declared by the contract (Run F, Part 1, item 4)', () => {
+  /** The contract's own schema of the snapshot, compiled by the validator the application enforces the contract with. */
+  function snapshotValidator() {
+    const contract = parse(readFileSync(locateContract(import.meta.dirname), 'utf8')) as {
+      components: { schemas: Record<string, object | undefined> };
+    };
+    const schema = contract.components.schemas.DestinationZoneSnapshot;
+    expect(schema, 'the contract declares DestinationZoneSnapshot').toBeDefined();
+    const requireModule = createRequire(import.meta.url);
+    const { Ajv2020 } = requireModule('ajv/dist/2020.js') as {
+      Ajv2020: new (options: object) => {
+        compile(schema: object): (value: unknown) => boolean;
+      };
+    };
+    const addFormats = requireModule('ajv-formats') as (ajv: unknown) => unknown;
+    const ajv = new Ajv2020({ strict: false });
+    addFormats(ajv);
+    return ajv.compile(schema ?? {});
+  }
+
+  // Break caught: a snapshot that the screens read members from while the contract called it a free object: every snapshot the server writes (a zone placed by its alias, one an officer chose with a note, a parcel that
+  // goes outside the service area) is held to the declaration, in the order's answer and in the preview's, and the declaration refuses what is not a snapshot (an unknown scope, a missing scope, a member nobody
+  // declared, an area that is no area of the launch hub).
+  it('holds the three snapshots the server writes, in the order and in its preview, and refuses what is none', async () => {
+    const validate = snapshotValidator();
+    const intake = await cleared(4);
+    const [a, b, c, d] = intake.parcels as [Parcel, Parcel, Parcel, Parcel];
+    const place = (address: string) => ({
+      name: 'Ama',
+      phone: '0241234567',
+      location: { address },
+    });
+
+    const placed = orderOf(await itemize(officer, intake.id, body(a.id)));
+    expect(validate(placed.destination_zone_snapshot)).toBe(true);
+    expect(placed.destination_zone_snapshot).toMatchObject({
+      scope: 'SERVICE_AREA',
+      zone_name: ZONE_A.name,
+      service_area: 'ACCRA_TEMA',
+      alias: 'madina',
+    });
+
+    const chosen = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, {
+          recipient: place('Madina Adenta road'),
+          destination_zone_authorization: {
+            zone_id: ZONE_B.id,
+            note: 'The sender phoned from Adenta',
+          },
+        }),
+      ),
+    );
+    expect(validate(chosen.destination_zone_snapshot)).toBe(true);
+    expect(chosen.destination_zone_snapshot).toMatchObject({
+      authorization_note: 'The sender phoned from Adenta',
+    });
+
+    const waybill = await storedIntakeEvidence(routes, officer, intake.id, 'ITEMIZATION');
+    const outside = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(c.id, {
+          lane: 'THIRD_PARTY_HANDOFF',
+          commercial_mode: 'MELARC_COVERED_THIRD_PARTY_DELIVERY',
+          recipient: place('Adum, Kumasi'),
+          carrier_cost: { amount_minor: 5000, currency: 'GHS' },
+          carrier_waybill_evidence_id: waybill,
+        }),
+      ),
+    );
+    expect(outside.destination_zone_snapshot).toEqual({ scope: 'OUTSIDE_SERVICE_AREA' });
+    expect(validate(outside.destination_zone_snapshot)).toBe(true);
+
+    // The preview of an order says the same of the zone it would keep.
+    const preview = (
+      await officer.client.post(`${ONE(intake.id)}/orders/preview`, body(d.id), { origin: OPS })
+    ).json() as { destination_zone_snapshot: unknown };
+    expect(validate(preview.destination_zone_snapshot)).toBe(true);
+
+    expect(validate({})).toBe(false);
+    expect(validate({ scope: 'SOMEWHERE' })).toBe(false);
+    expect(validate({ scope: 'SERVICE_AREA', zone_colour: 'red' })).toBe(false);
+    expect(validate({ scope: 'SERVICE_AREA', service_area: 'THE_MOON' })).toBe(false);
   });
 });
