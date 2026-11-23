@@ -12,6 +12,7 @@ import type {
 } from '../../../platform/hub-orders/orders-commands';
 import type { TermsView, ZoneCandidateView } from '../../../platform/hub-orders/orders-shape';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
+import { refusedFields } from './order-refusal-fields';
 
 /**
  * The flow of an order, **review and then save** (the reviews of 19 and 20 November 2026, approved; PRODUCT_DESIGN_DIRECTION section 6.3: *a short review before submit*): the officer fills the form, the server
@@ -165,6 +166,12 @@ export function useOrderFlow(config: OrderFlowConfig): OrderFlow {
         latest.current.onSaved(outcome.order);
         return;
       }
+      if (outcome.kind === 'zone-choice') {
+        // The address matches more than one zone now: back to the form, where the officer chooses one and says why, as the check offers it.
+        setCandidates(outcome.candidates);
+        setStage({ kind: 'editing' });
+        return;
+      }
       // The terms are not the ones the officer read: they are shown beside the earlier ones, and a second confirmation is asked for.
       const earlier = reviewed.current;
       reviewed.current = outcome.current;
@@ -180,6 +187,22 @@ export function useOrderFlow(config: OrderFlowConfig): OrderFlow {
       if (values !== undefined && alive.current) await check(values, reviewed.current);
     },
   });
+
+  // A refusal about a field is told on the field, where the officer can change it: back to the form (the review hides it), with the error kept (the refusal stays until a field changes) and the page puts the field
+  // in focus. A refusal about no field stays an alert over the review.
+  const refused = command.phase === 'refused' ? command.problem : undefined;
+  const [told, setTold] = useState<Problem | undefined>(undefined);
+  if (refused !== told) {
+    // Noticed while drawing, once for each refusal that arrives (React's way to answer a change of what a hook is given, without a second pass through an effect).
+    setTold(refused);
+    if (
+      refused !== undefined &&
+      stage.kind === 'reviewing' &&
+      Object.keys(refusedFields(refused)).length > 0
+    ) {
+      setStage({ kind: 'editing' });
+    }
+  }
 
   const confirm = useCallback(
     (values: OrderFormValues): void => {

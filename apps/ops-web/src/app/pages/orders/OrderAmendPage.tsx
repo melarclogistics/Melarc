@@ -105,6 +105,13 @@ function AmendForm({
     if (flow.checkProblem !== undefined) focusFirstInvalid(form.current);
   }, [flow.checkProblem]);
   useEffect(() => {
+    // A save refused about a field has brought the form back: the first field it names is where the officer's eyes go.
+    if (command.phase === 'refused' && stage.kind === 'editing' && tiedToAField) {
+      focusFirstInvalid(form.current);
+    }
+  }, [command.phase, stage.kind, tiedToAField]);
+
+  useEffect(() => {
     if (command.phase === 'unknown')
       form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();
   }, [command.phase]);

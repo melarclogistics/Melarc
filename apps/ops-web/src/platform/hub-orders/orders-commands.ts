@@ -136,7 +136,9 @@ export async function previewOrderAmendment(
 /** What a save answers: the order, or the terms as they are now when they are not the terms the officer reviewed. */
 export type SaveOutcome =
   | { readonly kind: 'saved'; readonly order: SavedOrderView; readonly version: string | undefined }
-  | { readonly kind: 'terms-changed'; readonly current: TermsView };
+  | { readonly kind: 'terms-changed'; readonly current: TermsView }
+  /** The address now matches more than one zone (the hub's aliases moved since the check): the zones the server named, for the officer to choose one and say why. */
+  | { readonly kind: 'zone-choice'; readonly candidates: readonly ZoneCandidateView[] };
 
 function saveOutcome(result: Parameters<typeof answerOf>[0]): SaveOutcome {
   try {
@@ -149,6 +151,10 @@ function saveOutcome(result: Parameters<typeof answerOf>[0]): SaveOutcome {
       const current = parseTerms(detailsOf(result.error).current_terms);
       // A refusal that says the terms changed and does not give them is a refusal the officer can only read again from the start: the page words it as a conflict.
       if (current !== undefined) return { kind: 'terms-changed', current };
+    }
+    if (error instanceof OperationFailure && namesRule(error, 'destination_zone_ambiguous')) {
+      const candidates = parseCandidates(detailsOf(result.error).candidates);
+      if (candidates !== undefined) return { kind: 'zone-choice', candidates };
     }
     throw error;
   }

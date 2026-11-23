@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
+import { ButtonLink } from '../../../components/ui/button/ButtonLink';
 import {
   UploadGateNotice,
   type UploadGate,
@@ -114,6 +115,7 @@ export function FlowActions({
           <Button
             key="retry"
             type="button"
+            size="lg"
             data-recovery
             onClick={() => {
               void command.retry();
@@ -121,13 +123,14 @@ export function FlowActions({
           >
             {F.acts.retry}
           </Button>
-          <Button type="button" variant="secondary" onClick={command.checkRecord}>
+          {/* Looking is looking: it opens the record, where the officer finds out whether the order was made. It sends nothing and checks no price, and what was entered stays in the held command, which only *Try again* sends. */}
+          <ButtonLink to={cancelTo} variant="secondary" size="lg">
             {lookLabel}
-          </Button>
+          </ButtonLink>
         </>
       ) : command.phase === 'conflict' ? (
         movedRule(command.problem?.rule) ? (
-          <Button key="again" type="button" onClick={command.checkRecord}>
+          <Button key="again" type="button" size="lg" onClick={command.checkRecord}>
             {F.acts.checkAgain}
           </Button>
         ) : (

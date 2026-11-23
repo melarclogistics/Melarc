@@ -718,3 +718,78 @@ describe('a refusal of the parcel or of the vendor (Run F, Part 2, items 5 and 1
     expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
   });
 });
+
+describe('what the officer sees when a save is refused or its outcome is not known (Run F, Part 2, items 6 and 7)', () => {
+  // Break caught: "Look at the orders" after an outcome nobody knows that throws the held command away and checks the price again (the officer is back at a form with nothing to say whether the order was made); it opens the
+  // vendor's orders, sends nothing, and only "Try again" sends the save again.
+  it('opens the vendor’s orders from "Look at the orders", and checks no price again', async () => {
+    const { user } = open({
+      [SAVE]: () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    await fillIn(user);
+    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
+    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await alertSaying('We could not tell whether the order was saved');
+    const look = screen.getByRole('link', { name: 'Look at the orders' });
+    expect(look).toHaveAttribute('href', `/intakes/${VENDOR_ID}/orders`);
+    await user.click(look);
+    // The form holds what was entered: leaving it is asked, and the officer says yes.
+    await user.click(await screen.findByRole('button', { name: 'Leave the page' }));
+    // The form is gone: the officer is on the vendor's orders, and nothing was sent but the one save that was lost.
+    await waitFor(() => {
+      expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
+    });
+    expect(sent(PREVIEW)).toHaveLength(1);
+    expect(sent(SAVE)).toHaveLength(1);
+  });
+
+  // Break caught: a save refused about a field while the review is on the screen, which left the officer on the review with no message (the field is hidden behind it): it returns to the form, the error is on the
+  // field in the floor's words and the field has the focus.
+  it('brings the form back with the error on the field and the field in focus when a save is refused about one', async () => {
+    const { user } = open({
+      [SAVE]: () =>
+        json(422, {
+          code: 'VALUE_DECLARATION_REQUIRED',
+          message: 'Diagnostic text that must never reach a screen.',
+          request_id: 'r7',
+          details: { rule: 'declaration_required' },
+        }),
+    });
+    await fillIn(user);
+    await user.type(screen.getByLabelText(/Declared value/), '900');
+    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
+    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    expect(
+      await screen.findByText(
+        /A value this high needs the sender’s agreement to the liability limit/,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Check the order' })).toBeNull();
+    expect(screen.getByLabelText(/Declared value/)).toBeInvalid();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Declared value/)).toHaveFocus();
+    });
+    expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
+  });
+
+  // Break caught: the zones an address matched when the order was saved (the hub's aliases moved since the check) read as no more than "something went wrong": the officer is offered the choice, as the check offers it.
+  it('offers the zones an address matches at the save, and sends no order', async () => {
+    const { user } = open({
+      [SAVE]: () => {
+        const refusalBody = capturedRefusal('preview-zone-choice');
+        return json(refusalBody.status, refusalBody.body);
+      },
+    });
+    await fillIn(user);
+    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
+    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    const group = await screen.findByRole('group', { name: /Which zone is it\?/ });
+    expect(within(group).getByRole('radio', { name: 'Tema' })).toBeVisible();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Check the order' })).toBeNull();
+  });
+});
