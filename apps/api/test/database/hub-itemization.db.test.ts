@@ -44,7 +44,7 @@ import {
 import { manifestDays, type ManifestDays } from './support/manifest-days.js';
 import { insertPickupRequest, pickupRequestRow, setFinancialStanding } from './support/pickups.js';
 import { grant, newBundle } from './support/policy-fixtures.js';
-import { staffContext } from './support/rls-fixture.js';
+import { staffContext, vendorContext } from './support/rls-fixture.js';
 import { seedHubConfiguration } from './support/seeded.js';
 import { buildService, type BuiltService } from './support/service.js';
 import { clientFor } from './support/test-database.js';
@@ -6102,5 +6102,225 @@ describe('the zone an order keeps is declared by the contract (Run F, Part 1, it
     expect(validate({ scope: 'SOMEWHERE' })).toBe(false);
     expect(validate({ scope: 'SERVICE_AREA', zone_colour: 'red' })).toBe(false);
     expect(validate({ scope: 'SERVICE_AREA', service_area: 'THE_MOON' })).toBe(false);
+  });
+});
+
+describe('an order made early for a parcel that is then written off stays as a record (Run F, Part 1, D-S7-4; OB-S1-120)', () => {
+  const written = async (): Promise<{
+    intake: Arranged;
+    early: Order;
+    kept: Order[];
+    boss: Actor;
+    missing: Parcel;
+  }> => {
+    const intake = await opened(3);
+    const [a, b, c] = intake.parcels as [Parcel, Parcel, Parcel];
+    // An order made early for the parcel that does not come, and for the two that do.
+    const early = orderOf(await itemize(officer, intake.id, body(b.id)));
+    expect((await tap(officer, a.id, true)).status).toBe(200);
+    expect((await tap(officer, c.id, true)).status).toBe(200);
+    expect((await finishAsTapped(officer, intake.id)).status).toBe(200);
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const decided = await boss.client.post(
+      `${ONE(intake.id)}/discrepancy`,
+      { outcome: 'WRITTEN_OFF', note: 'Not found after a day’s search' },
+      { origin: OPS, headers: { 'If-Match': (await read(boss, intake.id)).etag } },
+    );
+    expect(decided.status, decided.text).toBe(200);
+    const kept = [
+      orderOf(await itemize(officer, intake.id, body(a.id))),
+      orderOf(await itemize(officer, intake.id, body(c.id))),
+    ];
+    return { intake, early, kept, boss, missing: b };
+  };
+
+  // Break caught: after a write-off, an early order that is priced and frozen by a late tap, counted by the progress or by the close, shown in the vendor's summary, or told to a vendor as a charge: the order is a record
+  // of what the officer prepared, with no price that stands, and the vendor who reads it is told the parcel was not received. Two parcels arrive and are ordered, and the close has parity without it.
+  it('is never frozen, counted or summarised, and the vendor is told the parcel was not received', async () => {
+    const { intake, early, kept, boss, missing } = await written();
+    expect(await orderRow(early.id)).toMatchObject({
+      commercial_state: null,
+      locked_price_minor: null,
+    });
+    // A tap after the write-off does not bring the parcel back and freeze its order.
+    const late = await tap(officer, missing.id, true);
+    expect(await orderRow(early.id)).toMatchObject({
+      commercial_state: null,
+      locked_price_minor: null,
+    });
+    expect([late.status].every((status) => status === 200 || status === 409)).toBe(true);
+
+    // The worklist keeps the record beside its parcel, as missing, and the counts leave it out.
+    const list = (
+      await officer.client.get(`${ORDERS(intake.id)}?view=all&page_size=100`)
+    ).json() as {
+      progress: Record<string, number | null>;
+      items: { work_state: string; parcel: { id: string } | null; order: { id: string } | null }[];
+    };
+    expect(list.items.find((item) => item.parcel?.id === missing.id)).toMatchObject({
+      work_state: 'MISSING',
+      order: { id: early.id },
+    });
+    expect(list.progress).toMatchObject({ missing: 1, orders: 2, itemized: 2, needs_order: 0 });
+
+    // The close has parity: the two parcels that arrived have their orders, and the record of the one that did not is not among them.
+    const closed = await officer.client.post(`${ONE(intake.id)}/close`, undefined, {
+      origin: OPS,
+      headers: {
+        'If-Match': (await read(officer, intake.id)).etag,
+        'Idempotency-Key': randomUUID(),
+      },
+    });
+    expect(closed.status, closed.text).toBe(200);
+
+    // The vendor is shown the two orders that stand, and reads the record of the third: no price, nothing to pay, and the parcel was not received.
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    const summary = (await browser.get(`${ONE(intake.id)}/summary`)).json() as {
+      orders: { id: string }[];
+    };
+    expect(summary.orders.map((order) => order.id).toSorted()).toEqual(
+      kept.map((order) => order.id).toSorted(),
+    );
+    const seen = await browser.get(`${API}/orders/${early.id}`);
+    expect(seen.status, seen.text).toBe(200);
+    const shown = seen.json() as Record<string, unknown>;
+    expect(shown).toMatchObject({
+      intake_parcel_state: 'MISSING',
+      commercial_state: null,
+      locked_price: null,
+    });
+    expect(shown).not.toHaveProperty('payer_allocation');
+    expect(shown).not.toHaveProperty('price_components_snapshot');
+    // The staff read the same record, and a price they are shown is the early quote, said so.
+    expect(await readOrderView(boss, early.id)).toMatchObject({
+      intake_parcel_state: 'MISSING',
+      price_status: 'EARLY_QUOTE',
+      locked_price: null,
+    });
+  });
+});
+
+describe('the state of a parcel is told to the vendor of its order and to nobody else (Run F, Part 1, D-S7-4; migration 0122)', () => {
+  const stateAs = async (
+    context: Parameters<typeof routes.built.service.transactionWithContext>[0],
+    orderId: string,
+  ): Promise<string | null> =>
+    routes.built.service.transactionWithContext(context, async (tx) => {
+      const found = await tx.execute(
+        sql`select melarc.vendor_order_parcel_state(${orderId}::uuid) as state`,
+      );
+      return (found.rows[0] as { state: string | null }).state;
+    });
+
+  // Break caught: a function that tells any vendor the state of any parcel (another vendor's included), that answers a staff caller or a vendor asking under another key, or that reads the parcel of an order that was
+  // taken back: the function answers the state of the parcel of the vendor's OWN order, and refuses everyone else; the owner's policy on the parcels names the vendor's organisation through its order.
+  it('answers the vendor of the order and refuses another vendor, a staff caller and another key', async () => {
+    const intake = await opened(2);
+    const [a] = intake.parcels as [Parcel, Parcel];
+    const early = orderOf(await itemize(officer, intake.id, body(a.id)));
+    const key = (organisation: string) => ({
+      ...vendorContext(organisation),
+      authorizationKey: 'pricing.read',
+      correlationId: randomUUID(),
+    });
+    // The vendor of the order is told the parcel is still expected; another vendor is told nothing; neither is told by a staff session or under another key.
+    expect(await stateAs(key(vendor.row.organizationId), early.id)).toBe('EXPECTED');
+    const other = await routes.vendor();
+    expect(await stateAs(key(other.row.organizationId), early.id)).toBeNull();
+    await expect(
+      stateAs(
+        { ...staffContext([HUB_A]), authorizationKey: 'pricing.read', correlationId: randomUUID() },
+        early.id,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      stateAs(
+        {
+          ...vendorContext(vendor.row.organizationId),
+          authorizationKey: 'pickup.read',
+          correlationId: randomUUID(),
+        },
+        early.id,
+      ),
+    ).rejects.toThrow();
+    // The vendor cannot select the parcels themselves, whatever the function does: the policy admits the owner alone.
+    const direct = await routes.built.service.transactionWithContext(
+      key(vendor.row.organizationId),
+      async (tx) =>
+        (await tx.execute(sql`select count(*)::int as n from intake_parcel`)).rows[0] as {
+          n: number;
+        },
+    );
+    expect(direct.n).toBe(0);
+  });
+});
+
+describe('a vendor sees who pays what on its own orders (Run F, Part 1, D-S7-10; OB-S1-144)', () => {
+  const SUMMARY = (id: string): string => `${ONE(id)}/summary`;
+  const close = async (actor: Actor, id: string): Promise<TestResponse> =>
+    actor.client.post(`${ONE(id)}/close`, undefined, {
+      origin: OPS,
+      headers: { 'If-Match': (await read(actor, id)).etag, 'Idempotency-Key': randomUUID() },
+    });
+  interface Shown {
+    id: string;
+    locked_price?: { amount_minor: number };
+    payer_allocation?: { sender_minor: number; recipient_minor: number };
+  }
+  const summaryOf = async (actor: { get: (path: string) => Promise<TestResponse> }, id: string) => {
+    const seen = await actor.get(SUMMARY(id));
+    expect(seen.status, seen.text).toBe(200);
+    return (seen.json() as { orders: Shown[] }).orders;
+  };
+
+  // Break caught: a vendor who is shown the price of its orders and not who pays it (the vendor's portion and the recipient's), a portion that is shown where the price is not (an amount is money: left out, never a zero),
+  // or a portion of the summary that is not the one `getOrder` reads. The first order is paid by its recipient and the second by its sender: the amounts add up to the locked price, whoever reads them.
+  it('carries the portions beside the price in the summary and in the order, and where the price is left out so are they', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    const recipientPays = orderOf(await itemize(officer, intake.id, body(a.id)));
+    const senderPays = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(b.id, { payer_override: { payer_intent: 'SENDER_PAYS_FULL' } }),
+      ),
+    );
+    expect((await close(officer, intake.id)).status).toBe(200);
+
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    const mine = await summaryOf(browser, intake.id);
+    const portions = new Map(mine.map((order) => [order.id, order.payer_allocation]));
+    expect(portions.get(recipientPays.id)).toEqual({ sender_minor: 0, recipient_minor: 3500 });
+    expect(portions.get(senderPays.id)).toEqual({ sender_minor: 3500, recipient_minor: 0 });
+    for (const order of mine) {
+      const shown = order.payer_allocation;
+      expect((shown?.sender_minor ?? -1) + (shown?.recipient_minor ?? 0)).toBe(
+        order.locked_price?.amount_minor,
+      );
+    }
+    // The order the vendor reads by itself says the same.
+    for (const order of [recipientPays, senderPays]) {
+      const read = (await browser.get(`${API}/orders/${order.id}`)).json() as Shown;
+      expect(read.payer_allocation).toEqual(portions.get(order.id));
+    }
+    // Staff are told them where the price is shown, and where it is left out so are the portions.
+    for (const order of await summaryOf(officer.client, intake.id)) {
+      expect(order.payer_allocation).toEqual(portions.get(order.id));
+    }
+    const pickupOnly = await newBundle(routes.admin, [grant('pickup.read', 'own')]);
+    for (const order of await summaryOf(
+      (await routes.actor(pickupOnly, HUB_A)).client,
+      intake.id,
+    )) {
+      expect(order).not.toHaveProperty('locked_price');
+      expect(order).not.toHaveProperty('payer_allocation');
+    }
   });
 });

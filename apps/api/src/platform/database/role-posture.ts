@@ -251,6 +251,8 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.evidence_citable',
     // The intakes closed with the approved exception that still have work left (`melarc.closed_intake_exceptions`, read-only, staff under `hub.intake.close_exception`).
     'melarc.closed_intake_exceptions',
+    // What a vendor is told of the parcel of its own order (migration `0122`, D-S7-4): the state, for the vendor of the order alone, under `pricing.read` (read-only).
+    'melarc.vendor_order_parcel_state',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

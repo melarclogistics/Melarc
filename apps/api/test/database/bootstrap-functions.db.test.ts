@@ -333,6 +333,7 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.hold_request_payer',
       'melarc.evidence_citable',
       'melarc.closed_intake_exceptions',
+      'melarc.vendor_order_parcel_state',
     ]);
   });
 

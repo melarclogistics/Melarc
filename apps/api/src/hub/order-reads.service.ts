@@ -84,6 +84,8 @@ export interface IntakeSummaryView {
     readonly service_area: string;
     readonly size_class?: string;
     readonly locked_price?: { readonly amount_minor: number; readonly currency: 'GHS' };
+    /** Who pays what of the locked price (D-S7-10): shown where the price is, and left out where it is not. */
+    readonly payer_allocation?: { readonly sender_minor: number; readonly recipient_minor: number };
     readonly commercial_state: string;
   }[];
 }
@@ -179,11 +181,27 @@ export class HubOrderReads {
             etag: orderEtagOf(view, version),
           };
         }
-        const shown = vendorOrderViewOf(view);
+        // A vendor has no policy on the parcels (the hub's inside): the one thing of its parcel it is told is read through a function of the database that answers for the vendor's own order alone (D-S7-4: a
+        // parcel that did not come is told as one that was not received, with no price and nothing to pay).
+        const parcelState =
+          row.intake_parcel_id === null ? null : await this.#parcelStateForVendor(tx, id);
+        const shown = vendorOrderViewOf({ ...view, intake_parcel_state: parcelState });
         return { order: shown, etag: orderEtagOf(shown, version) };
       },
       { isolation: 'REPEATABLE READ' },
     );
+  }
+
+  /** The state of the parcel of the vendor's own order (`melarc.vendor_order_parcel_state`, migration 0122): null for an order that is not the vendor's, whatever it says. */
+  async #parcelStateForVendor(
+    tx: ReturnType<typeof transactionOf>,
+    id: string,
+  ): Promise<string | null> {
+    const found = await tx.execute(
+      sql`select melarc.vendor_order_parcel_state(${id}::uuid) as state`,
+    );
+    const state = (found.rows[0] as { state: string | null } | undefined)?.state;
+    return state ?? null;
   }
 
   /** How the order was corrected before it froze (the members that changed, never their values) and whether its arrival was reversed. */
@@ -263,6 +281,7 @@ export class HubOrderReads {
         size_class: string | null;
         locked_price_minor: number | null;
         commercial_state: string | null;
+        payer_allocation: { sender_minor: number; recipient_minor: number } | null;
       }[];
       return {
         intake_id: row.intake_id,
@@ -278,6 +297,14 @@ export class HubOrderReads {
             ? {}
             : {
                 locked_price: { amount_minor: order.locked_price_minor, currency: 'GHS' as const },
+              }),
+          ...(order.payer_allocation === null || !showPrices
+            ? {}
+            : {
+                payer_allocation: {
+                  sender_minor: order.payer_allocation.sender_minor,
+                  recipient_minor: order.payer_allocation.recipient_minor,
+                },
               }),
           commercial_state: order.commercial_state ?? 'PRICED',
         })),

@@ -11,6 +11,15 @@ import { described } from '../platform/openapi/described-schema.js';
  */
 const UUID = { type: 'string', format: 'uuid' } as const;
 const NULLABLE_UUID = { type: ['string', 'null'], format: 'uuid' } as const;
+/** The resolved portions of a locked price (`PayerAllocation`): what the vendor pays and what the recipient pays, in whole pesewas. */
+const PAYER_ALLOCATION_SHOWN = {
+  type: 'object',
+  required: ['sender_minor', 'recipient_minor'],
+  properties: {
+    sender_minor: { type: 'integer', minimum: 0 },
+    recipient_minor: { type: 'integer', minimum: 0 },
+  },
+} as const;
 /**
  * What an order keeps of its destination's zone (`DestinationZoneSnapshot` of the contract, Run F, 5.119.0; `DestinationSnapshot` of `pricing/order-pricing.ts` is what is written): the scope, and for a destination the server
  * placed or an officer chose, the zone as it was named and the service area **as a code** (the words of an area are the screens').
@@ -456,14 +465,7 @@ export const ORDER_SCHEMA = described({
         { type: 'null' },
       ],
     },
-    payer_allocation: {
-      type: 'object',
-      required: ['sender_minor', 'recipient_minor'],
-      properties: {
-        sender_minor: { type: 'integer', minimum: 0 },
-        recipient_minor: { type: 'integer', minimum: 0 },
-      },
-    },
+    payer_allocation: PAYER_ALLOCATION_SHOWN,
   },
 });
 
@@ -489,6 +491,7 @@ export const INTAKE_SUMMARY_SCHEMA = described({
           service_area: { type: 'string' },
           size_class: SIZE_CLASS,
           locked_price: MONEY,
+          payer_allocation: PAYER_ALLOCATION_SHOWN,
           commercial_state: { type: 'string' },
         },
       },

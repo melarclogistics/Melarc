@@ -762,6 +762,8 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.evidence_citable',
       // The intakes closed with the approved exception that still have work left (OB-S1-151).
       'melarc.closed_intake_exceptions',
+      // What a vendor is told of the parcel of its own order (migration 0122, D-S7-4).
+      'melarc.vendor_order_parcel_state',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).
