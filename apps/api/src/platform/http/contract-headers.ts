@@ -13,3 +13,16 @@ export const ETAG_HEADERS = {
     schema: { type: 'string' },
   },
 } as unknown as Record<string, never>;
+
+/**
+ * The header of the answer that makes an order (`itemizeOrder`): the vendor's version after the order, which the next order of the same vendor takes as `If-Match`. The first order of a cleared vendor moves it
+ * from ready to being worked, so the token the screen read is stale for the next order; the answer gives the new one and the screen reads nothing between two orders. It is a header of its own because an order is
+ * not the record this token is a version of.
+ */
+export const INTAKE_ETAG_HEADERS = {
+  'Intake-ETag': {
+    description:
+      "The vendor's version after this order. Send it as `If-Match` on the vendor's next order. A retry under the same key answers the vendor's version as it is then.",
+    schema: { type: 'string' },
+  },
+} as unknown as Record<string, never>;

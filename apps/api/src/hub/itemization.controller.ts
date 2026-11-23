@@ -10,15 +10,20 @@ import {
   Param,
   Post,
   Req,
+  Res,
 } from '@nestjs/common';
 import { ApiBody, ApiHeader, ApiParam, ApiResponse } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 
 import { Authorized } from '../platform/authorization/authorized-operation.decorator.js';
 import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
 import { OperationUnavailableError } from '../platform/authorization/operation-unavailable-error.js';
 import { ContractOperation } from '../platform/contract/contract-operation.js';
-import { IDEMPOTENCY_KEY_SCHEMA, IF_MATCH_SCHEMA } from '../platform/http/contract-headers.js';
+import {
+  IDEMPOTENCY_KEY_SCHEMA,
+  IF_MATCH_SCHEMA,
+  INTAKE_ETAG_HEADERS,
+} from '../platform/http/contract-headers.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { fingerprintOfRequest } from '../platform/http/request-fingerprint-input.js';
 import { currentRequestContext } from '../platform/logging/request-context.js';
@@ -39,7 +44,7 @@ const correlation = (): string => currentRequestContext()?.requestId ?? randomUU
 /**
  * `itemizeOrder` (S1.36, `SLICE-001`): `POST /hub-intakes/{id}/orders` makes one order for one parcel of an intake, under `hub.intake.itemize`, for the Ops Portal's staff alone and in the hubs of the session's
  * grant. It takes the `ETag` of the intake's read as `If-Match` and an `Idempotency-Key` (a receiving officer retrying over a flaky hub connection must never make two priced orders for one parcel), and answers `201`
- * with the order: its price calculated and, for a parcel that has arrived, frozen. The price, the zone and the dates are the server's and are in no part of the body.
+ * with the order: its price calculated and, for a parcel that has arrived, frozen, and the vendor's token after it in `Intake-ETag`. The price, the zone and the dates are the server's and are in no part of the body.
  */
 @Controller('hub-intakes')
 export class ItemizationController {
@@ -56,7 +61,7 @@ export class ItemizationController {
   @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
   @ApiHeader({ name: 'If-Match', required: true, schema: IF_MATCH_SCHEMA })
   @ApiBody({ schema: ORDER_ITEMIZE_BODY })
-  @ApiResponse({ status: 201, schema: ORDER_SCHEMA })
+  @ApiResponse({ status: 201, schema: ORDER_SCHEMA, headers: INTAKE_ETAG_HEADERS })
   @DescribeErrors(
     ErrorCode.CarrierCostRequired,
     ErrorCode.CommitmentSourceUnresolved,
@@ -88,14 +93,18 @@ export class ItemizationController {
     @Headers('if-match') ifMatch: string | undefined,
     @Headers('idempotency-key') idempotencyKey: string,
     @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
   ): Promise<OrderView> {
     if (this.itemization === undefined) throw new OperationUnavailableError('itemizeOrder');
-    return this.itemization.itemize(authorized, correlation(), id, {
+    const made = await this.itemization.itemize(authorized, correlation(), id, {
       body,
       ifMatch,
       idempotencyKey,
       fingerprint: fingerprintOfRequest(request, 'itemizeOrder'),
     });
+    // The vendor's token after the order, so that the next order of the vendor is made on it with no read between. The order carries no `ETag` of its own: it is not the record this token is a version of.
+    response.setHeader('Intake-ETag', made.intakeEtag);
+    return made.order;
   }
 
   @Post(':id/orders/preview')

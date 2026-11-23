@@ -5731,3 +5731,100 @@ describe('a close that is out of date says so, and the senior reads again (the r
     );
   });
 });
+
+describe('the vendor’s version, the lock, and the version an order leaves (Run F, Part 1, item 1)', () => {
+  const lockRow = async (id: string) =>
+    (
+      await routes.rows<{
+        active_receiver_id: string | null;
+        lock_acquired_at: Date | null;
+        version: string;
+      }>(
+        `select active_receiver_id, lock_acquired_at, version::text as version from pickup_intake where id = $1`,
+        [id],
+      )
+    )[0];
+  /** What the receiving page does every minute while it is open: it takes the lock again (`acquireIntakeLock`). */
+  const renewLock = (actor: Actor, id: string): Promise<TestResponse> =>
+    actor.client.post(`${ONE(id)}/lock`, {}, { origin: OPS });
+
+  // Break caught: a renewal of the lock that moves the version an early order is compared on, so that an order made from a page that was read more than a minute ago is refused as stale. The review's premise was the
+  // version trigger of migration 0092; 0093 and 0103 left the lock out of what moves the version, and this holds that: the time of the lock moves, the version and the token do not.
+  it('leaves an early order valid when the lock is renewed between the read and the save', async () => {
+    const intake = await opened(3);
+    const [a, b] = intake.parcels as [Parcel, Parcel, Parcel];
+    expect((await renewLock(officer, intake.id)).status).toBe(200);
+    const taken = await lockRow(intake.id);
+    expect(taken?.active_receiver_id).not.toBeNull();
+    const { etag } = await read(officer, intake.id);
+
+    // The page that is open renews the lock, and the renewal rewrites the moment it was taken.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect((await renewLock(officer, intake.id)).status).toBe(200);
+    const renewed = await lockRow(intake.id);
+    expect(renewed?.lock_acquired_at?.getTime()).toBeGreaterThan(
+      taken?.lock_acquired_at?.getTime() ?? Number.POSITIVE_INFINITY,
+    );
+    expect(renewed?.version).toBe(taken?.version);
+    expect((await read(officer, intake.id)).etag).toBe(etag);
+
+    // The save of the page that was read before the renewal is valid, and so is the next early order on the same read: an early order moves nothing the token is made of.
+    expect((await itemize(officer, intake.id, body(a.id), { etag })).status).toBe(201);
+    expect((await renewLock(officer, intake.id)).status).toBe(200);
+    expect((await itemize(officer, intake.id, body(b.id), { etag })).status).toBe(201);
+    expect((await read(officer, intake.id)).etag).toBe(etag);
+  });
+
+  // Break caught: a token that no longer judges anything (an order accepted on a read that the vendor's own check-in has overtaken): the vendor finished by another officer is a real change, and an early order
+  // made from the page read before it is stale, with the lock renewed or not.
+  it('still answers stale when the vendor really changed since the read', async () => {
+    const intake = await opened(2);
+    const [a] = intake.parcels as [Parcel, Parcel];
+    const { etag } = await read(officer, intake.id);
+    const other = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
+    expect((await finishAsTapped(other, intake.id)).status).toBe(200);
+    expect(refusal(await itemize(officer, intake.id, body(a.id), { etag }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'stale',
+    ]);
+    expect(await countOrders(intake.id)).toBe(0);
+  });
+
+  // Break caught: an answer that leaves the screen to read the vendor again before it can make the next order (the first order of a cleared vendor moves it from ready to being worked, so the token it
+  // was read at is stale for the next order): the 201 carries the vendor's new token, a replay carries the vendor's token as it is then, and the next order is made on it with no read between.
+  it('answers the vendor’s token as it is after the order, so the next order needs no read', async () => {
+    const intake = await cleared(3);
+    const [a, b] = intake.parcels as [Parcel, Parcel, Parcel];
+    const before = (await read(officer, intake.id)).etag;
+    const key = randomUUID();
+    const sent = await reviewedItemization(officer, intake.id, body(a.id));
+    const first = await itemize(officer, intake.id, sent, { etag: before, key, review: false });
+    const made = orderOf(first);
+    const after = first.header('intake-etag');
+    expect(after).not.toBeNull();
+    expect(after).not.toBe(before);
+    expect(after).toBe((await read(officer, intake.id)).etag);
+    // The order's own representation has no token the vendor's could be taken for.
+    expect(first.header('etag')).toBeNull();
+
+    // The next order is made on that token, with no read of the vendor in between, and the token is the same after it (a second order moves nothing).
+    const next = await itemize(officer, intake.id, body(b.id), { etag: after });
+    expect(next.status, next.text).toBe(201);
+    expect(next.header('intake-etag')).toBe(after);
+
+    // A retry of the first answers the order it made and the vendor's token as it is at the retry.
+    const again = await itemize(officer, intake.id, sent, { etag: before, key, review: false });
+    expect(again.status).toBe(201);
+    expect((again.json() as Order).id).toBe(made.id);
+    expect(again.header('intake-etag')).toBe(after);
+    expect(await countOrders(intake.id)).toBe(2);
+
+    // An early order leaves the token where it was.
+    const early = await opened(2);
+    const [e] = early.parcels as [Parcel, Parcel];
+    const waiting = await itemize(officer, early.id, body(e.id));
+    expect(waiting.status).toBe(201);
+    expect(waiting.header('intake-etag')).toBe((await read(officer, early.id)).etag);
+  });
+});

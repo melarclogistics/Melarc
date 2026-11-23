@@ -286,6 +286,12 @@ const POINTER_OF_RULE: Readonly<Record<string, string>> = {
   requested_before_default: '/requested_delivery_date',
 };
 
+/** What `itemizeOrder` answers: the order, and the vendor's token after it (the `Intake-ETag` header of the answer). */
+export interface MadeOrder {
+  readonly order: OrderView;
+  readonly intakeEtag: string;
+}
+
 /**
  * `itemizeOrder` (S1.36 and Run D, D-D6; `hub.intake.itemize`; `AC-SLICE-001-47` to `-50`, `-53`, `-54`, `-56`, `-58`, `-59`, `-90` and `-104`; features/hub/itemization.md sections 5.1, 5.2 and 5.4; domain-model.md
  * sections 6.7 and `DeliveryCommitment`; state-machines.md sections 7 and 8; `MSC-DEC-207`, `-209`, `-210`, `-213`; D-06, D-D6): the order is made for one parcel, and **price first becomes authoritative here**.
@@ -323,7 +329,7 @@ export class HubItemization {
       readonly idempotencyKey: string;
       readonly fingerprint: string;
     },
-  ): Promise<OrderView> {
+  ): Promise<MadeOrder> {
     const { runner, audit, idempotency, clock } = this.#options;
     this.#requireStaff(authorized);
     if (!isIdempotencyKey(request.idempotencyKey)) {
@@ -352,7 +358,11 @@ export class HubItemization {
         } as const;
         const begun = await idempotency.begin(handle, scope, request.fingerprint);
         if (begun.outcome === 'REPLAY') {
-          return JSON.parse(Buffer.from(begun.response.body).toString('utf8')) as OrderView;
+          // The order is the first answer; the vendor's token is the one it has now, which is what the next order is made on.
+          return {
+            order: JSON.parse(Buffer.from(begun.response.body).toString('utf8')) as OrderView,
+            intakeEtag: await this.#intakeEtag(handle, authorized, id),
+          };
         }
         if (begun.outcome === 'CONFLICT') {
           throw ApiException.of(
@@ -559,7 +569,8 @@ export class HubItemization {
           status: 201,
           body: new TextEncoder().encode(JSON.stringify(view)),
         });
-        return view;
+        // The vendor's token after this order: the first order of a cleared vendor moves it from ready to being worked, and the screen makes the next order on this one with no read between.
+        return { order: view, intakeEtag: await this.#intakeEtag(handle, authorized, id) };
       }),
     );
   }
@@ -1404,6 +1415,27 @@ export class HubItemization {
     const hub = (found.rows[0] as { responsible_hub_id?: string } | undefined)?.responsible_hub_id;
     if (typeof hub !== 'string') throw ApiException.of(ErrorCode.NotFound, 'Not found');
     return hub.toLowerCase();
+  }
+
+  /**
+   * The `ETag` of the intake as it stands in this transaction, the token a read would answer: after an order is written it is the one the next order of the vendor is made on (`Intake-ETag`). The lock is not part
+   * of it (`hub-intake-etag.ts`), so the renewal of the lock every minute moves nothing a save compares.
+   */
+  async #intakeEtag(
+    handle: TransactionHandle,
+    authorized: AuthorizedRequest,
+    id: string,
+  ): Promise<string> {
+    const tx = transactionOf(handle);
+    const found = await tx.execute(
+      sql`select ${RECEIVING_INTAKE_COLUMNS} from pickup_intake where id = ${id}::uuid`,
+    );
+    const row = found.rows[0] as unknown as ReceivingIntakeRow | undefined;
+    if (row === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+    const loaded = await loadIntakes(tx, [row], authorized.session.principalId.toLowerCase());
+    const etag = loaded.checkIns.get(row.id)?.etag ?? loaded.blind.get(row.id)?.etag;
+    if (etag === undefined) throw new Error('An intake is loaded in one of its shapes');
+    return etag;
   }
 
   /**
