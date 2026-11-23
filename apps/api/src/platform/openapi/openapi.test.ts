@@ -231,8 +231,8 @@ describe('the generated description of the real application', () => {
       // Stage 7: what a close would find, and the reversal of a mistaken arrival.
       ['/hub-intake-exceptions', ['get'], ['listClosedIntakeExceptions']],
       ['/hub-intakes/{id}/closure', ['get'], ['getIntakeClosure']],
-      ['/orders/{id}/amendment-preview', ['post'], ['previewOrderAmendment']],
       ['/orders/{id}/recipient-correction', ['post'], ['correctOrderRecipient']],
+      ['/orders/{id}/amendment-preview', ['post'], ['previewOrderAmendment']],
       ['/orders/{id}/arrival-reversal', ['post'], ['reverseOrderArrival']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],

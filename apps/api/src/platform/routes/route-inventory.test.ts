@@ -57,6 +57,7 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/hub-intakes' },
       { method: 'GET', path: '/api/v1/hub-intakes/:id' },
       { method: 'GET', path: '/api/v1/hub-intakes/:id/closure' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id/destination-zones' },
       { method: 'GET', path: '/api/v1/hub-intakes/:id/orders' },
       { method: 'GET', path: '/api/v1/hub-intakes/:id/summary' },
       { method: 'GET', path: '/api/v1/missing-parcels' },
@@ -131,6 +132,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/orders/:id/amendment-preview' },
       { method: 'POST', path: '/api/v1/orders/:id/arrival-reversal' },
       { method: 'POST', path: '/api/v1/orders/:id/payer-correction' },
+      { method: 'POST', path: '/api/v1/orders/:id/recipient-correction' },
       { method: 'POST', path: '/api/v1/payer-corrections/:id/decision' },
       { method: 'POST', path: '/api/v1/pickup-manifests' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/assign-rider' },
@@ -312,6 +314,19 @@ describe('the real application', () => {
         path: '/api/v1/hub-intakes/:id/closure',
         access: 'permission',
         permission: 'hub.intake.close',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      // Run F (D-S7-5): the zones of the hub an intake belongs to, for an officer to choose one for an address that matches none, under the key that itemizes.
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id/destination-zones',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'qualifying',
@@ -1103,6 +1118,19 @@ describe('the real application', () => {
         path: '/api/v1/orders/:id/payer-correction',
         access: 'permission',
         permission: 'pricing.correction.create',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // Run F (D-S7-1): the correction of the recipient of a confirmed order, with a reason, under the key that itemizes (no new key).
+      {
+        method: 'POST',
+        path: '/api/v1/orders/:id/recipient-correction',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'qualifying',
