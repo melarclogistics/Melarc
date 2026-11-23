@@ -163,3 +163,103 @@ p.orders-photo__none {
   align-items: center;
   gap: var(--space-2);
 }
+
+/* The form of an order with the photo and the price beside it (D-S7-2 and the review of 23 November 2026, item 1). The form is a container (task-form): where it has about 40rem (a tablet at 768px has 41rem) the
+   photo and the price are a column beside the fields and stay in view while the fields scroll; where it has not, the photo is at the top and stays there while the fields scroll under it, the fields come next
+   and the price follows them, above the save. */
+.orders-layout {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'photo'
+    'fields'
+    'price';
+}
+
+.orders-layout__side {
+  display: contents;
+}
+
+.orders-layout__photo {
+  grid-area: photo;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-block: var(--space-2);
+  background: var(--color-surface-page, var(--color-surface-subtle));
+}
+
+.orders-layout__photo img {
+  max-height: 38dvh;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.orders-layout__fields {
+  grid-area: fields;
+  min-width: 0;
+}
+
+.orders-layout__price {
+  grid-area: price;
+  min-width: 0;
+}
+
+@container task-form (min-width: 40rem) {
+  .orders-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 22rem);
+    grid-template-areas: 'fields side';
+    align-items: start;
+  }
+
+  .orders-layout__side {
+    display: grid;
+    gap: var(--space-4);
+    grid-area: side;
+    position: sticky;
+    top: var(--space-4);
+    max-height: calc(100dvh - var(--space-8));
+    overflow-y: auto;
+  }
+
+  .orders-layout__photo {
+    position: static;
+    padding-block: 0;
+    background: none;
+  }
+
+  .orders-layout__photo img {
+    max-height: 32dvh;
+  }
+}
+
+.orders-price {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.orders-price__title {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.orders-price__body:focus-visible {
+  outline-offset: var(--space-1);
+}
+
+/* What was typed, above the one save: a line the officer reads before pressing it. */
+.orders-typed {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.orders-typed__label {
+  font-weight: var(--text-heading-sm-weight);
+  color: inherit;
+}
