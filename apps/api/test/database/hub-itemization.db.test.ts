@@ -6324,3 +6324,99 @@ describe('a vendor sees who pays what on its own orders (Run F, Part 1, D-S7-10;
     }
   });
 });
+
+describe('the zones of the hub an intake belongs to (Run F, Part 1, D-S7-5; OB-S1-165)', () => {
+  const ZONES = (id: string): string => `${ONE(id)}/destination-zones`;
+  interface Offered {
+    items: { zone_id: string; name: string }[];
+  }
+
+  // Break caught: a form that cannot offer the choice of a zone for an address no zone matches (the officer who knows the zone cannot say it), a list that carries another hub's zones, an inactive zone or more of a zone
+  // than its identifier and its name, one that is read by a session without the key to itemize, by a vendor or for an intake of another hub, or an unknown intake that is answered as an empty list.
+  it('lists the active zones of the intake’s hub by name and nothing more, for the officers who itemize, and the officer’s choice is then accepted', async () => {
+    const intake = await opened(2);
+    const expected = await routes.rows<{ id: string; name: string }>(
+      `select id, name from service_zone where hub_id = $1 and active order by name, id`,
+      [HUB_A],
+    );
+    expect(expected.length).toBeGreaterThanOrEqual(3);
+    const listed = await officer.client.get(ZONES(intake.id));
+    expect(listed.status, listed.text).toBe(200);
+    const { items } = listed.json() as Offered;
+    expect(items).toEqual(expected.map((zone) => ({ zone_id: zone.id, name: zone.name })));
+    for (const item of items) expect(Object.keys(item).toSorted()).toEqual(['name', 'zone_id']);
+    // No zone of another hub is in the list: every zone of it is a zone of this hub.
+    const foreign = await routes.rows<{ id: string }>(
+      `select id from service_zone where hub_id <> $1`,
+      [HUB_A],
+    );
+    for (const zone of foreign) expect(items.map((item) => item.zone_id)).not.toContain(zone.id);
+
+    // A zone that is not active is not offered (the guards put aside, as the other tests arrange a world the application cannot make), and is back when it is.
+    const hidden = present(expected, 0);
+    const setActive = async (active: boolean): Promise<void> => {
+      await routes.admin.query('begin');
+      await routes.admin.query('set local session_replication_role = replica');
+      await routes.admin.query('update service_zone set active = $2 where id = $1', [
+        hidden.id,
+        active,
+      ]);
+      await routes.admin.query('commit');
+    };
+    await setActive(false);
+    try {
+      const without = (await officer.client.get(ZONES(intake.id))).json() as Offered;
+      expect(without.items.map((item) => item.zone_id)).not.toContain(hidden.id);
+      expect(without.items).toHaveLength(items.length - 1);
+    } finally {
+      await setActive(true);
+    }
+
+    // The choice the form then sends, for an address no zone matches, is the one the order is made with.
+    const [a] = intake.parcels as [Parcel, Parcel];
+    const chosen = present(items, items.length - 1);
+    const refused = await itemize(
+      officer,
+      intake.id,
+      body(a.id, {
+        recipient: { name: 'Kofi', phone: '0201112233', location: { address: 'Adum, Kumasi' } },
+      }),
+    );
+    expect(refusal(refused)).toEqual([422, 'SETTING_MISSING', 'destination_zone_unresolved']);
+    const made = orderOf(
+      await itemize(
+        officer,
+        intake.id,
+        body(a.id, {
+          recipient: { name: 'Kofi', phone: '0201112233', location: { address: 'Adum, Kumasi' } },
+          destination_zone_authorization: {
+            zone_id: chosen.zone_id,
+            note: 'The sender phoned and said it is for this zone',
+          },
+        }),
+      ),
+    );
+    expect(made.destination_zone_resolution).toBe('EXPLICITLY_AUTHORIZED');
+    expect(made.destination_zone_snapshot).toMatchObject({ zone_id: chosen.zone_id });
+  });
+
+  // Break caught: a read of the zones for another hub's intake, for an unknown one or by a session that does not hold the key.
+  it('is for the hub’s own officers who hold the key: another hub, an unknown intake, a reader without the key and a vendor are refused', async () => {
+    const intake = await opened(1);
+    expect(refusal(await otherHub.client.get(ZONES(intake.id)))[1]).toBe('HUB_SCOPE_VIOLATION');
+    expect((await officer.client.get(ZONES(randomUUID()))).status).toBe(404);
+    const readOnly = await routes.actor(
+      await newBundle(routes.admin, [grant('hub.read', 'own')]),
+      HUB_A,
+    );
+    expect(refusal(await readOnly.client.get(ZONES(intake.id))).slice(0, 2)).toEqual([
+      403,
+      'PERMISSION_DENIED',
+    ]);
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    expect((await browser.get(ZONES(intake.id))).status).toBe(403);
+  });
+});

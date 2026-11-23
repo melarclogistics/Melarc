@@ -575,6 +575,7 @@ describe('the existence rule is asked about records that are real (the control o
       getPayerCorrection: 'payerCorrection',
       previewOrder: 'pickupIntake',
       listIntakeOrders: 'pickupIntake',
+      listDestinationZones: 'pickupIntake',
       getIntakeClosure: 'pickupIntake',
       addExtraParcel: 'pickupIntake',
       adjudicateDiscrepancy: 'pickupIntake',

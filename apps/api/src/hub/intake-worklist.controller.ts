@@ -19,6 +19,7 @@ import {
   WORKLIST_VIEWS,
   type ClosedExceptionPageView,
   type ClosureAssessmentView,
+  type DestinationZonesView,
   type IntakeWorklist,
   type IntakeWorklistView,
   type WorklistFilter,
@@ -26,6 +27,7 @@ import {
 import {
   CLOSED_EXCEPTION_PAGE_SCHEMA,
   CLOSURE_ASSESSMENT_SCHEMA,
+  DESTINATION_ZONE_LIST_SCHEMA,
   INTAKE_ORDER_LIST_SCHEMA,
 } from './order-schemas.js';
 
@@ -103,6 +105,33 @@ export class IntakeWorklistController {
       return Promise.reject(new OperationUnavailableError('listIntakeOrders'));
     }
     return this.worklist.list(authorized, correlation(), id, filterOf(query));
+  }
+
+  @Get('hub-intakes/:id/destination-zones')
+  @HttpCode(200)
+  @ContractOperation('listDestinationZones')
+  @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
+  @ApiResponse({ status: 200, schema: DESTINATION_ZONE_LIST_SCHEMA })
+  @DescribeSecurity(['browserSession'])
+  @DescribeErrors(
+    ErrorCode.HubScopeViolation,
+    ErrorCode.NotFound,
+    ErrorCode.PermissionDenied,
+    ErrorCode.SessionInvalid,
+  )
+  @RequiresPermission('hub.intake.itemize', {
+    surfaces: ['OPS_PORTAL'],
+    activity: 'qualifying',
+    record: { entity: 'pickup_intake', param: 'id' },
+  })
+  zones(
+    @Authorized() authorized: AuthorizedRequest,
+    @Param('id') id: string,
+  ): Promise<DestinationZonesView> {
+    if (this.worklist === undefined) {
+      return Promise.reject(new OperationUnavailableError('listDestinationZones'));
+    }
+    return this.worklist.destinationZones(authorized, correlation(), id);
   }
 
   @Get('hub-intake-exceptions')

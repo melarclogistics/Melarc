@@ -469,6 +469,24 @@ export const ORDER_SCHEMA = described({
   },
 });
 
+/** The zones of the hub an intake belongs to (`DestinationZoneList`, D-S7-5): the form's choice for an address no zone matches. */
+export const DESTINATION_ZONE_LIST_SCHEMA = described({
+  type: 'object',
+  required: ['items'],
+  additionalProperties: false,
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['zone_id', 'name'],
+        additionalProperties: false,
+        properties: { zone_id: UUID, name: { type: 'string' } },
+      },
+    },
+  },
+});
+
 /** The vendor-facing intake-completed and order summary (`IntakeSummary`, S1.38): the orders of the parcels that arrived and what a vendor may know of each, and nothing else. */
 export const INTAKE_SUMMARY_SCHEMA = described({
   type: 'object',

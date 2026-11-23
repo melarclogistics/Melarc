@@ -227,6 +227,7 @@ describe('the generated description of the real application', () => {
       ['/payer-corrections/{id}', ['get'], ['getPayerCorrection']],
       ['/orders/{id}/payer-correction', ['post'], ['requestPayerCorrection']],
       ['/payer-corrections/{id}/decision', ['post'], ['approvePayerCorrection']],
+      ['/hub-intakes/{id}/destination-zones', ['get'], ['listDestinationZones']],
       // Stage 7: what a close would find, and the reversal of a mistaken arrival.
       ['/hub-intake-exceptions', ['get'], ['listClosedIntakeExceptions']],
       ['/hub-intakes/{id}/closure', ['get'], ['getIntakeClosure']],

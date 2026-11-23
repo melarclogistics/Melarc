@@ -129,6 +129,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'approvePayerCorrection',
   // Stage 7, the reads a screen cannot do without (the external review of 19 November 2026): the parcel worklist with the counts of the whole intake, what a close would find, and the corrections a checker opens.
   'listIntakeOrders',
+  'listDestinationZones',
   'getIntakeClosure',
   'listPayerCorrections',
   'getPayerCorrection',

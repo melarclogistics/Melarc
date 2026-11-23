@@ -439,6 +439,49 @@ export class IntakeWorklist {
     );
   }
 
+  /**
+   * The zones of the hub an intake belongs to, for the form that must offer one for an address no zone matches (D-S7-5, OB-S1-165): the hub's **active** zones by name, and nothing else of a zone. The hub is the
+   * intake's; the staff's own policy on the zones reads the hubs of the grant alone, so another hub's zones are never in the answer, and a foreign intake is audited as every staff read is.
+   */
+  async destinationZones(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    intakeId: string,
+  ): Promise<DestinationZonesView> {
+    refuseNotStaff(authorized);
+    return this.#options.runner.read(
+      authorized,
+      correlationId,
+      async (handle) => {
+        const tx = transactionOf(handle);
+        const hub = (
+          await tx.execute(
+            sql`select responsible_hub_id from pickup_intake where id = ${intakeId}::uuid`,
+          )
+        ).rows[0] as { responsible_hub_id: string } | undefined;
+        if (hub === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+        const baseline = await primaryHubOfStaff(handle, authorized.session.principalId);
+        if (hub.responsible_hub_id !== baseline) {
+          await this.#options.audit.write(handle, {
+            code: 'auth.hub_boundary.crossed',
+            enhanced: true,
+            outcome: 'SUCCEEDED',
+            object: { type: 'HUB', id: hub.responsible_hub_id },
+            responsibleHubId: hub.responsible_hub_id,
+            relatedIds: { operation_id: 'listDestinationZones' },
+          });
+        }
+        const zones = (
+          await tx.execute(
+            sql`select id, name from service_zone where hub_id = ${hub.responsible_hub_id}::uuid and active order by name, id`,
+          )
+        ).rows as unknown as { id: string; name: string }[];
+        return { items: zones.map((zone) => ({ zone_id: zone.id, name: zone.name })) };
+      },
+      { isolation: 'REPEATABLE READ' },
+    );
+  }
+
   async closure(
     authorized: AuthorizedRequest,
     correlationId: string,
@@ -475,6 +518,11 @@ export class IntakeWorklist {
       { isolation: 'REPEATABLE READ' },
     );
   }
+}
+
+/** The zones of an intake's hub, as the form offers them (`DestinationZoneList`). */
+export interface DestinationZonesView {
+  readonly items: readonly { readonly zone_id: string; readonly name: string }[];
 }
 
 /** One intake that was closed with the approved exception and still has received parcels without an order. */
