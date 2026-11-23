@@ -48,7 +48,7 @@ export const ORDERS_WORDS = {
         label: 'Not here yet',
         none: 'No parcel is still on its way to the table.',
       },
-      prepared: { label: 'Not confirmed', none: 'No order is waiting to be confirmed.' },
+      prepared: { label: 'Waiting for its parcel', none: 'No order is waiting for its parcel.' },
       itemized: { label: 'Confirmed', none: 'No order is confirmed yet.' },
       payment_required: { label: 'Payment due', none: 'No order is waiting for payment.' },
       missing: { label: 'Missing', none: 'No parcel is missing.' },
@@ -63,8 +63,8 @@ export const ORDERS_WORDS = {
     state: {
       NEEDS_ORDER: 'Needs an order',
       AWAITING_ARRIVAL: 'Not here yet',
-      PREPARED: 'Order made, not confirmed',
-      ITEMIZED: 'Confirmed',
+      PREPARED: 'Waiting for its parcel',
+      ITEMIZED: 'Confirmed — price fixed',
       MISSING: 'Missing',
     },
     paymentDue: 'Payment due',
@@ -361,8 +361,8 @@ export const ORDERS_WORDS = {
   record: {
     documentTitle: (code: string): string => `Order ${code}`,
     status: {
-      EARLY_QUOTE: 'Not confirmed',
-      FROZEN: 'Confirmed',
+      EARLY_QUOTE: 'Waiting for its parcel',
+      FROZEN: 'Confirmed — price fixed',
       REVERSED: 'Taken back',
     },
     sentence: {

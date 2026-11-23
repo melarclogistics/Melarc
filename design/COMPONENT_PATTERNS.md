@@ -2187,11 +2187,11 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `RECEIVING_PARCEL` | `VOID` | neutral | Taken back |
 | `ORDER_WORK` | `NEEDS_ORDER` | waiting | Needs an order |
 | `ORDER_WORK` | `AWAITING_ARRIVAL` | neutral | Not here yet |
-| `ORDER_WORK` | `PREPARED` | info | Order made, not confirmed |
-| `ORDER_WORK` | `ITEMIZED` | success | Confirmed |
+| `ORDER_WORK` | `PREPARED` | info | Waiting for its parcel |
+| `ORDER_WORK` | `ITEMIZED` | success | Confirmed — price fixed |
 | `ORDER_WORK` | `MISSING` | danger | Missing |
-| `ORDER_PRICE` | `EARLY_QUOTE` | info | Not confirmed |
-| `ORDER_PRICE` | `FROZEN` | success | Confirmed |
+| `ORDER_PRICE` | `EARLY_QUOTE` | info | Waiting for its parcel |
+| `ORDER_PRICE` | `FROZEN` | success | Confirmed — price fixed |
 | `ORDER_PRICE` | `REVERSED` | neutral | Taken back |
 | `PAYER_CORRECTION` | `REQUESTED` | waiting | Waiting for a decision |
 | `PAYER_CORRECTION` | `APPROVED` | success | Approved |

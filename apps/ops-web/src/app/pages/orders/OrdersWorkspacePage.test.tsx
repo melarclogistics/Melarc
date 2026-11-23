@@ -98,7 +98,7 @@ describe('a vendor with door photos', () => {
     expect(rows.getByText('Parcel 2')).toBeVisible();
     expect(rows.getAllByText('Needs an order').length).toBeGreaterThan(0);
     expect(rows.getAllByText('Not here yet').length).toBeGreaterThan(0);
-    expect(rows.getAllByText('Confirmed').length).toBeGreaterThan(0);
+    expect(rows.getAllByText('Confirmed — price fixed').length).toBeGreaterThan(0);
     // The views are the server's filter, with the counts of the whole vendor.
     const views = within(screen.getByRole('tablist', { name: 'Views of the orders' }));
     expect(views.getByRole('tab', { name: /Needs an order/ })).toHaveTextContent('1');
