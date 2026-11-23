@@ -29,8 +29,10 @@ import { copyFor } from '../../../platform/problem/problem-copy';
 import { UUID } from '../staff/WithProfile';
 import { OrderFields } from './OrderFields';
 import { FlowActions, FlowAlerts } from './OrderFlowParts';
-import { OrderReview } from './OrderReview';
-import { refusedFields } from './order-refusal-fields';
+import { OrderLayout } from './OrderLayout';
+import { OrderPrice } from './OrderPrice';
+import { errorsOf, refusedFields } from './order-refusal-fields';
+import { typedLineOf } from './order-typed';
 import { orderPath, ordersPath, TO_MAKE_CRUMB } from './orders-presentation';
 import { useOrderFlow } from './use-order-flow';
 import './orders-pages.css';
@@ -59,40 +61,49 @@ function AmendForm({
   const version = useRef(record.etag);
   const gate = useUploadGate();
 
-  const flow = useOrderFlow({
-    operation: 'amendOrder',
-    previewOperation: 'previewOrderAmendment',
-    preview: (current) =>
-      previewOrderAmendment(client, order.id, intakeId, amendPatchOf(initial, current)),
-    save: (command, key) =>
-      amendOrder(
-        client,
-        order.id,
-        amendSaveBodyOf(
-          amendPatchOf(initial, command.values),
-          command.values.reason,
-          command.token,
+  const flow = useOrderFlow(
+    {
+      operation: 'amendOrder',
+      previewOperation: 'previewOrderAmendment',
+      preview: (current) =>
+        previewOrderAmendment(client, order.id, intakeId, amendPatchOf(initial, current)),
+      save: (command, key) =>
+        amendOrder(
+          client,
+          order.id,
+          amendSaveBodyOf(
+            amendPatchOf(initial, command.values),
+            command.values.reason,
+            command.token,
+          ),
+          command.version,
+          key,
         ),
-        command.version,
-        key,
-      ),
-    version: () => version.current,
-    reload: async () => {
-      const read = await reload();
-      if (read !== undefined) version.current = read.etag;
+      version: () => version.current,
+      reload: async () => {
+        const read = await reload();
+        if (read !== undefined) version.current = read.etag;
+      },
+      onSaved: (done) => {
+        setSaved(done.code);
+      },
+      // The price of a change is asked for once something was changed and what is entered can be priced: the reason is the save's, never the price's.
+      complete: (current, zoneNeeded) =>
+        !gate.busy &&
+        Object.keys(problemsWith(current, { zoneNeeded })).length === 0 &&
+        !isEmptyPatch(amendPatchOf(initial, current)),
+      keyOf: (current) => JSON.stringify(amendPatchOf(initial, current)),
     },
-    onSaved: (done) => {
-      setSaved(done.code);
-    },
-  });
-  const { stage, command } = flow;
-  const reviewing = stage.kind === 'reviewing';
+    values,
+  );
+  const { command } = flow;
   const fromServer = refusedFields(
     command.phase === 'refused' ? command.problem : flow.checkProblem,
   );
   const tiedToAField = Object.keys(fromServer).length > 0;
-  const locked = command.locked || stage.kind === 'checking';
-  const errors: OrderFieldErrors = { ...fromServer, ...invalid };
+  const locked = command.locked;
+  const errors: OrderFieldErrors = errorsOf(fromServer, invalid);
+  const terms = flow.price.kind === 'ready' ? flow.price.terms : undefined;
 
   useEffect(() => {
     // A form that was sent holds nothing unsaved: the guard against leaving is off once `saved` is set, and only then does the page go on to the order, with the word that it was changed.
@@ -102,15 +113,9 @@ function AmendForm({
     if (attempts > 0) focusFirstInvalid(form.current);
   }, [attempts]);
   useEffect(() => {
-    if (flow.checkProblem !== undefined) focusFirstInvalid(form.current);
-  }, [flow.checkProblem]);
-  useEffect(() => {
-    // A save refused about a field has brought the form back: the first field it names is where the officer's eyes go.
-    if (command.phase === 'refused' && stage.kind === 'editing' && tiedToAField) {
-      focusFirstInvalid(form.current);
-    }
-  }, [command.phase, stage.kind, tiedToAField]);
-
+    // A save refused about a field leaves the error on the field and the focus on it; the price's own refusals take no focus, which is in the field being typed in.
+    if (command.phase === 'refused' && tiedToAField) focusFirstInvalid(form.current);
+  }, [command.phase, tiedToAField]);
   useEffect(() => {
     if (command.phase === 'unknown')
       form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();
@@ -132,12 +137,8 @@ function AmendForm({
 
   function send(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (command.locked || stage.kind === 'checking') return;
-    if (stage.kind === 'reviewing') {
-      flow.confirm(values);
-      return;
-    }
-    if (gate.busy) return;
+    if (command.locked || gate.busy) return;
+    // The reason of a change is the save's: it is asked for when the officer saves, and the field says so.
     const found = problemsWith(values, {
       amendment: true,
       zoneNeeded: flow.candidates !== undefined,
@@ -152,13 +153,14 @@ function AmendForm({
       setNothing(true);
       return;
     }
-    void flow.check(values);
+    // The price is of what is entered: the one save sends the token of the price on the screen.
+    if (flow.pressable) flow.save();
   }
 
   return (
     <TaskForm
       formRef={form}
-      busy={stage.kind === 'checking' || command.phase === 'sending'}
+      busy={command.phase === 'sending'}
       dirty={saved === undefined && values !== initial}
       onSubmit={send}
       alerts={
@@ -171,29 +173,14 @@ function AmendForm({
           <FlowAlerts flow={flow} tiedToAField={tiedToAField} />
         </>
       }
-      summary={{
-        title: F.summary.title,
-        children: (
-          <>
-            {F.summary.lines.map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-          </>
-        ),
-      }}
-      review={{
-        active: reviewing,
-        title: WORDS.review.title,
-        backLabel: F.acts.back,
-        onBack: flow.back,
-        children: reviewing ? <OrderReview terms={stage.terms} earlier={stage.earlier} /> : null,
-      }}
       actions={
         <FlowActions
           flow={flow}
           gate={gate}
           cancelTo={orderPath(order.id)}
-          confirm={F.acts.saveChange}
+          typed={typedLineOf(values, terms)}
+          save={F.acts.saveChange}
+          saveAt={F.acts.saveChangeAt}
           lookLabel={WORDS.record.acts.openVendor}
         />
       }
@@ -209,16 +196,18 @@ function AmendForm({
         ],
       }}
     >
-      <OrderFields
-        values={values}
-        errors={errors}
-        locked={locked}
-        intakeId={intakeId}
-        candidates={flow.candidates}
-        gate={gate}
-        amendment
-        change={change}
-      />
+      <OrderLayout photo={null} price={<OrderPrice flow={flow} />}>
+        <OrderFields
+          values={values}
+          errors={errors}
+          locked={locked}
+          intakeId={intakeId}
+          candidates={flow.candidates}
+          gate={gate}
+          amendment
+          change={change}
+        />
+      </OrderLayout>
     </TaskForm>
   );
 }

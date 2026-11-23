@@ -54,6 +54,22 @@ const fieldOf = (pointer: string): OrderField | undefined =>
   POINTERS.find(([prefix]) => pointer === prefix || pointer.startsWith(`${prefix}/`))?.[1];
 
 /**
+ * The errors the form draws: what the server refused of what is entered (`fromServer`) and what the form itself found wrong (`invalid`). A field the officer has changed since is kept in `invalid` as `undefined`
+ * ("no error of the form's"), and a plain spread would let that hide the server's refusal of the same field: only an error that is there is taken, and the form's own is the one that stands when both name a field.
+ */
+export function errorsOf(
+  fromServer: OrderFieldErrors,
+  invalid: OrderFieldErrors,
+): OrderFieldErrors {
+  const merged: Partial<Record<OrderField, string>> = { ...fromServer };
+  for (const field of Object.keys(invalid) as OrderField[]) {
+    const text = invalid[field];
+    if (text !== undefined) merged[field] = text;
+  }
+  return merged;
+}
+
+/**
  * The fields a refusal is about, in the words of each field, **from the places the API named and from the codes that are about one field**: a refusal the server gives for the size is told on the size, the one for
  * the carrier's charge on the charge. A refusal that is about no field is the page's alert, and the page says so by getting none here.
  */

@@ -12,33 +12,37 @@ import type {
 } from '../../../platform/hub-orders/orders-commands';
 import type { TermsView, ZoneCandidateView } from '../../../platform/hub-orders/orders-shape';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
-import { refusedFields } from './order-refusal-fields';
 
 /**
- * The flow of an order, **review and then save** (the reviews of 19 and 20 November 2026, approved; PRODUCT_DESIGN_DIRECTION section 6.3: *a short review before submit*): the officer fills the form, the server
- * works out what confirming would give (`previewOrder`, `previewOrderAmendment`), the officer reads it, and the save is made on **the digest of those terms** (`reviewed_terms`). It is one flow for a new order and
- * for the amendment of one that is not confirmed yet, so that they cannot disagree about what a review is.
+ * The flow of an order, **one step** (the Product Owner's decision D-S7-2, 23 November 2026; it replaces the review of the decisions of 19 and 20 November, whose second button an officer could press unread by
+ * tapping twice): the price is shown beside the form **by itself**. Once what was entered is complete (the size, the destination and the address among it) the form asks the server for the price
+ * (`previewOrder`, `previewOrderAmendment`), a moment after the last key (`PRICE_DEBOUNCE_MS`), **at most one request at a time, and an answer to what was entered before is thrown away**: the figure on the screen is
+ * the price of what is on the screen, never of what was there a moment ago. Nothing is worked out in the browser.
  *
- * - **Editing**: the form. **Checking**: the server is working the terms out. **Reviewing**: the terms are on the screen with what they say; the form is still in the page, only hidden, so that nothing entered is lost
- *   by looking at the review.
- * - **A price that changed while the officer looked** is not an error: the save answers with the terms as they are now (`terms-changed`), the screen shows them **beside the earlier ones** and asks for a
- *   second, explicit confirmation. The officer's entries stay.
+ * - **One save.** It sends the token of the price on the screen (`reviewed_terms`), so the server saves exactly what was shown. While what is entered differs from what was priced, the button says that the price is being
+ *   checked and cannot be pressed.
+ * - **A price that changed at the save** (`terms-changed`, the rates moved while the officer looked) is not an error: the price on the screen becomes the new one, the earlier one is shown beside it, and the save is
+ *   offered again as a separate button that says the new figure; **a press in the moment after it appears is ignored** (`SAVE_GUARD_MS`), so that a second tap meant for the first button never saves a price nobody read.
  * - **A vendor that changed**, or **prices that are being changed** (`stale`, `configuration_changing`): nothing was saved, the entries stay, and one press reads the vendor again and checks the price again.
  * - **A save is one command** (`useConfirmedCommand`): a lost answer is sent again under the same key and never makes an order twice, and a refusal ends the attempt.
+ * It is one flow for a new order and for the change of one that is not confirmed yet, so that they cannot disagree about what a price on the screen is.
  */
-export type FlowStage =
-  | { readonly kind: 'editing' }
+export const PRICE_DEBOUNCE_MS = 600;
+export const SAVE_GUARD_MS = 600;
+
+export type PriceState =
+  /** What was entered is not complete enough to be priced: nothing is asked. */
+  | { readonly kind: 'waiting' }
+  /** The server is working the price out for what is entered. */
   | { readonly kind: 'checking' }
-  | {
-      readonly kind: 'reviewing';
-      readonly terms: TermsView;
-      /** The terms the officer read before they changed: shown beside the new ones, and the reason a second confirmation is asked for. */
-      readonly earlier: TermsView | undefined;
-    };
+  /** The price of what is entered. `earlier` is the price the officer read before it changed at the save, when it did. */
+  | { readonly kind: 'ready'; readonly terms: TermsView; readonly earlier: TermsView | undefined }
+  /** The server would not price what is entered: the refusal is on the fields (`checkProblem`, `candidates`). */
+  | { readonly kind: 'refused' };
 
 export interface OrderCommand {
   readonly values: OrderFormValues;
-  /** The `terms_token` of the review the save is made on. */
+  /** The `terms_token` of the price the save is made on. */
   readonly token: string;
   /** The version the act takes (`If-Match`), exactly as it was read. */
   readonly version: string;
@@ -47,7 +51,7 @@ export interface OrderCommand {
 export interface OrderFlowConfig {
   /** The operation the save is, so that a refusal is worded for it. */
   readonly operation: 'itemizeOrder' | 'amendOrder';
-  /** The operation the review is, so that a refusal of it is worded for it. */
+  /** The operation the price is, so that a refusal of it is worded for it. */
   readonly previewOperation: 'previewOrder' | 'previewOrderAmendment';
   readonly preview: (values: OrderFormValues) => Promise<PreviewOutcome>;
   readonly save: (command: OrderCommand, key: string) => Promise<SaveOutcome>;
@@ -56,9 +60,15 @@ export interface OrderFlowConfig {
   /** Reads the record again, for the version, after the vendor or the order changed under the officer. */
   readonly reload: () => Promise<unknown>;
   readonly onSaved: (order: SavedOrderView) => void;
+  /** Whether what is entered can be priced, **given whether a zone has to be chosen** (an address that matches more than one zone). It is the form's own completeness and says nothing of what the server will answer. */
+  readonly complete: (values: OrderFormValues, zoneNeeded: boolean) => boolean;
+  /** What a price is of: two sets of entries with the same key have the same price, so a change that does not move it (the reason of a change) does not ask again. */
+  readonly keyOf: (values: OrderFormValues) => string;
+  /** How long after the last key the price is asked for. Default `PRICE_DEBOUNCE_MS`. */
+  readonly debounceMs?: number;
 }
 
-/** What differs between two reviews of one order, in the parts an officer reads: a price, a date, who pays, the photos attached, the zone, the high-value status. */
+/** What differs between two prices, in the parts an officer reads: a price, a date, who pays, the photos attached, the zone, the high-value status. */
 export type TermsDifference =
   'price' | 'date' | 'payer' | 'evidence' | 'zone' | 'highValue' | 'other';
 
@@ -95,20 +105,27 @@ export function termsDifferences(before: TermsView, now: TermsView): readonly Te
   return found;
 }
 
+/** The answer of the server to the entries of one key: a price, or a refusal (told on the fields). */
+interface Answer {
+  readonly key: string;
+  readonly terms?: TermsView;
+  readonly earlier?: TermsView;
+  readonly problem?: Problem;
+}
+
 export interface OrderFlow {
-  readonly stage: FlowStage;
+  readonly price: PriceState;
+  /** The save, and its states (`sending`, `unknown`, `refused`, `conflict`). */
   readonly command: ConfirmedCommand<OrderCommand>;
-  /** The refusal of the review, if the server refused to work the terms out: the form tells it on the field it names. */
+  /** Whether the save may be pressed now: the price on the screen is the price of what is entered, and nothing is being sent. */
+  readonly pressable: boolean;
+  /** The refusal of the price, if the server refused to work it out: the form tells it on the field it names. */
   readonly checkProblem: Problem | undefined;
   /** The zones an address matched with each other, for the officer to choose one: the server's own, from the refusal. */
   readonly candidates: readonly ZoneCandidateView[] | undefined;
-  /** Asks the server to work the terms out. */
-  readonly check: (values: OrderFormValues) => Promise<void>;
-  /** Saves the order on the terms on the screen. Only while reviewing. */
-  readonly confirm: (values: OrderFormValues) => void;
-  /** Goes back to the form, with everything entered. */
-  readonly back: () => void;
-  /** Takes the refusal of the review and the zone choice off the screen: the officer changed something. */
+  /** Saves the order on the price on the screen. Ignored unless the price is the price of what is entered, and for a moment after the price changed at the save. */
+  readonly save: () => void;
+  /** Takes the refusal of the save off the screen: the officer changed something. */
   readonly changed: () => void;
   readonly clearCandidates: () => void;
 }
@@ -117,119 +134,159 @@ export interface OrderFlow {
 const worthShowing = (problem: Problem): boolean =>
   problem.kind !== 'session-ended' && problem.kind !== 'stale';
 
-export function useOrderFlow(config: OrderFlowConfig): OrderFlow {
-  const [stage, setStage] = useState<FlowStage>({ kind: 'editing' });
-  const [checkProblem, setCheckProblem] = useState<Problem | undefined>(undefined);
+export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): OrderFlow {
+  const [answer, setAnswer] = useState<Answer | undefined>(undefined);
   const [candidates, setCandidates] = useState<readonly ZoneCandidateView[] | undefined>(undefined);
   const latest = useRef(config);
+  const entered = useRef(values);
   const alive = useRef(true);
-  const lastValues = useRef<OrderFormValues | undefined>(undefined);
-  const reviewed = useRef<TermsView | undefined>(undefined);
+  const desired = useRef<{ readonly key: string; readonly values: OrderFormValues } | undefined>(
+    undefined,
+  );
+  const inFlight = useRef(false);
+  const due = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const armedUntil = useRef(0);
+  const shown = useRef<Answer | undefined>(undefined);
+
   useEffect(() => {
     latest.current = config;
+    entered.current = values;
   });
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      if (timer.current !== undefined) clearTimeout(timer.current);
     };
   }, []);
 
-  const check = useCallback(async (values: OrderFormValues, earlier?: TermsView): Promise<void> => {
-    lastValues.current = values;
-    setStage({ kind: 'checking' });
-    setCheckProblem(undefined);
-    try {
-      const outcome = await latest.current.preview(values);
-      if (!alive.current) return;
-      if (outcome.kind === 'zone-choice') {
-        setCandidates(outcome.candidates);
-        setStage({ kind: 'editing' });
+  const key = config.keyOf(values);
+  const complete = config.complete(values, candidates !== undefined);
+
+  /** Asks for the price of what is wanted now. One request at a time: a request that is out when another is due makes the finishing one ask again, for what is wanted then. */
+  const pump = useCallback((): Promise<void> => {
+    const run = async (): Promise<void> => {
+      if (inFlight.current) {
+        due.current = true;
         return;
       }
-      reviewed.current = outcome.terms;
-      // Terms that are the ones the officer read (the vendor was read again and nothing changed) need no second look: the alert and the second confirmation are for terms that differ.
-      const differs = earlier !== undefined && termsDifferences(earlier, outcome.terms).length > 0;
-      setStage({ kind: 'reviewing', terms: outcome.terms, earlier: differs ? earlier : undefined });
-    } catch (error) {
+      const target = desired.current;
+      if (target === undefined) return;
+      inFlight.current = true;
+      let outcome: PreviewOutcome | undefined;
+      let failure: unknown;
+      try {
+        outcome = await latest.current.preview(target.values);
+      } catch (error) {
+        failure = error;
+      }
+      inFlight.current = false;
       if (!alive.current) return;
-      const problem = problemOf(error, { operation: latest.current.previewOperation });
-      if (worthShowing(problem)) setCheckProblem(problem);
-      setStage({ kind: 'editing' });
-    }
+      // An answer is for the entries it was asked for: if they have changed since, it is thrown away and never drawn.
+      if (desired.current?.key === target.key) {
+        if (outcome?.kind === 'terms') {
+          setAnswer({ key: target.key, terms: outcome.terms });
+        } else if (outcome?.kind === 'zone-choice') {
+          setCandidates(outcome.candidates);
+          setAnswer({ key: target.key });
+        } else {
+          const problem = problemOf(failure, { operation: latest.current.previewOperation });
+          setAnswer({ key: target.key, ...(worthShowing(problem) ? { problem } : {}) });
+        }
+      }
+      if (due.current || (desired.current !== undefined && desired.current.key !== target.key)) {
+        due.current = false;
+        await run();
+      }
+    };
+    return run();
   }, []);
 
+  useEffect(() => {
+    if (timer.current !== undefined) clearTimeout(timer.current);
+    if (!complete) {
+      desired.current = undefined;
+      return;
+    }
+    desired.current = { key, values: entered.current };
+    timer.current = setTimeout(() => {
+      void pump();
+    }, latest.current.debounceMs ?? PRICE_DEBOUNCE_MS);
+    return () => {
+      if (timer.current !== undefined) clearTimeout(timer.current);
+    };
+  }, [key, complete, pump]);
+
   const command = useConfirmedCommand<OrderCommand, SaveOutcome>({
-    send: (sent, key) => latest.current.save(sent, key),
+    send: (sent, commandKey) => latest.current.save(sent, commandKey),
     onDone: (outcome) => {
       if (outcome.kind === 'saved') {
         latest.current.onSaved(outcome.order);
         return;
       }
       if (outcome.kind === 'zone-choice') {
-        // The address matches more than one zone now: back to the form, where the officer chooses one and says why, as the check offers it.
+        // The address matches more than one zone now: the officer chooses one and says why, as the price offers it.
         setCandidates(outcome.candidates);
-        setStage({ kind: 'editing' });
+        setAnswer(undefined);
         return;
       }
-      // The terms are not the ones the officer read: they are shown beside the earlier ones, and a second confirmation is asked for.
-      const earlier = reviewed.current;
-      reviewed.current = outcome.current;
-      setStage({ kind: 'reviewing', terms: outcome.current, earlier });
+      // The price is not the one the officer read: it replaces it on the screen, the earlier one is shown beside it, and the save is offered again as a separate button that ignores a press for a moment.
+      const earlier = shown.current?.terms;
+      armedUntil.current = Date.now() + SAVE_GUARD_MS;
+      setAnswer({
+        key: desired.current?.key ?? key,
+        terms: outcome.current,
+        ...(earlier === undefined ? {} : { earlier }),
+      });
     },
     // The save takes an Idempotency-Key: a lost answer is sent again under the same key, and an order is not made twice.
     retryable: true,
     operation: config.operation,
     onReload: async () => {
-      // The vendor or the prices changed under the officer: read the vendor again, and check the price again on what was entered.
+      // The vendor or the prices changed under the officer: nothing on the screen is the price of things as they are now, so the price comes off the screen at once (a press in the meantime would save on the version
+      // and the figure that just proved wrong), the vendor is read again, and the price is asked for again of what was entered.
+      setAnswer(undefined);
       await latest.current.reload();
-      const values = lastValues.current;
-      if (values !== undefined && alive.current) await check(values, reviewed.current);
+      if (!alive.current) return;
+      await pump();
     },
   });
 
-  // A refusal about a field is told on the field, where the officer can change it: back to the form (the review hides it), with the error kept (the refusal stays until a field changes) and the page puts the field
-  // in focus. A refusal about no field stays an alert over the review.
-  const refused = command.phase === 'refused' ? command.problem : undefined;
-  const [told, setTold] = useState<Problem | undefined>(undefined);
-  if (refused !== told) {
-    // Noticed while drawing, once for each refusal that arrives (React's way to answer a change of what a hook is given, without a second pass through an effect).
-    setTold(refused);
-    if (
-      refused !== undefined &&
-      stage.kind === 'reviewing' &&
-      Object.keys(refusedFields(refused)).length > 0
-    ) {
-      setStage({ kind: 'editing' });
-    }
-  }
+  const forThese = complete && answer?.key === key;
+  const price: PriceState = !complete
+    ? { kind: 'waiting' }
+    : !forThese
+      ? { kind: 'checking' }
+      : answer.terms === undefined
+        ? { kind: 'refused' }
+        : { kind: 'ready', terms: answer.terms, earlier: answer.earlier };
+  useEffect(() => {
+    shown.current = forThese ? answer : undefined;
+  });
+  const pressable = price.kind === 'ready' && !command.locked;
+  const checkProblem = forThese ? answer.problem : undefined;
 
-  const confirm = useCallback(
-    (values: OrderFormValues): void => {
-      if (stage.kind !== 'reviewing') return;
-      lastValues.current = values;
-      void command.submit({
-        values,
-        token: stage.terms.terms_token,
-        version: latest.current.version(),
-      });
-    },
-    [command, stage],
-  );
+  const save = useCallback((): void => {
+    // A press in the moment after the price changed is meant for the button that was there: it saves nothing. (A second press while a save is on its way is the command's own: it does nothing.)
+    if (Date.now() < armedUntil.current) return;
+    const onScreen = shown.current;
+    if (onScreen?.terms === undefined || desired.current?.key !== onScreen.key) return;
+    void command.submit({
+      values: entered.current,
+      token: onScreen.terms.terms_token,
+      version: latest.current.version(),
+    });
+  }, [command]);
 
   return {
-    stage,
+    price,
     command,
+    pressable,
     checkProblem,
     candidates,
-    check: (values) => check(values),
-    confirm,
-    back: () => {
-      command.dismiss();
-      setStage({ kind: 'editing' });
-    },
+    save,
     changed: () => {
-      setCheckProblem(undefined);
       command.dismiss();
     },
     clearCandidates: () => {

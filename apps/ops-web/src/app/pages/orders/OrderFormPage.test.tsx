@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID, preCountFixture } from '../../../test-support/hub-intake-fixture';
@@ -31,10 +31,15 @@ import {
 } from '../../../test-support/receiving-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
+import { PRICE_DEBOUNCE_MS, SAVE_GUARD_MS } from './use-order-flow';
 
 /**
- * `/intakes/{id}/orders/new` (`previewOrder` then `itemizeOrder`; S1.40; AC-SLICE-001-47 to 59, 90, 104). **An order is made for one parcel with its photo beside the form, and the officer checks the price
- * before anything is saved**: the server works out what confirming gives, the officer reads it, and the save is made on the digest of exactly those terms. Each break named below is one these tests catch.
+ * `/intakes/{id}/orders/new` (`previewOrder` then `itemizeOrder`; S1.40; AC-SLICE-001-47 to 59, 90, 104). **An order is made for one parcel with its photo beside the form, and the price is beside the form by
+ * itself** (D-S7-2): once what is entered is complete the server works out what saving gives, the officer reads it, and the one save is made on the digest of exactly those terms. Each break named below is one
+ * these tests catch.
+ *
+ * The price comes a moment after the last key by design (`PRICE_DEBOUNCE_MS`), so a test that waits for it waits for that moment and a little more: `PRICE_WAIT` is the debounce and two seconds, the one wait of
+ * these tests that is longer than a `findBy`'s own.
  */
 const ACCRA = { id: INTAKE_HUB_ID, display_name: 'Accra Hub' };
 const KEYS = ['hub.read', 'hub.intake.itemize', 'hub.intake.close', 'pricing.read'];
@@ -53,8 +58,16 @@ const SAVED = (id: string) => ({
   intake_parcel_id: PARCELS[0]?.id,
 });
 
+const PRICE_WAIT = { timeout: PRICE_DEBOUNCE_MS + 2000 };
+/** The one save once its price is on the screen: *Save the order at GH₵35.00*. */
+const pricedSave = (): Promise<HTMLElement> =>
+  screen.findByRole('button', { name: /^Save the order at / }, PRICE_WAIT);
+const pause = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 let api: FakeApi;
 afterEach(() => {
+  vi.useRealTimers();
   expect(api.unhandled).toEqual([]);
   api.restore();
 });
@@ -128,14 +141,15 @@ describe('making an order, and checking the price first', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
     ).toBeVisible();
-    // The parcel's photo is beside the form, and nothing of an identifier is drawn.
-    expect(screen.getByRole('heading', { level: 2, name: 'The parcel' })).toBeVisible();
-
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
 
-    // The review is the server's: the price, its parts, where it goes, the date, who pays and what that means.
-    expect(await screen.findByRole('heading', { level: 2, name: 'Check the order' })).toBeVisible();
+    // The price is beside the form by itself, with nothing pressed, and it is the server's: the price, its parts, where it goes, the date, who pays and what that means.
+    expect(await screen.findByRole('heading', { level: 2, name: 'The price' })).toBeVisible();
+    expect(await pricedSave()).toHaveTextContent('Save the order at GH₵35.00');
+    // What was typed is one line above the save, for the officer to read before pressing it.
+    expect(
+      screen.getByText(/Ama Mensah · 024 123 4567 · 12 Madina Estate, near the market · Medium/),
+    ).toBeVisible();
     expect(screen.getAllByText('GH₵35.00').length).toBeGreaterThan(0);
     expect(screen.getByText('Delivery inside our area')).toBeVisible();
     expect(
@@ -168,7 +182,7 @@ describe('making an order, and checking the price first', () => {
       expect(previewBody).not.toHaveProperty(never);
     }
 
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
 
     const request = sent(SAVE)[0];
@@ -196,7 +210,7 @@ describe('making an order, and checking the price first', () => {
     ).getAllByRole('radio')) {
       expect(radio).not.toBeChecked();
     }
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    await user.click(screen.getByRole('button', { name: 'Save the order' }));
     expect(await screen.findByText('Choose the size of the parcel.')).toBeVisible();
     expect(sent(PREVIEW)).toHaveLength(0);
   });
@@ -215,35 +229,44 @@ describe('making an order, and checking the price first', () => {
 });
 
 describe('a price that changes while the officer looks', () => {
-  // Break caught: an order saved on a price the officer did not read; the earlier figure lost; a second confirmation that does not say what it is for; entries lost.
-  it('shows the new terms beside the old, asks for a second confirmation at the new figure, and keeps what was entered', async () => {
+  /** The save answers that the price moved on the first press, and saves on the second. */
+  const movesThenSaves = (): Handler => {
     let saves = 0;
-    const { user } = open({
-      [SAVE]: () => {
-        saves += 1;
-        return saves === 1
-          ? json(409, {
-              code: 'STATE_CONFLICT',
-              message: 'Diagnostic text that must never reach a screen.',
-              request_id: 'r1',
-              details: { rule: 'terms_changed', current_terms: termsOf({}, 4000, NEW_TOKEN) },
-            })
-          : json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' });
-      },
-    });
+    return () => {
+      saves += 1;
+      return saves === 1
+        ? json(409, {
+            code: 'STATE_CONFLICT',
+            message: 'Diagnostic text that must never reach a screen.',
+            request_id: 'r1',
+            details: { rule: 'terms_changed', current_terms: termsOf({}, 4000, NEW_TOKEN) },
+          })
+        : json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' });
+    };
+  };
+
+  // Break caught: an order saved on a price the officer did not read; the earlier figure lost; the new figure drawn where the focus is not, so that the button that says it is pressed unread; entries lost.
+  it('shows the new price beside the old with the focus on it, offers the save again at the new figure, and keeps what was entered', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { user } = open({ [SAVE]: movesThenSaves() });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
 
     const warning = await alertSaying('The terms changed while you were looking');
     expect(warning.textContent).toContain('Price: GH₵35.00 before, GH₵40.00 now.');
-    // The officer is asked to confirm the new figure, not the old one.
-    expect(screen.getByRole('button', { name: 'Confirm at GH₵40.00' })).toBeVisible();
+    // The officer is asked to save at the new figure, not the old one, and the new figure is read first: the price beside the form has the focus.
+    expect(await screen.findByRole('button', { name: 'Save at GH₵40.00' })).toBeVisible();
+    const price = screen.getByRole('region', { name: 'The price' });
+    expect(price).toContainElement(warning);
+    expect(price).toContainElement(document.activeElement as HTMLElement);
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
     expect(sent(SAVE)).toHaveLength(1);
+    // What was entered is kept.
+    expect(screen.getByLabelText(/Recipient’s name/)).toHaveValue('Ama Mensah');
+    expect(screen.getByRole('radio', { name: 'Medium' })).toBeChecked();
 
-    await user.click(screen.getByRole('button', { name: 'Confirm at GH₵40.00' }));
+    vi.setSystemTime(Date.now() + SAVE_GUARD_MS + 1);
+    await user.click(screen.getByRole('button', { name: 'Save at GH₵40.00' }));
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
     expect(sent(SAVE)).toHaveLength(2);
     // The second save is on the new terms.
@@ -251,6 +274,26 @@ describe('a price that changes while the officer looks', () => {
     // Nothing the officer entered was asked for again: one preview, and the save carried the same size.
     expect(sent(PREVIEW)).toHaveLength(1);
     expect(await bodyOf(sent(SAVE)[1])).toMatchObject({ size_class: 'MEDIUM' });
+  });
+
+  // Break caught (D-S7-2): the save at the new figure pressed by the second tap of a double-tap meant for the first button, which would save a price nobody read.
+  it('ignores a press in the moment after the price changed, and saves when it is pressed again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { user } = open({ [SAVE]: movesThenSaves() });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    const again = await screen.findByRole('button', { name: 'Save at GH₵40.00' });
+
+    // The second tap of the same finger, at once: nothing is sent, and the button is still there for a press that is meant.
+    await user.click(again);
+    await pause(100);
+    expect(sent(SAVE)).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Save at GH₵40.00' })).toBeVisible();
+
+    vi.setSystemTime(Date.now() + SAVE_GUARD_MS + 1);
+    await user.click(screen.getByRole('button', { name: 'Save at GH₵40.00' }));
+    expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+    expect(sent(SAVE)).toHaveLength(2);
   });
 
   // Break caught: the entries lost when the hub's prices are being changed, or an alert that does not say nothing was saved and what to do.
@@ -273,21 +316,19 @@ describe('a price that changes while the officer looks', () => {
         }),
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
 
     const alert = await alertSaying('The hub’s prices are being changed');
     expect(alert.textContent).toContain('nothing was saved');
     await user.click(screen.getByRole('button', { name: 'Check the price again' }));
 
-    // The same entries are checked again, and the new figure is the one the officer is asked to confirm.
+    // The same entries are checked again, and the new figure is the one the officer is asked to save at, in the save itself.
     await waitFor(() => {
       expect(sent(PREVIEW)).toHaveLength(2);
     });
     expect(await bodyOf(sent(PREVIEW)[1])).toEqual(await bodyOf(sent(PREVIEW)[0]));
     expect((await screen.findAllByText('GH₵36.00')).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'Confirm at GH₵36.00' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Save the order at GH₵36.00' })).toBeVisible();
   });
 
   // Break caught: a vendor that changed under the officer shown as a failure that loses the form; a retry that is not one press.
@@ -314,14 +355,60 @@ describe('a price that changes while the officer looks', () => {
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     await alertSaying('This vendor changed while you were working');
     await user.click(screen.getByRole('button', { name: 'Check the price again' }));
-    await user.click(await screen.findByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
     // The second save is made on the version read again.
+    expect(sent(SAVE)[1]?.headers.get('If-Match')).toBe('"v2"');
+  });
+
+  // Break caught (the flow's own race): the price that proved wrong still on the screen, and its save pressable, while the vendor is read again, so that a press in that moment saves on the old version and the old figure.
+  it('takes the price off the screen while the vendor is read again, so that nothing is saved on what proved wrong', async () => {
+    let reads = 0;
+    let saves = 0;
+    let release: (() => void) | undefined;
+    const { user } = open({
+      [RECORD]: () => {
+        reads += 1;
+        const body = checkInFixture(PARCELS, { id: VENDOR_ID, state: 'ITEMIZING' });
+        return reads === 1
+          ? json(200, body, { ETag: '"v1"' })
+          : new Promise<Response>((resolve) => {
+              release = () => {
+                resolve(json(200, body, { ETag: '"v2"' }));
+              };
+            });
+      },
+      [SAVE]: () => {
+        saves += 1;
+        return saves === 1
+          ? json(409, {
+              code: 'STATE_CONFLICT',
+              message: 'Diagnostic text that must never reach a screen.',
+              request_id: 'r3',
+              details: { rule: 'stale' },
+            })
+          : json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' });
+      },
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    await alertSaying('This vendor changed while you were working');
+    await user.click(screen.getByRole('button', { name: 'Check the price again' }));
+
+    // The vendor is being read again: the price is off the screen and the save says so and cannot be pressed.
+    expect(await screen.findByRole('button', { name: 'Checking the price…' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /^Save the order at / })).toBeNull();
+    await waitFor(() => {
+      expect(release).toBeDefined();
+    });
+    release?.();
+
+    await user.click(await pricedSave());
+    expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+    expect(sent(SAVE)).toHaveLength(2);
     expect(sent(SAVE)[1]?.headers.get('If-Match')).toBe('"v2"');
   });
 });
@@ -355,9 +442,7 @@ describe('the next order of a vendor', () => {
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
     expect(sent(SAVE)[0]?.headers.get('If-Match')).toBe('"v1"');
 
@@ -366,9 +451,7 @@ describe('the next order of a vendor', () => {
       await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 2' }),
     ).toBeVisible();
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     await waitFor(() => {
       expect(sent(SAVE)).toHaveLength(2);
     });
@@ -418,9 +501,7 @@ describe('the next order of a vendor', () => {
       `/intakes/${VENDOR_ID}/orders/new`,
     );
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
 
     await user.click(screen.getByRole('link', { name: 'Make the next order' }));
@@ -433,7 +514,7 @@ describe('the next order of a vendor', () => {
 
 describe('a refusal and an outcome nobody knows', () => {
   // Break caught: a refusal about one field told as a banner, the field not marked, or the server's own words drawn.
-  it('tells a refusal on the field it is about, in the floor’s words, and shows no review', async () => {
+  it('tells a refusal on the field it is about, in the floor’s words, and shows no price', async () => {
     const { user } = open({
       [PREVIEW]: () =>
         json(422, {
@@ -445,14 +526,17 @@ describe('a refusal and an outcome nobody knows', () => {
     });
     await fillIn(user);
     await user.type(screen.getByLabelText(/Declared value/), '900');
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
     expect(
       await screen.findByText(
         /A value this high needs the sender’s agreement to the liability limit/,
+        {},
+        PRICE_WAIT,
       ),
     ).toBeVisible();
     expect(screen.getByLabelText(/Declared value/)).toBeInvalid();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Check the order' })).toBeNull();
+    // No price is shown, and the save cannot be pressed on one: the fields say what to change.
+    expect(screen.queryByRole('button', { name: /^Save the order at / })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save the order' })).toBeDisabled();
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
   });
 
@@ -467,9 +551,7 @@ describe('a refusal and an outcome nobody knows', () => {
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     await alertSaying('We could not tell whether the order was saved');
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
@@ -494,29 +576,30 @@ describe('an address that matches more than one zone', () => {
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    const group = await screen.findByRole('group', { name: /Which zone is it\?/ });
+    // The zones come by themselves, with the price that could not be given.
+    const group = await screen.findByRole('group', { name: /Which zone is it\?/ }, PRICE_WAIT);
     for (const radio of within(group).getAllByRole('radio')) expect(radio).not.toBeChecked();
     expect(within(group).getByRole('radio', { name: 'Accra Central' })).toBeVisible();
     expect(within(group).getByRole('radio', { name: 'Tema' })).toBeVisible();
 
-    // No zone is sent until one is chosen with its reason.
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    // No zone is sent until one is chosen with its reason: the save says what is missing.
+    await user.click(screen.getByRole('button', { name: 'Save the order' }));
     expect(await screen.findByText('Choose the zone.')).toBeVisible();
     expect(sent(PREVIEW)).toHaveLength(1);
     await user.click(within(group).getByRole('radio', { name: 'Tema' }));
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    await user.click(screen.getByRole('button', { name: 'Save the order' }));
     expect(await screen.findByText('Say why you chose this zone.')).toBeVisible();
     await user.type(screen.getByLabelText(/Why this zone/), 'The market is in Tema');
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'Check the order' })).toBeVisible();
+    // With the zone and the reason the price comes by itself, for exactly what was chosen.
+    expect(await pricedSave()).toBeVisible();
     expect(screen.getByText('Zone chosen by you')).toBeVisible();
-    const second = await bodyOf(sent(PREVIEW)[1]);
+    const second = await bodyOf(sent(PREVIEW).at(-1));
     expect(second.destination_zone_authorization).toEqual({
       zone_id: '5eed0101-0000-4000-8000-000000000001',
       note: 'The market is in Tema',
     });
+    expect(sent(SAVE)).toHaveLength(0);
   });
 
   // Break caught: a zone chosen for one address kept when the address is changed.
@@ -528,8 +611,7 @@ describe('an address that matches more than one zone', () => {
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('group', { name: /Which zone is it\?/ });
+    await screen.findByRole('group', { name: /Which zone is it\?/ }, PRICE_WAIT);
     await user.type(screen.getByLabelText(/Delivery address/), ' Tema');
     expect(screen.queryByRole('group', { name: /Which zone is it\?/ })).toBeNull();
   });
@@ -598,7 +680,7 @@ describeInterfaceStates('the form of an order', {
   'validation error': {
     test: async () => {
       const { user } = open();
-      await user.click(await screen.findByRole('button', { name: 'Check the price' }));
+      await user.click(await screen.findByRole('button', { name: 'Save the order' }));
       expect(await screen.findByText('Enter the recipient’s name.')).toBeVisible();
       expect(screen.getByLabelText(/Recipient’s name/)).toBeInvalid();
     },
@@ -640,9 +722,7 @@ describeInterfaceStates('the form of an order', {
           }),
       });
       await fillIn(user);
-      await user.click(screen.getByRole('button', { name: 'Check the price' }));
-      await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-      await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+      await user.click(await pricedSave());
       await alertSaying('This vendor changed while you were working');
     },
   },
@@ -652,9 +732,7 @@ describeInterfaceStates('the form of an order', {
         [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' }),
       });
       await fillIn(user);
-      await user.click(screen.getByRole('button', { name: 'Check the price' }));
-      await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-      await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+      await user.click(await pricedSave());
       expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
     },
   },
@@ -692,9 +770,7 @@ describe('a refusal of the parcel or of the vendor (Run F, Part 2, items 5 and 1
         }),
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     await alertSaying('This parcel already has an order. Open the orders to see it.');
     expect(screen.queryByText(/This vendor changed while you were working/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Check the price again' })).toBeNull();
@@ -729,9 +805,7 @@ describe('what the officer sees when a save is refused or its outcome is not kno
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     await alertSaying('We could not tell whether the order was saved');
     const look = screen.getByRole('link', { name: 'Look at the orders' });
     expect(look).toHaveAttribute('href', `/intakes/${VENDOR_ID}/orders`);
@@ -746,8 +820,7 @@ describe('what the officer sees when a save is refused or its outcome is not kno
     expect(sent(SAVE)).toHaveLength(1);
   });
 
-  // Break caught: a save refused about a field while the review is on the screen, which left the officer on the review with no message (the field is hidden behind it): it returns to the form, the error is on the
-  // field in the floor's words and the field has the focus.
+  // Break caught: a save refused about a field that left the officer with no message (the old review hid the field behind it): the error is on the field in the floor's words, and the field has the focus.
   it('brings the form back with the error on the field and the field in focus when a save is refused about one', async () => {
     const { user } = open({
       [SAVE]: () =>
@@ -760,15 +833,12 @@ describe('what the officer sees when a save is refused or its outcome is not kno
     });
     await fillIn(user);
     await user.type(screen.getByLabelText(/Declared value/), '900');
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     expect(
       await screen.findByText(
         /A value this high needs the sender’s agreement to the liability limit/,
       ),
     ).toBeVisible();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Check the order' })).toBeNull();
     expect(screen.getByLabelText(/Declared value/)).toBeInvalid();
     await waitFor(() => {
       expect(screen.getByLabelText(/Declared value/)).toHaveFocus();
@@ -785,11 +855,11 @@ describe('what the officer sees when a save is refused or its outcome is not kno
       },
     });
     await fillIn(user);
-    await user.click(screen.getByRole('button', { name: 'Check the price' }));
-    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
-    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await user.click(await pricedSave());
     const group = await screen.findByRole('group', { name: /Which zone is it\?/ });
     expect(within(group).getByRole('radio', { name: 'Tema' })).toBeVisible();
-    expect(screen.queryByRole('heading', { level: 2, name: 'Check the order' })).toBeNull();
+    // The save was refused, so no order was made: the form is still there, and no saved screen.
+    expect(screen.queryByText(/is saved\./)).toBeNull();
+    expect(sent(SAVE)).toHaveLength(1);
   });
 });

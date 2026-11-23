@@ -82,32 +82,35 @@ export function FlowAlerts({
 }
 
 /**
- * The actions of the form of an order, by where the flow is: *Check the price* while editing (waiting for a photo that is on its way, and saying so); *Confirm the order* while reviewing (*Confirm at GH₵40.00* when
- * the terms changed, because the officer is asked to confirm the new figure and not the old); *Try again* and *Look at the orders* when nobody knows whether the order was saved; and *Check the price again* when
- * the vendor or the hub's prices changed under the officer.
+ * The actions of the form of an order, by where the flow is (D-S7-2): **one save**, with the line of what was typed right above it. The save says what it will do and at what price (*Save the order at GH₵40.00*);
+ * while the price of what is entered is being checked it says so and cannot be pressed; when the price changed at the save it is a button of its own that says the new figure (*Save at GH₵45.00*), which the flow
+ * ignores for a moment after it appears. *Try again* and *Look at the orders* are for an outcome nobody knows (looking sends nothing), and *Check the price again* for a vendor or prices that moved under the officer.
  */
 export function FlowActions({
   flow,
   gate,
   cancelTo,
-  confirm,
+  typed,
+  save,
+  saveAt,
   lookLabel,
 }: {
   readonly flow: OrderFlow;
   readonly gate: UploadGate;
   readonly cancelTo: string;
-  /** What confirming says: *Confirm the order*, or *Save the change* for an amendment. */
-  readonly confirm: string;
-  /** What looking at the record says: *Look at the orders*. */
+  /** What was typed, in one line: shown above the save. */
+  readonly typed: string;
+  /** What the save says before there is a price: *Save the order*, or *Save the change*. */
+  readonly save: string;
+  /** What the save says with the price: *Save the order at GH₵40.00*. */
+  readonly saveAt: (price: string) => string;
+  /** Where looking leads: the vendor's orders, or the order. */
   readonly lookLabel: string;
 }): ReactNode {
-  const { stage, command } = flow;
-  const reviewing = stage.kind === 'reviewing';
-  const busy = stage.kind === 'checking' || command.phase === 'sending';
-  const confirmLabel =
-    stage.kind === 'reviewing' && stage.earlier !== undefined
-      ? F.acts.confirmAt(formatMinor(stage.terms.total.amount_minor, 'GHS'))
-      : confirm;
+  const { price, command } = flow;
+  const total =
+    price.kind === 'ready' ? formatMinor(price.terms.total.amount_minor, 'GHS') : undefined;
+  const changed = price.kind === 'ready' && price.earlier !== undefined;
   return (
     <>
       {command.phase === 'unknown' ? (
@@ -138,15 +141,27 @@ export function FlowActions({
         )
       ) : (
         <>
+          {typed === '' ? null : (
+            <p className="orders-typed" id="orders-typed">
+              <span className="orders-typed__label">{WORDS.form.typed}</span> {typed}
+            </p>
+          )}
           <Button
-            key="submit"
+            // A save at a changed price is another button, so that a press meant for the first is not a press of this one.
+            key={changed ? 'save-new' : 'save'}
             type="submit"
             size="lg"
-            loading={busy}
-            disabled={!reviewing && gate.busy}
-            aria-describedby="orders-form-gate"
+            loading={command.phase === 'sending'}
+            disabled={price.kind === 'checking' || price.kind === 'refused' || gate.busy}
+            aria-describedby={typed === '' ? 'orders-form-gate' : 'orders-typed orders-form-gate'}
           >
-            {reviewing ? confirmLabel : stage.kind === 'checking' ? F.acts.checking : F.acts.check}
+            {total === undefined
+              ? price.kind === 'checking'
+                ? F.acts.checking
+                : save
+              : changed
+                ? F.acts.saveAtNew(total)
+                : saveAt(total)}
           </Button>
           <Link to={cancelTo}>{F.acts.cancel}</Link>
         </>

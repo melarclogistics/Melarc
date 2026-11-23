@@ -31,8 +31,10 @@ import { WithRecord } from '../receiving/WithRecord';
 import { OrderFields } from './OrderFields';
 import { FlowActions, FlowAlerts } from './OrderFlowParts';
 import { OrderPhoto } from './OrderPhoto';
-import { OrderReview } from './OrderReview';
-import { refusedFields } from './order-refusal-fields';
+import { OrderLayout } from './OrderLayout';
+import { OrderPrice } from './OrderPrice';
+import { errorsOf, refusedFields } from './order-refusal-fields';
+import { typedLineOf } from './order-typed';
 import {
   closePath,
   newOrderPath,
@@ -178,46 +180,48 @@ function OrderForm({
   const gate = useUploadGate();
   const parcelId = parcel?.id ?? null;
 
-  const flow = useOrderFlow({
-    operation: 'itemizeOrder',
-    previewOperation: 'previewOrder',
-    preview: (current) => previewOrder(client, facts.id, previewBodyOf(current, parcelId)),
-    save: (command, key) =>
-      itemizeOrder(
-        client,
-        facts.id,
-        saveBodyOf(command.values, parcelId, command.token),
-        command.version,
-        key,
-      ),
-    version: () => version.current,
-    reload: async () => {
-      const read = await reload();
-      if (read !== undefined) version.current = vendorFactsOf(read).etag;
+  const flow = useOrderFlow(
+    {
+      operation: 'itemizeOrder',
+      previewOperation: 'previewOrder',
+      preview: (current) => previewOrder(client, facts.id, previewBodyOf(current, parcelId)),
+      save: (command, key) =>
+        itemizeOrder(
+          client,
+          facts.id,
+          saveBodyOf(command.values, parcelId, command.token),
+          command.version,
+          key,
+        ),
+      version: () => version.current,
+      reload: async () => {
+        const read = await reload();
+        if (read !== undefined) version.current = vendorFactsOf(read).etag;
+      },
+      onSaved: setSaved,
+      // The price is asked for once what is entered is complete (a photo that is on its way is not): the same completeness the save would be judged by.
+      complete: (current, zoneNeeded) =>
+        !gate.busy && Object.keys(problemsWith(current, { zoneNeeded })).length === 0,
+      keyOf: (current) => JSON.stringify(previewBodyOf(current, parcelId)),
     },
-    onSaved: setSaved,
-  });
-  const { stage, command } = flow;
-  const reviewing = stage.kind === 'reviewing';
+    values,
+  );
+  const { command } = flow;
   const fromServer = refusedFields(
     command.phase === 'refused' ? command.problem : flow.checkProblem,
   );
   const tiedToAField = Object.keys(fromServer).length > 0;
-  const locked = command.locked || stage.kind === 'checking';
+  const locked = command.locked;
+  const terms = flow.price.kind === 'ready' ? flow.price.terms : undefined;
 
   useEffect(() => {
     if (attempts > 0) focusFirstInvalid(form.current);
   }, [attempts]);
   useEffect(() => {
-    if (flow.checkProblem !== undefined) focusFirstInvalid(form.current);
-  }, [flow.checkProblem]);
-  useEffect(() => {
-    // A save refused about a field has brought the form back: the first field it names is where the officer's eyes go.
-    if (command.phase === 'refused' && stage.kind === 'editing' && tiedToAField) {
-      focusFirstInvalid(form.current);
-    }
-  }, [command.phase, stage.kind, tiedToAField]);
-
+    // A save refused about a field leaves the error on the field and the focus on it: the officer's eyes go where the fix is. The price's own refusals are told on the fields without taking the focus, which is
+    // in the field the officer is typing in.
+    if (command.phase === 'refused' && tiedToAField) focusFirstInvalid(form.current);
+  }, [command.phase, tiedToAField]);
   useEffect(() => {
     if (command.phase === 'unknown')
       form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();
@@ -227,7 +231,7 @@ function OrderForm({
     return <Saved facts={facts} order={saved} onReload={() => reload()} />;
   }
 
-  const errors: OrderFieldErrors = { ...fromServer, ...invalid };
+  const errors: OrderFieldErrors = errorsOf(fromServer, invalid);
 
   function change(patch: Partial<OrderFormValues>, ...fields: OrderField[]): void {
     setValues((current) => ({ ...current, ...patch }));
@@ -244,19 +248,17 @@ function OrderForm({
 
   function send(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (command.locked || stage.kind === 'checking') return;
-    if (stage.kind === 'reviewing') {
-      flow.confirm(values);
+    if (command.locked) return;
+    // The price is of what is entered: the one save sends the token of the price on the screen.
+    if (flow.pressable) {
+      flow.save();
       return;
     }
-    if (gate.busy) return;
+    // Still being priced (or refused): the button says so and the press is nothing. Not complete: the fields that are missing say so, and the first has the focus.
+    if (flow.price.kind !== 'waiting' || gate.busy) return;
     const found = problemsWith(values, { zoneNeeded: flow.candidates !== undefined });
     setInvalid(found);
-    if (Object.keys(found).length > 0) {
-      setAttempts((count) => count + 1);
-      return;
-    }
-    void flow.check(values);
+    if (Object.keys(found).length > 0) setAttempts((count) => count + 1);
   }
 
   const title = parcel === undefined ? F.title : F.titleFor(parcel.ordinal);
@@ -264,46 +266,18 @@ function OrderForm({
   return (
     <TaskForm
       formRef={form}
-      busy={stage.kind === 'checking' || command.phase === 'sending'}
+      busy={command.phase === 'sending'}
       dirty={values !== initial}
       onSubmit={send}
       alerts={<FlowAlerts flow={flow} tiedToAField={tiedToAField} />}
-      summary={{
-        title: parcel === undefined ? F.summary.title : F.sections.parcel,
-        children: (
-          <>
-            {parcel === undefined ? null : (
-              <OrderPhoto
-                parcel={{
-                  door_photo_evidence_id:
-                    parcel.origin === 'DOOR_PHOTO' ? parcel.photo_evidence_id : null,
-                  hub_photo_evidence_id:
-                    parcel.origin === 'HUB_EXTRA' ? parcel.photo_evidence_id : null,
-                }}
-                size="full"
-                alt={`${F.photoOf}: ${WORDS.common.parcel(parcel.ordinal)}`}
-              />
-            )}
-            {remainingNote === undefined ? null : <p>{remainingNote}</p>}
-            {F.summary.lines.map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-          </>
-        ),
-      }}
-      review={{
-        active: reviewing,
-        title: WORDS.review.title,
-        backLabel: F.acts.back,
-        onBack: flow.back,
-        children: reviewing ? <OrderReview terms={stage.terms} earlier={stage.earlier} /> : null,
-      }}
       actions={
         <FlowActions
           flow={flow}
           gate={gate}
           cancelTo={ordersPath(facts.id)}
-          confirm={F.acts.confirm}
+          typed={typedLineOf(values, terms)}
+          save={F.acts.save}
+          saveAt={F.acts.saveAt}
           lookLabel={F.checkRecord}
         />
       }
@@ -317,16 +291,39 @@ function OrderForm({
         ],
       }}
     >
-      <OrderFields
-        values={values}
-        errors={errors}
-        locked={locked}
-        intakeId={facts.id}
-        candidates={flow.candidates}
-        gate={gate}
-        amendment={false}
-        change={change}
-      />
+      <OrderLayout
+        photo={
+          parcel === undefined ? null : (
+            <OrderPhoto
+              parcel={{
+                door_photo_evidence_id:
+                  parcel.origin === 'DOOR_PHOTO' ? parcel.photo_evidence_id : null,
+                hub_photo_evidence_id:
+                  parcel.origin === 'HUB_EXTRA' ? parcel.photo_evidence_id : null,
+              }}
+              size="full"
+              alt={`${F.photoOf}: ${WORDS.common.parcel(parcel.ordinal)}`}
+            />
+          )
+        }
+        price={
+          <>
+            {remainingNote === undefined ? null : <p className="orders-note">{remainingNote}</p>}
+            <OrderPrice flow={flow} />
+          </>
+        }
+      >
+        <OrderFields
+          values={values}
+          errors={errors}
+          locked={locked}
+          intakeId={facts.id}
+          candidates={flow.candidates}
+          gate={gate}
+          amendment={false}
+          change={change}
+        />
+      </OrderLayout>
     </TaskForm>
   );
 }

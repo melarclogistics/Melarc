@@ -140,7 +140,7 @@ export const ORDERS_WORDS = {
     title: 'Make an order',
     titleFor: (ordinal: number): string => `Make an order for parcel ${String(ordinal)}`,
     description:
-      'Fill in what the parcel needs, then check the price. Nothing is saved until you confirm.',
+      'Fill in what the parcel needs. The price shows beside the form by itself, and nothing is saved until you press the save.',
     documentTitle: 'Make an order',
     breadcrumbVendor: (vendor: string | undefined): string => vendor ?? 'The vendor',
     breadcrumbOrders: 'Orders',
@@ -218,23 +218,27 @@ export const ORDERS_WORDS = {
     splitBases: { FIXED_AMOUNT: 'A fixed amount', PERCENTAGE: 'A percentage' },
     photoOf: 'Photo of the parcel',
     noPhoto: 'This parcel has no photo.',
-    summary: {
-      title: 'After you check the price',
-      lines: [
-        'You see the price, the delivery date and who pays before anything is saved.',
-        'The price is worked out for you. You never type it.',
-      ],
-    },
-    acts: {
-      check: 'Check the price',
+    /** The price beside the form: it is worked out by the server as the parcel is filled in, and the officer never types it. */
+    price: {
+      title: 'The price',
+      waiting: 'The price shows here once the parcel is filled in. You never type it.',
       checking: 'Checking the price…',
-      back: 'Go back and change',
-      confirm: 'Confirm the order',
-      confirmAt: (price: string): string => `Confirm at ${price}`,
+      refused:
+        'The price could not be worked out for what you entered. The fields marked say what to change.',
+    },
+    /** The line above the save: what was typed, so that the officer reads what is about to be saved. */
+    typed: 'What you typed',
+    acts: {
+      save: 'Save the order',
+      saveAt: (price: string): string => `Save the order at ${price}`,
+      saveChange: 'Save the change',
+      saveChangeAt: (price: string): string => `Save the change at ${price}`,
+      /** After the price changed at the save: a button of its own, which says the new figure. */
+      saveAtNew: (price: string): string => `Save at ${price}`,
+      checking: 'Checking the price…',
       cancel: 'Back to the orders',
       checkAgain: 'Check the price again',
       retry: 'Try again',
-      saveChange: 'Save the change',
     },
     errors: {
       name: 'Enter the recipient’s name.',
@@ -270,7 +274,7 @@ export const ORDERS_WORDS = {
     photoFailed: 'The photo could not be saved. Try again.',
     amendTitle: (code: string): string => `Change order ${code}`,
     amendDescription:
-      'Change what was written down wrongly. The price is worked out again, and you check it before it is saved.',
+      'Change what was written down wrongly. The price is worked out again beside the form, and nothing is changed until you press the save.',
     amendNotAllowed:
       'This order is confirmed, so it cannot be changed here. To change who pays, ask for a correction.',
     amendClosed: 'The vendor is closed, so this order cannot be changed.',
@@ -329,7 +333,7 @@ export const ORDERS_WORDS = {
     unknownKind: 'Other charge',
     changed: {
       title: 'The terms changed while you were looking',
-      text: 'What this order comes to is not what you checked. Read the new figures, then confirm again.',
+      text: 'What this order comes to is not what you read. Read the new figures, then save again.',
       price: (before: string, after: string): string => `Price: ${before} before, ${after} now.`,
       date: (before: string, after: string): string =>
         `Delivery date: ${before} before, ${after} now.`,
@@ -834,7 +838,7 @@ const orderRefusals = (operation: (typeof ORDER_OPERATIONS)[number]): readonly C
   {
     operation,
     code: 'REASON_REQUIRED',
-    text: 'A high-value parcel needs photos of it. Add them, then check the price again.',
+    text: 'A high-value parcel needs photos of it. Add them to go on.',
   },
   {
     operation,
