@@ -17,7 +17,8 @@ export function OrderPrice({ flow }: { readonly flow: OrderFlow }) {
   const { price } = flow;
   const earlier = price.kind === 'ready' ? price.earlier : undefined;
   useEffect(() => {
-    if (earlier !== undefined) box.current?.focus();
+    // The focus moves to the new figure so that it is read, and **the page does not move with it**: a finger that is still on its way down for a second tap must find the screen where the first tap left it.
+    if (earlier !== undefined) box.current?.focus({ preventScroll: true });
   }, [earlier]);
   return (
     <section className="orders-price" aria-labelledby="orders-price-title">
@@ -26,7 +27,14 @@ export function OrderPrice({ flow }: { readonly flow: OrderFlow }) {
       </h2>
       <div aria-live="polite">
         {price.kind === 'ready' ? (
-          <div ref={box} tabIndex={-1} className="orders-price__body">
+          // Reachable by keyboard: where the column beside the form is taller than the screen it scrolls, and a scrolling region that nothing in it can take focus in is out of a keyboard user's reach (WCAG 2.1.1).
+          <div
+            ref={box}
+            tabIndex={0}
+            role="group"
+            aria-labelledby="orders-price-title"
+            className="orders-price__body"
+          >
             <OrderReview terms={price.terms} earlier={price.earlier} />
           </div>
         ) : (

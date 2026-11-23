@@ -65,9 +65,19 @@ const pricedSave = (): Promise<HTMLElement> =>
 const pause = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+/**
+ * The save at a changed price ignores a press for a moment, measured on the monotonic clock (\`performance.now\`). A test holds that clock still, so that "at once" is at once however slow the machine is, and
+ * moves it on by hand when the moment has passed.
+ */
+let clock = 0;
+function holdTheClock(): void {
+  clock = 1000;
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+}
+
 let api: FakeApi;
 afterEach(() => {
-  vi.useRealTimers();
+  vi.restoreAllMocks();
   expect(api.unhandled).toEqual([]);
   api.restore();
 });
@@ -247,7 +257,7 @@ describe('a price that changes while the officer looks', () => {
 
   // Break caught: an order saved on a price the officer did not read; the earlier figure lost; the new figure drawn where the focus is not, so that the button that says it is pressed unread; entries lost.
   it('shows the new price beside the old with the focus on it, offers the save again at the new figure, and keeps what was entered', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+    holdTheClock();
     const { user } = open({ [SAVE]: movesThenSaves() });
     await fillIn(user);
     await user.click(await pricedSave());
@@ -265,7 +275,7 @@ describe('a price that changes while the officer looks', () => {
     expect(screen.getByLabelText(/Recipient’s name/)).toHaveValue('Ama Mensah');
     expect(screen.getByRole('radio', { name: 'Medium' })).toBeChecked();
 
-    vi.setSystemTime(Date.now() + SAVE_GUARD_MS + 1);
+    clock += SAVE_GUARD_MS + 1;
     await user.click(screen.getByRole('button', { name: 'Save at GH₵40.00' }));
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
     expect(sent(SAVE)).toHaveLength(2);
@@ -278,7 +288,7 @@ describe('a price that changes while the officer looks', () => {
 
   // Break caught (D-S7-2): the save at the new figure pressed by the second tap of a double-tap meant for the first button, which would save a price nobody read.
   it('ignores a press in the moment after the price changed, and saves when it is pressed again', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+    holdTheClock();
     const { user } = open({ [SAVE]: movesThenSaves() });
     await fillIn(user);
     await user.click(await pricedSave());
@@ -290,7 +300,7 @@ describe('a price that changes while the officer looks', () => {
     expect(sent(SAVE)).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Save at GH₵40.00' })).toBeVisible();
 
-    vi.setSystemTime(Date.now() + SAVE_GUARD_MS + 1);
+    clock += SAVE_GUARD_MS + 1;
     await user.click(screen.getByRole('button', { name: 'Save at GH₵40.00' }));
     expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
     expect(sent(SAVE)).toHaveLength(2);

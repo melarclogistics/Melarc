@@ -233,7 +233,8 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
       }
       // The price is not the one the officer read: it replaces it on the screen, the earlier one is shown beside it, and the save is offered again as a separate button that ignores a press for a moment.
       const earlier = shown.current?.terms;
-      armedUntil.current = Date.now() + SAVE_GUARD_MS;
+      // The window is measured on the monotonic clock: an interval is not the wall clock's to judge (a clock that is set back would hold the save shut, and one set forward would open it at once).
+      armedUntil.current = performance.now() + SAVE_GUARD_MS;
       setAnswer({
         key: desired.current?.key ?? key,
         terms: outcome.current,
@@ -269,7 +270,7 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
 
   const save = useCallback((): void => {
     // A press in the moment after the price changed is meant for the button that was there: it saves nothing. (A second press while a save is on its way is the command's own: it does nothing.)
-    if (Date.now() < armedUntil.current) return;
+    if (performance.now() < armedUntil.current) return;
     const onScreen = shown.current;
     if (onScreen?.terms === undefined || desired.current?.key !== onScreen.key) return;
     void command.submit({
