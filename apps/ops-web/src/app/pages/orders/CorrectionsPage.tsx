@@ -13,7 +13,7 @@ import {
 import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
-import { cedisText } from '../../../platform/hub-orders/order-form-model';
+import { formatMinor } from '../../../components/ui/money/money-value';
 import type { CorrectionFilter, CorrectionView } from '../../../platform/hub-orders/orders-shape';
 import { CORRECTION_VIEWS } from '../../../platform/hub-orders/orders-shape';
 import { usePayerCorrections } from '../../../platform/hub-orders/use-orders-queries';
@@ -58,8 +58,8 @@ const askedText = (item: CorrectionView): string =>
   item.proposed_allocation === null
     ? WORDS.form.payers[item.proposed.payer_intent].label
     : K.amounts(
-        `GH₵${cedisText(item.proposed_allocation.sender_minor)}`,
-        `GH₵${cedisText(item.proposed_allocation.recipient_minor)}`,
+        formatMinor(item.proposed_allocation.sender_minor, 'GHS'),
+        formatMinor(item.proposed_allocation.recipient_minor, 'GHS'),
       );
 
 /**

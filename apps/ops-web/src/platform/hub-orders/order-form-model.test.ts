@@ -8,6 +8,7 @@ import {
   destinationOf,
   EMPTY_ORDER_FORM,
   isEmptyPatch,
+  looksLikeGhanaNumber,
   payerProposalOf,
   previewBodyOf,
   problemsWith,
@@ -16,6 +17,42 @@ import {
   type OrderFormValues,
 } from './order-form-model';
 import { parseOrder } from './orders-shape';
+
+describe('a phone number that looks like a Ghana number (guidance while it is typed, never a refusal)', () => {
+  // Break caught: a pattern that refuses what an officer knows is right (a number written with its country code, or with dashes), or one that is quiet about a number of the wrong length.
+  it.each([
+    '024 123 4567',
+    '0241234567',
+    '024-123-4567',
+    '+233 24 123 4567',
+    '233241234567',
+    '00233241234567',
+    '(024) 123 4567',
+    '030 222 1234',
+  ])('accepts %s', (number) => {
+    expect(looksLikeGhanaNumber(number)).toBe(true);
+  });
+
+  it.each(['12345', '024 123 456', '024 123 45678', '+44 20 7946 0958', '0911234567', 'abc', ''])(
+    'doubts %s',
+    (number) => {
+      expect(looksLikeGhanaNumber(number)).toBe(false);
+    },
+  );
+
+  // Break caught: guidance that became a rule: a number that does not look right must still be sent (the server judges it), so the form's own completeness never reads the pattern.
+  it('does not stop the form being complete', () => {
+    const typed = {
+      ...EMPTY_ORDER_FORM,
+      name: 'Ama',
+      phone: '12345',
+      address: '12 Madina',
+      sizeClass: 'SMALL' as const,
+      destination: 'DOORSTEP' as const,
+    };
+    expect(problemsWith(typed)).toEqual({});
+  });
+});
 
 /**
  * What the form of an order holds and what is sent from it (S1.40). **The form sends no price, no total, no surcharge and no zone of its own**; money is whole pesewas and never a float; a member the officer did not

@@ -118,7 +118,11 @@ export function refusedFields(problem: Problem | undefined): OrderFieldErrors {
       continue;
     }
     const field = fieldOf(violation.pointer);
-    if (field !== undefined) found[field] ??= WORDS[field];
+    // A number the server will not take is not a number left empty: the word for it is another.
+    if (field !== undefined) {
+      found[field] ??=
+        field === 'phone' && violation.rule !== 'required' ? E.phoneFormat : WORDS[field];
+    }
   }
   return found;
 }

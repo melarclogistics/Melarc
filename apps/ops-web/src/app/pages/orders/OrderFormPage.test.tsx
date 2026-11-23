@@ -211,6 +211,19 @@ describe('making an order, and checking the price first', () => {
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
   });
 
+  // Break caught: a number that does not look right refused by the form (the server judges it, and the officer may know better than a pattern), or guidance that stays after the number is right.
+  it('tells an officer, while a number is typed, that it does not look like a Ghana number, and refuses nothing', async () => {
+    const { user } = open();
+    const phone = await screen.findByLabelText(/Recipient’s phone/);
+    await user.type(phone, '12345');
+    expect(await screen.findByText(/This doesn’t look like a Ghana number\./)).toBeVisible();
+    expect(phone).not.toBeInvalid();
+    await user.clear(phone);
+    await user.type(phone, '024 123 4567');
+    expect(screen.queryByText(/This doesn’t look like a Ghana number\./)).toBeNull();
+    expect(screen.getByText('As the recipient gave it, for example 024 123 4567.')).toBeVisible();
+  });
+
   // Break caught: a size chosen for the officer (a default that becomes the answer by inertia), or a form that goes on without one.
   it('chooses no size for the officer and does not go on without one', async () => {
     const { user } = open();

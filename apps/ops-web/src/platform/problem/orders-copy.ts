@@ -21,6 +21,8 @@ export const ORDERS_WORDS = {
     receiving: 'Receiving',
     back: 'Back to the vendor',
     backToOrders: 'Back to the orders',
+    /** The reference a refusal carries, for an officer who rings for help. */
+    reference: (reference: string): string => `Reference: ${reference}`,
     loading: 'Loading…',
     notFoundVendor: 'This vendor could not be found.',
     notFoundOrder: 'This order could not be found.',
@@ -168,6 +170,8 @@ export const ORDERS_WORDS = {
       name: 'Recipient’s name',
       phone: 'Recipient’s phone',
       phoneHelp: 'As the recipient gave it, for example 024 123 4567.',
+      /** Guidance while the number is typed, never a refusal: the officer may know better than a pattern does. */
+      phoneLook: 'This doesn’t look like a Ghana number. Check it, for example 024 123 4567.',
       address: 'Delivery address',
       addressHelp: 'The area or a landmark helps us find the zone.',
       landmark: 'Landmark',
@@ -243,6 +247,7 @@ export const ORDERS_WORDS = {
     errors: {
       name: 'Enter the recipient’s name.',
       phone: 'Enter the recipient’s phone number.',
+      phoneFormat: 'That doesn’t look like a phone number. Check the digits.',
       address: 'Enter the delivery address.',
       size: 'Choose the size of the parcel.',
       destination: 'Choose where the parcel goes.',
@@ -267,6 +272,9 @@ export const ORDERS_WORDS = {
       'We could not tell whether the order was saved. Look at the orders before you try again.',
     checkRecord: 'Look at the orders',
     done: (code: string): string => `Order ${code} is saved.`,
+    /** What a vendor with door photos has left, after an order is saved: the server's count of the whole vendor. */
+    parcelsLeft: (count: number): string =>
+      count === 1 ? '1 parcel needs an order.' : `${String(count)} parcels need an order.`,
     doneAmend: (code: string): string => `Order ${code} was changed.`,
     /** After an order of a vendor counted without photos is saved (D-S7-3, 23 November 2026): the code is what the officer writes on the parcel, and the count says where the vendor stands. */
     blindSaved: {

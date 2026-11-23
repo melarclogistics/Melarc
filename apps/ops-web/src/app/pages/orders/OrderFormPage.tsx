@@ -139,7 +139,7 @@ function Saved({
           {remaining > 0
             ? facts.mode === 'BLIND_COUNT'
               ? WORDS.workspace.blind.remaining(remaining)
-              : `${String(remaining)} ${remaining === 1 ? 'parcel needs' : 'parcels need'} an order.`
+              : F.parcelsLeft(remaining)
             : WORDS.workspace.notes.allDone}
         </p>
       )}

@@ -8,6 +8,7 @@ import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { TaskFormSection } from '../../../components/ui/templates/TaskForm';
 import {
   DESTINATIONS,
+  looksLikeGhanaNumber,
   type OrderField,
   type OrderFieldErrors,
   type OrderFormValues,
@@ -83,7 +84,16 @@ export function OrderFields({
             }}
           />
         </Field>
-        <Field label={F.fields.phone} required help={F.fields.phoneHelp} {...errorOf('phone')}>
+        <Field
+          label={F.fields.phone}
+          required
+          help={
+            values.phone.trim() !== '' && !looksLikeGhanaNumber(values.phone)
+              ? F.fields.phoneLook
+              : F.fields.phoneHelp
+          }
+          {...errorOf('phone')}
+        >
           <Input
             name="phone"
             value={values.phone}

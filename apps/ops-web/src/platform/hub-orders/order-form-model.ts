@@ -109,6 +109,14 @@ const E = ORDERS_WORDS.form.errors;
 const PERCENTAGE = /^(?:100(?:\.0{1,2})?|\d{1,2}(?:\.\d{1,2})?)$/;
 
 /** The words of what is wrong with a field, or nothing. The checks are the cheap ones the server makes first. */
+/**
+ * Whether a phone number, as typed, looks like a Ghana number: the national form (`024 123 4567`, ten digits from a zero) or the international one (`+233 24 123 4567`, `233…`, `00233…`). **Guidance and nothing more**:
+ * the form tells the officer while they type, never refuses for it, and the server judges the number it is given.
+ */
+export function looksLikeGhanaNumber(text: string): boolean {
+  return /^(?:(?:\+|00)?233|0)[2-5]\d{8}$/.test(text.replace(/[\s().-]/g, ''));
+}
+
 export function problemsWith(
   values: OrderFormValues,
   options: { readonly amendment?: boolean; readonly zoneNeeded?: boolean } = {},

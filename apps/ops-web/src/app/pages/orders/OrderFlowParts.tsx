@@ -7,7 +7,6 @@ import {
   UploadGateNotice,
   type UploadGate,
 } from '../../../components/ui/evidence-upload/UploadGate';
-import { Link } from '../../../components/ui/link/Link';
 import { formatMinor } from '../../../components/ui/money/money-value';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import type { OrderFlow } from './use-order-flow';
@@ -65,7 +64,7 @@ export function FlowAlerts({
         <Alert variant="danger" announce>
           <p>{command.problem.message}</p>
           {command.problem.reference === undefined ? null : (
-            <p>Reference: {command.problem.reference}</p>
+            <p>{WORDS.common.reference(command.problem.reference)}</p>
           )}
         </Alert>
       ) : null}
@@ -73,7 +72,7 @@ export function FlowAlerts({
         <Alert variant="danger" announce>
           <p>{flow.checkProblem.message}</p>
           {flow.checkProblem.reference === undefined ? null : (
-            <p>Reference: {flow.checkProblem.reference}</p>
+            <p>{WORDS.common.reference(flow.checkProblem.reference)}</p>
           )}
         </Alert>
       ) : null}
@@ -137,7 +136,9 @@ export function FlowActions({
             {F.acts.checkAgain}
           </Button>
         ) : (
-          <Link to={cancelTo}>{F.acts.cancel}</Link>
+          <ButtonLink to={cancelTo} variant="secondary" size="lg">
+            {F.acts.cancel}
+          </ButtonLink>
         )
       ) : (
         <>
@@ -163,7 +164,9 @@ export function FlowActions({
                 ? F.acts.saveAtNew(total)
                 : saveAt(total)}
           </Button>
-          <Link to={cancelTo}>{F.acts.cancel}</Link>
+          <ButtonLink to={cancelTo} variant="secondary" size="lg">
+            {F.acts.cancel}
+          </ButtonLink>
         </>
       )}
       <UploadGateNotice gate={gate} id="orders-form-gate" />

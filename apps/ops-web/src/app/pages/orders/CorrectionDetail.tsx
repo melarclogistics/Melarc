@@ -9,7 +9,7 @@ import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { useApiClient } from '../../../platform/api/api-client';
-import { cedisText } from '../../../platform/hub-orders/order-form-model';
+import { formatMinor } from '../../../components/ui/money/money-value';
 import {
   decidePayerCorrection,
   type CorrectionWithVersion,
@@ -37,8 +37,8 @@ function Amounts({ allocation }: { readonly allocation: AllocationView }) {
   return (
     <>
       {K.amounts(
-        `GH₵${cedisText(allocation.sender_minor)}`,
-        `GH₵${cedisText(allocation.recipient_minor)}`,
+        formatMinor(allocation.sender_minor, 'GHS'),
+        formatMinor(allocation.recipient_minor, 'GHS'),
       )}
     </>
   );
@@ -49,7 +49,7 @@ function proposalText(proposed: PayerChoiceView): string {
   const base = WORDS.form.payers[proposed.payer_intent].label;
   if (proposed.payer_intent !== 'SPLIT') return base;
   if (proposed.split_basis === 'FIXED_AMOUNT' && proposed.split_sender_amount !== null) {
-    return `${base}: the sender pays GH₵${cedisText(proposed.split_sender_amount.amount_minor)}`;
+    return `${base}: the sender pays ${formatMinor(proposed.split_sender_amount.amount_minor, 'GHS')}`;
   }
   if (proposed.split_basis === 'PERCENTAGE' && proposed.split_sender_percentage !== null) {
     return `${base}: the sender pays ${String(proposed.split_sender_percentage)}%`;

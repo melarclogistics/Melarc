@@ -3,7 +3,8 @@
 import { EMPTY_ORDER_FORM } from '../../../platform/hub-orders/order-form-model';
 import { parseTerms } from '../../../platform/hub-orders/orders-shape';
 import { termsOf, TOKEN } from '../../../test-support/orders-fixture';
-import { errorsOf } from './order-refusal-fields';
+import type { Problem } from '../../../platform/problem/problem-copy';
+import { errorsOf, refusedFields } from './order-refusal-fields';
 import { typedLineOf } from './order-typed';
 
 /**
@@ -37,6 +38,23 @@ describe('the errors the form draws', () => {
   it('is nothing when nothing is wrong', () => {
     expect(errorsOf({}, {})).toEqual({});
     expect(errorsOf({}, { name: undefined })).toEqual({});
+  });
+});
+
+describe('the words of a refused phone number', () => {
+  const refusedAt = (rule: string): Problem => ({
+    kind: 'refused',
+    message: 'The price could not be checked.',
+    code: 'VALIDATION_FAILED',
+    violations: [{ in: 'body', pointer: '/recipient/phone', rule }],
+  });
+
+  // Break caught: a number the server will not take told as a field left empty ("Enter the recipient’s phone number"), which the officer reads as a form that did not take what was typed.
+  it('is told as a number that does not look right, and a number left out as one to enter', () => {
+    expect(refusedFields(refusedAt('format')).phone).toBe(
+      'That doesn’t look like a phone number. Check the digits.',
+    );
+    expect(refusedFields(refusedAt('required')).phone).toBe('Enter the recipient’s phone number.');
   });
 });
 
