@@ -1,0 +1,76 @@
+{
+  "intake_id": "01a124d3-7400-7bc4-9ead-088b44a26ee6",
+  "parcel_id": "01a20575-8ec0-7cc7-bfb7-f128f772179d",
+  "order_id": "01a124d3-7400-78d9-a6ac-84e78569efd0",
+  "order_version": 1,
+  "status": "CURRENT_PREVIEW",
+  "validation": {
+    "evidence": "NONE_CITED"
+  },
+  "cited_evidence": {
+    "high_value": [],
+    "carrier_waybill": null
+  },
+  "will_confirm": "WHEN_ARRIVAL_IS_COMMITTED",
+  "quote_policy": "PROTECTED_UNTIL_AMENDED",
+  "price": {
+    "total": {
+      "amount_minor": 3500,
+      "currency": "GHS"
+    },
+    "components": [
+      {
+        "kind": "SERVICE_AREA_BASE_FEE",
+        "amount": {
+          "amount_minor": 3500,
+          "currency": "GHS"
+        }
+      }
+    ]
+  },
+  "is_high_value": false,
+  "high_value_surcharge": null,
+  "destination_zone_snapshot": {
+    "scope": "SERVICE_AREA",
+    "zone_id": "5eed0101-0000-4000-8000-000000000001",
+    "zone_code": "TEMA",
+    "zone_name": "Tema",
+    "service_area": "ACCRA_TEMA",
+    "alias": "madina"
+  },
+  "destination_zone_resolution": "SERVER_RESOLVED",
+  "delivery": {
+    "default_date": "2026-11-23",
+    "requested_date": null,
+    "committed_date": "2026-11-23",
+    "window_start": "10:00",
+    "window_end": "16:00"
+  },
+  "payer": {
+    "source": "REQUEST",
+    "payer_intent": "RECIPIENT_PAYS",
+    "sender": {
+      "amount_minor": 0,
+      "currency": "GHS"
+    },
+    "recipient": {
+      "amount_minor": 3500,
+      "currency": "GHS"
+    },
+    "commercial_state_after_confirmation": "NO_VENDOR_CHARGE"
+  },
+  "current": {
+    "total": {
+      "amount_minor": 3500,
+      "currency": "GHS"
+    },
+    "is_high_value": false,
+    "derived_delivery_date": "2026-11-23",
+    "destination_zone_resolution": "SERVER_RESOLVED",
+    "cited_evidence": {
+      "high_value": [],
+      "carrier_waybill": null
+    }
+  },
+  "terms_token": "849aad4cbbba97e174822eec8710d36206adf53e7a6398407943a8239063af6f"
+}

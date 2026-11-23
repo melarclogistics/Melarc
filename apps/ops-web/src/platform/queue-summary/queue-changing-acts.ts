@@ -160,6 +160,13 @@ export const QUEUE_CHANGING_ACTS: readonly QueueChangingAct[] = [
   },
   {
     method: 'POST',
+    path: '/orders/{id}/arrival-reversal',
+    operation: 'reverseOrderArrival',
+    queues: ['HUB_MISSING_PARCELS_SEARCHING'],
+    why: 'Taking back a mistaken arrival puts the parcel back on the list of missing parcels and the vendor back in review (S1.39), so the parcels being searched for grow by one.',
+  },
+  {
+    method: 'POST',
     path: '/staff-identities',
     operation: 'createStaffIdentity',
     queues: ['STAFF_AWAITING_APPROVAL'],
@@ -221,6 +228,18 @@ export const QUEUE_NEUTRAL_CALLS: readonly QueueNeutralCall[] = [
       ['POST', '/hub-intakes/{id}/extra-parcels', 'addExtraParcel'],
       ['POST', '/evidence', 'createEvidence'],
       ['POST', '/evidence/{id}/complete', 'completeEvidenceUpload'],
+    ],
+  ),
+  ...neutral(
+    'Orders at a hub (S1.40): the price checked before an order is made or changed, the order made or changed, the close of a vendor whose orders are made, and the request and the decision of a change of who pays. No queue of the hub counts what these change: the queue by run counts runs not yet checked in, and the parcels being searched for are the missing ones of a case in review, which none of these opens (only taking back an arrival does, and it is above).',
+    [
+      ['POST', '/hub-intakes/{id}/orders/preview', 'previewOrder'],
+      ['POST', '/orders/{id}/amendment-preview', 'previewOrderAmendment'],
+      ['POST', '/hub-intakes/{id}/orders', 'itemizeOrder'],
+      ['PATCH', '/orders/{id}', 'amendOrder'],
+      ['POST', '/hub-intakes/{id}/close', 'closeHubIntake'],
+      ['POST', '/orders/{id}/payer-correction', 'requestPayerCorrection'],
+      ['POST', '/payer-corrections/{id}/decision', 'approvePayerCorrection'],
     ],
   ),
   ...neutral('Acts on a rider’s device, which no queue counts.', [

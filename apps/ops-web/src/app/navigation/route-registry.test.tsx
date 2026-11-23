@@ -75,7 +75,7 @@ describe('the real registry', () => {
       groups: [
         ['Today', ['My work', 'Decisions', 'Handshakes']],
         ['Pickups', ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes']],
-        ['Hub', ['Receiving', 'Missing parcels']],
+        ['Hub', ['Receiving', 'Missing parcels', 'Orders to make', 'Who pays', 'Still to order']],
         ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
         ['System', ['Message log']],
       ],
@@ -171,7 +171,7 @@ describe('the real registry', () => {
   it('offers the receiving queue to the holders of its read alone, and gives the acts on an intake no entry', () => {
     expect(menusFor(['hub.read']).groups).toEqual([
       ['Today', ['My work']],
-      ['Hub', ['Receiving', 'Missing parcels']],
+      ['Hub', ['Receiving', 'Missing parcels', 'Orders to make']],
     ]);
     // The count and the adjudication open no queue of their own: a holder of either alone is offered nothing.
     expect(menusFor(['hub.intake.count']).groups).toEqual([['Today', ['My work']]]);
@@ -217,10 +217,19 @@ describe('the real registry', () => {
     ]) {
       expect(route(path)?.menu, path).toBeNull();
     }
-    // No route starts the work that comes after receiving: itemising and closing are later tasks, and a route for them would be a placeholder.
-    expect(SIGNED_IN_ROUTES.some((candidate) => /items|close|itemi/i.test(candidate.path))).toBe(
-      false,
-    );
+    // The work that comes after receiving is built (S1.40): the orders of a vendor and the close are behind the keys of their own operations, and are reached from the vendor, not from the menu
+    // (the entries of the Hub group that come after receiving are three queues that find the work again).
+    expect(route('/intakes/:id/orders')?.access).toEqual({ permission: 'hub.read' });
+    expect(route('/intakes/:id/orders/new')?.access).toEqual({ permission: 'hub.intake.itemize' });
+    expect(route('/intakes/:id/close')?.access).toEqual({ permission: 'hub.intake.close' });
+    for (const path of [
+      '/intakes/:id/orders',
+      '/intakes/:id/orders/new',
+      '/intakes/:id/close',
+      '/intakes/:id/summary',
+    ]) {
+      expect(route(path)?.menu, path).toBeNull();
+    }
   });
 
   // Break caught: Decisions gathering the staff approver's count: it stays on Staff, and a merged inbox is a later page that is not built.
@@ -272,7 +281,7 @@ describe('the real registry', () => {
             'Pickups',
             ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
           ],
-          ['Hub', ['Receiving', 'Missing parcels']],
+          ['Hub', ['Receiving', 'Missing parcels', 'Orders to make', 'Who pays']],
           ['People and access', ['Riders', 'Vendors']],
           ['System', ['Message log']],
         ],
@@ -289,7 +298,7 @@ describe('the real registry', () => {
             'Pickups',
             ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
           ],
-          ['Hub', ['Receiving', 'Missing parcels']],
+          ['Hub', ['Receiving', 'Missing parcels', 'Orders to make', 'Who pays', 'Still to order']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],
@@ -306,7 +315,7 @@ describe('the real registry', () => {
             'Pickups',
             ['Requests', 'Pickup runs', 'Failed pickups', 'Count differences', 'Disputes'],
           ],
-          ['Hub', ['Receiving', 'Missing parcels']],
+          ['Hub', ['Receiving', 'Missing parcels', 'Orders to make', 'Who pays', 'Still to order']],
           ['People and access', ['Staff', 'Riders', 'Vendors', 'Sessions']],
           ['System', ['Message log']],
         ],

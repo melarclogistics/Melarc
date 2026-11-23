@@ -27,6 +27,13 @@ export const HUB_INTAKE_COPY: readonly CopyRule[] = [
     code: 'PERMISSION_DENIED',
     text: SENIOR_DECIDES,
   },
+  // A photo an order cites (a high-value parcel's, a carrier's waybill) is made under the key that makes orders.
+  {
+    operation: 'createEvidence',
+    context: 'itemize',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.intake.itemize'),
+  },
   {
     operation: 'createEvidence',
     code: 'VALIDATION_FAILED',

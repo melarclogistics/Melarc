@@ -1,0 +1,31 @@
+{
+  "status": 409,
+  "body": {
+    "code": "STATE_CONFLICT",
+    "message": "What a close would find is not what was reviewed: the assessment is shown again",
+    "details": {
+      "rule": "assessment_changed",
+      "current_assessment": {
+        "intake_id": "01a124d3-7400-7e71-bd8d-a560d31a60e3",
+        "intake_state": "ITEMIZING",
+        "receiving_mode": "PHOTO_CHECK_IN",
+        "received": 3,
+        "ordered": 3,
+        "unpriced": 0,
+        "payment_required": 0,
+        "missing": 0,
+        "outstanding_count": 0,
+        "excess_count": 0,
+        "assessment_token": "ddc04c9a192f7ad6d8a7fb9716ebf28e272fe9409250fd702dfdce6e774abad2",
+        "outstanding_parcels": [],
+        "closed_at": null,
+        "parity_exception_note": null,
+        "can_close": true,
+        "needs_exception": false,
+        "blockers": [],
+        "payment_still_required": false
+      }
+    },
+    "request_id": "1b9b5a96-7acf-46c1-9c91-fcca8d9c3bfd"
+  }
+}

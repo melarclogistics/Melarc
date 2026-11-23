@@ -1,0 +1,28 @@
+{
+  "intake_id": "01a124d3-7400-7588-b5fb-f55f1fc3bba6",
+  "intake_state": "CLOSED",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "received": 3,
+  "ordered": 2,
+  "unpriced": 0,
+  "payment_required": 0,
+  "missing": 0,
+  "outstanding_count": 1,
+  "excess_count": 0,
+  "assessment_token": "8f807f44513e6b658580b5b55beec83532277cacfe54e29aa26fdbcb248d2f49",
+  "outstanding_parcels": [
+    {
+      "origin": "DOOR_PHOTO",
+      "ordinal": 3,
+      "parcel_id": "01a20575-baa9-77d6-ac83-777f4def0a22",
+      "hub_photo_evidence_id": null,
+      "door_photo_evidence_id": "01a124d3-7400-78af-b7a3-8b4cf56af3d2"
+    }
+  ],
+  "closed_at": "2026-11-22T22:52:13.847Z",
+  "parity_exception_note": "One parcel is on the rider’s bike",
+  "can_close": false,
+  "needs_exception": false,
+  "blockers": ["intake_not_ready"],
+  "payment_still_required": false
+}

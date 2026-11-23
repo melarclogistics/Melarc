@@ -1,0 +1,165 @@
+/*
+ * The order screens (S1.40: a vendor's orders, the form of an order and its review, an order's record, its change, the close, the summary, the payer corrections and the queues that find the work again).
+ * Presentation only: what a page shows and offers is its own and the API's. Every size, space and colour is a token. These are hub-floor screens (design/DESIGN_SYSTEM.md sections 11 and 12): the controls are
+ * the 56px of `--control-height-lg` (the page asks for it, the components draw it), and a line of text is never narrower than the page lets it be.
+ */
+
+/* A quiet sentence under a heading or beside a figure: what a rule is, or what the page does not do. It is not a warning. */
+.orders-note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.orders-quiet {
+  color: var(--color-text-secondary);
+}
+
+/* The figures above the list of a vendor's orders: the counts of the whole vendor, never of a page, and the sentences that go with them. */
+.orders-summary {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.orders-summary p {
+  margin: 0;
+}
+
+/* The parcel of a row: its photo and its name side by side, the photo a small square cropped to its box and never stretched, so that two rows are the same height. */
+.orders-parcel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.orders-photo__tile,
+.orders-photo__none {
+  display: block;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  margin-block: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+  flex: none;
+}
+
+/* The photo of a parcel with none, opened whole: a line and not an empty box. */
+p.orders-photo__none {
+  inline-size: auto;
+  block-size: auto;
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+/* Where a row stands: the badge, and the one fact beside it that the badge does not say. */
+.orders-standing {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The page that says what came of an act (an order saved, a vendor closed) and the way on: focus comes to it, so that a keyboard or a screen reader is told what happened. */
+.orders-saved {
+  display: grid;
+  gap: var(--space-4);
+  max-inline-size: 40rem;
+}
+
+.orders-saved:focus-visible,
+.orders-notice:focus-visible {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-md);
+}
+
+/* The acts of that page: side by side while they fit and one under the other when they do not, with the gap of a thumb between them. */
+.orders-saved__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.orders-notice {
+  margin-block-end: var(--space-4);
+}
+
+/* The review before an order is saved: what the server worked out, in blocks that are read from the top, the price first. */
+.orders-review {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.orders-review__block {
+  display: grid;
+  gap: var(--space-2);
+  padding-block-end: var(--space-4);
+  border-block-end: 1px solid var(--color-border-subtle);
+}
+
+.orders-review__block:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.orders-review__block p {
+  margin: 0;
+}
+
+.orders-review__heading {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  line-height: var(--text-heading-sm-line-height);
+  font-weight: var(--text-heading-sm-weight);
+}
+
+/* The price, the one figure that is read first: larger than the words around it. */
+.orders-review__total {
+  font-size: var(--text-heading-md-size);
+  line-height: var(--text-heading-md-line-height);
+  font-weight: var(--text-heading-md-weight);
+}
+
+.orders-review__changed-title {
+  margin: 0;
+  font-weight: var(--text-heading-sm-weight);
+}
+
+.orders-review__changes {
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-6);
+}
+
+/* The parcels that have no order yet, at the close: a photo and a name each, wrapping, so that a hundred of them are a few lines and not a column. */
+.orders-outstanding {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orders-outstanding__item {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  inline-size: var(--space-16);
+}
+
+/* What was said about a close, and what became of it: one message to a line, with its status, so that a held-back message is as plain as a delivered one. */
+.orders-said {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orders-said__entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

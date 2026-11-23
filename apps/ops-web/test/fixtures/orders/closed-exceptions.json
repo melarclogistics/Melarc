@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "intake_id": "01a124d3-7400-7588-b5fb-f55f1fc3bba6",
+      "intake_code": "ACC-IN-5K4YPA",
+      "pickup_request_id": "7578ac10-6392-4164-8e46-c5f2ee1a8868",
+      "responsible_hub_id": "5eed0100-0000-4000-8000-000000000001",
+      "receiving_mode": "PHOTO_CHECK_IN",
+      "closed_at": "2026-11-22T22:52:13.847Z",
+      "closed_by": "f4c117e9-50c1-4953-b0e9-18f474dc9f88",
+      "exception_note": "One parcel is on the rider’s bike",
+      "received": 3,
+      "ordered": 2,
+      "outstanding_count": 1
+    }
+  ],
+  "next_page_token": null
+}

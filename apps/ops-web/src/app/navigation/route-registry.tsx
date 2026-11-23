@@ -2,6 +2,15 @@ import type { ReactElement } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 
 import { RequirePermission } from '../../platform/session/RequirePermission';
+import { ClosedVendorsPage } from '../pages/orders/ClosedVendorsPage';
+import { ClosePage } from '../pages/orders/ClosePage';
+import { CorrectionPage, CorrectionsPage } from '../pages/orders/CorrectionsPage';
+import { OrderAmendPage } from '../pages/orders/OrderAmendPage';
+import { OrderFormPage } from '../pages/orders/OrderFormPage';
+import { OrderRecordPage } from '../pages/orders/OrderRecordPage';
+import { OrdersToMakePage } from '../pages/orders/OrdersToMakePage';
+import { OrdersWorkspacePage } from '../pages/orders/OrdersWorkspacePage';
+import { SummaryPage } from '../pages/orders/SummaryPage';
 import { BlindCountPage } from '../pages/receiving/BlindCountPage';
 import { ConditionRedirect } from '../pages/receiving/ConditionRedirect';
 import { DecisionPage } from '../pages/receiving/DecisionPage';
@@ -145,7 +154,7 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
   // Receiving at a hub (S1.35c; D-D2): the queue BY RUN, and, from the intakes' side, one vendor's record, the blind count, the condition and the decision. Each is behind the key of the operation that is its
   // point, and never a role: the queue and the records open for the read, the count for the key of the count, the decision for the read (its page tells an officer without the key Ops Staff do not hold that a senior officer decides). The queue is the first entry, in the
   // Hub group; its count is the queue summary's `HUB_RECEIVING_RUNS_WAITING` (the runs that wait, never vendors). `/intakes` was the queue of S1.35 and is a
-  // redirect now, so that a link made before it goes to the queue by run. Itemising and closing are later work and have no route.
+  // redirect now, so that a link made before it goes to the queue by run.
   {
     path: '/receiving',
     element: <ReceivingQueuePage />,
@@ -215,6 +224,92 @@ export const SIGNED_IN_ROUTES: readonly SignedInRoute[] = [
     // decide), and the API checks the key again on the act.
     access: { permission: 'hub.read' },
     menu: null,
+  },
+  // The orders of a vendor and the pages of their acts (S1.40; Stage 7): the vendor's orders, the form of one order (with its review), the close, the summary of a closed vendor, and an order with its change. Each is
+  // behind the key of the operation that is its point, and never a role: the orders and the vendors to work open for the read, the form and the change for the key that makes orders, the close for the key that closes,
+  // the order for the key that reads a price, the summary for the key that reads a request. The queues that find the work again are entries of the Hub group: the vendors with orders to make, the changes of who
+  // pays (the checker's queue) and the vendors closed with parcels still to order (a senior officer's).
+  {
+    path: '/orders-to-make',
+    element: <OrdersToMakePage />,
+    access: { permission: 'hub.read' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Orders to make',
+      icon: 'orders',
+      order: 2,
+      description:
+        'Find the vendors checked in at your hubs whose orders are not finished, and make them.',
+    },
+  },
+  {
+    path: '/intakes/:id/orders',
+    element: <OrdersWorkspacePage />,
+    access: { permission: 'hub.read' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/orders/new',
+    element: <OrderFormPage />,
+    access: { permission: 'hub.intake.itemize' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/close',
+    element: <ClosePage />,
+    access: { permission: 'hub.intake.close' },
+    menu: null,
+  },
+  {
+    path: '/intakes/:id/summary',
+    element: <SummaryPage />,
+    access: { permission: 'pickup.read' },
+    menu: null,
+  },
+  {
+    path: '/orders/:id',
+    element: <OrderRecordPage />,
+    access: { permission: 'pricing.read' },
+    menu: null,
+  },
+  {
+    path: '/orders/:id/amend',
+    element: <OrderAmendPage />,
+    access: { permission: 'hub.intake.itemize' },
+    menu: null,
+  },
+  {
+    path: '/payer-corrections',
+    element: <CorrectionsPage />,
+    access: { permission: 'pricing.correction.create' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Who pays',
+      icon: 'payer-corrections',
+      order: 3,
+      description: 'Decide the requests to change who pays for an order whose price is fixed.',
+    },
+  },
+  {
+    path: '/payer-corrections/:id',
+    element: <CorrectionPage />,
+    access: { permission: 'pricing.correction.create' },
+    menu: null,
+  },
+  {
+    path: '/closed-vendors',
+    element: <ClosedVendorsPage />,
+    access: { permission: 'hub.intake.close_exception' },
+    menu: {
+      place: 'sidebar',
+      group: 'hub',
+      label: 'Still to order',
+      icon: 'closed-vendors',
+      order: 4,
+      description: 'Find the vendors that were closed while parcels received still had no order.',
+    },
   },
   // The message log (S1.12e): what the platform said to people about an act, and what became of each message. Behind the key of its one read,
   // `notification.read`, and never a role. It is reached from the menu and, for one request, from that request's page.

@@ -1,0 +1,78 @@
+{
+  "intake_id": "01a124d3-7400-7715-b5da-bd22578028d0",
+  "intake_state": "RECONCILIATION_REQUIRED",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "progress": {
+    "received": 2,
+    "awaiting_arrival": 0,
+    "needs_order": 0,
+    "prepared": 0,
+    "itemized": 2,
+    "payment_required": 1,
+    "missing": 1,
+    "orders": 2
+  },
+  "items": [
+    {
+      "work_state": "ITEMIZED",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20575-7a2f-7698-931a-e00fe930f426",
+        "ordinal": 1,
+        "origin": "DOOR_PHOTO",
+        "state": "ARRIVED",
+        "door_photo_evidence_id": "01a124d3-7400-7f0a-9b7d-02fbb58f252e",
+        "hub_photo_evidence_id": null
+      },
+      "order": {
+        "id": "01a124d3-7400-7ccc-afeb-d02b8225c62c",
+        "code": "ACC-OR-E5VMPB",
+        "recipient_name": "Ama Mensah",
+        "service_area": "ACCRA_TEMA",
+        "size_class": "SMALL",
+        "commercial_state": "PAYMENT_REQUIRED",
+        "confirmed": true,
+        "payment_required": true
+      }
+    },
+    {
+      "work_state": "ITEMIZED",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20575-7a3b-7d45-9d1d-5f28a9980369",
+        "ordinal": 2,
+        "origin": "DOOR_PHOTO",
+        "state": "ARRIVED",
+        "door_photo_evidence_id": "01a124d3-7400-7293-be59-ccceb897c935",
+        "hub_photo_evidence_id": null
+      },
+      "order": {
+        "id": "01a124d3-7400-767e-bb04-76cb0f476088",
+        "code": "ACC-OR-TS6GJA",
+        "recipient_name": "Ama Mensah",
+        "service_area": "ACCRA_TEMA",
+        "size_class": "MEDIUM",
+        "commercial_state": "NO_VENDOR_CHARGE",
+        "confirmed": true,
+        "payment_required": false
+      }
+    },
+    {
+      "work_state": "MISSING",
+      "reversed_order": {
+        "id": "01a124d3-7400-7c2b-81df-6fb4ba5ece31",
+        "code": "ACC-OR-MPF4VY"
+      },
+      "parcel": {
+        "id": "01a20575-7a46-7fcd-8ec1-7cd85025eeb4",
+        "ordinal": 3,
+        "origin": "DOOR_PHOTO",
+        "state": "MISSING",
+        "door_photo_evidence_id": "01a124d3-7400-7b45-b8af-00f1b58ff340",
+        "hub_photo_evidence_id": null
+      },
+      "order": null
+    }
+  ],
+  "next_page_token": null
+}

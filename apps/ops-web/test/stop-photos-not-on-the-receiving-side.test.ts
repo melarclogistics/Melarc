@@ -85,6 +85,8 @@ const PICTURE_COMPONENT_USERS = [
   'app/pages/receiving/ParcelViewer.tsx',
   // The photo of a missing parcel, in its row of the list of those being searched for and whole in the panel of the row (D-D4).
   'app/pages/receiving/MissingPicture.tsx',
+  // The photo of a parcel beside the order made for it, and in the list of a vendor's orders and of the parcels that still have none (S1.40, D-D6: the order is made for a parcel and the parcel's photo is the order's).
+  'app/pages/orders/OrderPhoto.tsx',
 ];
 const PHOTO_GRID = 'PhotoGrid';
 const GRID_USERS = [

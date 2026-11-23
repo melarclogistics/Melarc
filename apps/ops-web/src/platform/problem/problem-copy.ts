@@ -8,6 +8,7 @@ import { HUB_INTAKE_COPY } from './hub-intake-copy';
 import { RECEIVING_COPY } from './receiving-copy';
 import { MANIFEST_COPY } from './manifest-copy';
 import { NOTIFICATION_COPY } from './notification-copy';
+import { ORDERS_COPY } from './orders-copy';
 import { PICKUP_COPY } from './pickup-copy';
 import { PICKUP_WORK_COPY } from './pickup-work-copy';
 import { RIDER_COPY } from './rider-copy';
@@ -285,6 +286,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   ...PICKUP_WORK_COPY,
   ...HUB_INTAKE_COPY,
   ...RECEIVING_COPY,
+  ...ORDERS_COPY,
   ...NOTIFICATION_COPY,
 ];
 

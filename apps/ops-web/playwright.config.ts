@@ -129,6 +129,9 @@ const WEBKIT_HEADED_RUN = WEBKIT_HEADED && REQUESTED_ENGINES.includes('webkit');
  *   receiving   the receiving screens (S1.35, S1.35c): the queue by run and the run's page (All N here, a tap on each parcel, the lock, the photos, a parcel that is not on the list, damage, the summary and the
  *               rider's bag, the hub floor's 56 px and the action bar above the keyboard), the blind count (proved from outside: the rider's number in no response and nowhere on the page before the count), the
  *               vendor's record, the decision, the correction of a count, the damage of a vendor with no photos and the list of missing parcels, the same two ways, with a stateful stand-in for the API that carries the rider's number only where the contract does and, on demand, everywhere.
+ *   orders      the order screens (S1.40): the vendors with orders to make, the form of an order with the price checked before anything is saved, a price that changes while the officer looks, the close of a
+ *               vendor and its summary, the change of an order that is not confirmed, and the request to change who pays with the checker's decision, the same two ways, with a stateful stand-in for the API that keeps
+ *               what the API keeps; and the screens at 1280, 768 and 320 px with axe.
  *   evidence-store-origin the evidence store on another origin, under the production policy (OB-S1-107): a real HTTPS server on another port with the behaviour of a bucket (the CORS preflight, the signed
  *               headers), the photo sent and drawn with the store's origin named by the policy, and an unapproved origin and a wrong CORS rule refused, against the production build.
  *   messages    the message log (S1.12e), the same two ways, with a stand-in for the API that plants a number, a text and a code in
@@ -322,6 +325,19 @@ export default defineConfig({
       // The same file against the development server (strict mode runs every effect twice, which a page that keeps a lock must survive).
       name: `receiving-dev-${engine}`,
       testMatch: 'receiving.spec.ts',
+      use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
+    },
+    {
+      // The order screens (S1.40) against the production build, with a stateful stand-in for the API that keeps what the API keeps: the vendor's version moves with every order, the price is the stand-in's server's and a
+      // save is on the digest of the terms that were read, a key makes an order once, and a change of who pays is a request a checker decides. The picture beside the form is served from the page's own origin (`img-src 'self'`).
+      name: `orders-${engine}`,
+      testMatch: 'orders.spec.ts',
+      use: { ...ENGINES[engine], baseURL: PREVIEW_ORIGIN },
+    },
+    {
+      // The same file against the development server (strict mode runs every effect twice, which a form that is read, checked and saved must survive).
+      name: `orders-dev-${engine}`,
+      testMatch: 'orders.spec.ts',
       use: { ...ENGINES[engine], baseURL: DEV_ORIGIN },
     },
     {

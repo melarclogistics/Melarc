@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { ORDERS_WORDS } from '../../../platform/problem/orders-copy';
+import { ordersPath } from '../orders/orders-presentation';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { ParcelView, VendorView } from '../../../platform/hub-receiving/receiving-shape';
 import type { LockStatus } from '../../../platform/hub-receiving/use-receiving-locks';
@@ -124,6 +126,29 @@ function Notice({
 const barClass = (inWork: boolean): string =>
   inWork ? 'receiving-actions receiving-actions--sticky' : 'receiving-actions';
 
+/** The way on from a vendor that is cleared for its orders, or closed: to its orders, where the work that is really left is counted (S1.40). Nothing is drawn for a vendor that is not there yet. */
+function OrdersWay({ vendor }: { readonly vendor: VendorView }) {
+  if (vendor.state === 'READY_FOR_ITEMIZATION' || vendor.state === 'ITEMIZING') {
+    return (
+      <div className={barClass(false)}>
+        <ButtonLink to={ordersPath(vendor.intake_id)} size="lg">
+          {ORDERS_WORDS.workspace.acts.makeOrders}
+        </ButtonLink>
+      </div>
+    );
+  }
+  if (vendor.state === 'CLOSED') {
+    return (
+      <div className={barClass(false)}>
+        <ButtonLink to={ordersPath(vendor.intake_id)} variant="secondary" size="lg">
+          {ORDERS_WORDS.workspace.acts.seeOrders}
+        </ButtonLink>
+      </div>
+    );
+  }
+  return null;
+}
+
 /** A vendor whose parcels are counted and not checked in (Ops excused the door photos): one line says how, and the count is typed before the rider's number is shown. Nothing of that number is here. */
 function BlindVendor({
   vendor,
@@ -155,6 +180,7 @@ function BlindVendor({
         <p>{WORDS.vendor.blind.variance[vendor.count_variance]}</p>
       )}
       <p>{WORDS.vendor.standing[vendor.state]}</p>
+      <OrdersWay vendor={vendor} />
     </>
   );
 }
@@ -236,6 +262,7 @@ function PhotoVendor({
         <>
           <p>{WORDS.vendor.standing[vendor.state]}</p>
           <p>{countsText(vendor)}</p>
+          <OrdersWay vendor={vendor} />
           {mayCount && vendor.state === 'RECONCILIATION_REQUIRED' && vendor.missing_count > 0 ? (
             <p>{WORDS.vendor.findHint}</p>
           ) : null}

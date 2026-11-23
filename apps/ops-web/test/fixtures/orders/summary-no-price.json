@@ -1,0 +1,23 @@
+{
+  "intake_id": "01a124d3-7400-77c4-bdb1-af656ac0909f",
+  "pickup_request_id": "8b91f6af-04ea-4c2d-8a6b-9c8d9f196a9a",
+  "closed_at": "2026-11-22T22:52:06.527Z",
+  "orders": [
+    {
+      "id": "01a124d3-7400-7775-8393-569a1125faf5",
+      "code": "ACC-OR-CMES2Q",
+      "recipient_name": "Ama Mensah",
+      "service_area": "ACCRA_TEMA",
+      "size_class": "SMALL",
+      "commercial_state": "NO_VENDOR_CHARGE"
+    },
+    {
+      "id": "01a124d3-7400-719a-9e8c-a388afab08d5",
+      "code": "ACC-OR-KV57UF",
+      "recipient_name": "Ama Mensah",
+      "service_area": "ACCRA_TEMA",
+      "size_class": "SMALL",
+      "commercial_state": "PAYMENT_REQUIRED"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -40,6 +41,7 @@ import {
   Package,
   PackagePlus,
   Plus,
+  ReceiptText,
   RotateCcw,
   Scale,
   Search,
@@ -49,6 +51,7 @@ import {
   User,
   UserPlus,
   Users,
+  Wallet,
   Warehouse,
   WifiOff,
   X,
@@ -90,6 +93,10 @@ export const ICONS = {
   receiving: Warehouse,
   // The parcels being searched for (S1.35c, D-D4): the list's entry.
   'missing-parcels': Binoculars,
+  // The orders a hub makes for a vendor (S1.40): a slip with its lines, in a family of its own (the manifests' picture is a clipboard).
+  orders: ReceiptText,
+  'payer-corrections': Wallet,
+  'closed-vendors': Archive,
   messages: MessageSquareText,
   staff: Users,
   'add-staff': UserPlus,

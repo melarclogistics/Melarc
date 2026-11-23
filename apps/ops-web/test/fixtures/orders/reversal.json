@@ -1,0 +1,15 @@
+{
+  "id": "01a124d3-7400-7d61-9bd8-65c4bed7aace",
+  "order_id": "01a124d3-7400-7c2b-81df-6fb4ba5ece31",
+  "intake_id": "01a124d3-7400-7715-b5da-bd22578028d0",
+  "parcel_id": "01a20575-7a46-7fcd-8ec1-7cd85025eeb4",
+  "previous_commercial_state": "NO_VENDOR_CHARGE",
+  "commercial_state": "REVERSED",
+  "parcel_state": "MISSING",
+  "previous_intake_state": "ITEMIZING",
+  "intake_state": "RECONCILIATION_REQUIRED",
+  "received_before": 3,
+  "received_after": 2,
+  "note": "The parcel was not on the table",
+  "reversed_at": "2026-11-22T22:51:59.535Z"
+}
