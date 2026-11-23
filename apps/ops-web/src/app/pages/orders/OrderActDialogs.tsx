@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { Alert } from '../../../components/ui/alert/Alert';
 import { Field } from '../../../components/ui/field/Field';
 import { Input } from '../../../components/ui/input/Input';
 import { RadioGroup } from '../../../components/ui/radio/RadioGroup';
@@ -9,14 +10,19 @@ import {
   EMPTY_ORDER_FORM,
   payerProposalOf,
   problemsWith,
+  valuesOf,
+  type OrderField,
   type OrderFormValues,
   type PayerChoice,
 } from '../../../platform/hub-orders/order-form-model';
 import {
+  correctOrderRecipient,
   reverseOrderArrival,
   requestPayerCorrection,
   type CorrectionWithVersion,
   type PayerChoiceBody,
+  type RecipientCorrectionBody,
+  type SavedOrderView,
 } from '../../../platform/hub-orders/orders-commands';
 import {
   PAYER_INTENTS,
@@ -284,6 +290,184 @@ export function PayerCorrectionDialog({
           onChange={(event) => {
             setReason(event.target.value);
             setErrors((current) => ({ ...current, reason: undefined }));
+          }}
+        />
+      </Field>
+    </ActDialog>
+  );
+}
+
+interface RecipientCommand {
+  readonly body: RecipientCorrectionBody;
+}
+
+type RecipientValues = Pick<OrderFormValues, 'name' | 'phone' | 'address' | 'landmark'>;
+type RecipientErrors = Partial<
+  Record<Extract<OrderField, 'name' | 'phone' | 'address'> | 'reason' | 'nothing', string>
+>;
+
+const recipientOf = (values: OrderFormValues): RecipientValues => ({
+  name: values.name,
+  phone: values.phone,
+  address: values.address,
+  landmark: values.landmark,
+});
+
+/**
+ * The recipient of a confirmed order is corrected (`correctOrderRecipient`, `hub.intake.itemize`; the Product Owner's decision D-S7-1 of 23 November 2026): a name or a phone written down wrongly, or an address that
+ * is only mistyped, with a reason in words. The price, the zone and the delivery date never move, and the old details are kept in the order's history. **Only what was changed is sent**, on the version of the order
+ * the page read and under a key; an address that would move the zone or the price is refused by the server and the dialog says so in words (that change is a request a checker decides, which is not built yet).
+ */
+export function CorrectRecipientDialog({
+  order,
+  version,
+  onCancel,
+  onDone,
+  onReload,
+  onStale,
+}: {
+  readonly order: OrderView;
+  /** The order's `ETag`, exactly as the read gave it. */
+  readonly version: string;
+  readonly onCancel: () => void;
+  readonly onDone: (done: SavedOrderView) => void;
+  readonly onReload: () => unknown;
+  /** A refusal said the order is not as it was read: the page says so, once, and offers to read it again. */
+  readonly onStale?: () => void;
+}) {
+  const client = useApiClient();
+  const [initial] = useState<RecipientValues>(() => recipientOf(valuesOf(order)));
+  const [values, setValues] = useState<RecipientValues>(initial);
+  const [reason, setReason] = useState('');
+  const [errors, setErrors] = useState<RecipientErrors>({});
+  const R = WORDS.recipient;
+  const E = WORDS.form.errors;
+  const F = WORDS.form.fields;
+  const change = (
+    patch: Partial<RecipientValues>,
+    field: keyof RecipientErrors | undefined,
+  ): void => {
+    setValues((current) => ({ ...current, ...patch }));
+    setErrors((current) => ({
+      ...current,
+      nothing: undefined,
+      ...(field === undefined ? {} : { [field]: undefined }),
+    }));
+  };
+  return (
+    <ActDialog<RecipientCommand, SavedOrderView>
+      open
+      title={R.title}
+      consequence={<p>{R.description(order.code)}</p>}
+      confirmLabel={R.confirm}
+      confirmVariant="primary"
+      cancelLabel={R.cancel}
+      size="lg"
+      operation="correctOrderRecipient"
+      retryable
+      build={() => {
+        const name = values.name.trim();
+        const phone = values.phone.trim();
+        const address = values.address.trim();
+        const landmark = values.landmark.trim();
+        const said = reason.trim();
+        const found: RecipientErrors = {};
+        if (name === '') found.name = E.name;
+        if (phone === '') found.phone = E.phone;
+        if (address === '') found.address = E.address;
+        if (said === '') found.reason = R.reasonRequired;
+        const recipient: RecipientCorrectionBody['recipient'] = {
+          ...(name === initial.name.trim() ? {} : { name }),
+          ...(phone === initial.phone.trim() ? {} : { phone }),
+          ...(address === initial.address.trim() && landmark === initial.landmark.trim()
+            ? {}
+            : { location: { address, ...(landmark === '' ? {} : { landmark }) } }),
+        };
+        if (Object.keys(found).length === 0 && Object.keys(recipient).length === 0) {
+          found.nothing = R.nothingChanged;
+        }
+        setErrors(found);
+        return Object.keys(found).length > 0 ? undefined : { body: { note: said, recipient } };
+      }}
+      send={(command, key) => correctOrderRecipient(client, order.id, command.body, version, key)}
+      onDone={onDone}
+      onCancel={onCancel}
+      onReload={onReload}
+      onRefused={(problem) => {
+        if (problem.kind === 'conflict' && problem.rule === 'stale') onStale?.();
+        if (problem.code === 'REASON_REQUIRED') setErrors({ reason: R.reasonRequired });
+      }}
+    >
+      {errors.nothing === undefined ? null : (
+        <Alert variant="danger" announce>
+          <p>{errors.nothing}</p>
+        </Alert>
+      )}
+      <Field label={F.name} required {...(errors.name === undefined ? {} : { error: errors.name })}>
+        <Input
+          name="name"
+          autoComplete="off"
+          value={values.name}
+          onChange={(event) => {
+            change({ name: event.target.value }, 'name');
+          }}
+        />
+      </Field>
+      <Field
+        label={F.phone}
+        required
+        {...(errors.phone === undefined ? {} : { error: errors.phone })}
+      >
+        <Input
+          name="phone"
+          type="tel"
+          inputMode="tel"
+          autoComplete="off"
+          value={values.phone}
+          onChange={(event) => {
+            change({ phone: event.target.value }, 'phone');
+          }}
+        />
+      </Field>
+      <Field
+        label={F.address}
+        help={R.addressHelp}
+        required
+        {...(errors.address === undefined ? {} : { error: errors.address })}
+      >
+        <Input
+          name="address"
+          autoComplete="off"
+          value={values.address}
+          onChange={(event) => {
+            change({ address: event.target.value }, 'address');
+          }}
+        />
+      </Field>
+      <Field label={F.landmark}>
+        <Input
+          name="landmark"
+          autoComplete="off"
+          value={values.landmark}
+          onChange={(event) => {
+            change({ landmark: event.target.value }, undefined);
+          }}
+        />
+      </Field>
+      <Field
+        label={R.reasonLabel}
+        help={R.reasonHelp}
+        required
+        {...(errors.reason === undefined ? {} : { error: errors.reason })}
+      >
+        <Textarea
+          name="reason"
+          rows={3}
+          maxLength={1000}
+          value={reason}
+          onChange={(event) => {
+            setReason(event.target.value);
+            setErrors((current) => ({ ...current, reason: undefined, nothing: undefined }));
           }}
         />
       </Field>

@@ -463,6 +463,7 @@ export const ORDERS_WORDS = {
       amend: 'Change this order',
       reverse: 'Take back the arrival',
       correct: 'Change who pays',
+      correctRecipient: 'Correct the recipient',
       openCorrection: 'Open the correction',
       openVendor: 'Open the orders',
     },
@@ -506,6 +507,22 @@ export const ORDERS_WORDS = {
     unknown:
       'We could not tell whether the request was sent. Look at the order before you try again.',
     lookAtOrder: 'Look at the order',
+  },
+
+  // The recipient of a confirmed order, corrected after the price is fixed (D-S7-1, 23 November 2026).
+  recipient: {
+    title: 'Correct the recipient',
+    description: (code: string): string =>
+      `Order ${code} is confirmed and its price is fixed. Correct the name, the phone or the address if it was written down wrongly. The price, the zone and the delivery date do not change, and the old details are kept in the order’s history with your reason.`,
+    addressHelp:
+      'An address can be corrected while it stays in the same zone. One in another zone changes the price, and that cannot be done here yet.',
+    reasonLabel: 'Why are you correcting this?',
+    reasonHelp: 'For example: the phone number had a digit wrong. It is kept with the correction.',
+    confirm: 'Save the correction',
+    cancel: 'Cancel',
+    reasonRequired: 'Write why you are correcting this.',
+    nothingChanged: 'Nothing was changed. Correct a detail, or cancel.',
+    done: (code: string): string => `The recipient of order ${code} was corrected.`,
   },
 
   // What closing finds, and the close.
@@ -1120,6 +1137,78 @@ export const ORDERS_COPY: readonly CopyRule[] = [
     operation: 'reverseOrderArrival',
     code: 'HUB_SCOPE_VIOLATION',
     text: 'This order is at a hub your account does not work in.',
+  },
+
+  // The recipient of a confirmed order, corrected (D-S7-1).
+  { operation: 'correctOrderRecipient', text: 'The correction was not saved.' },
+  {
+    operation: 'correctOrderRecipient',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.intake.itemize'),
+  },
+  { operation: 'correctOrderRecipient', code: 'NOT_FOUND', text: ORDER_NOT_FOUND },
+  {
+    operation: 'correctOrderRecipient',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: 'This order is at a hub your account does not work in.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    code: 'REASON_REQUIRED',
+    text: 'Write why you are correcting this.',
+  },
+  { operation: 'correctOrderRecipient', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'no_change',
+    code: 'VALIDATION_FAILED',
+    text: 'Nothing was changed. Correct a detail, or cancel.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    code: 'STATE_CONFLICT',
+    text: 'This order is not as it was when you opened it, so nothing was changed. Reload to see it as it is now.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'stale',
+    code: 'STATE_CONFLICT',
+    text: 'This order changed after you opened it, so nothing was changed. Reload to see it as it is now.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'address_changes_zone',
+    code: 'STATE_CONFLICT',
+    text: 'That address is in another zone, so it would change the price. It cannot be corrected here yet, and nothing was changed.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'order_not_confirmed',
+    code: 'STATE_CONFLICT',
+    text: 'This order is not confirmed yet. Change it from its page instead.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'order_reversed',
+    code: 'STATE_CONFLICT',
+    text: 'The arrival of this order was taken back, so its recipient cannot be corrected.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'order_progressed',
+    code: 'STATE_CONFLICT',
+    text: 'This order has been paid for or reserved, so its recipient can no longer be corrected here.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    context: 'order_dispatched',
+    code: 'STATE_CONFLICT',
+    text: 'This order has gone out for delivery, so its recipient can no longer be corrected here.',
+  },
+  {
+    operation: 'correctOrderRecipient',
+    code: 'IDEMPOTENCY_KEY_CONFLICT',
+    text: 'This request clashed with an earlier attempt. Look at the order before you try again.',
   },
 
   // Who pays, after the price is fixed.

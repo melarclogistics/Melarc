@@ -34,6 +34,7 @@ export type OrderSaveBody = Schemas['OrderItemize'];
 export type AmendPreviewBody = Schemas['OrderAmendPreview'];
 export type AmendSaveBody = Schemas['OrderAmend'];
 export type PayerChoiceBody = Schemas['PayerAllocationInput'];
+export type RecipientCorrectionBody = Schemas['OrderRecipientCorrection'];
 
 /** What a save of an order answers: the order as the API says it stands now (its identity and where it stands: the page reads the record again). */
 export interface SavedOrderView {
@@ -197,6 +198,34 @@ export async function amendOrder(
     body: patch,
   });
   return saveOutcome(result);
+}
+
+// ---- The recipient of a confirmed order ---------------------------------------------------------------------------------------------------------
+
+/**
+ * `correctOrderRecipient` (`hub.intake.itemize`, D-S7-1): corrects the name, the phone or the address of a confirmed order, with a reason in words, on the version of the order that was read (`If-Match`) and
+ * under an `Idempotency-Key`. Only the members that change are sent. The price, the zone and the promise never move: an address that would move the zone or the price is refused (`STATE_CONFLICT`, rule
+ * `address_changes_zone`) and nothing changes. The answer is the order as it stands now; the page reads the record again.
+ */
+export async function correctOrderRecipient(
+  client: ApiClient,
+  orderId: string,
+  body: RecipientCorrectionBody,
+  version: string,
+  idempotencyKey: string,
+): Promise<SavedOrderView> {
+  const answer = answerOf(
+    await client.POST('/orders/{id}/recipient-correction', {
+      params: {
+        path: { id: orderId },
+        header: { 'Idempotency-Key': idempotencyKey, 'If-Match': version },
+      },
+      body,
+    }),
+  );
+  const order = parseSavedOrder(answer.data);
+  if (order?.id.toLowerCase() !== orderId.toLowerCase()) throw unexpectedResponse(answer.status);
+  return order;
 }
 
 // ---- A mistaken arrival ------------------------------------------------------------------------------------------------------------------------

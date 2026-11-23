@@ -26,7 +26,11 @@ import { formatInstant } from '../../../platform/time/format-time';
 import { serviceDateText } from '../pickup/pickup-presentation';
 import { UUID } from '../staff/WithProfile';
 import { Cedis } from './Cedis';
-import { PayerCorrectionDialog, ReverseArrivalDialog } from './OrderActDialogs';
+import {
+  CorrectRecipientDialog,
+  PayerCorrectionDialog,
+  ReverseArrivalDialog,
+} from './OrderActDialogs';
 import {
   amendPath,
   commercialText,
@@ -234,7 +238,7 @@ function RecordBody({
   const me = useSignedInSession();
   const navigate = useNavigate();
   const location = useLocation();
-  const [dialog, setDialog] = useState<'reverse' | 'correct' | undefined>(undefined);
+  const [dialog, setDialog] = useState<'reverse' | 'correct' | 'recipient' | undefined>(undefined);
   // The page says the order changed only when a refusal said it (an act answered `stale`): every other time the officer is looking at what was just read.
   const [stale, setStale] = useState(false);
   // The change page hands the order over with the word that it was changed: said once, here, where the officer lands.
@@ -262,6 +266,8 @@ function RecordBody({
   const mayReverse =
     me.holds('hub.osd.adjudicate') && frozen && !reversed && order.intake_parcel_id !== null;
   const mayCorrect = me.holds('pricing.correction.create') && frozen && !reversed;
+  // A name or a phone written down wrongly is corrected after the price is fixed, with a reason (D-S7-1): by the officers who make and change orders, and decided by the server (an order paid for or sent out is refused).
+  const mayCorrectRecipient = me.holds('hub.intake.itemize') && frozen && !reversed;
   // A taken-back order says so in its header: its payment line would say it a second time.
   const commercial = reversed ? undefined : commercialText(order.commercial_state);
   const sideFacts = [
@@ -289,8 +295,19 @@ function RecordBody({
     </Button>
   ) : undefined;
   const secondary: ReactNode =
-    mayReverse || (mayAmend && mayCorrect) ? (
+    mayReverse || mayCorrectRecipient || (mayAmend && mayCorrect) ? (
       <>
+        {mayCorrectRecipient ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setDialog('recipient');
+            }}
+          >
+            {R.acts.correctRecipient}
+          </Button>
+        ) : null}
         {mayReverse ? (
           <Button
             type="button"
@@ -383,6 +400,28 @@ function RecordBody({
           onDone={(done) => {
             setDialog(undefined);
             setNotice(<p>{R.reverseDone(done.received_after)}</p>);
+            void query.refetch();
+          }}
+          onReload={() => {
+            setDialog(undefined);
+            setStale(false);
+            return query.refetch();
+          }}
+          onStale={() => {
+            setStale(true);
+          }}
+        />
+      ) : null}
+      {dialog === 'recipient' ? (
+        <CorrectRecipientDialog
+          order={order}
+          version={etag}
+          onCancel={() => {
+            setDialog(undefined);
+          }}
+          onDone={(done) => {
+            setDialog(undefined);
+            setNotice(<p>{WORDS.recipient.done(done.code)}</p>);
             void query.refetch();
           }}
           onReload={() => {

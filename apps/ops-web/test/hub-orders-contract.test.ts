@@ -210,6 +210,7 @@ describe('each screen is behind the key of the operation that is its point', () 
     ['previewOrderAmendment', 'hub.intake.itemize'],
     ['amendOrder', 'hub.intake.itemize'],
     ['reverseOrderArrival', 'hub.osd.adjudicate'],
+    ['correctOrderRecipient', 'hub.intake.itemize'],
     ['requestPayerCorrection', 'pricing.correction.create'],
     ['approvePayerCorrection', 'pricing.correction.approve'],
     ['getIntakeClosure', 'hub.intake.close'],
@@ -235,6 +236,7 @@ describe('each act sends the headers its operation declares, and no other', () =
     ['itemizeOrder', ['Idempotency-Key', 'If-Match']],
     ['amendOrder', ['Idempotency-Key', 'If-Match']],
     ['reverseOrderArrival', ['Idempotency-Key', 'If-Match']],
+    ['correctOrderRecipient', ['Idempotency-Key', 'If-Match']],
     ['requestPayerCorrection', ['Idempotency-Key', 'If-Match']],
     ['approvePayerCorrection', ['Idempotency-Key', 'If-Match']],
     ['closeHubIntake', ['Idempotency-Key', 'If-Match']],
@@ -248,6 +250,7 @@ describe('each act sends the headers its operation declares, and no other', () =
       'itemizeOrder',
       'amendOrder',
       'reverseOrderArrival',
+      'correctOrderRecipient',
       'approvePayerCorrection',
       'closeHubIntake',
     ]) {

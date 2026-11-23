@@ -37,6 +37,7 @@ const OPERATIONS = [
   'amendOrder',
   'getOrder',
   'reverseOrderArrival',
+  'correctOrderRecipient',
   'requestPayerCorrection',
   'listPayerCorrections',
   'getPayerCorrection',
@@ -197,6 +198,17 @@ describe('the words of the conflicts', () => {
       'blind_count_intake',
       /counted without photos, so there is no parcel to take back/,
     ],
+    // The correction of a recipient after the price is fixed (D-S7-1): each rule the contract names, in the floor's words, and the one that moves the zone says nothing was changed.
+    ['correctOrderRecipient', 'stale', /changed after you opened it, so nothing was changed/],
+    [
+      'correctOrderRecipient',
+      'address_changes_zone',
+      /in another zone, so it would change the price\. It cannot be corrected here yet, and nothing was changed/,
+    ],
+    ['correctOrderRecipient', 'order_not_confirmed', /not confirmed yet\. Change it from its page/],
+    ['correctOrderRecipient', 'order_reversed', /taken back, so its recipient cannot be corrected/],
+    ['correctOrderRecipient', 'order_progressed', /paid for or reserved/],
+    ['correctOrderRecipient', 'order_dispatched', /gone out for delivery/],
   ])('words %s by the rule %s', (operation, rule, words) => {
     expect(problemOf(conflict(rule), { operation }).message).toMatch(words);
   });

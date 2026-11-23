@@ -209,6 +209,162 @@ describe('an order whose price is fixed', () => {
   });
 });
 
+describe('the recipient of a confirmed order, corrected (D-S7-1, Run F)', () => {
+  const CORRECT = `POST /orders/${ORDER_ID}/recipient-correction`;
+  const held = () => orderOf('frozen').recipient as { name: string; phone: string };
+  const refused = (rule: string, code = 'STATE_CONFLICT', status = 409) =>
+    json(status, {
+      code,
+      message: 'Diagnostic text that must never reach a screen.',
+      request_id: 'r-correct',
+      details: { rule },
+    });
+
+  async function openDialog(handlers: Record<string, Handler> = {}) {
+    const opened = open(orderOf('frozen'), OFFICER, handlers);
+    await opened.user.click(await screen.findByRole('button', { name: 'Correct the recipient' }));
+    return { ...opened, asked: within(await dialog()) };
+  }
+
+  // Break caught: the act drawn for an order that is not confirmed (it is changed with its own form), for one whose arrival was taken back, or for a session that holds no key to make orders.
+  it('is offered for a confirmed order to a session that makes orders', async () => {
+    open(orderOf('frozen'));
+    expect(await screen.findByRole('button', { name: 'Correct the recipient' })).toBeVisible();
+  });
+
+  it('is not offered for an order that is not confirmed, one that was taken back, or to a session that may not make orders', async () => {
+    open(orderOf('early'), OFFICER, {}, EARLY_ORDER_ID);
+    await screen.findByText(/Made before the parcel was checked in for good\./);
+    expect(screen.queryByRole('button', { name: 'Correct the recipient' })).toBeNull();
+    api.restore();
+
+    open({ ...orderOf('reversed'), id: ORDER_ID, code: ORDER_CODE });
+    await screen.findByText('Taken back');
+    expect(screen.queryByRole('button', { name: 'Correct the recipient' })).toBeNull();
+    api.restore();
+
+    open(orderOf('frozen'), ['hub.read', 'pricing.read', 'pricing.correction.create']);
+    await screen.findByRole('heading', { level: 1, name: ORDER_CODE });
+    expect(screen.queryByRole('button', { name: 'Correct the recipient' })).toBeNull();
+  });
+
+  // Break caught: a form that starts empty (the officer retypes what was right), a correction with no reason, or one that changes nothing (a wasted trip, told by the server).
+  it('starts from what the order holds, asks for the reason, and says nothing was changed before it sends anything', async () => {
+    const { user, asked } = await openDialog();
+    expect(asked.getByLabelText(/Recipient’s name/)).toHaveValue(held().name);
+    expect(asked.getByLabelText(/Delivery address/)).not.toHaveValue('');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    expect(await asked.findByText('Write why you are correcting this.')).toBeVisible();
+
+    await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'Checking');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    expect(
+      await asked.findByText('Nothing was changed. Correct a detail, or cancel.'),
+    ).toBeVisible();
+    expect(sent(CORRECT)).toHaveLength(0);
+  });
+
+  // Break caught: the whole recipient sent for a one-field correction (a member the officer did not touch would be overwritten), a correction not on the version read or with no key, or an order that is not read again.
+  it('sends only what was corrected, with the reason, on the version read, and says what it did', async () => {
+    let reads = 0;
+    const { user, asked } = await openDialog({
+      [CORRECT]: () => json(200, orderOf('frozen'), { ETag: '"o2"' }),
+      [READ(ORDER_ID)]: () => {
+        reads += 1;
+        return json(200, orderOf('frozen'), { ETag: reads === 1 ? '"o1"' : '"o2"' });
+      },
+    });
+    const phone = asked.getByLabelText(/Recipient’s phone/);
+    await user.clear(phone);
+    await user.type(phone, '024 765 4321');
+    await user.type(
+      asked.getByLabelText(/Why are you correcting this\?/),
+      'The phone had a digit wrong',
+    );
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+
+    expect(
+      await screen.findByText(`The recipient of order ${ORDER_CODE} was corrected.`),
+    ).toBeVisible();
+    const request = sent(CORRECT)[0];
+    expect(request?.headers.get('If-Match')).toBe('"o1"');
+    expect(request?.headers.get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await bodyOf(request)).toEqual({
+      note: 'The phone had a digit wrong',
+      recipient: { phone: '024 765 4321' },
+    });
+    // The order is read again, as it now stands.
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+  });
+
+  // Break caught: the place sent as anything but its text and its landmark together (the contract takes nothing else, and a landmark left out is a landmark removed).
+  it('sends the place as its text and its landmark together when either was corrected', async () => {
+    const { user, asked } = await openDialog({
+      [CORRECT]: () => json(200, orderOf('frozen'), { ETag: '"o2"' }),
+    });
+    const address = asked.getByLabelText(/Delivery address/);
+    await user.clear(address);
+    await user.type(address, '14 Madina Estate, opposite the pharmacy');
+    const landmark = asked.getByLabelText(/Landmark/);
+    await user.clear(landmark);
+    await user.type(landmark, 'By the pharmacy');
+    await user.type(
+      asked.getByLabelText(/Why are you correcting this\?/),
+      'The address was mistyped',
+    );
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    await screen.findByText(`The recipient of order ${ORDER_CODE} was corrected.`);
+    expect(await bodyOf(sent(CORRECT)[0])).toEqual({
+      note: 'The address was mistyped',
+      recipient: {
+        location: {
+          address: '14 Madina Estate, opposite the pharmacy',
+          landmark: 'By the pharmacy',
+        },
+      },
+    });
+  });
+
+  // Break caught: the refusal of an address that would move the zone and the price told as "something went wrong" or as a success, or the dialog lost: the officer is told in words that nothing was changed.
+  it('says an address in another zone cannot be corrected here, and nothing changes', async () => {
+    const { user, asked } = await openDialog({
+      [CORRECT]: () => refused('address_changes_zone'),
+    });
+    const address = asked.getByLabelText(/Delivery address/);
+    await user.clear(address);
+    await user.type(address, 'Tema Community 1');
+    await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'Wrong town');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+
+    expect(
+      await asked.findByText(/That address is in another zone, so it would change the price\./),
+    ).toBeVisible();
+    expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
+    expect(screen.queryByText(/was corrected\./)).toBeNull();
+    expect(sent(CORRECT)).toHaveLength(1);
+  });
+
+  // Break caught: an order that changed under the officer (someone else corrected it) overwritten, or told as a failure that says nothing of what to do.
+  it('tells an order that changed, in the dialog and on the page, and sends nothing again', async () => {
+    const { user, asked } = await openDialog({ [CORRECT]: () => refused('stale') });
+    const phone = asked.getByLabelText(/Recipient’s phone/);
+    await user.clear(phone);
+    await user.type(phone, '024 765 4321');
+    await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'A digit');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+
+    expect(
+      await asked.findByText(/This order changed after you opened it, so nothing was changed\./),
+    ).toBeVisible();
+    expect(
+      screen.getByText('This order changed after you opened it. Reload to see it as it is now.'),
+    ).toBeVisible();
+    expect(sent(CORRECT)).toHaveLength(1);
+  });
+});
+
 describe('an order that waits for its parcel', () => {
   // Break caught: a quote drawn as a fixed price, or an order that waits drawn as one that cannot be changed.
   it('shows the price as calculated, not fixed, and offers the change', async () => {
