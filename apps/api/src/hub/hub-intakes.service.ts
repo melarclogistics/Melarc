@@ -28,6 +28,8 @@ export interface HubIntakesOptions {
 /** What `listHubIntakes` takes from the query, as it was sent: the service judges it. */
 export interface HubIntakeFilter {
   readonly state?: string;
+  /** `needs_senior` (D-S7-7): the vendors whose orders wait for a senior officer. The only view there is; any other text is `VALIDATION_FAILED`. */
+  readonly view?: string;
   readonly pageSize?: number;
   readonly pageToken?: string;
 }
@@ -35,8 +37,27 @@ export interface HubIntakeFilter {
 /** An intake as a read answers it: a photo intake is `HubIntakeCheckIn` (the door photos are the receiving officer's reference, D-D1), a blind-count intake `HubIntakePreCount` and then `HubIntakePostCount`. */
 export type HubIntakeShape = HubIntakeView | HubIntakeCheckInView;
 
+/**
+ * What a vendor's row of Orders to make says besides the vendor (D-S7-6 and D-S7-7), for the vendors in the states where orders are made: how many orders stand, how many received parcels still need one (null while a
+ * blind count is not committed: nothing is known to have been received), and why a senior officer is needed, if one is. Only `listHubIntakes` carries it.
+ */
+export interface QueueFacts {
+  readonly orders_made?: number;
+  readonly parcels_needing_order?: number | null;
+  readonly senior_needed?: 'CLOSE_EXCEPTION' | 'ARRIVAL_TAKEN_BACK';
+}
+
+/** The states a vendor is in while orders are made for it, or sent back by an arrival that was taken back: the rows that carry the counts. */
+const ORDER_QUEUE_STATES: readonly string[] = [
+  'READY_FOR_ITEMIZATION',
+  'ITEMIZING',
+  'RECONCILIATION_REQUIRED',
+];
+
+const uuidArray = (ids: readonly string[]) => sql`${`{${ids.join(',')}}`}::uuid[]`;
+
 export interface HubIntakePage {
-  readonly items: readonly HubIntakeShape[];
+  readonly items: readonly (HubIntakeShape & QueueFacts)[];
   readonly next_page_token: string | null;
 }
 
@@ -129,7 +150,9 @@ export class HubIntakes {
     ) {
       throw invalid('state', 'enum');
     }
+    if (filter.view !== undefined && filter.view !== 'needs_senior') throw invalid('view', 'enum');
     const state = filter.state ?? null;
+    const view = filter.view ?? null;
     const afterMoment = after?.createdAt ?? null;
     const afterId = after?.id ?? null;
     return this.#options.runner.read(
@@ -141,6 +164,7 @@ export class HubIntakes {
           select ${RECEIVING_INTAKE_COLUMNS}, handed_over_at::text as position_text
             from pickup_intake
            where (${state}::text is null or state = ${state}::text)
+             and (${view}::text is null or (state in ('ITEMIZING', 'RECONCILIATION_REQUIRED') and melarc.intake_senior_needed(id) is not null))
              and (${afterMoment}::timestamptz is null or (handed_over_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
            order by handed_over_at, id
            limit ${size + 1}`);
@@ -164,8 +188,29 @@ export class HubIntakes {
         }
         const loaded = await loadIntakes(tx, page, authorized.session.principalId.toLowerCase());
         const last = page.at(-1);
+        // The counts of the vendors whose orders are made, from the database's own count of the whole intake, in one statement for the page (and the reason a senior is needed, for the ones that need one).
+        const queued = page.filter((row) => ORDER_QUEUE_STATES.includes(row.state));
+        const facts = new Map<string, QueueFacts>();
+        if (queued.length > 0) {
+          const counted = await tx.execute(sql`
+            select u.id, g.orders, g.needs_order, melarc.intake_senior_needed(u.id) as senior_needed
+              from unnest(${uuidArray(queued.map((row) => row.id))}) as u(id)
+             cross join lateral melarc.intake_progress(u.id) as g`);
+          for (const row of counted.rows as unknown as {
+            id: string;
+            orders: number | string;
+            needs_order: number | string | null;
+            senior_needed: 'CLOSE_EXCEPTION' | 'ARRIVAL_TAKEN_BACK' | null;
+          }[]) {
+            facts.set(row.id, {
+              orders_made: Number(row.orders),
+              parcels_needing_order: row.needs_order === null ? null : Number(row.needs_order),
+              ...(row.senior_needed === null ? {} : { senior_needed: row.senior_needed }),
+            });
+          }
+        }
         return {
-          items: page.map((row) => shapeOf(loaded, row)),
+          items: page.map((row) => ({ ...shapeOf(loaded, row), ...facts.get(row.id) })),
           next_page_token:
             read.length > size && last !== undefined
               ? encodePageToken({ createdAt: last.position_text, id: last.id })

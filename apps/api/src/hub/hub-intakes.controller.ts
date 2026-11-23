@@ -51,10 +51,12 @@ function filterOf(query: Record<string, unknown>): HubIntakeFilter {
     return value;
   };
   const state = take('state');
+  const view = take('view');
   const size = take('page_size');
   const pageToken = take('page_token');
   return {
     ...(state === undefined ? {} : { state }),
+    ...(view === undefined ? {} : { view }),
     ...(size === undefined ? {} : { pageSize: /^\d+$/.test(size) ? Number(size) : Number.NaN }),
     ...(pageToken === undefined ? {} : { pageToken }),
   };
@@ -82,6 +84,11 @@ export class HubIntakesController {
     name: 'state',
     required: false,
     schema: { type: 'string', enum: [...INTAKE_STATES] },
+  })
+  @ApiQuery({
+    name: 'view',
+    required: false,
+    schema: { type: 'string', enum: ['needs_senior'] },
   })
   @ApiQuery({
     name: 'page_size',

@@ -6420,3 +6420,157 @@ describe('the zones of the hub an intake belongs to (Run F, Part 1, D-S7-5; OB-S
     expect((await browser.get(ZONES(intake.id))).status).toBe(403);
   });
 });
+
+describe('the rows of Orders to make say how many orders are made, and which vendors wait for a senior officer (Run F, Part 1, D-S7-6 and D-S7-7)', () => {
+  interface Row {
+    id: string;
+    state: string;
+    orders_made?: number;
+    parcels_needing_order?: number | null;
+    senior_needed?: string;
+  }
+  const rows = async (actor: Actor, query: string): Promise<Row[]> => {
+    const found: Row[] = [];
+    let token: string | null = null;
+    do {
+      const response = await actor.client.get(
+        `${INTAKES}?${query}&page_size=100${token === null ? '' : `&page_token=${token}`}`,
+      );
+      expect(response.status, response.text).toBe(200);
+      const page = response.json() as { items: Row[]; next_page_token: string | null };
+      found.push(...page.items);
+      token = page.next_page_token;
+    } while (token !== null);
+    return found;
+  };
+  const rowOf = async (actor: Actor, query: string, id: string): Promise<Row | undefined> =>
+    (await rows(actor, query)).find((row) => row.id === id);
+  const progressOf = async (id: string) =>
+    (
+      (await officer.client.get(`${ORDERS(id)}?page_size=1`)).json() as {
+        progress: { orders: number; needs_order: number | null };
+      }
+    ).progress;
+
+  // Break caught: a row of Orders to make that cannot say how many orders are made and how many are left (an officer opens every vendor to find out), counts that are not the database's own count of the whole intake
+  // (the worklist's), figures on a vendor that is not being worked, or a blind count that is not committed shown as "0 left" (null is not zero).
+  it('carries the orders made and the parcels that still need one, the worklist’s own counts, for the vendors whose orders are made', async () => {
+    const intake = await cleared(3);
+    const [a, b, c] = intake.parcels as [Parcel, Parcel, Parcel];
+    const ready = await rowOf(officer, 'state=READY_FOR_ITEMIZATION', intake.id);
+    expect(ready).toMatchObject({ orders_made: 0, parcels_needing_order: 3 });
+    expect(ready).not.toHaveProperty('senior_needed');
+
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    const working = await rowOf(officer, 'state=ITEMIZING', intake.id);
+    expect(working).toMatchObject({ orders_made: 1, parcels_needing_order: 2 });
+    const stated = await progressOf(intake.id);
+    expect([working?.orders_made, working?.parcels_needing_order]).toEqual([
+      stated.orders,
+      stated.needs_order,
+    ]);
+    orderOf(await itemize(officer, intake.id, body(b.id)));
+    orderOf(await itemize(officer, intake.id, body(c.id)));
+    const done = await rowOf(officer, 'state=ITEMIZING', intake.id);
+    expect(done).toMatchObject({ orders_made: 3, parcels_needing_order: 0 });
+    expect(done).not.toHaveProperty('senior_needed');
+
+    // A vendor counted blind says the same, and one whose count is not committed says nothing (it is not being worked, and null is not zero).
+    const counted = await blind(3);
+    orderOf(await itemize(officer, counted.id, body(null)));
+    expect(await rowOf(officer, 'state=ITEMIZING', counted.id)).toMatchObject({
+      orders_made: 1,
+      parcels_needing_order: 2,
+    });
+    const uncounted = await handOver(routes, vendor, days, { collected: [2], declared: [2] });
+    const waiting = await rowOf(officer, 'state=AWAITING_COUNT', uncounted.intakes[0]?.id ?? '');
+    expect(waiting).toBeDefined();
+    expect(waiting).not.toHaveProperty('orders_made');
+    expect(waiting).not.toHaveProperty('parcels_needing_order');
+  });
+
+  // Break caught: a view that lists every vendor, that leaves out a vendor an officer cannot finish, that keeps listing a vendor whose arrival a senior has decided, that names the wrong reason, that shows another
+  // hub's vendors, or that answers a view that is not one as an empty list.
+  it('lists in needs_senior the vendors whose close needs a senior’s exception and the ones an arrival taken back sent to review, and no one else', async () => {
+    // A vendor whose orders are under way and that still has a parcel without one: the close needs an exception or the orders that remain.
+    const gap = await cleared(2);
+    orderOf(await itemize(officer, gap.id, body(present(gap.parcels, 0).id)));
+    // A vendor with every order made, and one waiting for its first order: neither needs a senior.
+    const whole = await cleared(1);
+    orderOf(await itemize(officer, whole.id, body(present(whole.parcels, 0).id)));
+    const fresh = await cleared(1);
+    // A vendor sent back to review by an arrival a senior took back.
+    const back = await cleared(2);
+    const wrong = orderOf(await itemize(officer, back.id, body(present(back.parcels, 0).id)));
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const reversed = await boss.client.post(
+      `${API}/orders/${wrong.id}/arrival-reversal`,
+      { note: 'The wrong parcel was ticked' },
+      {
+        origin: OPS,
+        headers: {
+          'If-Match': (await boss.client.get(`${API}/orders/${wrong.id}`)).header('etag') ?? '',
+          'Idempotency-Key': randomUUID(),
+        },
+      },
+    );
+    expect(reversed.status, reversed.text).toBe(200);
+
+    const seen = await rows(officer, 'view=needs_senior');
+    const reasons = new Map(seen.map((row) => [row.id, row.senior_needed]));
+    expect(reasons.get(gap.id)).toBe('CLOSE_EXCEPTION');
+    expect(reasons.get(back.id)).toBe('ARRIVAL_TAKEN_BACK');
+    expect(reasons.has(whole.id)).toBe(false);
+    expect(reasons.has(fresh.id)).toBe(false);
+    for (const row of seen) expect(['ITEMIZING', 'RECONCILIATION_REQUIRED']).toContain(row.state);
+
+    // The vendors of another hub are not in the list of this one, and the senior's decision takes the vendor out of it.
+    expect((await rows(otherHub, 'view=needs_senior')).map((row) => row.id)).not.toContain(gap.id);
+    const decided = await boss.client.post(
+      `${ONE(back.id)}/discrepancy`,
+      { outcome: 'ACCEPTED', note: 'The parcel was found on the table' },
+      { origin: OPS, headers: { 'If-Match': (await read(boss, back.id)).etag } },
+    );
+    expect(decided.status, decided.text).toBe(200);
+    expect((await rows(officer, 'view=needs_senior')).map((row) => row.id)).not.toContain(back.id);
+    // The last order of the vendor with the gap ends its wait for a senior.
+    orderOf(await itemize(officer, gap.id, body(present(gap.parcels, 1).id)));
+    expect((await rows(officer, 'view=needs_senior')).map((row) => row.id)).not.toContain(gap.id);
+
+    // The function itself answers staff under the key that reads intakes and nobody else (a staff session under another key, and a vendor, are refused by the database).
+    const askedUnder = async (
+      context: Parameters<typeof routes.built.service.transactionWithContext>[0],
+    ): Promise<unknown> =>
+      routes.built.service.transactionWithContext(context, async (tx) => {
+        const found = await tx.execute(
+          sql`select melarc.intake_senior_needed(${gap.id}::uuid) as reason`,
+        );
+        return (found.rows[0] as { reason: string | null }).reason;
+      });
+    await expect(
+      askedUnder({
+        ...staffContext([HUB_A]),
+        authorizationKey: 'pickup.read',
+        correlationId: randomUUID(),
+      }),
+    ).rejects.toThrow();
+    await expect(
+      askedUnder({
+        ...vendorContext(vendor.row.organizationId),
+        authorizationKey: 'hub.read',
+        correlationId: randomUUID(),
+      }),
+    ).rejects.toThrow();
+
+    // A view that is not one is refused, and so is a reader without the key.
+    const refused = await officer.client.get(`${INTAKES}?view=everything`);
+    expect(refusal(refused).slice(0, 2)).toEqual([400, 'VALIDATION_FAILED']);
+    const noKey = await routes.actor(
+      await newBundle(routes.admin, [grant('pickup.read', 'own')]),
+      HUB_A,
+    );
+    expect(refusal(await noKey.client.get(`${INTAKES}?view=needs_senior`))[1]).toBe(
+      'PERMISSION_DENIED',
+    );
+  }, 180_000);
+});

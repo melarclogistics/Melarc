@@ -11,6 +11,16 @@ export const INTAKE_STATES = [
 ] as const;
 
 /** The contract's `HubIntakeBase`. */
+/**
+ * What a vendor's row of Orders to make says besides the vendor (D-S7-6 and D-S7-7; contract 5.119.0): the three optional members that `listHubIntakes` alone fills, for a vendor in a state where orders are made.
+ * `orders_made` is the orders that stand, `parcels_needing_order` the received parcels with none (null while a blind count is not committed), `senior_needed` why a senior officer is needed, when one is.
+ */
+export const INTAKE_QUEUE_FACTS_PROPERTIES = {
+  orders_made: { type: 'integer', minimum: 0 },
+  parcels_needing_order: { type: ['integer', 'null'], minimum: 0 },
+  senior_needed: { type: 'string', enum: ['CLOSE_EXCEPTION', 'ARRIVAL_TAKEN_BACK'] },
+} as const;
+
 export const HUB_INTAKE_BASE_SCHEMA = described({
   type: 'object',
   required: [
@@ -38,6 +48,7 @@ export const HUB_INTAKE_BASE_SCHEMA = described({
     lock_acquired_at: { type: ['string', 'null'], format: 'date-time' },
     state: { type: 'string', enum: [...INTAKE_STATES] },
     count_phase: { type: 'string', enum: ['PRE_COUNT', 'POST_COUNT'] },
+    ...INTAKE_QUEUE_FACTS_PROPERTIES,
   },
 });
 

@@ -2,6 +2,7 @@ import { described } from '../platform/openapi/described-schema.js';
 import {
   HUB_INTAKE_POST_COUNT_SCHEMA,
   HUB_INTAKE_PRE_COUNT_SCHEMA,
+  INTAKE_QUEUE_FACTS_PROPERTIES,
   INTAKE_STATES,
 } from './hub-intake-schemas.js';
 
@@ -199,6 +200,7 @@ export const HUB_INTAKE_CHECK_IN_SCHEMA = described({
     condition_findings: { type: 'array', items: INTAKE_FINDING_SCHEMA },
     dispute_state: { type: ['string', 'null'] },
     parity_exception_id: NULLABLE_UUID,
+    ...INTAKE_QUEUE_FACTS_PROPERTIES,
   },
 });
 
