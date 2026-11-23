@@ -5961,3 +5961,52 @@ describe('the worklist finds the reversed order of a parcel by an index (Run F, 
     }
   }, 300_000);
 });
+
+describe('what the counts of an intake counted blind say (Run F, Part 1, item 3)', () => {
+  const VIEWS = [
+    'needs_order',
+    'awaiting_arrival',
+    'prepared',
+    'itemized',
+    'payment_required',
+    'missing',
+  ] as const;
+  interface Listed {
+    readonly progress: Record<string, number | null>;
+    readonly items: readonly unknown[];
+  }
+  const listed = async (id: string, view: string): Promise<Listed> => {
+    const response = await officer.client.get(`${ORDERS(id)}?view=${view}&page_size=100`);
+    expect(response.status, response.text).toBe(200);
+    return response.json() as Listed;
+  };
+
+  // Break caught: the contract's statement that every count is the number of rows of its view, which is false for the orders still to be made of a blind intake: the number is the count less the orders made (what a screen
+  // says as "N more orders needed"), and the view of that name opens no rows (no parcel exists to list), while every other count of the intake is the number of rows of its own view. 5.119.0 states exactly that.
+  it('is the orders still to be made, a number with no rows, and every other count is the rows of its view', async () => {
+    const intake = await blind(4);
+    orderOf(await itemize(officer, intake.id, body(null)));
+    orderOf(await itemize(officer, intake.id, body(null)));
+    const whole = await listed(intake.id, 'all');
+    expect(whole.progress).toMatchObject({
+      received: 4,
+      orders: 2,
+      needs_order: 2,
+      awaiting_arrival: 0,
+      missing: 0,
+    });
+    expect(whole.items).toHaveLength(2);
+    // The number of the orders still to be made has no rows to open.
+    expect((await listed(intake.id, 'needs_order')).items).toHaveLength(0);
+    // Every other count is the rows of the view of its name.
+    for (const view of VIEWS.filter((name) => name !== 'needs_order')) {
+      expect((await listed(intake.id, view)).items, view).toHaveLength(
+        Number(whole.progress[view]),
+      );
+    }
+    // The last order leaves nothing to make, and the number says so.
+    orderOf(await itemize(officer, intake.id, body(null)));
+    orderOf(await itemize(officer, intake.id, body(null)));
+    expect((await listed(intake.id, 'all')).progress).toMatchObject({ needs_order: 0, orders: 4 });
+  });
+});
