@@ -2185,6 +2185,17 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `RECEIVING_PARCEL` | `ARRIVED` | success | Checked in |
 | `RECEIVING_PARCEL` | `MISSING` | danger | Missing |
 | `RECEIVING_PARCEL` | `VOID` | neutral | Taken back |
+| `ORDER_WORK` | `NEEDS_ORDER` | waiting | Needs an order |
+| `ORDER_WORK` | `AWAITING_ARRIVAL` | neutral | Not here yet |
+| `ORDER_WORK` | `PREPARED` | info | Order made, not confirmed |
+| `ORDER_WORK` | `ITEMIZED` | success | Confirmed |
+| `ORDER_WORK` | `MISSING` | danger | Missing |
+| `ORDER_PRICE` | `EARLY_QUOTE` | info | Not confirmed |
+| `ORDER_PRICE` | `FROZEN` | success | Confirmed |
+| `ORDER_PRICE` | `REVERSED` | neutral | Taken back |
+| `PAYER_CORRECTION` | `REQUESTED` | waiting | Waiting for a decision |
+| `PAYER_CORRECTION` | `APPROVED` | success | Approved |
+| `PAYER_CORRECTION` | `REJECTED` | neutral | Rejected |
 
 
 The same state name in two domains (`PENDING`, `ACTIVE`, `CANCELLED`) is two different states of two different records. The words are sentence case and plain, with no raw value and no full stop.
