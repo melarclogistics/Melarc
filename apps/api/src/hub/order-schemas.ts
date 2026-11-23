@@ -204,7 +204,17 @@ export const ORDER_RECIPIENT_CORRECTION_BODY = described({
     recipient: {
       type: 'object',
       additionalProperties: false,
-      properties: { name: { type: 'string' }, phone: { type: 'string' }, location: LOCATION },
+      properties: {
+        name: { type: 'string' },
+        phone: { type: 'string' },
+        // Only the text of an address is corrected: a map link or coordinates are a place that no text moves (a correction that carried one would skip the judgement of the zone).
+        location: {
+          type: 'object',
+          required: ['address'],
+          additionalProperties: false,
+          properties: { address: { type: 'string' }, landmark: { type: 'string' } },
+        },
+      },
     },
   },
 });

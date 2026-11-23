@@ -3,7 +3,7 @@
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
  *   Melarc Platform API 5.119.0
- *   SHA-256 0287f2f6879c4d1b8dc69f367a5a1bf41a9967e7ec2aac81de835b5e518914d5 (of the contract, line endings normalized to LF)
+ *   SHA-256 493e3c4200179cf747dbd64748bc36b594c076e744db03ce83785a34148a3ce2 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -11772,13 +11772,10 @@ export interface components {
             recipient: {
                 name?: string;
                 phone?: string;
+                /** @description The text of the address and its landmark, and nothing else: a map link or coordinates are a place that no text moves, and a correction that carried one would skip the judgement of the zone. */
                 location?: {
                     address: string;
                     landmark?: string;
-                    /** Format: uri */
-                    map_link?: string;
-                    latitude?: number;
-                    longitude?: number;
                 };
             };
         };

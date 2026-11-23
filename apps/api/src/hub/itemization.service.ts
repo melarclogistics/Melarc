@@ -139,6 +139,15 @@ export interface AmendBody {
   readonly evidence_ids?: readonly string[];
 }
 
+/** The location an order holds: the text, and the place it may carry. */
+interface StoredLocation {
+  readonly address: string;
+  readonly landmark?: string;
+  readonly map_link?: string;
+  readonly latitude?: number;
+  readonly longitude?: number;
+}
+
 /**
  * The body of `correctOrderRecipient` (Run F, D-S7-1): the recipient's name, phone and address as they are now to be, any of the three, and the reason in words. A member that is not given stays as it was.
  */
@@ -147,7 +156,8 @@ export interface RecipientCorrectionBody {
   readonly recipient: {
     readonly name?: string;
     readonly phone?: string;
-    readonly location?: LocationText;
+    /** The text of the address and its landmark, and nothing else: the place it may carry (a map link, coordinates) is the order's own and does not move with a correction. */
+    readonly location?: { readonly address: string; readonly landmark?: string };
   };
 }
 
@@ -1218,7 +1228,7 @@ export class HubItemization {
           name: string;
           phone: string;
           phone_as_entered?: string;
-          location: LocationText;
+          location: StoredLocation;
         };
         const corrected = {
           ...stored,
@@ -1226,7 +1236,9 @@ export class HubItemization {
           ...(patch.phone === undefined || phone === undefined
             ? {}
             : { phone, phone_as_entered: patch.phone }),
-          ...(patch.location === undefined ? {} : { location: patch.location }),
+          ...(patch.location === undefined
+            ? {}
+            : { location: this.#correctedLocation(stored.location, patch.location) }),
         };
         const record = randomUUIDv7(clock);
         let done: { version: number | string; changed: string[] } | undefined;
@@ -1275,20 +1287,45 @@ export class HubItemization {
     );
   }
 
+  /** The location an order holds with its text corrected: the members that are not text (a map link, coordinates) stay as they are, and a landmark that is not given is taken away. */
+  #correctedLocation(
+    stored: StoredLocation,
+    patch: { readonly address: string; readonly landmark?: string },
+  ): StoredLocation {
+    const { address: _address, landmark: _landmark, ...place } = stored;
+    return {
+      ...place,
+      address: patch.address,
+      ...(patch.landmark === undefined ? {} : { landmark: patch.landmark }),
+    };
+  }
+
   /**
    * An address is corrected on a confirmed order only when the server finds that its zone and its price come out as they are: the order is delivered to the door, the server placed it in the first place, and the new
    * address still resolves to that very zone (the flat fee of a zone's service area does not depend on the address). Anything else moves the zone or the price, which a checker decides and which is not built.
    */
-  #requireSameZone(config: HubConfiguration, row: OrderRow, location: LocationText): void {
+  #requireSameZone(
+    config: HubConfiguration,
+    row: OrderRow,
+    location: { readonly address: string; readonly landmark?: string },
+  ): void {
     const snapshot = row.destination_zone_snapshot as { zone_id?: string };
-    const unchanged =
-      (row.recipient as unknown as { location?: LocationText }).location?.address ===
-        location.address &&
-      ((row.recipient as unknown as { location?: LocationText }).location?.landmark ?? '') ===
-        (location.landmark ?? '');
-    if (unchanged) return;
+    const stored = (row.recipient as unknown as { location: StoredLocation }).location;
+    // Only the text of an address can differ here (the body carries nothing else and the place the order holds is kept), so an address that reads as it did is no change of where the order goes.
+    if (
+      stored.address === location.address &&
+      (stored.landmark ?? '') === (location.landmark ?? '')
+    ) {
+      return;
+    }
+    // An order that holds a place (a map link, coordinates) goes where that place says, and a new text does not move it: that is a change of where it goes, which a checker decides.
+    const holdsAPlace =
+      stored.map_link !== undefined ||
+      stored.latitude !== undefined ||
+      stored.longitude !== undefined;
     const placed = resolveZone(config, location);
     if (
+      holdsAPlace ||
       row.lane !== 'DOORSTEP' ||
       row.destination_zone_resolution !== 'SERVER_RESOLVED' ||
       snapshot.zone_id === undefined ||

@@ -18089,12 +18089,13 @@ components:
             location:
               type: object
               required: [address]
+              additionalProperties: false
+              description: >-
+                The text of the address and its landmark, and nothing else: a map link or coordinates are a place that no
+                text moves, and a correction that carried one would skip the judgement of the zone.
               properties:
                 address: { type: string }
                 landmark: { type: string }
-                map_link: { type: string, format: uri }
-                latitude: { type: number }
-                longitude: { type: number }
       description: >-
         The body of `correctOrderRecipient` (5.119.0): the recipient's name, phone and address as they are now to be, any of the three.
 

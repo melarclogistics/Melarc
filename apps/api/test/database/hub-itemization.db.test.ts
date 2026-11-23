@@ -6767,6 +6767,44 @@ describe('the recipient of a confirmed order is corrected (Run F, Part 1, D-S7-1
     ).toBe(200);
   });
 
+  // Break caught (the security review of this change): an address "corrected" by its map link or its coordinates alone, which moves where the order goes with the text as it was and skips the judgement of the
+  // zone; and a new text on an order that holds a place the text no longer describes. The body carries the text of an address and nothing else, and an order that holds a place is not moved by a new text.
+  it('corrects the text of an address and nothing else: a map link or coordinates are refused, and an order that holds a place is not moved by a new text', async () => {
+    const intake = await cleared(1);
+    const [a] = intake.parcels as [Parcel];
+    const located = {
+      name: 'Ama Mensah',
+      phone: '024 123 4567',
+      location: { address: '12 Madina Estate, near the market', latitude: 5.6, longitude: -0.17 },
+    };
+    const placed = orderOf(await itemize(officer, intake.id, body(a.id, { recipient: located })));
+    for (const location of [
+      { address: located.location.address, latitude: 5.9 },
+      { address: located.location.address, map_link: 'https://maps.example/somewhere-else' },
+    ]) {
+      expect(
+        refusal(
+          await correct(officer, placed.id, { note: 'Moved the pin', recipient: { location } }),
+        ).slice(0, 2),
+      ).toEqual([400, 'VALIDATION_FAILED']);
+    }
+    expect(
+      refusal(
+        await correct(officer, placed.id, {
+          note: 'The street was wrong',
+          recipient: { location: { address: '9 Madina Estate' } },
+        }),
+      ),
+    ).toEqual([409, 'STATE_CONFLICT', 'address_changes_zone']);
+    // The name is corrected, and the place the order holds stays exactly as it was.
+    const named = await correct(officer, placed.id, {
+      note: 'The spelling',
+      recipient: { name: 'Ama Mensah-Boateng' },
+    });
+    expect(named.status, named.text).toBe(200);
+    expect((named.json() as Order).recipient.location).toEqual(located.location);
+  });
+
   // Break caught: a correction of an order that is not confirmed (it is amended with the order), of one whose arrival was taken back, by a session without the key or in another hub or a vendor, and an edit of a
   // confirmed order's recipient by any other writer, with no record beside it.
   it('is for the officers of the hub who hold the key, for a confirmed order only, and is held by the database for every writer', async () => {
