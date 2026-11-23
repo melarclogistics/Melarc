@@ -320,7 +320,8 @@ function Workspace({
 
   const stillToOrder = progress?.needs_order ?? null;
   const everyParcelHasAnOrder = stillToOrder === 0;
-  const canMakeOrders = mayItemize && !facts.closed && (blind ? facts.cleared : true);
+  // An order for a parcel that arrived is taken once the vendor is cleared, never while its check-in is open (the server would refuse it as `check_in_open`), for either kind of vendor.
+  const canMakeOrders = mayItemize && !facts.closed && facts.cleared;
   const primary: ReactNode = facts.closed ? (
     <ButtonLink to={summaryPath(facts.id)}>{WORDS.workspace.acts.summary}</ButtonLink>
   ) : canMakeOrders && stillToOrder !== 0 && (blind ? stillToOrder !== null : true) ? (
@@ -406,6 +407,9 @@ function Workspace({
       ) : null}
       {progress === undefined ? null : <ProgressFacts progress={progress} mode={facts.mode} />}
       {facts.closed ? <p className="orders-note">{WORDS.workspace.notes.closed}</p> : null}
+      {!facts.closed && !facts.cleared && !blind ? (
+        <p className="orders-note">{WORDS.workspace.notes.checkInOpen}</p>
+      ) : null}
       {!facts.closed && !blind && everyParcelHasAnOrder ? (
         <p className="orders-note">{WORDS.workspace.notes.allDone}</p>
       ) : null}

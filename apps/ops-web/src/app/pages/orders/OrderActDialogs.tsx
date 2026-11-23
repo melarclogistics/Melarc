@@ -47,6 +47,7 @@ export function ReverseArrivalDialog({
   onCancel,
   onDone,
   onReload,
+  onStale,
 }: {
   readonly order: OrderView;
   /** The order's `ETag`, exactly as the read gave it. */
@@ -54,6 +55,8 @@ export function ReverseArrivalDialog({
   readonly onCancel: () => void;
   readonly onDone: (done: ReversalView) => void;
   readonly onReload: () => unknown;
+  /** A refusal said the order is not as it was read: the page says so, once, and offers to read it again. */
+  readonly onStale?: () => void;
 }) {
   const client = useApiClient();
   const [reason, setReason] = useState('');
@@ -82,6 +85,7 @@ export function ReverseArrivalDialog({
       onCancel={onCancel}
       onReload={onReload}
       onRefused={(problem) => {
+        if (problem.kind === 'conflict' && problem.rule === 'stale') onStale?.();
         if (problem.code === 'REASON_REQUIRED') setError(WORDS.reverse.reasonRequired);
       }}
     >
@@ -132,12 +136,15 @@ export function PayerCorrectionDialog({
   onCancel,
   onDone,
   onReload,
+  onStale,
 }: {
   readonly order: OrderView;
   readonly version: string;
   readonly onCancel: () => void;
   readonly onDone: (done: CorrectionWithVersion) => void;
   readonly onReload: () => unknown;
+  /** A refusal said the order is not as it was read: the page says so, once, and offers to read it again. */
+  readonly onStale?: () => void;
 }) {
   const client = useApiClient();
   const [payer, setPayer] = useState<PayerValues>(PAYER_VALUES);
@@ -186,6 +193,7 @@ export function PayerCorrectionDialog({
       onCancel={onCancel}
       onReload={onReload}
       onRefused={(problem) => {
+        if (problem.kind === 'conflict' && problem.rule === 'stale') onStale?.();
         if (problem.code === 'REASON_REQUIRED') setErrors({ reason: WORDS.correct.reasonRequired });
       }}
     >

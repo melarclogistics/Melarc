@@ -379,3 +379,33 @@ describe('an order that is not there', () => {
     ).toBeVisible();
   });
 });
+
+describe('the order changed after it was opened (Run F, Part 2, item 4)', () => {
+  // Break caught: every order page telling every officer that the order changed after they opened it, with a Reload, the moment it opens, when nothing has said so (the page passed its conflict to the template
+  // whatever had happened).
+  it('is not said when the order has just been read', async () => {
+    open(orderOf('frozen'));
+    expect(await screen.findByRole('heading', { level: 1, name: ORDER_CODE })).toBeVisible();
+    expect(screen.queryByText(/changed after you opened it/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull();
+  });
+
+  // Break caught: a refusal as stale that the page behind the dialog never says, so that the officer who closes the dialog is left looking at an order that is not as it is now.
+  it('is said once an act of the page is refused as stale', async () => {
+    const { user } = open(orderOf('frozen'), SENIOR, {
+      [`POST /orders/${ORDER_ID}/arrival-reversal`]: () =>
+        refusal(409, 'STATE_CONFLICT', { rule: 'stale' }),
+    });
+    await user.click(await screen.findByRole('button', { name: 'Take back the arrival' }));
+    const asked = within(await dialog());
+    await user.type(
+      asked.getByLabelText(/Why is the arrival being taken back\?/),
+      'Not on the table',
+    );
+    await user.click(asked.getByRole('button', { name: 'Take back the arrival' }));
+    await asked.findByText(/This order changed after you opened it, so nothing was changed\./);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Reload to see it as it is now.');
+    });
+  });
+});

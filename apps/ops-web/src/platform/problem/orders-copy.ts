@@ -111,6 +111,8 @@ export const ORDERS_WORDS = {
       early:
         'An order made for a parcel that is not here yet keeps the price it was calculated at, and is confirmed when the check-in is final.',
       notCleared: 'This vendor is not cleared for orders yet.',
+      checkInOpen:
+        'The vendor is still being checked in. The parcels that are here can be ordered once the check-in is finished.',
     },
     panel: {
       photo: 'Photo of the parcel',
@@ -255,6 +257,8 @@ export const ORDERS_WORDS = {
       noChange: 'Nothing was changed. Change something, or go back.',
     },
     sending: 'Saving the order…',
+    checkInOpen:
+      'The vendor is still being checked in, so the parcels that are here cannot be ordered yet. Finish the check-in first.',
     unknownOutcome:
       'We could not tell whether the order was saved. Look at the orders before you try again.',
     checkRecord: 'Look at the orders',

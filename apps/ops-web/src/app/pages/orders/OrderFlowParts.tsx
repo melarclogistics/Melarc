@@ -14,6 +14,10 @@ import './orders-pages.css';
 
 const F = WORDS.form;
 
+/** Whether a conflict is the vendor or the prices having moved under the officer (the version, the hub's rates): the only conflicts that one press of *Check the price again* answers. Any other is a rule about the parcel. */
+export const movedRule = (rule: string | undefined): boolean =>
+  rule === undefined || rule === 'stale' || rule === 'configuration_changing';
+
 /**
  * What the flow of an order says above the form, in the words of the floor: an outcome nobody knows, a vendor or a price that changed under the officer (nothing was saved, the entries stay), a refusal that is
  * about no field, and the refusal of the review. A refusal about a field is told on the field and not here (`tiedToAField`).
@@ -27,6 +31,7 @@ export function FlowAlerts({
 }): ReactNode {
   const { command } = flow;
   const rule = command.phase === 'conflict' ? command.problem?.rule : undefined;
+  const moved = movedRule(rule);
   return (
     <>
       {command.phase === 'unknown' ? (
@@ -36,16 +41,23 @@ export function FlowAlerts({
       ) : null}
       {command.phase === 'conflict' && command.problem !== undefined ? (
         <Alert variant="danger" announce>
-          <p className="orders-review__changed-title">
-            {rule === 'configuration_changing'
-              ? WORDS.review.changing.title
-              : WORDS.review.stale.title}
-          </p>
-          <p>
-            {rule === 'configuration_changing'
-              ? WORDS.review.changing.text
-              : WORDS.review.stale.text}
-          </p>
+          {moved ? (
+            <>
+              <p className="orders-review__changed-title">
+                {rule === 'configuration_changing'
+                  ? WORDS.review.changing.title
+                  : WORDS.review.stale.title}
+              </p>
+              <p>
+                {rule === 'configuration_changing'
+                  ? WORDS.review.changing.text
+                  : WORDS.review.stale.text}
+              </p>
+            </>
+          ) : (
+            // A refusal of the state of the parcel or of the vendor (the parcel has its order, is missing, the check-in is open, no place is left) is told in its own words, and not as a vendor that changed.
+            <p>{command.problem.message}</p>
+          )}
         </Alert>
       ) : null}
       {command.phase === 'refused' && command.problem !== undefined && !tiedToAField ? (
@@ -114,9 +126,13 @@ export function FlowActions({
           </Button>
         </>
       ) : command.phase === 'conflict' ? (
-        <Button key="again" type="button" onClick={command.checkRecord}>
-          {F.acts.checkAgain}
-        </Button>
+        movedRule(command.problem?.rule) ? (
+          <Button key="again" type="button" onClick={command.checkRecord}>
+            {F.acts.checkAgain}
+          </Button>
+        ) : (
+          <Link to={cancelTo}>{F.acts.cancel}</Link>
+        )
       ) : (
         <>
           <Button

@@ -383,3 +383,17 @@ describeInterfaceStates('the orders of a vendor', {
     },
   },
 });
+
+describe('the next order while the check-in is open (Run F, Part 2, item 5)', () => {
+  // Break caught: "Make the next order" offered for a vendor with door photos before it is cleared: the form it leads to ends in a refusal, and nothing said why at the top of the page.
+  it('offers no order for the parcels that are here until the vendor is cleared, and says why at the top', async () => {
+    open({}, OFFICER, 'AWAITING_COUNT');
+    await table();
+    expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+    expect(
+      screen.getByText(
+        /The vendor is still being checked in\. The parcels that are here can be ordered/,
+      ),
+    ).toBeVisible();
+  });
+});

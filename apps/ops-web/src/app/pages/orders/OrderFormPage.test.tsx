@@ -677,3 +677,44 @@ describe('the captured answers', () => {
     expect(progressOf().orders).toBe(1);
   });
 });
+
+describe('a refusal of the parcel or of the vendor (Run F, Part 2, items 5 and 11)', () => {
+  // Break caught: every conflict of a save told as "This vendor changed while you were working", with "Check the price again" as the only way on, when the refusal is about the parcel (it has an order, it is
+  // missing, the check-in is open, no place is left): the words of the rule, and the way back to the orders.
+  it('tells a refusal about the parcel in its own words, and offers no second check of the price', async () => {
+    const { user } = open({
+      [SAVE]: () =>
+        json(409, {
+          code: 'STATE_CONFLICT',
+          message: 'Diagnostic text that must never reach a screen.',
+          request_id: 'r9',
+          details: { rule: 'parcel_ordered' },
+        }),
+    });
+    await fillIn(user);
+    await user.click(screen.getByRole('button', { name: 'Check the price' }));
+    await screen.findByRole('heading', { level: 2, name: 'Check the order' });
+    await user.click(screen.getByRole('button', { name: 'Confirm the order' }));
+    await alertSaying('This parcel already has an order. Open the orders to see it.');
+    expect(screen.queryByText(/This vendor changed while you were working/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Check the price again' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+  });
+
+  // Break caught: a form for an arrived parcel, or for no parcel in particular, while the vendor's check-in is open: the officer fills it in and the save is refused as check_in_open.
+  it('says the check-in is open before the officer fills in a form for a parcel that is here', async () => {
+    open(
+      {
+        [RECORD]: () =>
+          json(200, checkInFixture(PARCELS, { id: VENDOR_ID, state: 'AWAITING_COUNT' }), {
+            ETag: '"v1"',
+          }),
+      },
+      `/intakes/${VENDOR_ID}/orders/new`,
+    );
+    expect(
+      await screen.findByText(/The vendor is still being checked in, so the parcels that are here/),
+    ).toBeVisible();
+    expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
+  });
+});

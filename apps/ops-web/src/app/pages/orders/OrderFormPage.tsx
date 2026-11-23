@@ -403,10 +403,17 @@ function Entry({
       />
     );
   }
+  // While the vendor's check-in is open the parcels that are here wait for it to finish: the server would refuse their order, so the page says so before the officer fills in a form.
+  if (!facts.cleared && (parcelParam === null || !UUID.test(parcelParam))) {
+    return <NothingToOrder facts={facts} words={F.checkInOpen} />;
+  }
   if (parcelParam === null || !UUID.test(parcelParam)) return <NextParcel facts={facts} />;
   const parcel = parcelOf(record, parcelParam);
   if (parcel === undefined || parcel.state === 'VOID') {
     return <NothingToOrder facts={facts} words={F.parcelNotAvailable} />;
+  }
+  if (!facts.cleared && parcel.state === 'ARRIVED') {
+    return <NothingToOrder facts={facts} words={F.checkInOpen} />;
   }
   return (
     <OrderForm

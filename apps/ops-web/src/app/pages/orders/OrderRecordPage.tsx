@@ -235,6 +235,8 @@ function RecordBody({
   const navigate = useNavigate();
   const location = useLocation();
   const [dialog, setDialog] = useState<'reverse' | 'correct' | undefined>(undefined);
+  // The page says the order changed only when a refusal said it (an act answered `stale`): every other time the officer is looking at what was just read.
+  const [stale, setStale] = useState(false);
   // The change page hands the order over with the word that it was changed: said once, here, where the officer lands.
   const [notice, setNotice] = useState<ReactNode>(() => {
     const amended = amendedCodeOf(location.state);
@@ -327,7 +329,17 @@ function RecordBody({
           ...(secondary === undefined ? {} : { secondary }),
           ...(note === undefined ? {} : { note }),
         }}
-        conflict={{ message: R.stale, onReload: () => void query.refetch() }}
+        conflict={
+          stale
+            ? {
+                message: R.stale,
+                onReload: () => {
+                  setStale(false);
+                  void query.refetch();
+                },
+              }
+            : undefined
+        }
         notice={
           notice === undefined ? undefined : (
             <div className="orders-notice" ref={box} tabIndex={-1}>
@@ -375,7 +387,11 @@ function RecordBody({
           }}
           onReload={() => {
             setDialog(undefined);
+            setStale(false);
             return query.refetch();
+          }}
+          onStale={() => {
+            setStale(true);
           }}
         />
       ) : null}
@@ -398,7 +414,11 @@ function RecordBody({
           }}
           onReload={() => {
             setDialog(undefined);
+            setStale(false);
             return query.refetch();
+          }}
+          onStale={() => {
+            setStale(true);
           }}
         />
       ) : null}
