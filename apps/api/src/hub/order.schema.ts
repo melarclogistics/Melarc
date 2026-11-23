@@ -169,6 +169,11 @@ export const orderRecord = pgTable(
       .on(table.intakeParcelId)
       .where(sql`${table.commercialState} IS DISTINCT FROM 'REVERSED'`),
     index('order_intake_idx').on(table.pickupIntakeId, table.createdAt),
+    // The orders a parcel had that were taken back, newest first: the worklist shows each parcel's latest reversed order beside the one that stands. The unique index above holds the orders that stand, so a reversed one
+    // had no index and each parcel row scanned the table (Run F, Part 1, item 2; migration 0121).
+    index('order_reversed_parcel_idx')
+      .on(table.intakeParcelId, table.createdAt.desc(), table.id.desc())
+      .where(sql`${table.commercialState} = 'REVERSED'`),
     index('order_hub_idx').on(table.responsibleHubId, table.createdAt),
     check(
       'order_commercial_state_closed',

@@ -5828,3 +5828,136 @@ describe('the vendor’s version, the lock, and the version an order leaves (Run
     expect(waiting.header('intake-etag')).toBe((await read(officer, early.id)).etag);
   });
 });
+
+describe('the worklist finds the reversed order of a parcel by an index (Run F, Part 1, item 2)', () => {
+  interface PlanNode {
+    readonly 'Node Type': string;
+    readonly 'Relation Name'?: string;
+    readonly 'Index Name'?: string;
+    readonly Filter?: string;
+    readonly Plans?: readonly PlanNode[];
+  }
+  const nodesOf = (plan: PlanNode): PlanNode[] => [plan, ...(plan.Plans ?? []).flatMap(nodesOf)];
+
+  /**
+   * The plan of the statement the worklist runs: the body of the live function with its parameters given, as the administrator's connection plans it (the row-level policies the function's own role is held to add
+   * conditions to every table, and are not in this plan; the index a lookup uses is the same).
+   */
+  async function planOfWorklist(intakeId: string, settings: string[] = []): Promise<PlanNode> {
+    const source = await routes.rows<{ prosrc: string }>(
+      `select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'melarc' and p.proname = 'intake_worklist'`,
+    );
+    const match = /RETURN QUERY\s+([\s\S]*?);\s*END\s*$/i.exec(source[0]?.prosrc ?? '');
+    expect(match, 'the worklist function is one statement that returns a query').not.toBeNull();
+    const statement = (match?.[1] ?? '')
+      .replace(/\bp_intake\b/g, `'${intakeId}'::uuid`)
+      .replace(/\bp_view\b/g, `'all'::text`)
+      .replace(/\bp_after_n\b/g, 'NULL::bigint')
+      .replace(/\bp_after_id\b/g, 'NULL::uuid')
+      .replace(/\bp_limit\b/g, '100');
+    await routes.admin.query('begin');
+    try {
+      for (const setting of settings) await routes.admin.query(`set local ${setting}`);
+      const planned = await routes.admin.query<{ 'QUERY PLAN': { Plan: PlanNode }[] }>(
+        `explain (format json) ${statement}`,
+      );
+      const root = planned.rows[0]?.['QUERY PLAN'][0]?.Plan;
+      if (root === undefined) throw new Error('the statement has no plan');
+      return root;
+    } finally {
+      await routes.admin.query('rollback');
+    }
+  }
+
+  /** Order rows of other intakes, as a hub that has been working for years holds them: copies of an order of the test, with the guards put aside as the other tests arrange a world the application cannot make. */
+  async function fillTheOrderTable(from: string, rows: number): Promise<void> {
+    await routes.admin.query('begin');
+    await routes.admin.query('set local session_replication_role = replica');
+    await routes.admin.query(
+      `insert into "order"
+       select (jsonb_populate_record(null::"order", to_jsonb(o) || jsonb_build_object('id', gen_random_uuid(), 'code', 'FILL-' || g, 'pickup_intake_id', gen_random_uuid(), 'intake_parcel_id', null))).*
+         from "order" as o cross join generate_series(1, $2::int) as g where o.id = $1`,
+      [from, rows],
+    );
+    await routes.admin.query('commit');
+    await routes.admin.query('analyze "order"');
+  }
+  const emptyTheOrderTable = async (): Promise<void> => {
+    await routes.admin.query('begin');
+    await routes.admin.query('set local session_replication_role = replica');
+    await routes.admin.query(`delete from "order" where code like 'FILL-%'`);
+    await routes.admin.query('commit');
+  };
+
+  // Break caught: a worklist that finds each parcel's reversed order by a scan of the whole order table, twice for every row of every page (the two scalar lookups of 0118 that no index could serve): in the plan of
+  // the live function, with the table as large as a hub's years of orders and an intake of 150 parcels with orders and two that were taken back, no node scans the order table for them, and the partial index of 0121 is
+  // the one the lookup uses. The worklist still answers the reversed order beside the parcel that has none that stands.
+  it('reads the reversed orders of 150 parcels by index, with the order table at the size of years of work', async () => {
+    const intake = await cleared(150);
+    const parcels = intake.parcels.slice(0, 6);
+    const made: Order[] = [];
+    for (const parcel of parcels)
+      made.push(orderOf(await itemize(officer, intake.id, body(parcel.id))));
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    for (const order of made.slice(0, 2)) {
+      const reversed = await boss.client.post(
+        `${API}/orders/${order.id}/arrival-reversal`,
+        { note: 'The wrong parcel was ticked' },
+        {
+          origin: OPS,
+          headers: {
+            'If-Match': (await boss.client.get(`${API}/orders/${order.id}`)).header('etag') ?? '',
+            'Idempotency-Key': randomUUID(),
+          },
+        },
+      );
+      expect(reversed.status, reversed.text).toBe(200);
+    }
+    try {
+      await fillTheOrderTable(present(made, 2).id, 20_000);
+
+      // The plan the planner chooses, and the plan with every scan of a table put aside where an index can serve: neither reads the order table in full for the reversed orders.
+      const chosen = nodesOf(await planOfWorklist(intake.id)).filter(
+        (node) => node['Relation Name'] === 'order',
+      );
+      expect(
+        chosen.filter(
+          (node) =>
+            node['Node Type'] === 'Seq Scan' && (node.Filter ?? '').includes("= 'REVERSED'"),
+        ),
+        'a sequential scan of the order table for a reversed order',
+      ).toEqual([]);
+      expect(chosen.some((node) => node['Index Name'] === 'order_reversed_parcel_idx')).toBe(true);
+      const indexed = nodesOf(await planOfWorklist(intake.id, ['enable_seqscan = off'])).filter(
+        (node) => node['Relation Name'] === 'order',
+      );
+      expect(
+        indexed.filter((node) => node['Node Type'] === 'Seq Scan'),
+        'a scan of the order table that no index serves',
+      ).toEqual([]);
+
+      // The worklist says what it said: the parcel has no order that stands, and the order that was taken back is shown beside it.
+      const page = (
+        await officer.client.get(`${ORDERS(intake.id)}?view=all&page_size=100`)
+      ).json() as {
+        items: {
+          parcel: { id: string };
+          order: { id: string } | null;
+          reversed_order: { id: string } | null;
+        }[];
+      };
+      expect(page.items).toHaveLength(100);
+      for (const [index, order] of made.entries()) {
+        const item = page.items.find((candidate) => candidate.parcel.id === parcels[index]?.id);
+        expect(item?.reversed_order?.id ?? null, `parcel ${String(index)}`).toBe(
+          index < 2 ? order.id : null,
+        );
+        expect(item?.order?.id ?? null, `parcel ${String(index)}`).toBe(
+          index < 2 ? null : order.id,
+        );
+      }
+    } finally {
+      await emptyTheOrderTable();
+    }
+  }, 300_000);
+});
