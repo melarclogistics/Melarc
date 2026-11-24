@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 
 import { Button } from '../../../components/ui/button/Button';
+import { DescriptionList } from '../../../components/ui/description-list/DescriptionList';
+import { formatMinor } from '../../../components/ui/money/money-value';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { OrderReview } from './OrderReview';
 import type { OrderFlow } from './use-order-flow';
@@ -14,7 +16,14 @@ const F = WORDS.form;
  * unable to price what was entered: the fields say why). When the price changed at the save, the earlier one is shown beside the new one and **the focus goes to it**, so that the officer reads it before the
  * save that says the new figure is pressed.
  */
-export function OrderPrice({ flow }: { readonly flow: OrderFlow }) {
+export function OrderPrice({
+  flow,
+  holds,
+}: {
+  readonly flow: OrderFlow;
+  /** The price the order being changed holds now, in pesewas, as the order says it: drawn while no new price is (the change page opens with it, and the order now is drawn beside the new price once there is one). */
+  readonly holds?: number | null;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const { price } = flow;
   const earlier = price.kind === 'ready' ? price.earlier : undefined;
@@ -41,6 +50,13 @@ export function OrderPrice({ flow }: { readonly flow: OrderFlow }) {
           </div>
         ) : (
           <>
+            {holds === undefined || holds === null ? null : (
+              <DescriptionList
+                items={[
+                  { label: WORDS.review.beforeAmend.total, value: formatMinor(holds, 'GHS') },
+                ]}
+              />
+            )}
             {price.kind === 'failed' ? (
               // The check itself failed, for a reason that is no field's: nothing the officer entered is lost, and a press checks again.
               <div className="orders-price__failed">

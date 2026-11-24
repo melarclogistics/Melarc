@@ -319,7 +319,8 @@ export const ORDERS_WORDS = {
       lastTitle: 'The last orders of this vendor',
       lastNone: 'The last orders could not be read.',
     },
-    open: 'Open',
+    /** The order that was just made, opened from the saved screen (Run G1, Part 2, item 11: named for what it opens). */
+    open: 'Open this order',
     another: 'Make another',
     uploading: 'A photo is still being saved. Wait for it to finish.',
     photoFailed: 'The photo could not be saved. Try again.',
@@ -519,6 +520,8 @@ export const ORDERS_WORDS = {
       correctRecipient: 'Correct the recipient',
       openCorrection: 'Open the correction',
       openVendor: 'Open the orders',
+      /** The link that opens one order, from the change page (it was named Open the orders, the name of the link that opens a vendor's orders). */
+      openOrder: 'Open this order',
     },
     notes: {
       seniorReverses: 'A senior officer takes back an arrival.',

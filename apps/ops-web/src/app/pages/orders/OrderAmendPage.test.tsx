@@ -317,6 +317,33 @@ describe('a new address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () =>
   });
 });
 
+describe('the price an order holds, when its change page opens (Run G1, Part 2, item 11)', () => {
+  // Break caught: the link that looks at the order after a save whose outcome is not known named Open the orders (the name of the link that opens a vendor's orders), when it opens one order: it is named for what it opens.
+  it('names the link that looks at the order for what it opens when the outcome of a save is not known', async () => {
+    const { user } = open({
+      [SAVE]: () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    await changeSize(user);
+    await user.click(await pricedSave());
+    const look = await screen.findByRole('link', { name: 'Open this order' });
+    expect(look).toHaveAttribute('href', `/orders/${EARLY_ORDER_ID}`);
+    expect(screen.queryByRole('link', { name: 'Open the orders' })).toBeNull();
+  });
+
+  // Break caught: a change page that opens with a column that says only that nothing has been asked yet, so that the officer changes an order without the price it holds in front of them until the first check comes back.
+  it('shows the price the order holds before anything has been changed, and not twice once the check is back', async () => {
+    const { user } = open();
+    const holds = await screen.findByText('Price it holds now');
+    expect(holds.nextElementSibling).toHaveTextContent('GH₵35.00');
+    await changeSize(user);
+    // The check is back: the order now is drawn beside the new price, and the line of before is not drawn again.
+    await screen.findByRole('region', { name: 'The order now' }, PRICE_WAIT);
+    expect(screen.getAllByText('Price it holds now')).toHaveLength(1);
+  });
+});
+
 describe('a price that appears while the officer taps (Run G1, Part 2, item 10; OB-S1-170a)', () => {
   // Break caught: the double tap that straddles the moment the price of a change first appears saving a change at a price that may not have been read.
   it('ignores a press in the moment after a price first appears, and saves when it is pressed again', async () => {
@@ -460,7 +487,9 @@ describe('an order that cannot be changed here', () => {
       ),
     ).toBeVisible();
     expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
-    expect(screen.getByRole('link', { name: 'Open the orders' })).toHaveAttribute(
+    // The link opens one order, and is named for it (it was Open the orders, the name of the link that opens a vendor's orders).
+    expect(screen.queryByRole('link', { name: 'Open the orders' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Open this order' })).toHaveAttribute(
       'href',
       `/orders/${EARLY_ORDER_ID}`,
     );

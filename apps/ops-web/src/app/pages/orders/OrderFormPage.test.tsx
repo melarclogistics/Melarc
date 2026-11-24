@@ -221,6 +221,11 @@ describe('making an order, and checking the price first', () => {
       parcel_id: PARCELS[0]?.id,
       size_class: 'MEDIUM',
     });
+    // The order that was just made opens from the saved screen by what it opens, not by a bare Open (Run G1, Part 2, item 11).
+    expect(screen.getByRole('link', { name: 'Open this order' })).toHaveAttribute(
+      'href',
+      '/orders/11111111-2222-4333-8444-555555555555',
+    );
     // After a save the way on is the next parcel, with what is left counted by the server. A vendor with door photos has its parcels to show the order on: nothing is said of a code to write on one.
     expect(screen.getByRole('link', { name: 'Make the next order' })).toBeVisible();
     expect(screen.queryByText('Write this code on the parcel.')).toBeNull();

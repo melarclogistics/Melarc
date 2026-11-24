@@ -194,7 +194,7 @@ function AmendForm({
           typed={typedLineOf(values, terms)}
           save={F.acts.saveChange}
           saveAt={F.acts.saveChangeAt}
-          lookLabel={WORDS.record.acts.openVendor}
+          lookLabel={WORDS.record.acts.openOrder}
         />
       }
       header={{
@@ -211,7 +211,12 @@ function AmendForm({
     >
       <OrderLayout
         photo={photoId === undefined ? null : <ParcelPhotoOpener evidenceId={photoId} />}
-        price={<OrderPrice flow={flow} />}
+        price={
+          <OrderPrice
+            flow={flow}
+            holds={order.locked_price?.amount_minor ?? order.calculated_total_minor}
+          />
+        }
       >
         <OrderFields
           values={values}
@@ -264,7 +269,7 @@ function Reading({ id }: { readonly id: string }) {
                 <p className="orders-note">{reason}</p>
                 <div className="orders-saved__acts orders-saved__acts--after">
                   <ButtonLink to={orderPath(record.order.id)} variant="secondary" size="lg">
-                    {WORDS.record.acts.openVendor}
+                    {WORDS.record.acts.openOrder}
                   </ButtonLink>
                 </div>
               </>
