@@ -43,6 +43,7 @@ import {
   Plus,
   ReceiptText,
   RotateCcw,
+  RotateCw,
   Scale,
   Search,
   Store,
@@ -55,6 +56,8 @@ import {
   Warehouse,
   WifiOff,
   X,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -141,6 +144,11 @@ export const ICONS = {
   camera: Camera,
   gallery: Images,
   retake: RotateCcw,
+  // The photo viewer's way of looking closely (Run G2, OB-S1-168): zoom in and out, and turn a quarter to the left or the right (each with words beside it).
+  'zoom-in': ZoomIn,
+  'zoom-out': ZoomOut,
+  'turn-left': RotateCcw,
+  'turn-right': RotateCw,
   // The connection banner (Run D, S1.35c-0): the connection is gone and what a person does now is not saved (the words say so: the icon never does alone).
   offline: WifiOff,
 } as const satisfies Record<string, LucideIcon>;
