@@ -460,7 +460,8 @@ test.describe('a price that could not be checked, and the checks of a whole orde
       await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible();
       expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`)).toHaveLength(2);
       expect(api.unexpected).toEqual([]);
-      expect(watch.problems.filter((problem) => !/500|Failed|ERR_/.test(problem))).toEqual([]);
+      // The one request that failed is the price check the stand-in was asked to fail (each engine words a lost connection its own way).
+      expect(watch.problems.filter((problem) => !problem.includes('/orders/preview'))).toEqual([]);
     });
   }
 
