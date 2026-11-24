@@ -152,7 +152,7 @@ export interface ReceivingVendorView extends IntakeCountsView {
   readonly parcels: readonly IntakeParcelView[];
 }
 
-const NOT_AVAILABLE = '(name not available)';
+export const NOT_AVAILABLE = '(name not available)';
 
 const idList = (ids: readonly string[]): SQL =>
   sql.join(
@@ -517,7 +517,12 @@ export async function loadIntakes(
               })),
             };
       const view = hubIntakeViewOf(row, after);
-      blind.set(row.id, { view, etag: hubIntakeEtagOf(view, row.version), after });
+      // The vendor's name is said beside the intake and is no part of its token: the digest is of the view without it, as the count's own recomputation makes it.
+      blind.set(row.id, {
+        view: { ...view, vendor_name: book.vendor.get(row.id) ?? NOT_AVAILABLE },
+        etag: hubIntakeEtagOf(view, row.version),
+        after,
+      });
     }
   }
   return { checkIns, blind, parcels, findings, book };

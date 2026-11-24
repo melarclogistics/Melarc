@@ -57,6 +57,12 @@ export interface HubIntakePreCountView {
   readonly declaration_captured_at: string;
   readonly active_receiver_id: string | null;
   readonly lock_acquired_at: string | null;
+  /**
+   * The vendor, by name, as receiving names a vendor with photos (the stop's dispatch snapshot, `melarc.receiving_names`; Run G1, Part 1, item 4), so that the order screens never have to call a vendor counted
+   * without photos by its intake code. Said by every read of an intake (`getHubIntake`, `listHubIntakes`); **not part of the `ETag`** (a vendor renamed makes no count stale), and absent from the answers that
+   * are built from the row alone (the handover's, the count's own).
+   */
+  readonly vendor_name?: string;
   readonly count_phase: 'PRE_COUNT';
 }
 

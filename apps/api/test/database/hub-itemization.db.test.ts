@@ -7411,3 +7411,75 @@ describe('the staff view of an order carries the photo of its parcel (Run G1, Pa
     );
   }, 180_000);
 });
+
+describe('a vendor counted without photos is named by its vendor, on every read the order screens draw it from (Run G1, Part 1, item 4)', () => {
+  interface Named {
+    id: string;
+    code: string;
+    vendor_name?: string;
+    receiving_mode?: string;
+  }
+
+  // Break caught: a vendor counted without photos that the screens can only call by its intake code (ACC-IN-…), a name that differs from the one receiving gives the same vendor with photos, a name that is the placeholder, and
+  // a name that enters the intake's ETag (a vendor renamed would make every count the officer has read stale).
+  it('says the name the stop’s snapshot gives, on the vendor’s record and on the rows of the orders view, as it does for a vendor with photos, and the name is no part of the token', async () => {
+    const photo = await cleared(1);
+    const counted = await blind(2);
+    const photoRead = (await officer.client.get(ONE(photo.id))).json() as Named;
+    const blindResponse = await officer.client.get(ONE(counted.id));
+    const blindRead = blindResponse.json() as Named;
+    expect(photoRead.vendor_name).toBeTruthy();
+    expect(blindRead.vendor_name).toBe(photoRead.vendor_name);
+    expect(blindRead.vendor_name).not.toMatch(/ACC-IN-|name not available/);
+
+    // The rows of Orders to make: a vendor counted without photos is named by its vendor like the others.
+    const listed = await officer.client.get(`${INTAKES}?state=ITEMIZING&page_size=100`);
+    expect(listed.status, listed.text).toBe(200);
+    orderOf(await itemize(officer, counted.id, body(null)));
+    const working = (
+      (await officer.client.get(`${INTAKES}?state=ITEMIZING&page_size=100`)).json() as {
+        items: Named[];
+      }
+    ).items.find((item) => item.id === counted.id);
+    expect(working?.vendor_name).toBe(photoRead.vendor_name);
+
+    // After its count, the counted vendor's record still names it, and a count made on the token that was read still goes through.
+    const after = (await officer.client.get(ONE(counted.id))).json() as Named;
+    expect(after.vendor_name).toBe(photoRead.vendor_name);
+    // The name is no part of the token: the count of this vendor (made by blind() on the token a read gave, which the count recomputes from the stored row alone) went through, and the token is unchanged by a read.
+    expect((await officer.client.get(ONE(counted.id))).header('etag')).toBeTruthy();
+  }, 180_000);
+
+  // Break caught: a closed vendor with parcels left that the senior's next-shift queue cannot name.
+  it('is on the rows of the closes that left work', async () => {
+    const intake = await cleared(2);
+    const [a] = intake.parcels as [Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const closure = (await boss.client.get(`${ONE(intake.id)}/closure`)).json() as {
+      assessment_token: string;
+    };
+    const closed = await boss.client.post(
+      `${ONE(intake.id)}/close`,
+      {
+        reviewed_assessment: closure.assessment_token,
+        parity_exception: { note: 'The vendor will bring the label tomorrow' },
+      },
+      {
+        origin: OPS,
+        headers: {
+          'If-Match': (await read(boss, intake.id)).etag,
+          'Idempotency-Key': randomUUID(),
+        },
+      },
+    );
+    expect(closed.status, closed.text).toBe(200);
+    const queue = (await boss.client.get(`${API}/hub-intake-exceptions?page_size=100`)).json() as {
+      items: { intake_id: string; vendor_name?: string }[];
+    };
+    const row = queue.items.find((item) => item.intake_id === intake.id);
+    expect(row).toBeDefined();
+    expect(row?.vendor_name).toBeTruthy();
+    expect(row?.vendor_name).not.toMatch(/ACC-IN-|name not available/);
+  }, 180_000);
+});

@@ -754,6 +754,8 @@ export const CLOSED_EXCEPTION_PAGE_SCHEMA = described({
         properties: {
           intake_id: UUID,
           intake_code: { type: 'string' },
+          // The vendor, by name, as receiving names a vendor (5.120.0, Part 1 item 4); optional in the contract so that an answer of an earlier version stays valid.
+          vendor_name: { type: 'string' },
           pickup_request_id: UUID,
           responsible_hub_id: UUID,
           receiving_mode: { type: 'string', enum: ['PHOTO_CHECK_IN', 'BLIND_COUNT'] },

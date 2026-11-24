@@ -48,6 +48,8 @@ export const HUB_INTAKE_BASE_SCHEMA = described({
     lock_acquired_at: { type: ['string', 'null'], format: 'date-time' },
     state: { type: 'string', enum: [...INTAKE_STATES] },
     count_phase: { type: 'string', enum: ['PRE_COUNT', 'POST_COUNT'] },
+    // The vendor, by name (5.120.0, Part 1 item 4): said by every read of an intake, no part of its `ETag`; optional in the contract so that an answer of an earlier version stays valid.
+    vendor_name: { type: 'string' },
     ...INTAKE_QUEUE_FACTS_PROPERTIES,
   },
 });

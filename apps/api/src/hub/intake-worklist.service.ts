@@ -12,6 +12,7 @@ import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
 import { primaryHubOfStaff } from '../platform/lookup/primary-hub.js';
+import { NOT_AVAILABLE, namesOf } from './receiving-views.js';
 
 export interface IntakeWorklistOptions {
   readonly runner: Pick<OperationRunner, 'read'>;
@@ -430,11 +431,16 @@ export class IntakeWorklist {
             });
           }
         }
+        const names = await namesOf(
+          tx,
+          page.map((row) => row.intake_id),
+        );
         const last = page.at(-1);
         return {
           items: page.map((row): ClosedExceptionView => ({
             intake_id: row.intake_id,
             intake_code: row.intake_code,
+            vendor_name: names.vendor.get(row.intake_id) ?? NOT_AVAILABLE,
             pickup_request_id: row.pickup_request_id,
             responsible_hub_id: row.responsible_hub_id,
             receiving_mode: row.receiving_mode,
@@ -545,6 +551,8 @@ export interface DestinationZonesView {
 export interface ClosedExceptionView {
   readonly intake_id: string;
   readonly intake_code: string;
+  /** The vendor, by name, as receiving names a vendor (Run G1, Part 1, item 4). */
+  readonly vendor_name: string;
   readonly pickup_request_id: string;
   readonly responsible_hub_id: string;
   readonly receiving_mode: string;

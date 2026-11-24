@@ -83,6 +83,8 @@ const PRE_COUNT_KEYS = [
   'pickup_manifest_id',
   'pickup_request_id',
   'state',
+  // The vendor, by name (Run G1, Part 1, item 4): said by every read of an intake, as receiving names a vendor with photos; no declaration, count or parcel is in it.
+  'vendor_name',
 ];
 
 /** The lock of an intake as another receiver left it some minutes ago (the moment of a lock is the database's, so an old one is arranged with the triggers off). */
@@ -629,6 +631,9 @@ describe('the handover and the reads answer one shape', () => {
     const opened = done.intakes[0];
     expect(opened).toBeDefined();
     const read = await ops.client.get(ONE(opened?.id ?? ''));
-    expect(read.json()).toEqual(opened);
+    // The read says what the handover says and, beside it, the vendor's name (which a rider's handover cannot read: only staff read the names of the receiving side).
+    const { vendor_name: named, ...rest } = read.json() as Record<string, unknown>;
+    expect(rest).toEqual(opened);
+    expect(typeof named).toBe('string');
   });
 });

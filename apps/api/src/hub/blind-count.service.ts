@@ -18,7 +18,12 @@ import {
   type HubIntakePostCountView,
   type HubIntakeRow,
 } from './hub-intake-view.js';
-import { RECEIVING_INTAKE_COLUMNS, type ReceivingIntakeRow } from './receiving-views.js';
+import {
+  NOT_AVAILABLE,
+  RECEIVING_INTAKE_COLUMNS,
+  namesOf,
+  type ReceivingIntakeRow,
+} from './receiving-views.js';
 
 const OPERATION = 'submitBlindCount';
 
@@ -181,6 +186,9 @@ export class HubBlindCounts {
       if (counted === undefined) throw new Error('A counted intake could not be read');
       const view = hubIntakeViewOf(counted, afterCountOf(after));
       if (view.count_phase !== 'POST_COUNT') throw new Error('A counted intake is read as counted');
+      // The act answers as the read does: the vendor, by name (Run G1, Part 1, item 4), which is no part of the token.
+      const names = await namesOf(tx, [id]);
+      const named = { ...view, vendor_name: names.vendor.get(id) ?? NOT_AVAILABLE };
 
       await audit.write(handle, {
         code: 'hub.intake.counted',
@@ -225,7 +233,7 @@ export class HubBlindCounts {
         });
       }
 
-      const answer: CountedIntake = { intake: view, etag: hubIntakeEtagOf(view, counted.version) };
+      const answer: CountedIntake = { intake: named, etag: hubIntakeEtagOf(view, counted.version) };
       await idempotency.complete(handle, scope, {
         status: 200,
         body: new TextEncoder().encode(JSON.stringify(answer)),
