@@ -229,6 +229,9 @@ export const ORDERS_WORDS = {
       checking: 'Checking the price…',
       refused:
         'The price could not be worked out for what you entered. The fields marked say what to change.',
+      /** The check itself failed (the network, a fault, too many requests): no field is at fault, and nothing entered is lost. */
+      failed: 'The price could not be checked.',
+      kept: 'Your entries are kept.',
     },
     /** The line above the save: what was typed, so that the officer reads what is about to be saved. */
     typed: 'What you typed',

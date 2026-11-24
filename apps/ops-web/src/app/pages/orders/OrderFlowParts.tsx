@@ -153,7 +153,12 @@ export function FlowActions({
             type="submit"
             size="lg"
             loading={command.phase === 'sending'}
-            disabled={price.kind === 'checking' || price.kind === 'refused' || gate.busy}
+            disabled={
+              price.kind === 'checking' ||
+              price.kind === 'refused' ||
+              price.kind === 'failed' ||
+              gate.busy
+            }
             aria-describedby={typed === '' ? 'orders-form-gate' : 'orders-typed orders-form-gate'}
           >
             {total === undefined

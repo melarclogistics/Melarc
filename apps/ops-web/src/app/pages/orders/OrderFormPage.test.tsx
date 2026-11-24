@@ -1,7 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
+import {
+  errorResponse,
+  installFakeApi,
+  json,
+  type FakeApi,
+  type Handler,
+} from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID, preCountFixture } from '../../../test-support/hub-intake-fixture';
 import {
   describeInterfaceStates,
@@ -1006,5 +1012,129 @@ describe('what the officer sees when a save is refused or its outcome is not kno
     // The save was refused, so no order was made: the form is still there, and no saved screen.
     expect(screen.queryByText(/is saved\./)).toBeNull();
     expect(sent(SAVE)).toHaveLength(1);
+  });
+});
+
+describe('a price check that could not be made (Run G1, Part 2, item 1)', () => {
+  /** The first check fails the way the test says, and every later one is priced. */
+  const failsThenPrices = (first: () => Response | Promise<Response>): Handler => {
+    let asked = 0;
+    return () => {
+      asked += 1;
+      return asked === 1 ? first() : json(200, termsOf());
+    };
+  };
+  const tooFast = (): Response =>
+    json(
+      429,
+      {
+        code: 'RATE_LIMITED',
+        message: 'Diagnostic text that must never reach a screen.',
+        request_id: 'r429',
+      },
+      { 'Retry-After': '1' },
+    );
+
+  // Break caught: a form that is stuck after a check that failed for a reason that is no field (the price column telling the officer to look at fields none of which is marked, the save disabled, nothing offering a new
+  // check); entries lost; a check that is not made again on one press.
+  it.each([
+    [
+      'a lost connection',
+      (): Promise<Response> => Promise.reject(new TypeError('Failed to fetch')),
+    ],
+    ['a fault of the server', (): Response => errorResponse(500, 'INTERNAL_ERROR')],
+  ] as const)(
+    'tells %s as what it is, keeps the entries and checks the price again on one press',
+    async (_name, first) => {
+      const { user } = open({ [PREVIEW]: failsThenPrices(first) });
+      await fillIn(user);
+      expect(
+        await screen.findByText('The price could not be checked.', {}, PRICE_WAIT),
+      ).toBeVisible();
+      expect(screen.getByText('Your entries are kept.')).toBeVisible();
+      // It is no field's fault, and the column does not say it is: nothing is marked, so nothing is pointed at.
+      expect(screen.queryByText(/The fields marked say what to change/)).toBeNull();
+      expect(screen.getByRole('button', { name: 'Save the order' })).toBeDisabled();
+      expect(screen.getByLabelText(/Recipient’s name/)).toHaveValue('Ama Mensah');
+      expect(sent(PREVIEW)).toHaveLength(1);
+
+      await user.click(screen.getByRole('button', { name: 'Check the price again' }));
+      expect(await pricedSave()).toHaveTextContent('Save the order at GH₵35.00');
+      expect(sent(PREVIEW)).toHaveLength(2);
+      // The price is on the screen and the way to check again is gone; the entries are as they were.
+      expect(screen.queryByText('The price could not be checked.')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Check the price again' })).toBeNull();
+      expect(screen.getByLabelText(/Recipient’s name/)).toHaveValue('Ama Mensah');
+    },
+  );
+
+  // Break caught: a form that waits for the officer after a 429 with nothing to say when the wait is over; a check made at once, inside the wait the server asked for; a check made again and again (a loop of requests
+  // into a limit).
+  it('checks the price once more by itself when the wait the server asked for is over, and then waits for the officer', async () => {
+    const { user } = open({ [PREVIEW]: failsThenPrices(tooFast) });
+    await fillIn(user);
+    expect(
+      await screen.findByText('The price could not be checked.', {}, PRICE_WAIT),
+    ).toBeVisible();
+    expect(sent(PREVIEW)).toHaveLength(1);
+    // Inside the wait nothing is sent; once it is over one new check is, by itself, and it prices.
+    expect(
+      await screen.findByRole('button', { name: /^Save the order at / }, { timeout: 6000 }),
+    ).toBeVisible();
+    expect(sent(PREVIEW)).toHaveLength(2);
+  }, 15_000);
+
+  it('does not check again by itself a second time: after another 429 it offers the button and sends nothing', async () => {
+    const { user } = open({ [PREVIEW]: () => tooFast() });
+    await fillIn(user);
+    await screen.findByText('The price could not be checked.', {}, PRICE_WAIT);
+    await waitFor(() => expect(sent(PREVIEW)).toHaveLength(2), { timeout: 6000 });
+    expect(await screen.findByRole('button', { name: 'Check the price again' })).toBeVisible();
+    // The wait of the second 429 passes, and nothing is sent: one new check by itself, and no more.
+    await pause(2200);
+    expect(sent(PREVIEW)).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Check the price again' })).toBeVisible();
+  }, 20_000);
+
+  // Break caught: a price that stays on the screen, pressable, after a field it was worked out for has changed (the save is of the screen, and the figure is the earlier one's).
+  it('takes the price off the screen the moment a field changes, and draws the price of the new entries when it comes', async () => {
+    let asked = 0;
+    const { user } = open({
+      [PREVIEW]: () => {
+        asked += 1;
+        return json(200, asked === 1 ? termsOf() : termsOf({}, 4000, NEW_TOKEN));
+      },
+    });
+    await fillIn(user);
+    expect(await pricedSave()).toHaveTextContent('Save the order at GH₵35.00');
+    await user.click(screen.getByRole('radio', { name: 'Large' }));
+    // At once: no price of the medium parcel is on the screen to press, and the save says the price is being checked.
+    expect(screen.queryByRole('button', { name: /^Save the order at / })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Checking the price…' })).toBeDisabled();
+    expect(await pricedSave()).toHaveTextContent('Save the order at GH₵40.00');
+  });
+
+  // Break caught: the price of what was entered a moment ago drawn for what is entered now (the figure on the screen is the price of the screen).
+  it('throws away the answer to what was entered before, when a field changed while the check waited', async () => {
+    const waiting: ((response: Response) => void)[] = [];
+    const { user } = open({
+      [PREVIEW]: () =>
+        new Promise<Response>((resolve) => {
+          waiting.push(resolve);
+        }),
+    });
+    await fillIn(user);
+    await waitFor(() => expect(waiting).toHaveLength(1), PRICE_WAIT);
+    // The officer changes the size while the first check is out; then the first answer, for the medium parcel, arrives.
+    await user.click(screen.getByRole('radio', { name: 'Large' }));
+    waiting[0]?.(json(200, termsOf()));
+    await pause(100);
+    // It is not drawn: the screen is no medium parcel's.
+    expect(screen.queryByRole('button', { name: /^Save the order at / })).toBeNull();
+    // The check for what is on the screen is made, and its answer is the one drawn.
+    await waitFor(() => expect(waiting).toHaveLength(2), PRICE_WAIT);
+    expect(await bodyOf(sent(PREVIEW)[1])).toMatchObject({ size_class: 'LARGE' });
+    waiting[1]?.(json(200, termsOf({}, 4000, NEW_TOKEN)));
+    expect(await pricedSave()).toHaveTextContent('Save the order at GH₵40.00');
   });
 });

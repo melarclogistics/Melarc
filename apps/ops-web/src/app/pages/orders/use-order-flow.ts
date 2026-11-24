@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -12,6 +13,8 @@ import type {
 } from '../../../platform/hub-orders/orders-commands';
 import type { TermsView, ZoneCandidateView } from '../../../platform/hub-orders/orders-shape';
 import { problemOf, type Problem } from '../../../platform/problem/problem-copy';
+import { holdOf } from '../../../platform/query/read-hold';
+import { refusedFields } from './order-refusal-fields';
 
 /**
  * The flow of an order, **one step** (the Product Owner's decision D-S7-2, 23 November 2026; it replaces the review of the decisions of 19 and 20 November, whose second button an officer could press unread by
@@ -23,6 +26,9 @@ import { problemOf, type Problem } from '../../../platform/problem/problem-copy'
  *   checked and cannot be pressed.
  * - **A price that changed at the save** (`terms-changed`, the rates moved while the officer looked) is not an error: the price on the screen becomes the new one, the earlier one is shown beside it, and the save is
  *   offered again as a separate button that says the new figure; **a press in the moment after it appears is ignored** (`SAVE_GUARD_MS`), so that a second tap meant for the first button never saves a price nobody read.
+ * - **A price that could not be checked** (the network dropped, the server answered 500 or 429: a reason that is no field's, `failed`) is told as what it is in the price column, with the way to check again and the
+ *   entries kept (Run G1, Part 2, item 1). After a 429 one new check is made by itself once the wait the server asked for is over (the portal's hold, `read-hold.ts`), and no more than one for the same entries:
+ *   the portal never tries a refused request again in a loop. Any other failure waits for the officer's press.
  * - **A vendor that changed**, or **prices that are being changed** (`stale`, `configuration_changing`): nothing was saved, the entries stay, and one press reads the vendor again and checks the price again.
  * - **A save is one command** (`useConfirmedCommand`): a lost answer is sent again under the same key and never makes an order twice, and a refusal ends the attempt.
  * It is one flow for a new order and for the change of one that is not confirmed yet, so that they cannot disagree about what a price on the screen is.
@@ -38,7 +44,9 @@ export type PriceState =
   /** The price of what is entered. `earlier` is the price the officer read before it changed at the save, when it did. */
   | { readonly kind: 'ready'; readonly terms: TermsView; readonly earlier: TermsView | undefined }
   /** The server would not price what is entered: the refusal is on the fields (`checkProblem`, `candidates`). */
-  | { readonly kind: 'refused' };
+  | { readonly kind: 'refused' }
+  /** The price could not be checked, for a reason that is no field's (the network, a fault, a 429): nothing was lost, and the officer can check again. */
+  | { readonly kind: 'failed'; readonly problem: Problem };
 
 export interface OrderCommand {
   readonly values: OrderFormValues;
@@ -125,6 +133,8 @@ export interface OrderFlow {
   readonly candidates: readonly ZoneCandidateView[] | undefined;
   /** Saves the order on the price on the screen. Ignored unless the price is the price of what is entered, and for a moment after the price changed at the save. */
   readonly save: () => void;
+  /** Checks the price of what is entered again, at once: the way out of a price that could not be checked. */
+  readonly checkAgain: () => void;
   /** Takes the refusal of the save off the screen: the officer changed something. */
   readonly changed: () => void;
   readonly clearCandidates: () => void;
@@ -148,6 +158,10 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const armedUntil = useRef(0);
   const shown = useRef<Answer | undefined>(undefined);
+  const hold = holdOf(useQueryClient());
+  /** The entries a check was already made again for by itself, after a 429: one for each, so that the wait is never a loop. */
+  const askedAgainFor = useRef<string | undefined>(undefined);
+  const waitAbort = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     latest.current = config;
@@ -158,6 +172,7 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     return () => {
       alive.current = false;
       if (timer.current !== undefined) clearTimeout(timer.current);
+      waitAbort.current?.abort();
     };
   }, []);
 
@@ -193,6 +208,27 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
         } else {
           const problem = problemOf(failure, { operation: latest.current.previewOperation });
           setAnswer({ key: target.key, ...(worthShowing(problem) ? { problem } : {}) });
+          if (problem.kind === 'rate-limited' && askedAgainFor.current !== target.key) {
+            // Too fast: once the wait the server asked for is over, one new check, by itself, of these same entries; the hold is the portal's own and never a loop.
+            askedAgainFor.current = target.key;
+            waitAbort.current?.abort();
+            const wait = new AbortController();
+            waitAbort.current = wait;
+            void hold
+              .untilFree('order-price', wait.signal)
+              .then(() => {
+                if (!alive.current || desired.current?.key !== target.key) return;
+                if (
+                  shown.current !== undefined &&
+                  shown.current.key === target.key &&
+                  shown.current.problem === undefined
+                )
+                  return;
+                setAnswer(undefined);
+                return pump();
+              })
+              .catch(() => undefined);
+          }
         }
       }
       if (due.current || (desired.current !== undefined && desired.current.key !== target.key)) {
@@ -215,6 +251,8 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     }, latest.current.debounceMs ?? PRICE_DEBOUNCE_MS);
     return () => {
       if (timer.current !== undefined) clearTimeout(timer.current);
+      // What was waited for under the wait of a 429 was for the entries that have changed.
+      waitAbort.current?.abort();
     };
   }, [key, complete, pump]);
 
@@ -260,13 +298,21 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     : !forThese
       ? { kind: 'checking' }
       : answer.terms === undefined
-        ? { kind: 'refused' }
+        ? answer.problem !== undefined && Object.keys(refusedFields(answer.problem)).length === 0
+          ? { kind: 'failed', problem: answer.problem }
+          : { kind: 'refused' }
         : { kind: 'ready', terms: answer.terms, earlier: answer.earlier };
   useEffect(() => {
     shown.current = forThese ? answer : undefined;
   });
   const pressable = price.kind === 'ready' && !command.locked;
   const checkProblem = forThese ? answer.problem : undefined;
+
+  const checkAgain = useCallback((): void => {
+    if (desired.current === undefined) return;
+    setAnswer(undefined);
+    void pump();
+  }, [pump]);
 
   const save = useCallback((): void => {
     // A press in the moment after the price changed is meant for the button that was there: it saves nothing. (A second press while a save is on its way is the command's own: it does nothing.)
@@ -287,6 +333,7 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     checkProblem,
     candidates,
     save,
+    checkAgain,
     changed: () => {
       command.dismiss();
     },

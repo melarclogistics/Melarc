@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 
+import { Button } from '../../../components/ui/button/Button';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { OrderReview } from './OrderReview';
 import type { OrderFlow } from './use-order-flow';
 import './orders-pages.css';
 
 const P = WORDS.form.price;
+const F = WORDS.form;
 
 /**
  * The price beside the form (D-S7-2, 23 November 2026): what the server worked out for what is entered, **drawn and never calculated**, or what it is doing (waiting for the parcel to be filled in, checking, or
@@ -38,13 +40,26 @@ export function OrderPrice({ flow }: { readonly flow: OrderFlow }) {
             <OrderReview terms={price.terms} earlier={price.earlier} />
           </div>
         ) : (
-          <p className="orders-note">
-            {price.kind === 'checking'
-              ? P.checking
-              : price.kind === 'refused'
-                ? P.refused
-                : P.waiting}
-          </p>
+          <>
+            {price.kind === 'failed' ? (
+              // The check itself failed, for a reason that is no field's: nothing the officer entered is lost, and a press checks again.
+              <div className="orders-price__failed">
+                <p className="orders-note">{P.failed}</p>
+                <p className="orders-note">{P.kept}</p>
+                <Button type="button" variant="secondary" onClick={flow.checkAgain}>
+                  {F.acts.checkAgain}
+                </Button>
+              </div>
+            ) : (
+              <p className="orders-note">
+                {price.kind === 'checking'
+                  ? P.checking
+                  : price.kind === 'refused'
+                    ? P.refused
+                    : P.waiting}
+              </p>
+            )}
+          </>
         )}
       </div>
     </section>
