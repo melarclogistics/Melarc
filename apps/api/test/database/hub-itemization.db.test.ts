@@ -7636,7 +7636,6 @@ describe('a telephone number in a note is refused by every act of Stage 7 that t
 });
 
 describe('the correction of a recipient is held by the database for every writer: the record is the correction, and the place does not move (Run G1, Part 1, item 6)', () => {
-  const ORDER = (id: string): string => `${API}/orders/${id}`;
   interface Stored {
     version: number;
     recipient: {
