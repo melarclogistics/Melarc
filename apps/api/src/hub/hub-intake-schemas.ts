@@ -18,7 +18,7 @@ export const INTAKE_STATES = [
 export const INTAKE_QUEUE_FACTS_PROPERTIES = {
   orders_made: { type: 'integer', minimum: 0 },
   parcels_needing_order: { type: ['integer', 'null'], minimum: 0 },
-  senior_needed: { type: 'string', enum: ['CLOSE_EXCEPTION', 'ARRIVAL_TAKEN_BACK'] },
+  senior_needed: { type: 'string', enum: ['ARRIVAL_TAKEN_BACK'] },
 } as const;
 
 export const HUB_INTAKE_BASE_SCHEMA = described({

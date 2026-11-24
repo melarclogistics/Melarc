@@ -28,7 +28,7 @@ export interface HubIntakesOptions {
 /** What `listHubIntakes` takes from the query, as it was sent: the service judges it. */
 export interface HubIntakeFilter {
   readonly state?: string;
-  /** `needs_senior` (D-S7-7): the vendors whose orders wait for a senior officer. The only view there is; any other text is `VALIDATION_FAILED`. */
+  /** `needs_senior` (D-S7-7, narrowed by D-S7-11): the vendors sent back to review by an arrival a senior took back. The only view there is; any other text is `VALIDATION_FAILED`. */
   readonly view?: string;
   readonly pageSize?: number;
   readonly pageToken?: string;
@@ -44,7 +44,7 @@ export type HubIntakeShape = HubIntakeView | HubIntakeCheckInView;
 export interface QueueFacts {
   readonly orders_made?: number;
   readonly parcels_needing_order?: number | null;
-  readonly senior_needed?: 'CLOSE_EXCEPTION' | 'ARRIVAL_TAKEN_BACK';
+  readonly senior_needed?: 'ARRIVAL_TAKEN_BACK';
 }
 
 /** The states a vendor is in while orders are made for it, or sent back by an arrival that was taken back: the rows that carry the counts. */
@@ -164,7 +164,7 @@ export class HubIntakes {
           select ${RECEIVING_INTAKE_COLUMNS}, handed_over_at::text as position_text
             from pickup_intake
            where (${state}::text is null or state = ${state}::text)
-             and (${view}::text is null or (state in ('ITEMIZING', 'RECONCILIATION_REQUIRED') and melarc.intake_senior_needed(id) is not null))
+             and (${view}::text is null or (state = 'RECONCILIATION_REQUIRED' and melarc.intake_senior_needed(id) is not null))
              and (${afterMoment}::timestamptz is null or (handed_over_at, id) > (${afterMoment}::timestamptz, ${afterId}::uuid))
            order by handed_over_at, id
            limit ${size + 1}`);
@@ -200,7 +200,7 @@ export class HubIntakes {
             id: string;
             orders: number | string;
             needs_order: number | string | null;
-            senior_needed: 'CLOSE_EXCEPTION' | 'ARRIVAL_TAKEN_BACK' | null;
+            senior_needed: 'ARRIVAL_TAKEN_BACK' | null;
           }[]) {
             facts.set(row.id, {
               orders_made: Number(row.orders),

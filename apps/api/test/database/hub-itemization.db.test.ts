@@ -6489,10 +6489,10 @@ describe('the rows of Orders to make say how many orders are made, and which ven
     expect(waiting).not.toHaveProperty('parcels_needing_order');
   });
 
-  // Break caught: a view that lists every vendor, that leaves out a vendor an officer cannot finish, that keeps listing a vendor whose arrival a senior has decided, that names the wrong reason, that shows another
-  // hub's vendors, or that answers a view that is not one as an empty list.
-  it('lists in needs_senior the vendors whose close needs a senior’s exception and the ones an arrival taken back sent to review, and no one else', async () => {
-    // A vendor whose orders are under way and that still has a parcel without one: the close needs an exception or the orders that remain.
+  // Break caught: a view that lists every vendor, that lists a vendor with parcels still to order (D-S7-11: those are the officer's: the officer calls the vendor and makes the order), that keeps listing a vendor whose
+  // arrival a senior has decided, that names the wrong reason, that shows another hub's vendors, or that answers a view that is not one as an empty list.
+  it('lists in needs_senior only the vendors an arrival taken back sent to review: a vendor with parcels still to order is the officer’s, never listed (D-S7-11)', async () => {
+    // A vendor whose orders are under way and that still has a parcel without one: the officer's to finish (D-S7-11), so no senior is asked.
     const gap = await cleared(2);
     orderOf(await itemize(officer, gap.id, body(present(gap.parcels, 0).id)));
     // A vendor with every order made, and one waiting for its first order: neither needs a senior.
@@ -6518,14 +6518,21 @@ describe('the rows of Orders to make say how many orders are made, and which ven
 
     const seen = await rows(officer, 'view=needs_senior');
     const reasons = new Map(seen.map((row) => [row.id, row.senior_needed]));
-    expect(reasons.get(gap.id)).toBe('CLOSE_EXCEPTION');
     expect(reasons.get(back.id)).toBe('ARRIVAL_TAKEN_BACK');
+    expect(reasons.has(gap.id)).toBe(false);
     expect(reasons.has(whole.id)).toBe(false);
     expect(reasons.has(fresh.id)).toBe(false);
-    for (const row of seen) expect(['ITEMIZING', 'RECONCILIATION_REQUIRED']).toContain(row.state);
+    for (const row of seen) {
+      expect(row.state).toBe('RECONCILIATION_REQUIRED');
+      expect(row.senior_needed).toBe('ARRIVAL_TAKEN_BACK');
+    }
+    // The vendor with the gap is still on the orders list with the parcels it has left, and says no senior is needed.
+    const stillOrdering = await rowOf(officer, 'state=ITEMIZING', gap.id);
+    expect(stillOrdering).toMatchObject({ orders_made: 1, parcels_needing_order: 1 });
+    expect(stillOrdering).not.toHaveProperty('senior_needed');
 
     // The vendors of another hub are not in the list of this one, and the senior's decision takes the vendor out of it.
-    expect((await rows(otherHub, 'view=needs_senior')).map((row) => row.id)).not.toContain(gap.id);
+    expect((await rows(otherHub, 'view=needs_senior')).map((row) => row.id)).not.toContain(back.id);
     const decided = await boss.client.post(
       `${ONE(back.id)}/discrepancy`,
       { outcome: 'ACCEPTED', note: 'The parcel was found on the table' },
@@ -6533,9 +6540,12 @@ describe('the rows of Orders to make say how many orders are made, and which ven
     );
     expect(decided.status, decided.text).toBe(200);
     expect((await rows(officer, 'view=needs_senior')).map((row) => row.id)).not.toContain(back.id);
-    // The last order of the vendor with the gap ends its wait for a senior.
-    orderOf(await itemize(officer, gap.id, body(present(gap.parcels, 1).id)));
-    expect((await rows(officer, 'view=needs_senior')).map((row) => row.id)).not.toContain(gap.id);
+    // A vendor whose arrival a senior has decided is back at work, and its row on the orders list no longer says a senior is needed (the reversal stays on record: the function reads the state too).
+    const resumed = await read(boss, back.id);
+    expect(resumed.intake.state).not.toBe('RECONCILIATION_REQUIRED');
+    const resumedRow = await rowOf(officer, `state=${resumed.intake.state}`, back.id);
+    expect(resumedRow).toBeDefined();
+    expect(resumedRow).not.toHaveProperty('senior_needed');
 
     // The function itself answers staff under the key that reads intakes and nobody else (a staff session under another key, and a vendor, are refused by the database).
     const askedUnder = async (
