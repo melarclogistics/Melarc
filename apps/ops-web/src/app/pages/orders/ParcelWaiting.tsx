@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
@@ -170,20 +171,24 @@ export function ParcelWaiting({
           <p>{problem.message}</p>
         </Alert>
       )}
-      {asking ? (
-        <MarkDialog
-          parcelId={parcelId}
-          version={version}
-          onCancel={() => {
-            setAsking(false);
-          }}
-          onDone={() => {
-            setAsking(false);
-            onMarked();
-          }}
-          onReload={onReload}
-        />
-      ) : null}
+      {asking
+        ? // The dialog is drawn under the page and not inside the form of the order (Run G1: a form inside a form is submitted by the browser itself in Chromium, which no test in jsdom shows); the form of the order still never hears its submit (ActDialog stops it).
+          createPortal(
+            <MarkDialog
+              parcelId={parcelId}
+              version={version}
+              onCancel={() => {
+                setAsking(false);
+              }}
+              onDone={() => {
+                setAsking(false);
+                onMarked();
+              }}
+              onReload={onReload}
+            />,
+            document.body,
+          )
+        : null}
     </section>
   );
 }
