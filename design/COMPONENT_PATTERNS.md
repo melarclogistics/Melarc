@@ -1670,9 +1670,24 @@ acted.
   screen's skeleton beside it), the error in approved words **with a retry that is a control beside the error and not part of it**,
   the refusals of authority (§15, naming the permission), nothing at all (the screen's empty state), and the content. It shows
   nothing for a session that has ended or an answer for a session that has gone, because the session boundary has already taken the
-  person away. It never shows the diagnostic `message`, never shows data of an earlier answer beside a failed refresh, and parks focus
-  on its region when a retry takes its button away. A retry is offered for what could work (no answer, a fault, a rate limit) and not
-  for a missing record or a refusal.
+  person away. It never shows the diagnostic `message` and parks focus on its region when a retry takes its button away. A retry is
+  offered for what could work (no answer, a fault, a rate limit) and not for a missing record or a refusal.
+  **A read that was drawn and is asked for again, and fails in a way a retry could mend (no answer, a fault, a rate limit), keeps the
+  page it drew and whatever was typed into it** (`keepsPage`; Run G2, the Product Owner's decision of 24 November 2026, D-S7-16: an
+  officer who went to the vendor's messages for a phone number came back to an error where the form had been). It says so in one
+  line above the page, *This could not be refreshed. What you see was read earlier and may be out of date.* (a rate limit says its
+  own calm words), with *Try again* beside the line and not in it, and the page's content stays where it is in the tree, so that a
+  form is not drawn again, which would empty it. **What does not keep:** a record that is gone and a refusal of authority replace the
+  page, as they always did (the page they replace is a page of something the person can no longer have), a session that ended shows
+  nothing, and a read with no data yet is the error. **Three switches, each for a screen that knows better:** `keepOnFailure={false}`
+  for a read whose earlier answer is no use once a new one could not be had (the link of a photo asked for again because the picture
+  it gave would not load), `ownsRefreshFailure` for a screen that tells a failed refresh itself (the freshness line of its header
+  and its connection banner: the receiving run's page), and, for a screen that draws part of itself around a `ReadState` (a heading
+  that stands until its own takes its place), `drawnData(query)` in place of `status === 'success'` and `RefreshFailed` where it
+  draws its content outside the `ReadState`, or it draws its heading twice or loses its body. **A form that keeps a version for its
+  save follows the record's** (the order form and the change page do): a re-read that the line asks for is a read the form's own
+  flow does not know of. The list of screens it reaches is the one that draws a `ReadState`, a `WithRecord`, a `WithManifest`, a
+  `WithPickupRequest` or a `WithProfile`; `app/pages/kept-page.test.tsx` holds each wrapper's screen to it.
 - **The problem copy** reads a failure as a kind (`forbidden`, `not-found`, `conflict`, `invalid`, `rate-limited`, `refused`,
   `unavailable`, `session-ended`, `stale`) and words it from a table keyed by **operation, context and code**; the most specific rule
   wins, and a rule for a whole operation does not speak over a code that has a meaning of its own. The generic wording is proposed
