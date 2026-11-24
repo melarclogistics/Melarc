@@ -306,6 +306,10 @@ describe('the recipient of a confirmed order, corrected (D-S7-1, Run F)', () => 
     });
     expect(phone).toHaveAttribute('aria-invalid', 'true');
     expect(asked.queryByText(/Check the note marked below/)).toBeNull();
+    // The alert is under the fields in a dialog, so what it points at is above it (found by looking at the picture of this state).
+    expect(
+      asked.getByText('Check what is marked above: it was not accepted as written.'),
+    ).toBeVisible();
     expect(sent(CORRECT)).toHaveLength(1);
   });
 

@@ -1282,7 +1282,7 @@ export const ORDERS_COPY: readonly CopyRule[] = [
   {
     operation: 'correctOrderRecipient',
     code: 'VALIDATION_FAILED',
-    text: 'Check what is marked below: it was not accepted as written.',
+    text: 'Check what is marked above: it was not accepted as written.',
   },
   {
     operation: 'correctOrderRecipient',
