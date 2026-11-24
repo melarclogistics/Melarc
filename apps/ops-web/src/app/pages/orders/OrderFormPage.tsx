@@ -233,6 +233,11 @@ function OrderForm({
   const form = useRef<HTMLFormElement>(null);
   const navigate = useNavigate();
   const version = useRef(facts.etag);
+  // The version a save takes is the latest read of the vendor, whoever read it: the flow's own re-read (below) or the one the page's line asks for when a read failed and the page was kept (`ReadState`), which
+  // the flow does not know of. A form that went on with the version it was opened at would be refused as stale for a read it had.
+  useEffect(() => {
+    version.current = facts.etag;
+  }, [facts.etag]);
   const gate = useUploadGate();
   const parcelId = parcel?.id ?? null;
 

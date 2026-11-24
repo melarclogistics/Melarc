@@ -1731,3 +1731,81 @@ describe('a parcel the officer is waiting on the vendor’s details for (Run G1,
     expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
   });
 });
+
+/**
+ * Run G2, OB-S1-169 item 10 (D-S7-16): a save is refused because the vendor changed under the officer, and the one press that checks again reads the vendor, and the read fails (a lost connection). The form that was
+ * there, and everything typed in it, are still there, with the failure told in a line and a way to ask again; once it is read the save goes through on the version that was read.
+ */
+describe('a refresh that fails while an officer is typing', () => {
+  /** The vendor's read, which answers until the connection is lost and again once it is back (the version moves with each answer). The screen's own read of it is not asked twice, a person does that. */
+  const vendorRead = () => {
+    const state = { down: false, reads: 0 };
+    return {
+      state,
+      handler: () => {
+        if (state.down) return errorResponse(500, 'INTERNAL_ERROR');
+        state.reads += 1;
+        return json(200, checkInFixture(PARCELS, { id: VENDOR_ID, state: 'ITEMIZING' }), {
+          ETag: `"v${String(state.reads)}"`,
+        });
+      },
+    };
+  };
+
+  // Break caught: the vendor's read drawn as an error in place of the form, which took the name, the phone, the address and the size with it.
+  it('keeps the page and every entry, says in a line that it could not be refreshed, mends with Try again and then saves', async () => {
+    const read = vendorRead();
+    let saves = 0;
+    const { user } = open({
+      [RECORD]: read.handler,
+      [SAVE]: () => {
+        saves += 1;
+        return saves === 1
+          ? json(409, {
+              code: 'STATE_CONFLICT',
+              message: 'Diagnostic text that must never reach a screen.',
+              request_id: 'r3',
+              details: { rule: 'stale' },
+            })
+          : json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' });
+      },
+    });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    await fillIn(user);
+    const name = screen.getByLabelText(/Recipient’s name/);
+    const phone = screen.getByLabelText(/Recipient’s phone/);
+    const address = screen.getByLabelText(/Delivery address/);
+    await user.click(await pricedSave());
+    await alertSaying('This vendor changed while you were working');
+
+    // The one press that checks again reads the vendor, and the connection is lost.
+    read.state.down = true;
+    await user.click(screen.getByRole('button', { name: 'Check the price again' }));
+    expect(await screen.findByText(/could not be refreshed/i)).toBeVisible();
+    // The same fields, not fields that were drawn again with the same text, and the page's one heading drawn once.
+    expect(screen.getByLabelText(/Recipient’s name/)).toBe(name);
+    expect(name).toHaveValue('Ama Mensah');
+    expect(phone).toHaveValue('024 123 4567');
+    expect(address).toHaveValue('12 Madina Estate, near the market');
+    expect(screen.getByRole('radio', { name: 'Medium' })).toBeChecked();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+    // The connection is back: the line's own Try again reads the vendor, the line goes, and nothing typed is lost.
+    read.state.down = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.queryByText(/could not be refreshed/i)).toBeNull();
+    });
+    expect(screen.getByLabelText(/Recipient’s name/)).toBe(name);
+    expect(name).toHaveValue('Ama Mensah');
+    expect(address).toHaveValue('12 Madina Estate, near the market');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+    // And the order is saved from the same form, on the version that was read.
+    await user.click(await pricedSave());
+    expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+    expect(sent(SAVE)[1]?.headers.get('If-Match')).toBe('"v2"');
+  });
+});

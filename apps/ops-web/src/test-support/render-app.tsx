@@ -6,6 +6,7 @@ import { createMemoryRouter } from 'react-router';
 import { App } from '../app/App';
 import type { SignedInRoute } from '../app/navigation/route-registry';
 import { createAppRoutes } from '../app/routes';
+import { createQueryClient } from '../platform/query/query-client';
 import { failWhenAPermissionKeyIsDrawn } from './permission-keys';
 
 /**
@@ -24,6 +25,8 @@ export function renderApp(
   const router = createMemoryRouter(createAppRoutes(extraRoutes, signedIn), {
     initialEntries: [initialPath],
   });
-  const view = render(<App router={router} />);
-  return { ...view, router, user: userEvent.setup() };
+  // The application's own kind of client, kept here so that a test can make a read ask again (a page's reads are idle: only an act of its own reads one again).
+  const queryClient = createQueryClient();
+  const view = render(<App router={router} queryClient={queryClient} />);
+  return { ...view, router, queryClient, user: userEvent.setup() };
 }

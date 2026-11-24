@@ -301,6 +301,15 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
   stale: '',
 };
 
+/**
+ * What a page says when a read it had drawn was asked for again and failed in a way asking once more could mend (`ReadState`, Run G2, OB-S1-169 item 10): the page stays as it was read, with whatever a person
+ * typed into it, and this is the line above it. A rate limit says its own calm words (`RATE_LIMITED_MESSAGE`) in place of the headline. Drafts, with the rest of the generic wording, for the Product Owner.
+ */
+export const REFRESH_FAILED = {
+  headline: 'This could not be refreshed.',
+  note: 'What you see was read earlier and may be out of date.',
+} as const;
+
 // What a refusal says is the table's (`capability-words.ts`), for every kind: the message a problem carries is the sentence the refusal components draw, one wording.
 const FORBIDDEN_MESSAGE: Readonly<Record<ForbiddenKind, string>> = {
   'permission-missing': refusalText('permission-missing', undefined),

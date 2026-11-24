@@ -8,7 +8,7 @@ import { Field } from '../../../components/ui/field/Field';
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState, RefreshFailed } from '../../../components/ui/read-state/ReadState';
 import { CommandOutcomeNotice } from '../../../components/ui/reason-confirmation/command-outcome';
 import { ReasonConfirmationDialog } from '../../../components/ui/reason-confirmation/ReasonConfirmationDialog';
 import { ReasonSelect } from '../../../components/ui/reason-select/ReasonSelect';
@@ -440,7 +440,9 @@ function Reading({ id }: { readonly id: string }) {
     }
   }
   const title = 'Revoke or replace a device';
-  const name = query.status === 'success' ? query.data.rider.full_name : undefined;
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): the form stays, with what was typed in it, and a line says the rider could not be read again.
+  const record = drawnData(query, { operation: 'getRider' });
+  const name = record?.rider.full_name;
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
@@ -453,8 +455,11 @@ function Reading({ id }: { readonly id: string }) {
         {...(name === undefined ? {} : { description: `For ${name}.` })}
         breadcrumb={riderTrail(id, name)}
       />
-      {query.status === 'success' ? (
-        <Device id={id} record={query.data} query={query} />
+      {record !== undefined ? (
+        <>
+          <RefreshFailed query={query} operation="getRider" />
+          <Device id={id} record={record} query={query} />
+        </>
       ) : (
         // Loading, or a failure that is not one of the pages above: the page still has its heading and its way back (the trail), and says what is happening.
         <ReadState<RiderRecord>

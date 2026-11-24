@@ -1,7 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
+import {
+  errorResponse,
+  installFakeApi,
+  json,
+  type FakeApi,
+  type Handler,
+} from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
 import {
   describeInterfaceStates,
@@ -629,6 +635,64 @@ describeInterfaceStates('the form of a change', {
       });
     },
   },
+});
+
+/**
+ * Run G2, OB-S1-169 item 10 (D-S7-16): the change is refused because the order changed under the officer, the one press that checks again reads the order, and the read fails (a lost connection). The form, what was
+ * changed and **the reason that was typed** are still there, with the failure told in a line and a way to ask again; once the order is read the change is saved on the version that was read.
+ */
+describe('a refresh that fails while an officer is changing an order', () => {
+  // Break caught: the order's read drawn as an error in place of the form, which took the change and the reason with it.
+  it('keeps the form, the change and the reason, says in a line that it could not be refreshed, mends with Try again and then saves', async () => {
+    const connection = { down: false };
+    let reads = 0;
+    let saves = 0;
+    const { user } = open({
+      [READ]: () => {
+        if (connection.down) return errorResponse(500, 'INTERNAL_ERROR');
+        reads += 1;
+        return json(200, orderOf('early'), { ETag: `"o${String(reads)}"` });
+      },
+      [SAVE]: () => {
+        saves += 1;
+        return saves === 1
+          ? json(409, {
+              code: 'STATE_CONFLICT',
+              message: 'Diagnostic text that must never reach a screen.',
+              request_id: 'r2',
+              details: { rule: 'stale' },
+            })
+          : json(200, SAVED(), { ETag: '"o9"' });
+      },
+    });
+    await changeSize(user);
+    const reason = screen.getByLabelText(/Why are you changing this order\?/);
+    await user.click(await pricedSave());
+    await alertSaying('changed while you were working');
+
+    // The one press that checks again reads the order, and the connection is lost.
+    connection.down = true;
+    await user.click(screen.getByRole('button', { name: 'Check the price again' }));
+    expect(await screen.findByText(/could not be refreshed/i)).toBeVisible();
+    // The same field, with the same words in it, and the page's one heading drawn once.
+    expect(screen.getByLabelText(/Why are you changing this order\?/)).toBe(reason);
+    expect(reason).toHaveValue('The parcel is bigger than the photo showed');
+    expect(screen.getByRole('radio', { name: 'Medium' })).toBeChecked();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+    connection.down = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.queryByText(/could not be refreshed/i)).toBeNull();
+    });
+    expect(screen.getByLabelText(/Why are you changing this order\?/)).toBe(reason);
+    expect(reason).toHaveValue('The parcel is bigger than the photo showed');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+    await user.click(await pricedSave());
+    expect(await screen.findByText(`Order ${CODE} was changed.`)).toBeVisible();
+    expect(sent(SAVE)[1]?.headers.get('If-Match')).toBe('"o2"');
+  });
 });
 
 // The captured answers are what the tests above are made of: a test that reaches for one that is not there fails here and not in a page.

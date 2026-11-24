@@ -11,7 +11,7 @@ import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { Panel } from '../../../components/ui/panel/Panel';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
@@ -495,12 +495,13 @@ function Reading({ id }: { readonly id: string }) {
     const problem = problemOf(query.error, { operation: 'getOrder' });
     if (problem.kind === 'not-found') return <OrderNotFound />;
   }
-  const loaded = query.status === 'success';
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): its own heading is there, and this one is not.
+  const read = drawnData(query, { operation: 'getOrder' });
   return (
     <>
-      <title>{`${loaded ? R.documentTitle(query.data.order.code) : 'Order'} · Melarc Ops Portal`}</title>
+      <title>{`${read === undefined ? 'Order' : R.documentTitle(read.order.code)} · Melarc Ops Portal`}</title>
       <HubFloor>
-        {loaded ? null : <PageHeader title="Order" />}
+        {read === undefined ? <PageHeader title="Order" /> : null}
         <ReadState<OrderRecordView>
           query={query}
           isEmpty={() => false}

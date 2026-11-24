@@ -6,7 +6,7 @@ import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenS
 import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import {
   useIntakeRecord,
@@ -139,7 +139,8 @@ function Reading({
     }
   }
 
-  const loaded = ownsHeading && query.status === 'success';
+  // A page that is kept after a read that failed again (`ReadState`) is a page that is drawn: its own heading is there, and this wrapper draws none.
+  const loaded = ownsHeading && drawnData(query, { operation: 'getHubIntake' }) !== undefined;
   const named = heading(query.data, vendor);
   const trail = breadcrumb?.(query.data, vendor);
   return (

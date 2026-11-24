@@ -8,7 +8,7 @@ import { useUploadGate } from '../../../components/ui/evidence-upload/UploadGate
 import { focusFirstInvalid } from '../../../components/ui/form/use-submission';
 import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { TaskForm } from '../../../components/ui/templates/TaskForm';
 import { useApiClient } from '../../../platform/api/api-client';
@@ -71,6 +71,11 @@ function AmendForm({
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const form = useRef<HTMLFormElement>(null);
   const version = useRef(record.etag);
+  // The version a save takes is the latest read of the order, whoever read it: the flow's own re-read (below) or the one the page's line asks for when a read failed and the page was kept (`ReadState`), which the flow
+  // does not know of.
+  useEffect(() => {
+    version.current = record.etag;
+  }, [record.etag]);
   const gate = useUploadGate();
 
   const flow = useOrderFlow(
@@ -250,12 +255,13 @@ function whyNot(record: OrderRecordView): string | undefined {
 
 function Reading({ id }: { readonly id: string }) {
   const query = useOrder(id);
-  const loaded = query.status === 'success';
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): its own heading is there, and this one is not.
+  const read = drawnData(query, { operation: 'getOrder' });
   return (
     <>
-      <title>{`${loaded ? F.amendTitle(query.data.order.code) : F.documentTitle} · Melarc Ops Portal`}</title>
+      <title>{`${read === undefined ? F.documentTitle : F.amendTitle(read.order.code)} · Melarc Ops Portal`}</title>
       <HubFloor>
-        {loaded ? null : <PageHeader title={F.documentTitle} />}
+        {read === undefined ? <PageHeader title={F.documentTitle} /> : null}
         <ReadState<OrderRecordView>
           query={query}
           isEmpty={() => false}

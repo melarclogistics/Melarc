@@ -5,7 +5,7 @@ import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState, RefreshFailed } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { PickupRequestView } from '../../../platform/pickup/pickup-shape';
 import { useQueueContinuity } from '../../../platform/pickup/queue-continuity-context';
@@ -141,7 +141,9 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithPicku
 
   const { title, description, breadcrumb, documentTitle } = heading(query.data?.request);
   // The way back is the same element in every state (loading, loaded, failed), so that a press on it while the request is on its way is not lost to the page replacing it.
-  const loaded = ownsHeading && query.status === 'success';
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): the request is shown as it was read, with a line that says so, and its own heading is in it.
+  const record = drawnData(query, { operation: 'getPickupRequest' });
+  const loaded = ownsHeading && record !== undefined;
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
@@ -153,9 +155,7 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithPicku
           {...(breadcrumb === undefined ? {} : { breadcrumb })}
         />
       )}
-      {query.status === 'success' ? (
-        children(query.data, query)
-      ) : (
+      {record === undefined ? (
         // Loading, or a failure that is not one of the pages above: the page still has its heading, and says what is happening.
         <ReadState<PickupRecord>
           query={query}
@@ -168,6 +168,11 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithPicku
         >
           {() => null}
         </ReadState>
+      ) : (
+        <>
+          <RefreshFailed query={query} operation="getPickupRequest" />
+          {children(record, query)}
+        </>
       )}
     </>
   );

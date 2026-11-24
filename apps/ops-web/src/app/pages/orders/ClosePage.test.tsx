@@ -1,7 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
+import {
+  errorResponse,
+  installFakeApi,
+  json,
+  type FakeApi,
+  type Handler,
+} from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
 import {
   describeInterfaceStates,
@@ -311,6 +317,74 @@ describe('closing with parcels still to order (a senior officer’s exception)',
     expect(screen.getByLabelText(/Why are you closing with parcels still to order?/)).toHaveValue(
       reason,
     );
+  });
+
+  // Break caught (Run G2, OB-S1-169 item 10): the two reads of the page drawn as errors in place of the form when the senior reads them again and the connection is lost, which took the reason the senior wrote with
+  // them. The page, the reason and the figures stay, each read says in a line that it could not be refreshed, and once they are read the close goes on the version that was read.
+  it('keeps the reason a senior wrote when the two reads that follow a stale close both fail, and closes once they are read', async () => {
+    const connection = { down: false };
+    let record = 0;
+    let closes = 0;
+    const { user } = open(
+      {
+        [RECORD]: () => {
+          if (connection.down) return errorResponse(500, 'INTERNAL_ERROR');
+          record += 1;
+          return json(200, checkInFixture(PARCELS, { id: VENDOR_ID, state: 'ITEMIZING' }), {
+            ETag: `"v${String(record)}"`,
+          });
+        },
+        [CLOSURE]: () =>
+          connection.down ? errorResponse(500, 'INTERNAL_ERROR') : json(200, withParcelLeft()),
+        [CLOSE]: () => {
+          closes += 1;
+          return closes === 1
+            ? json(409, {
+                code: 'STATE_CONFLICT',
+                message: 'Diagnostic text that must never reach a screen.',
+                request_id: 'r4',
+                details: { rule: 'stale' },
+              })
+            : json(200, checkInFixture(PARCELS, { id: VENDOR_ID, state: 'CLOSED' }), {
+                ETag: '"v9"',
+              });
+        },
+      },
+      SENIOR,
+    );
+    const reason = 'One parcel is on the rider’s bike';
+    const field = await screen.findByLabelText(/Why are you closing with parcels still to order\?/);
+    await user.type(field, reason);
+    await user.click(screen.getByRole('button', { name: 'Close with a reason' }));
+    await user.click(within(await dialog()).getByRole('button', { name: 'Yes, close it' }));
+    // The vendor changed: the senior is offered to read it again, and the connection is lost as they do.
+    connection.down = true;
+    await user.click(await screen.findByRole('button', { name: 'Reload the record' }));
+
+    // Both reads failed, and the page is the page it was: the same field, the same words in it, its one heading, and a line from each read.
+    expect((await screen.findAllByText(/could not be refreshed/i)).length).toBe(2);
+    expect(screen.getByLabelText(/Why are you closing with parcels still to order\?/)).toBe(field);
+    expect(field).toHaveValue(reason);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Close with a reason' })).toBeVisible();
+
+    // The connection is back: each line's own Try again reads its own read, and the senior closes on the version that was read.
+    connection.down = false;
+    for (const retry of screen.getAllByRole('button', { name: 'Try again' })) {
+      await user.click(retry);
+    }
+    await waitFor(() => {
+      expect(screen.queryByText(/could not be refreshed/i)).toBeNull();
+    });
+    expect(screen.getByLabelText(/Why are you closing with parcels still to order\?/)).toBe(field);
+    expect(field).toHaveValue(reason);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Close with a reason' }));
+    await user.click(within(await dialog()).getByRole('button', { name: 'Yes, close it' }));
+    expect(
+      await screen.findByText('The vendor is closed, with parcels still to order.'),
+    ).toBeVisible();
+    expect(sent(CLOSE)[1]?.headers.get('If-Match')).toBe(`"v${String(record)}"`);
   });
 
   // Break caught: a vendor with a surplus of orders closed over, with the exception or without it.

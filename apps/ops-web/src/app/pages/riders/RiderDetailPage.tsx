@@ -9,7 +9,7 @@ import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenS
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { Panel } from '../../../components/ui/panel/Panel';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState, RefreshFailed } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
@@ -216,13 +216,13 @@ function Reading({ id }: { readonly id: string }) {
     }
   }
   const title = query.data?.rider.full_name ?? 'Rider';
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): the rider is shown as it was read, with a line that says so.
+  const record = drawnData(query, { operation: 'getRider' });
   return (
     <>
       <title>{`${title} · Melarc Ops Portal`}</title>
       <BackToRiders />
-      {query.status === 'success' ? (
-        <Rider id={id} record={query.data} />
-      ) : (
+      {record === undefined ? (
         // Loading, or a failure that is not one of the pages above: the page still has its heading and its way back, and says what is happening.
         <>
           <PageHeader title="Rider" />
@@ -237,6 +237,11 @@ function Reading({ id }: { readonly id: string }) {
           >
             {() => null}
           </ReadState>
+        </>
+      ) : (
+        <>
+          <RefreshFailed query={query} operation="getRider" />
+          <Rider id={id} record={record} />
         </>
       )}
     </>

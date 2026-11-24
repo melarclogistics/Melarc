@@ -8,7 +8,7 @@ import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenS
 import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { RunPageView, VendorView } from '../../../platform/hub-receiving/receiving-shape';
 import { useReceivingRun } from '../../../platform/hub-receiving/use-receiving-queries';
@@ -191,7 +191,9 @@ function Reading({
     }
   }
 
-  const loaded = query.status === 'success';
+  // A run kept after a read that failed again is a run that is drawn (`ReadState`): its own header is there, and this one is not. The page tells a failed refresh itself (the freshness line of its header and its
+  // connection banner), so `ReadState` draws no line of its own.
+  const loaded = drawnData(query, { operation: 'getReceivingRun' }) !== undefined;
   return (
     <>
       {loaded ? null : (
@@ -208,6 +210,7 @@ function Reading({
         skeleton={<Skeleton lines={4} />}
         permission="hub.read"
         operation="getReceivingRun"
+        ownsRefreshFailure
       >
         {(page) => children(page, query)}
       </ReadState>

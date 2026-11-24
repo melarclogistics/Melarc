@@ -5,7 +5,7 @@ import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState, RefreshFailed } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import type { StaffIdentityView } from '../../../platform/staff/staff-shape';
@@ -105,7 +105,9 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithProfi
   }
 
   const { title, description, breadcrumb, documentTitle } = heading(query.data?.identity);
-  const loaded = ownsHeading && query.status === 'success';
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): the profile is shown as it was read, with a line that says so, and its own heading is in it.
+  const record = drawnData(query, { operation: 'getStaffIdentity' });
+  const loaded = ownsHeading && record !== undefined;
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
@@ -117,9 +119,7 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithProfi
           {...(breadcrumb === undefined ? {} : { breadcrumb })}
         />
       )}
-      {query.status === 'success' ? (
-        children(query.data, query)
-      ) : (
+      {record === undefined ? (
         // Loading, or a failure that is not one of the pages above: the page still has its heading, and says what is happening.
         <ReadState<StaffRecord>
           query={query}
@@ -132,6 +132,11 @@ function Reading({ id, heading, back, ownsHeading = false, children }: WithProfi
         >
           {() => null}
         </ReadState>
+      ) : (
+        <>
+          <RefreshFailed query={query} operation="getStaffIdentity" />
+          {children(record, query)}
+        </>
       )}
     </>
   );
