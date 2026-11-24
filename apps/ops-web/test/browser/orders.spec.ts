@@ -537,6 +537,8 @@ test.describe('a parcel the officer is waiting on the vendor’s details for (Ru
     expect(marks.at(-1)?.ifMatch).toBe('"v1"');
     expect(marks.at(-1)?.idempotencyKey).toBeUndefined();
 
+    // The page is left when the picture beside the form has finished loading: leaving it with the load in flight is an engine's cancelled request (WebKit words it as a failed one), which the test caused and the page did not.
+    await page.waitForLoadState('networkidle');
     // The vendor's orders page has a tab for the parcels that wait, with the server's count and the note.
     await page.goto(ORDERS);
     await page.getByRole('tab', { name: /Waiting for the vendor’s details/ }).click();
@@ -553,6 +555,7 @@ test.describe('a parcel the officer is waiting on the vendor’s details for (Ru
       )
       .toBe(true);
 
+    await page.waitForLoadState('networkidle');
     // The parcel's own form says it is waited on, and one press takes the mark off.
     await page.goto(FIRST_PARCEL);
     await expect(
