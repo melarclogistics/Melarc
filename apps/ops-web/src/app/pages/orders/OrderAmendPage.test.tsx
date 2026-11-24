@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
@@ -55,9 +55,15 @@ const previewOf = (total = 3500, token?: string) => {
 const SAVED = () => captured('amend-saved');
 
 const PRICE_WAIT = { timeout: PRICE_DEBOUNCE_MS + 2000 };
-/** The one save once its price is on the screen: *Save the change at GH₵35.00*. */
-const pricedSave = (): Promise<HTMLElement> =>
+/** The one save as soon as its price is on the screen: *Save the change at GH₵35.00*, with the moment in which a press is ignored still open. */
+const pricedSaveAtOnce = (): Promise<HTMLElement> =>
   screen.findByRole('button', { name: /^Save the change at / }, PRICE_WAIT);
+/** The one save once its price is on the screen and the moment in which a press is ignored has passed (the clock is held, and moved on here). */
+const pricedSave = async (): Promise<HTMLElement> => {
+  const button = await pricedSaveAtOnce();
+  clock += SAVE_GUARD_MS + 1;
+  return button;
+};
 const pause = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -79,6 +85,10 @@ function holdTheClock(): void {
 }
 
 let api: FakeApi;
+// Every test holds the clock: a price that appears opens a moment in which a press is ignored (OB-S1-170a), and a test moves it on by hand.
+beforeEach(() => {
+  holdTheClock();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   expect(api.unhandled).toEqual([]);
@@ -304,6 +314,22 @@ describe('a new address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () =>
     const chosen = { zone_id: TEMA, note: 'It is next to the harbour' };
     expect((await bodyOf(sent(PREVIEW).at(-1))).destination_zone_authorization).toEqual(chosen);
     expect((await bodyOf(sent(SAVE)[0])).destination_zone_authorization).toEqual(chosen);
+  });
+});
+
+describe('a price that appears while the officer taps (Run G1, Part 2, item 10; OB-S1-170a)', () => {
+  // Break caught: the double tap that straddles the moment the price of a change first appears saving a change at a price that may not have been read.
+  it('ignores a press in the moment after a price first appears, and saves when it is pressed again', async () => {
+    const { user } = open({ [SAVE]: () => json(200, SAVED(), { ETag: '"o2"' }) });
+    await changeSize(user);
+    await user.click(await pricedSaveAtOnce());
+    await pause(100);
+    expect(sent(SAVE)).toHaveLength(0);
+
+    clock += SAVE_GUARD_MS + 1;
+    await user.click(await pricedSaveAtOnce());
+    expect(await screen.findByText(`Order ${CODE} was changed.`)).toBeVisible();
+    expect(sent(SAVE)).toHaveLength(1);
   });
 });
 

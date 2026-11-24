@@ -90,11 +90,17 @@ export function termsDifferences(before: TermsView, now: TermsView): readonly Te
   const found: TermsDifference[] = [];
   if (before.total.amount_minor !== now.total.amount_minor) found.push('price');
   if (before.delivery.committed_date !== now.delivery.committed_date) found.push('date');
+  // Who pays has changed when the arrangement did (the intent, where it comes from, what the order becomes once it is confirmed), or when the portions moved and the price did not. The portions are amounts: they
+  // move with the price, and a price that moved is told as a price that moved, never as a change of who pays (Run G1, Part 2, item 11).
+  const priceMoved = before.total.amount_minor !== now.total.amount_minor;
   if (
-    before.payer.sender.amount_minor !== now.payer.sender.amount_minor ||
-    before.payer.recipient.amount_minor !== now.payer.recipient.amount_minor ||
+    before.payer.payer_intent !== now.payer.payer_intent ||
+    before.payer.source !== now.payer.source ||
     before.payer.commercial_state_after_confirmation !==
-      now.payer.commercial_state_after_confirmation
+      now.payer.commercial_state_after_confirmation ||
+    (!priceMoved &&
+      (before.payer.sender.amount_minor !== now.payer.sender.amount_minor ||
+        before.payer.recipient.amount_minor !== now.payer.recipient.amount_minor))
   ) {
     found.push('payer');
   }
@@ -237,6 +243,9 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
       // An answer is for the entries it was asked for: if they have changed since, it is thrown away and never drawn.
       if (desired.current?.key === target.key) {
         if (outcome?.kind === 'terms') {
+          // A price has just appeared: a press in the moment after it is meant for the button before it (a double tap that straddles the moment the price first appears), so it saves nothing (OB-S1-170a,
+          // decided by the Product Owner on 24 November 2026). It is the same moment a price that changed at the save opens, on the monotonic clock.
+          armedUntil.current = performance.now() + SAVE_GUARD_MS;
           setAnswer({ key: target.key, terms: outcome.terms });
         } else if (outcome?.kind === 'zone-choice') {
           setOffer({ why: 'ambiguous', zones: outcome.candidates });

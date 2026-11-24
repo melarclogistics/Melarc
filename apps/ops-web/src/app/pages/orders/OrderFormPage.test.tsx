@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   errorResponse,
@@ -67,9 +67,15 @@ const SAVED = (id: string) => ({
 });
 
 const PRICE_WAIT = { timeout: PRICE_DEBOUNCE_MS + 2000 };
-/** The one save once its price is on the screen: *Save the order at GH₵35.00*. */
-const pricedSave = (): Promise<HTMLElement> =>
+/** The one save as soon as its price is on the screen: *Save the order at GH₵35.00*, with the moment in which a press is ignored still open. */
+const pricedSaveAtOnce = (): Promise<HTMLElement> =>
   screen.findByRole('button', { name: /^Save the order at / }, PRICE_WAIT);
+/** The one save once its price is on the screen and the moment in which a press is ignored has passed (the clock is held, and moved on here: a price that has just appeared is not pressed by a finger that meant the button before it). */
+const pricedSave = async (): Promise<HTMLElement> => {
+  const button = await pricedSaveAtOnce();
+  clock += SAVE_GUARD_MS + 1;
+  return button;
+};
 const pause = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -84,6 +90,10 @@ function holdTheClock(): void {
 }
 
 let api: FakeApi;
+// Every test holds the clock: a price that appears opens a moment in which a press is ignored (OB-S1-170a), measured on the monotonic clock, and a test moves it on by hand, as a finger that waits does.
+beforeEach(() => {
+  holdTheClock();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   expect(api.unhandled).toEqual([]);
@@ -261,6 +271,54 @@ describe('making an order, and checking the price first', () => {
   });
 });
 
+describe('a price that appears while the officer taps (Run G1, Part 2, item 10; OB-S1-170a)', () => {
+  // Break caught: a double tap that straddles the moment a price first appears (the first tap on the button that says the price is being checked, which does nothing, the second on the save that now says it) saving a price
+  // that may not have been read: the moment in which a press is ignored is at every appearance of a price, not only after a price that changed at the save.
+  it('ignores a press in the moment after a price first appears, and saves when it is pressed again', async () => {
+    const { user } = open({
+      [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' }),
+    });
+    await fillIn(user);
+    await user.click(await pricedSaveAtOnce());
+    await pause(100);
+    expect(sent(SAVE)).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /^Save the order at / })).toBeVisible();
+
+    clock += SAVE_GUARD_MS + 1;
+    await user.click(await pricedSaveAtOnce());
+    expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+    expect(sent(SAVE)).toHaveLength(1);
+  });
+
+  // Break caught: the moment opened only for the first price of the page: the price of entries the officer changed after the first is as new as the first, and a press at once is as much a second tap.
+  it('opens the moment again for the price of entries that changed', async () => {
+    let previews = 0;
+    const { user } = open({
+      [PREVIEW]: () => {
+        previews += 1;
+        return json(
+          200,
+          termsOf({}, previews === 1 ? 3500 : 4000, previews === 1 ? TOKEN : NEW_TOKEN),
+        );
+      },
+      [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' }),
+    });
+    await fillIn(user);
+    await pricedSave();
+    // The officer changes the size while the first price is on the screen: a new price comes, and a press at once is ignored.
+    await user.click(screen.getByRole('radio', { name: 'Large' }));
+    await user.click(
+      await screen.findByRole('button', { name: 'Save the order at GH₵40.00' }, PRICE_WAIT),
+    );
+    await pause(100);
+    expect(sent(SAVE)).toHaveLength(0);
+    clock += SAVE_GUARD_MS + 1;
+    await user.click(screen.getByRole('button', { name: 'Save the order at GH₵40.00' }));
+    expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+    expect(sent(SAVE)).toHaveLength(1);
+  });
+});
+
 describe('a price that changes while the officer looks', () => {
   /** The save answers that the price moved on the first press, and saves on the second. */
   const movesThenSaves = (): Handler => {
@@ -287,6 +345,8 @@ describe('a price that changes while the officer looks', () => {
 
     const warning = await alertSaying('The terms changed while you were looking');
     expect(warning.textContent).toContain('Price: GH₵35.00 before, GH₵40.00 now.');
+    // The portions of who pays moved with the price, and nobody changed who pays: it is not said.
+    expect(warning.textContent).not.toContain('Who pays has changed');
     // The officer is asked to save at the new figure, not the old one, and the new figure is read first: the price beside the form has the focus.
     expect(await screen.findByRole('button', { name: 'Save at GH₵40.00' })).toBeVisible();
     const price = screen.getByRole('region', { name: 'The price' });
