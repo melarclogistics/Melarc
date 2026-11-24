@@ -890,6 +890,13 @@
       "when": 1795493192181,
       "tag": "0126_parcel_waiting_for_vendor",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1795502152687,
+      "tag": "0127_recipient_correction_bound_to_its_record",
+      "breakpoints": true
     }
   ]
 }

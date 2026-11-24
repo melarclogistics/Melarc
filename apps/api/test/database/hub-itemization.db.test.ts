@@ -7634,3 +7634,177 @@ describe('a telephone number in a note is refused by every act of Stage 7 that t
     ).toBe(200);
   }, 240_000);
 });
+
+describe('the correction of a recipient is held by the database for every writer: the record is the correction, and the place does not move (Run G1, Part 1, item 6)', () => {
+  const ORDER = (id: string): string => `${API}/orders/${id}`;
+  interface Stored {
+    version: number;
+    recipient: {
+      name: string;
+      phone: string;
+      location: { address: string; map_link?: string; latitude?: number; longitude?: number };
+    };
+  }
+  /** A confirmed order of a door parcel, placed by the server, and what a correction would start from. */
+  const confirmed = async (): Promise<{ id: string; current: Stored }> => {
+    const intake = await cleared(1);
+    const [only] = intake.parcels as [Parcel];
+    const made = orderOf(await itemize(officer, intake.id, body(only.id)));
+    const [current] = await routes.rows<Stored>(
+      `select version, recipient from "order" where id = $1`,
+      [made.id],
+    );
+    if (current === undefined) throw new Error('The order was made');
+    return { id: made.id, current };
+  };
+  /** A writer of the owner's, under the key of the officer and with no operation between it and the tables: what the guards are for. */
+  const writer = async (run: () => Promise<void>): Promise<void> => {
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `select set_config('melarc.authorization_key', 'hub.intake.itemize', true), set_config('melarc.principal_type', 'STAFF', true), set_config('melarc.principal_id', $1, true)`,
+        [randomUUID()],
+      );
+      await run();
+    } finally {
+      await routes.admin.query('rollback');
+    }
+  };
+  const record = (
+    orderId: string,
+    version: number,
+    before: unknown,
+    after: unknown,
+  ): Promise<unknown> =>
+    routes.admin.query(
+      `insert into order_amendment (id, order_id, responsible_hub_id, amended_by, amended_at, order_version, note, before, after, kind)
+       values ($1, $2, $3, $4, transaction_timestamp(), $5, 'A typo', $6::jsonb, $7::jsonb, 'RECIPIENT_CORRECTION')`,
+      [
+        randomUUID(),
+        orderId,
+        HUB_A,
+        randomUUID(),
+        version,
+        JSON.stringify({ recipient: before }),
+        JSON.stringify({ recipient: after }),
+      ],
+    );
+  const named = (recipient: Stored['recipient'], name: string): Stored['recipient'] => ({
+    ...recipient,
+    name,
+  });
+
+  // Break caught: a record of one recipient beside an update to another (the record proves a correction that was not made), and a record that says the recipient was what it was not.
+  it('binds the change to its record: the order takes the recipient the record says it became, and leaves the one the record says it was', async () => {
+    const { id, current } = await confirmed();
+    // The record says the name became "Somebody"; the order is written "Someone else": refused.
+    await writer(async () => {
+      await record(id, current.version, current.recipient, named(current.recipient, 'Somebody'));
+      await expect(
+        routes.admin.query(
+          `update "order" set recipient = jsonb_set(recipient, '{name}', '"Someone else"') where id = $1`,
+          [id],
+        ),
+      ).rejects.toThrow(
+        /moves it from what its record says it was to what its record says it became/,
+      );
+    });
+    // A record that says the recipient was someone the order does not have is no history of the order, and is refused when it is written.
+    await writer(async () => {
+      await expect(
+        record(
+          id,
+          current.version,
+          named(current.recipient, 'Not the recipient'),
+          named(current.recipient, 'Somebody'),
+        ),
+      ).rejects.toThrow(/says what the recipient was: the recipient the order has/);
+    });
+    // A record that is the correction, and an update that makes it, is the act: the name moves and the version with it.
+    await writer(async () => {
+      await record(id, current.version, current.recipient, named(current.recipient, 'Somebody'));
+      await routes.admin.query(
+        `update "order" set recipient = jsonb_set(recipient, '{name}', '"Somebody"') where id = $1`,
+        [id],
+      );
+      const [after] = (
+        await routes.admin.query(
+          `select recipient ->> 'name' as name, version from "order" where id = $1`,
+          [id],
+        )
+      ).rows as { name: string; version: number }[];
+      expect(after?.name).toBe('Somebody');
+      expect(Number(after?.version)).toBe(current.version + 1);
+    });
+    // Nothing of the three was kept: the order is as it was.
+    expect(
+      (await routes.rows<Stored>(`select version, recipient from "order" where id = $1`, [id]))[0],
+    ).toEqual(current);
+  }, 180_000);
+
+  // Break caught: a correction that moves where the order goes (its map link, its coordinates) because the record says so, or because the writer wrote a record that tells it.
+  it('holds the place: the map link and the coordinates of the order do not move in a correction, in the record or in the order', async () => {
+    const { id, current } = await confirmed();
+    const moved = {
+      ...current.recipient,
+      location: {
+        ...current.recipient.location,
+        map_link: 'https://maps.example/elsewhere',
+        latitude: 5.6,
+        longitude: -0.2,
+      },
+    };
+    // The record that says the place moved is refused when it is written.
+    await writer(async () => {
+      await expect(record(id, current.version, current.recipient, moved)).rejects.toThrow(
+        /changes the name, the phone and the text of the address and not the place the order holds/,
+      );
+    });
+    // And the order refuses it even beside a record that says it (a record made with the triggers of its own table off, as only a writer outside the act could): the place is the order's own.
+    await writer(async () => {
+      await routes.admin.query('set local session_replication_role = replica');
+      await record(id, current.version, current.recipient, moved);
+      await routes.admin.query('set local session_replication_role = origin');
+      await expect(
+        routes.admin.query(`update "order" set recipient = $2::jsonb where id = $1`, [
+          id,
+          JSON.stringify(moved),
+        ]),
+      ).rejects.toThrow(
+        /changes the name, the phone and the text of the address and not the place the order holds/,
+      );
+    });
+    // The text of the address and its landmark are what a correction restates: they move, and the place stays.
+    await writer(async () => {
+      const restated = {
+        ...current.recipient,
+        phone: '0201234567',
+        location: {
+          ...current.recipient.location,
+          address: '14 Madina Estate',
+          landmark: 'by the clinic',
+        },
+      };
+      await record(id, current.version, current.recipient, restated);
+      await routes.admin.query(`update "order" set recipient = $2::jsonb where id = $1`, [
+        id,
+        JSON.stringify(restated),
+      ]);
+      const [after] = (
+        await routes.admin.query(`select recipient from "order" where id = $1`, [id])
+      ).rows as { recipient: Stored['recipient'] }[];
+      expect(after?.recipient.phone).toBe('0201234567');
+      expect(after?.recipient.location).toMatchObject({
+        address: '14 Madina Estate',
+        landmark: 'by the clinic',
+      });
+      // Nothing of the place came or went: the members are the ones the order held, and the landmark.
+      expect(Object.keys(after?.recipient.location ?? {}).toSorted()).toEqual(
+        [...Object.keys(current.recipient.location), 'landmark'].toSorted(),
+      );
+    });
+    expect(
+      (await routes.rows<Stored>(`select version, recipient from "order" where id = $1`, [id]))[0],
+    ).toEqual(current);
+  }, 180_000);
+});
