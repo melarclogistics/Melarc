@@ -168,6 +168,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/staff-identities' },
       { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
       { method: 'PUT', path: '/api/v1/intake-parcels/:parcel_id/arrival' },
+      { method: 'PUT', path: '/api/v1/intake-parcels/:parcel_id/waiting-for-vendor' },
       { method: 'PUT', path: '/api/v1/pickup-manifests/:id/stops' },
     ]);
     expect(inspection.declared).toEqual([
@@ -1544,6 +1545,18 @@ describe('the real application', () => {
         path: '/api/v1/intake-parcels/:parcel_id/arrival',
         access: 'permission',
         permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'intake_parcel', param: 'parcel_id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'PUT',
+        path: '/api/v1/intake-parcels/:parcel_id/waiting-for-vendor',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'qualifying',

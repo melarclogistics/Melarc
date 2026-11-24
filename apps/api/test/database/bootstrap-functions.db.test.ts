@@ -337,6 +337,7 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.intake_senior_needed',
       'melarc.correct_order_recipient',
       'melarc.order_recipient_corrected_here',
+      'melarc.set_parcel_vendor_wait',
     ]);
   });
 

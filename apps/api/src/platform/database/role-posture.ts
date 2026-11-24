@@ -258,6 +258,8 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     // The correction of the recipient of a confirmed order (migration `0124`, D-S7-1): the act, for staff under `hub.intake.itemize`, and the proof helper the guard of the order asks, which the runtime login's update fires.
     'melarc.correct_order_recipient',
     'melarc.order_recipient_corrected_here',
+    // The mark of a parcel the officer is waiting on the vendor's details for (migration `0126`, D-S7-12): the act, for staff under `hub.intake.itemize` (the vendor's intake locked first; the guard of the table holds every rule).
+    'melarc.set_parcel_vendor_wait',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

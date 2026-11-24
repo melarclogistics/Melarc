@@ -234,6 +234,7 @@ describe('the generated description of the real application', () => {
       ['/orders/{id}/recipient-correction', ['post'], ['correctOrderRecipient']],
       ['/orders/{id}/amendment-preview', ['post'], ['previewOrderAmendment']],
       ['/orders/{id}/arrival-reversal', ['post'], ['reverseOrderArrival']],
+      ['/intake-parcels/{parcel_id}/waiting-for-vendor', ['put'], ['setParcelWaitingForVendor']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.

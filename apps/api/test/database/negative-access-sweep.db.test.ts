@@ -616,6 +616,7 @@ describe('the existence rule is asked about records that are real (the control o
       recordCollection: 'pickupStop',
       recordIntakeCondition: 'pickupIntake',
       recordParcelArrival: 'intakeParcel',
+      setParcelWaitingForVendor: 'intakeParcel',
       recoverVendorCredential: 'vendor',
       registerRiderDevice: 'rider',
       reportPickupFailure: 'pickupStop',

@@ -33,7 +33,7 @@
 #   5.116.0 I    Stage 7 (SLICE-001, the external review of 20 November 2026 and the Product Owner's approval of it): **what the officer confirms is what the officer was shown, and what a senior closes against is what the senior read.** `previewOrderAmendment` (`POST /orders/{id}/amendment-preview`, `hub.intake.itemize`) previews an amendment as `previewOrder` previews an order. `listClosedIntakeExceptions` (`GET /hub-intake-exceptions`, `hub.intake.close_exception`) lists the intakes closed with the approved exception that still have received parcels without an order, so that the work is found again after a reload or on the next shift (OB-S1-151). `OrderPreview` gains `terms_token` (the digest of the terms), `validation`, `status`, `order_id`, `order_version` and `current`, and the preview judges the evidence an order cites as the save does (`EVIDENCE_NOT_STORED`). `itemizeOrder` and `amendOrder` take `reviewed_terms` (required of a save: `VALIDATION_FAILED`, rule `required`) and answer `STATE_CONFLICT`, rule `terms_changed`, with `details.current_terms` when what confirming gives is not what was reviewed; the `note` of `OrderAmend` is required of the save and not of the preview. `Order` gains `is_high_value_manual` and `price_status`: an amendment recomputes the high-value status the declaration gives and keeps the officer's own flag, and keeps the choice of a zone for the address it was made for. `IntakeProgress` and `IntakeClosureAssessment` say null, not zero, for a blind count that is not committed; each count of the progress is the number of rows of the view of its name (`awaiting_arrival` opens every parcel still expected); the assessment carries `assessment_token`, which `closeHubIntake` takes as `reviewed_assessment` (required with the exception; `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`). `getOrder` is one snapshot, and a vendor reads no order whose arrival was reversed. The payer edit and the first freeze take one lock (migration 0118).
 #   5.118.0 I    Stage 7 (SLICE-001, the fourth external review of 22 November 2026 and the Product Owner's decisions of the same day): **a save is judged on the configuration in force once it holds both its locks, and the staff's summary shows a price only where the staff's own pricing grant reaches the hub.** `itemizeOrder` and `amendOrder` judge the order on the version in force of each of the hub's settings, its zones and aliases and the company-wide rules, at the moment the save holds the intake and the request's payer arrangement; a configuration that keeps moving is `STATE_CONFLICT`, rule `configuration_changing` (declared, with what a screen does about it). `getIntakeSummary` leaves `locked_price` out for a staff reader whose `pricing.read` does not reach the intake's hub (OB-S1-155). No operation is added or removed.
 #   5.119.0 J    Run F (SLICE-001, Stage 7: the fifth external review, of the order screens, 23 November 2026, and the Product Owner's decisions D-S7-1 to D-S7-10 of the same day). **One version for the run.** *Part 1, item 1:* `itemizeOrder`'s `201` carries `Intake-ETag`, the vendor's version after the order (the first order of a cleared vendor moves it from ready to being worked, so the token the screen read is stale for the next order; a retry under the same key answers the vendor's version as it is then); the lock of a check-in is not part of that version (migrations `0093` and `0103`, held now by a test), so the page that renews it every minute makes no early order stale. *Item 3:* the sentence of 5.116.0 (every count is the number of rows of its view) is corrected for an intake counted blind: `needs_order` there is the orders still to be made, a number, and its view opens no rows (there is no parcel to list). *Item 4:* `destination_zone_snapshot` of `Order` and `OrderPreview` is declared (`DestinationZoneSnapshot`: the scope, and for a zone its identifier, code, name and `service_area` as a code, the alias that placed the parcel, the officer's note) instead of a free object that the screens read members from. *D-S7-10 and D-S7-4:* the vendor's summary of a closed intake carries `payer_allocation` where it shows the price, `getOrder` says that a vendor sees the portions of its own orders and is told the state of its own order's parcel (`MISSING` for a parcel that was written off: no price, nothing to pay; migration `0122`). *D-S7-5:* `listDestinationZones` (`GET /hub-intakes/{id}/destination-zones`, `hub.intake.itemize`, hub-scoped) lists the hub's own zones as `{ zone_id, name }` for the form's choice of a zone for an address no zone matches. *D-S7-6 and D-S7-7:* the items of `listHubIntakes` for a vendor in a state where orders are made carry `orders_made`, `parcels_needing_order` and, when a senior officer is needed, `senior_needed`; the read gains `view=needs_senior` (migration `0123`). *D-S7-1:* `correctOrderRecipient` (`POST /orders/{id}/recipient-correction`, `hub.intake.itemize`) corrects the recipient's name, phone and, when the zone and the price come out as they are, address of a confirmed order with a reason, kept as an amendment record of the kind `RECIPIENT_CORRECTION` (migration `0124`); the change of an address that moves the zone or the price, decided by a checker, is not built (S1.39g)
-#   5.120.0 K    Run G1 (SLICE-001, Stage 7: the review of Run F and the Product Owner's decisions D-S7-11 to D-S7-16 of 24 November 2026, part 1). **One version for the run.** *Part 1, item 1 (D-S7-11):* a senior officer is for what the business or money decides, so `view=needs_senior` and `senior_needed` of `listHubIntakes` name one reason only, `ARRIVAL_TAKEN_BACK` (a vendor sent back to review by an arrival a senior took back); a vendor whose parcels still need an order is the officer's (the officer calls the vendor and makes the order) and is never listed there, and `CLOSE_EXCEPTION` is no longer a value of `senior_needed` (migration `0125`); the close with an exception stays a senior's act on the close page.
+#   5.120.0 K    Run G1 (SLICE-001, Stage 7: the review of Run F and the Product Owner's decisions D-S7-11 to D-S7-16 of 24 November 2026, part 1). **One version for the run.** *Part 1, item 1 (D-S7-11):* a senior officer is for what the business or money decides, so `view=needs_senior` and `senior_needed` of `listHubIntakes` name one reason only, `ARRIVAL_TAKEN_BACK` (a vendor sent back to review by an arrival a senior took back); a vendor whose parcels still need an order is the officer's (the officer calls the vendor and makes the order) and is never listed there, and `CLOSE_EXCEPTION` is no longer a value of `senior_needed` (migration `0125`); the close with an exception stays a senior's act on the close page. *Part 1, item 2 (D-S7-12):* `setParcelWaitingForVendor` (`PUT /intake-parcels/{parcel_id}/waiting-for-vendor`, `hub.intake.itemize`, hub-scoped, `If-Match` the vendor's token, no `Idempotency-Key`) marks a parcel as waiting for the vendor's details, or takes the mark off, with an optional note of one short line; the server holds the mark and clears it when the parcel's order is made; the parcel of a `listIntakeOrders` row says `waiting_for_vendor`, the view of that name opens those parcels and `progress.waiting_for_vendor` counts them (migration `0126`).
 # Owns:    the authoritative FE–BE contract for the pickup → hub receiving → itemization thread
 # Governed by: PROJECT_MASTER_SPECIFICATION.md §39.1, §42; contracts/* for every referenced code
 #
@@ -3124,6 +3124,79 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /intake-parcels/{parcel_id}/waiting-for-vendor:
+    parameters:
+      - name: parcel_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+        description: The parcel of an intake (`IntakeParcel.id`). UUID v7.
+    put:
+      operationId: setParcelWaitingForVendor
+      x-permission: hub.intake.itemize
+      x-error-codes:
+        [
+          CSRF_VALIDATION_FAILED,
+          HUB_SCOPE_VIOLATION,
+          NOT_FOUND,
+          PERMISSION_DENIED,
+          RATE_LIMITED,
+          SESSION_INVALID,
+          STATE_CONFLICT,
+          VALIDATION_FAILED,
+        ]
+      tags: [hub-intakes]
+      summary: Mark a parcel as waiting for the vendor's details, or take the mark off
+      description: |
+        **5.120.0 (Run G1, D-S7-12 of the Product Owner's decisions of 24 November 2026).** Permission
+        `hub.intake.itemize` (no new key), for staff of the Ops Portal alone, by the hubs of the grant
+        (`HUB_SCOPE_VIOLATION` for a parcel of an intake outside them, `NOT_FOUND` for one that does not exist).
+
+        **A parcel an officer cannot order yet** (a label that cannot be read, a missing phone, an address that makes no
+        sense) **is the officer's** (D-S7-11): the officer calls or messages the vendor, gets the details and makes the
+        order, and no senior is asked. This act says that the officer is waiting: the parcel is marked **`waiting for the
+        vendor's details`**, with an optional short note of what was asked and how (for example "Called the vendor,
+        waiting on WhatsApp"). **The server holds the mark, so every officer and every tablet sees it**: the parcel's row
+        in `listIntakeOrders` says it (`waiting_for_vendor`), a view of its own opens the parcels that wait and
+        `progress.waiting_for_vendor` counts them. *Make the next order* passes over a marked parcel, and **the mark is
+        cleared by the server when the parcel's order is made** (in the transaction of the order, for every writer) or by
+        an officer with this act. No senior, no money.
+
+        **One parcel at a time, stated as the state it should be in** (`waiting` true or false), so the act is
+        **idempotent by nature and takes no `Idempotency-Key`**: the same mark twice is the same answer (and the second
+        writes no event), taking off a mark that is not there changes nothing, and a new `note` on a parcel that already
+        waits replaces the note and keeps the moment. It takes the vendor's `ETag` as `If-Match`, as the order of a
+        parcel does (a token that is missing is `VALIDATION_FAILED`; one that is weak, another vendor's or out of
+        date is `STATE_CONFLICT`, `details.rule` `stale`), **and does not move that token**: the mark is no part of what a save compares, so a price check or an
+        order on screen for another parcel is not made stale by it.
+
+        The `note` is **one short line**: at most 120 characters, no line break, and only with `waiting` true; a note of
+        spaces is no note. It holds no phone number (`VALIDATION_FAILED` on `/note`). `STATE_CONFLICT` rules: the
+        vendor is in reconciliation (`reconciliation_open`) or is past its orders (`intake_not_ready`), the parcel
+        already has its order (`parcel_ordered`), is missing (`parcel_missing`) or was taken back (`parcel_void`).
+        Taking a mark off is allowed in any state. A vendor counted without photos has no parcel to mark. The audit
+        event is `hub.parcel.vendor_wait_marked` or `hub.parcel.vendor_wait_cleared`, written only when something
+        changed.
+      parameters:
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParcelWaiting' }
+      responses:
+        '200':
+          description: The mark as it now stands, whether or not the act changed it
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParcelWaitingForVendor' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /hub-intakes/{id}/summary:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
@@ -3330,13 +3403,24 @@ paths:
         migration 0114: the sentence was corrected, because a row made up for an order that does not exist would
         be a record of nothing.) For an intake checked in against door photos every count is the number of rows of
         its view, as 5.116.0 says.
+
+        **5.120.0 (Run G1, D-S7-12). A parcel the officer is waiting on the vendor's details for says so.** A parcel an
+        officer cannot order yet (a label that cannot be read, a missing phone, an address that makes no sense) is the
+        officer's, who calls or messages the vendor and gets the details; `setParcelWaitingForVendor` marks it, **held by
+        the server so that every officer and every tablet sees it**. The parcel of a row says it in
+        `waiting_for_vendor` (`since`, and the officer's `note` if one was written; `null` when it is not waiting), the
+        view `waiting_for_vendor` opens the parcels that wait, and `progress.waiting_for_vendor` counts them (zero for an
+        intake counted blind, which has no parcel to mark). **A parcel that waits still needs its order**: it stays in
+        `needs_order` (and `awaiting_arrival` if it is not here yet) and in the close's outstanding count; the mark is
+        cleared by the server when the parcel's order is made. Both members are optional in the schema so that an answer
+        of an earlier version stays valid; the application always states them.
       parameters:
         - name: view
           in: query
           required: false
           schema:
             type: string
-            enum: [all, needs_order, awaiting_arrival, prepared, itemized, payment_required, missing]
+            enum: [all, needs_order, awaiting_arrival, prepared, itemized, payment_required, missing, waiting_for_vendor]
             default: all
         - $ref: '#/components/parameters/PageSize'
         - $ref: '#/components/parameters/PageToken'
@@ -16291,6 +16375,7 @@ components:
         payment_required: { type: integer, minimum: 0 }
         missing: { type: integer, minimum: 0 }
         orders: { type: integer, minimum: 0 }
+        waiting_for_vendor: { type: integer, minimum: 0, description: 'The parcels the officer is waiting on the vendor''s details for: a live mark on a parcel that still needs its order, the rows the view of this name opens; zero for an intake counted blind (5.120.0, D-S7-12).' }
       description: The counts of the whole intake, never of a page (5.114.0).
 
     IntakeOrderList:
@@ -16330,6 +16415,15 @@ components:
                       state: { type: string, enum: [EXPECTED, ARRIVED, MISSING, VOID] }
                       door_photo_evidence_id: { type: [string, 'null'], format: uuid }
                       hub_photo_evidence_id: { type: [string, 'null'], format: uuid }
+                      waiting_for_vendor:
+                        description: Since when the officer is waiting on the vendor's details for this parcel, and the officer's note; null when it is not waiting (5.120.0, D-S7-12).
+                        oneOf:
+                          - type: object
+                            required: [since, note]
+                            properties:
+                              since: { type: string, format: date-time }
+                              note: { type: [string, 'null'] }
+                          - { type: 'null' }
                   - { type: 'null' }
               order:
                 oneOf:
@@ -17520,6 +17614,26 @@ components:
       properties:
         arrived: { type: boolean, description: 'The parcel''s desired state: true checks it in (or finds it); false takes the tap back or voids an extra.' }
       description: 'The body of `recordParcelArrival`: the desired state, so that the act is idempotent by nature.'
+
+    ParcelWaiting:
+      type: object
+      required: [waiting]
+      additionalProperties: false
+      properties:
+        waiting: { type: boolean, description: 'The desired state: true marks the parcel as waiting for the vendor''s details (or renews the note of a mark that stands); false takes the mark off.' }
+        note: { type: string, maxLength: 120, description: 'What was asked of the vendor and how, one short line (no line break, no phone number); only with waiting true. A note of spaces is no note.' }
+      description: 'The body of `setParcelWaitingForVendor` (5.120.0, D-S7-12).'
+
+    ParcelWaitingForVendor:
+      type: object
+      required: [parcel_id, waiting, since, note]
+      additionalProperties: false
+      properties:
+        parcel_id: { type: string, format: uuid }
+        waiting: { type: boolean }
+        since: { type: [string, 'null'], format: date-time, description: 'When the mark was made (it keeps its moment when its note is renewed); null when the parcel is not waiting.' }
+        note: { type: [string, 'null'] }
+      description: 'The answer of `setParcelWaitingForVendor`: the mark as it now stands, whether or not the act changed it (5.120.0, D-S7-12).'
 
     CheckInFinish:
       type: object

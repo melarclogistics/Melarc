@@ -7,6 +7,7 @@ import type { AuthorizedRequest } from '../platform/authorization/authorized-req
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { isUuid } from '../platform/database/transaction-context.js';
 import { transactionOf } from '../platform/database/transaction-handle.js';
+import { timestampOf } from '../platform/database/timestamps.js';
 import { ApiException } from '../platform/http/api-exception.js';
 import { ErrorCode } from '../platform/http/error-codes.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../platform/http/pagination.js';
@@ -32,6 +33,7 @@ export const WORKLIST_VIEWS = [
   'itemized',
   'payment_required',
   'missing',
+  'waiting_for_vendor',
 ] as const;
 
 /** The state of a parcel and its order, as one: the officer's next action in a word. */
@@ -51,6 +53,8 @@ export interface IntakeProgressView {
   readonly payment_required: number;
   readonly missing: number;
   readonly orders: number;
+  /** The parcels the officer is waiting on the vendor's details for (D-S7-12): a live mark on a parcel that still needs its order, the rows the view `waiting_for_vendor` opens; zero for a vendor counted blind. */
+  readonly waiting_for_vendor: number;
 }
 
 /** One row of the worklist: a parcel, the order made for it, and their state together. **No price, no portion and no phone**: the money is `getOrder`'s, under `pricing.read`. */
@@ -63,6 +67,8 @@ export interface WorklistRowView {
     readonly state: string;
     readonly door_photo_evidence_id: string | null;
     readonly hub_photo_evidence_id: string | null;
+    /** The officer is waiting on the vendor's details for this parcel (D-S7-12): since when, and the officer's note; null when it is not waiting. */
+    readonly waiting_for_vendor: { readonly since: string; readonly note: string | null } | null;
   } | null;
   /** The order of this parcel whose arrival was reversed, kept as history (its locked price and trail are `getOrder`'s): the parcel may stand with another order now. */
   readonly reversed_order: { readonly id: string; readonly code: string } | null;
@@ -145,6 +151,8 @@ interface WorklistRow {
   readonly work_state: WorkState;
   readonly reversed_order_id: string | null;
   readonly reversed_order_code: string | null;
+  readonly waiting_since: string | Date | null;
+  readonly waiting_note: string | null;
 }
 
 interface ProgressRow extends IntakeProgressView {
@@ -328,6 +336,7 @@ export class IntakeWorklist {
             payment_required: progress.payment_required,
             missing: progress.missing,
             orders: progress.orders,
+            waiting_for_vendor: progress.waiting_for_vendor,
           },
           items: page.map((row): WorklistRowView => ({
             work_state: row.work_state,
@@ -345,6 +354,13 @@ export class IntakeWorklist {
                     state: String(row.parcel_state),
                     door_photo_evidence_id: row.door_photo_evidence_id,
                     hub_photo_evidence_id: row.hub_photo_evidence_id,
+                    waiting_for_vendor:
+                      row.waiting_since === null
+                        ? null
+                        : {
+                            since: timestampOf(row.waiting_since).toISOString(),
+                            note: row.waiting_note,
+                          },
                   },
             order:
               row.order_id === null

@@ -141,4 +141,5 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'amendOrder',
   'reverseOrderArrival',
   'correctOrderRecipient',
+  'setParcelWaitingForVendor',
 ];

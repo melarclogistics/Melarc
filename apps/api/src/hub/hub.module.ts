@@ -10,6 +10,7 @@ import { ItemizationController } from './itemization.controller.js';
 import { hubProviders } from './hub-providers.js';
 import { OrderChangesController } from './order-changes.controller.js';
 import { OrderReadsController } from './order-reads.controller.js';
+import { ParcelVendorWaitController } from './parcel-vendor-wait.controller.js';
 import { PayerCorrectionsController } from './payer-corrections.controller.js';
 import { ReceivingController } from './receiving.controller.js';
 
@@ -33,6 +34,7 @@ import { ReceivingController } from './receiving.controller.js';
     PayerCorrectionsController,
     IntakeWorklistController,
     OrderChangesController,
+    ParcelVendorWaitController,
   ],
   providers: [...hubProviders],
 })

@@ -2484,6 +2484,7 @@ describe('the worklist, the progress and the closure assessment of an intake (th
       payment_required: 1,
       missing: 0,
       orders: 2,
+      waiting_for_vendor: 0,
     });
     expect(list.items.map((item) => item.work_state)).toEqual([
       'ITEMIZED',
@@ -2538,6 +2539,7 @@ describe('the worklist, the progress and the closure assessment of an intake (th
       payment_required: 0,
       missing: 0,
       orders: 1,
+      waiting_for_vendor: 0,
     });
     expect(list.items.map((item) => item.work_state)).toEqual(['PREPARED', 'AWAITING_ARRIVAL']);
     expect(list.items[0]?.order).toMatchObject({ confirmed: false, commercial_state: null });
@@ -2576,6 +2578,7 @@ describe('the worklist, the progress and the closure assessment of an intake (th
       payment_required: 0,
       missing: 0,
       orders: 1,
+      waiting_for_vendor: 0,
     });
     expect(list.items).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ work_state: 'ITEMIZED', parcel: null });
@@ -6902,4 +6905,405 @@ describe('the recipient of a confirmed order is corrected (Run F, Part 1, D-S7-1
       refusal(await correct(officer, made.id, { note: 'Typo', recipient: { name: 'Ama B' } })),
     ).toEqual([409, 'STATE_CONFLICT', 'order_reversed']);
   });
+});
+
+describe('a parcel the officer is waiting on is marked as waiting for the vendor’s details (Run G1, Part 1, D-S7-12)', () => {
+  const WAIT = (parcel: string): string => `${API}/intake-parcels/${parcel}/waiting-for-vendor`;
+  interface Shown {
+    parcel_id: string;
+    waiting: boolean;
+    since: string | null;
+    note: string | null;
+  }
+  interface WaitingRow {
+    work_state: string;
+    parcel: {
+      id: string;
+      waiting_for_vendor: { since: string; note: string | null } | null;
+    } | null;
+  }
+  interface Worklist {
+    progress: { needs_order: number | null; waiting_for_vendor: number };
+    items: WaitingRow[];
+  }
+  /** The mark or the unmark, on the `ETag` of the vendor as the officer read it unless the test says otherwise. */
+  const mark = async (
+    actor: Actor,
+    intakeId: string,
+    parcel: string,
+    sent: unknown,
+    over: { etag?: string | null } = {},
+  ): Promise<TestResponse> => {
+    const etag = over.etag === undefined ? (await read(actor, intakeId)).etag : over.etag;
+    return actor.client.request('PUT', WAIT(parcel), {
+      body: sent,
+      origin: OPS,
+      headers: etag === null ? {} : { 'If-Match': etag },
+    });
+  };
+  const shown = (response: TestResponse): Shown => {
+    expect(response.status, response.text).toBe(200);
+    return response.json() as Shown;
+  };
+  const worklist = async (actor: Actor, intakeId: string, view = 'all'): Promise<Worklist> => {
+    const response = await actor.client.get(`${ORDERS(intakeId)}?view=${view}&page_size=100`);
+    expect(response.status, response.text).toBe(200);
+    return response.json() as Worklist;
+  };
+  const stored = async (parcel: string) =>
+    routes.rows<{ cleared_at: string | null; cleared_reason: string | null; note: string | null }>(
+      `select cleared_at, cleared_reason, note from intake_parcel_wait where intake_parcel_id = $1 order by marked_at`,
+      [parcel],
+    );
+
+  // Break caught: a mark that is not held by the server (another officer or tablet never sees it), one that cannot be taken off, one that moves the vendor's token (a preview on screen would go stale for another parcel),
+  // a count or a view that disagrees with the rows, a note that is lost, a repeat that makes a second mark.
+  it('marks a parcel with an optional note, shows it on the parcel’s row, in a view and a count of its own, takes it off, and moves nothing the save compares', async () => {
+    const intake = await cleared(3);
+    const [a, b] = intake.parcels as [Parcel, Parcel, Parcel];
+    const before = await read(officer, intake.id);
+
+    const marked = shown(
+      await mark(officer, intake.id, a.id, {
+        waiting: true,
+        note: 'Called the vendor, waiting on WhatsApp',
+      }),
+    );
+    expect(marked).toMatchObject({
+      parcel_id: a.id,
+      waiting: true,
+      note: 'Called the vendor, waiting on WhatsApp',
+    });
+    expect(typeof marked.since).toBe('string');
+    // Held by the server: another officer (a second tablet) reads the same, in the row, the view and the count.
+    const second = await routes.actor(BUNDLE_IDS.opsStaff, HUB_A);
+    const rowsOf = await worklist(second, intake.id);
+    const row = rowsOf.items.find((item) => item.parcel?.id === a.id);
+    expect(row?.parcel?.waiting_for_vendor).toEqual({
+      since: marked.since,
+      note: 'Called the vendor, waiting on WhatsApp',
+    });
+    expect(rowsOf.items.find((item) => item.parcel?.id === b.id)?.parcel?.waiting_for_vendor).toBe(
+      null,
+    );
+    expect(rowsOf.progress.waiting_for_vendor).toBe(1);
+    // The parcel still needs its order (the close counts it), and the view of its own opens it alone.
+    expect(rowsOf.progress.needs_order).toBe(3);
+    const view = await worklist(second, intake.id, 'waiting_for_vendor');
+    expect(view.items.map((item) => item.parcel?.id)).toEqual([a.id]);
+    expect(view.progress.waiting_for_vendor).toBe(1);
+    // The act moved nothing the save compares: the vendor's token is the one it was.
+    expect((await read(officer, intake.id)).etag).toBe(before.etag);
+
+    // A repeat of the same mark is the same mark (idempotent): one row, the same moment.
+    const again = shown(
+      await mark(officer, intake.id, a.id, {
+        waiting: true,
+        note: 'Called the vendor, waiting on WhatsApp',
+      }),
+    );
+    expect(again).toEqual(marked);
+    expect(await stored(a.id)).toHaveLength(1);
+    // A new note on a parcel already marked says what is asked now, and the mark keeps its moment.
+    const renewed = shown(
+      await mark(officer, intake.id, a.id, { waiting: true, note: 'Messaged again, no answer' }),
+    );
+    expect(renewed).toMatchObject({
+      waiting: true,
+      since: marked.since,
+      note: 'Messaged again, no answer',
+    });
+    // No note is a mark with none.
+    const bare = shown(await mark(officer, intake.id, b.id, { waiting: true }));
+    expect(bare).toMatchObject({ waiting: true, note: null });
+    expect((await worklist(officer, intake.id)).progress.waiting_for_vendor).toBe(2);
+
+    // Taking it off: the parcel is the officer's to order again, and a second unmark changes nothing.
+    const off = shown(await mark(officer, intake.id, a.id, { waiting: false }));
+    expect(off).toEqual({ parcel_id: a.id, waiting: false, since: null, note: null });
+    expect(shown(await mark(officer, intake.id, a.id, { waiting: false })).waiting).toBe(false);
+    const after = await worklist(officer, intake.id);
+    expect(after.progress.waiting_for_vendor).toBe(1);
+    expect(after.items.find((item) => item.parcel?.id === a.id)?.parcel?.waiting_for_vendor).toBe(
+      null,
+    );
+    // The history is kept, never deleted: the first mark is cleared as unmarked.
+    const history = await stored(a.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ cleared_reason: 'UNMARKED' });
+    expect(history[0]?.cleared_at).not.toBeNull();
+    // Marked again later, it is a new mark.
+    shown(await mark(officer, intake.id, a.id, { waiting: true, note: 'Waiting again' }));
+    expect(await stored(a.id)).toHaveLength(2);
+
+    // The audit says who marked it and when, never for a repeat, and the note is the event's note.
+    const events = await routes.rows<{ event_code: string; note: string | null }>(
+      `select event_code, note from audit_event where event_code like 'hub.parcel.vendor_wait_%' and related_ids ->> 'parcel_id' = $1 order by recorded_at, id`,
+      [a.id],
+    );
+    expect(events.map((event) => event.event_code)).toEqual([
+      'hub.parcel.vendor_wait_marked',
+      'hub.parcel.vendor_wait_marked',
+      'hub.parcel.vendor_wait_cleared',
+      'hub.parcel.vendor_wait_marked',
+    ]);
+    expect(events[0]?.note).toBe('Called the vendor, waiting on WhatsApp');
+  }, 120_000);
+
+  // Break caught: a mark that survives its order (the parcel would be told as waiting for details it has), an order the mark blocks, a parcel that has an order marked afterwards.
+  it('is cleared by the server when the parcel’s order is made, and a parcel that has an order cannot be marked', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    shown(
+      await mark(officer, intake.id, a.id, { waiting: true, note: 'Waiting for the phone number' }),
+    );
+    shown(await mark(officer, intake.id, b.id, { waiting: true }));
+    // The order for the first parcel is made on the vendor's token as it is read after the marks (the marks moved nothing).
+    const made = orderOf(await itemize(officer, intake.id, body(a.id)));
+    expect(made.intake_parcel_id).toBe(a.id);
+    const afterOrder = await worklist(officer, intake.id);
+    expect(afterOrder.progress.waiting_for_vendor).toBe(1);
+    expect(
+      afterOrder.items.find((item) => item.parcel?.id === a.id)?.parcel?.waiting_for_vendor,
+    ).toBe(null);
+    expect(
+      afterOrder.items.find((item) => item.parcel?.id === b.id)?.parcel?.waiting_for_vendor,
+    ).not.toBe(null);
+    const ended = await stored(a.id);
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({ cleared_reason: 'ORDER_MADE' });
+    expect(ended[0]?.cleared_at).not.toBeNull();
+    // Neither the mark nor the unmark of a parcel that has its order is taken: it is ordered.
+    expect(refusal(await mark(officer, intake.id, a.id, { waiting: true }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'parcel_ordered',
+    ]);
+    // The unmark of a parcel that is not marked is nothing to do, even when it has an order.
+    expect(shown(await mark(officer, intake.id, a.id, { waiting: false })).waiting).toBe(false);
+    // The last parcel's order ends the wait of the vendor altogether.
+    orderOf(await itemize(officer, intake.id, body(b.id)));
+    expect((await worklist(officer, intake.id)).progress.waiting_for_vendor).toBe(0);
+  }, 120_000);
+
+  // Break caught: a note that is no short line, an unknown member, a type that is not one, a stale token, a missing token, another hub's officer, a reader without the key, a vendor, a vendor in reconciliation.
+  it('takes a short note of one line and refuses what it should: the body, the token, the hub, the key, a vendor in reconciliation', async () => {
+    const intake = await cleared(2);
+    const [a] = intake.parcels as [Parcel, Parcel];
+    const invalidAt = (
+      response: TestResponse,
+    ): [number, string | undefined, string | undefined] => {
+      const parsed = response.json() as {
+        details?: { violations?: { pointer?: string; rule?: string }[] };
+      };
+      return [
+        response.status,
+        parsed.details?.violations?.[0]?.pointer,
+        parsed.details?.violations?.[0]?.rule,
+      ];
+    };
+    expect(invalidAt(await mark(officer, intake.id, a.id, { note: 'x' }))).toEqual([
+      400,
+      '/waiting',
+      'required',
+    ]);
+    expect(invalidAt(await mark(officer, intake.id, a.id, { waiting: 'yes' }))).toEqual([
+      400,
+      '/waiting',
+      'type',
+    ]);
+    expect(invalidAt(await mark(officer, intake.id, a.id, { waiting: true, note: 5 }))).toEqual([
+      400,
+      '/note',
+      'type',
+    ]);
+    expect(
+      invalidAt(await mark(officer, intake.id, a.id, { waiting: true, note: 'x'.repeat(121) })),
+    ).toEqual([400, '/note', 'maxLength']);
+    expect(
+      invalidAt(
+        await mark(officer, intake.id, a.id, { waiting: true, note: 'One line\nand another' }),
+      ),
+    ).toEqual([400, '/note', 'single_line']);
+    expect(
+      invalidAt(
+        await mark(officer, intake.id, a.id, { waiting: false, note: 'Not for an unmark' }),
+      ),
+    ).toEqual([400, '/note', 'not_allowed']);
+    expect(invalidAt(await mark(officer, intake.id, a.id, { waiting: true, vendor: 'x' }))[0]).toBe(
+      400,
+    );
+    // A note of spaces is no note.
+    expect(shown(await mark(officer, intake.id, a.id, { waiting: true, note: '   ' })).note).toBe(
+      null,
+    );
+
+    // The token the officer read is the vendor's: a token that is missing is a request that is not well formed; one that is weak, another vendor's, out of date or no token is a token the vendor is not at.
+    const other = await cleared(1);
+    const current = (await read(officer, intake.id)).etag;
+    expect(
+      refusal(await mark(officer, intake.id, a.id, { waiting: true }, { etag: null })).slice(0, 2),
+    ).toEqual([400, 'VALIDATION_FAILED']);
+    for (const etag of [`W/${current}`, '"nonsense"', (await read(officer, other.id)).etag]) {
+      expect(
+        refusal(await mark(officer, intake.id, a.id, { waiting: true }, { etag })),
+        etag,
+      ).toEqual([409, 'STATE_CONFLICT', 'stale']);
+    }
+
+    const etag = (await read(officer, intake.id)).etag;
+    expect((await mark(officer, intake.id, randomUUID(), { waiting: true })).status).toBe(404);
+    expect(refusal(await mark(otherHub, intake.id, a.id, { waiting: true }, { etag }))[1]).toBe(
+      'HUB_SCOPE_VIOLATION',
+    );
+    const readOnly = await routes.actor(
+      await newBundle(routes.admin, [grant('hub.read', 'own')]),
+      HUB_A,
+    );
+    expect(
+      refusal(await mark(readOnly, intake.id, a.id, { waiting: true }, { etag })).slice(0, 2),
+    ).toEqual([403, 'PERMISSION_DENIED']);
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await browser.request('PUT', WAIT(a.id), {
+          body: { waiting: true },
+          headers: { 'If-Match': '"x"' },
+        })
+      ).status,
+    ).toBe(403);
+
+    // A vendor whose arrival was sent to review is not worked: nothing is marked there.
+    const sent = await opened(2);
+    const [p, q] = sent.parcels as [Parcel, Parcel];
+    expect((await tap(officer, p.id, true)).status).toBe(200);
+    // A parcel the officer marked while it was expected, and that the vendor is then finished without, is missing: the mark stays on record but says nothing (a missing parcel is searched for, not waited on).
+    shown(
+      await mark(officer, sent.id, q.id, { waiting: true, note: 'Asked the vendor where it is' }),
+    );
+    expect((await finishAsTapped(officer, sent.id)).status).toBe(200);
+    expect((await read(officer, sent.id)).intake.state).toBe('RECONCILIATION_REQUIRED');
+    expect(refusal(await mark(officer, sent.id, p.id, { waiting: true }))).toEqual([
+      409,
+      'STATE_CONFLICT',
+      'reconciliation_open',
+    ]);
+    const dormant = await worklist(officer, sent.id);
+    expect(dormant.items.find((item) => item.parcel?.id === q.id)?.parcel?.waiting_for_vendor).toBe(
+      null,
+    );
+    expect(dormant.progress.waiting_for_vendor).toBe(0);
+    expect((await worklist(officer, sent.id, 'waiting_for_vendor')).items).toEqual([]);
+  }, 180_000);
+
+  // Break caught: a vendor with every parcel marked that a senior is asked about (the officer owns these parcels: D-S7-11), a parcel of an intake counted blind (it has none), and the early order of a parcel not here yet.
+  it('puts no vendor in Needs a senior, and a parcel not here yet can be marked while the check-in is open', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    orderOf(await itemize(officer, intake.id, body(a.id)));
+    shown(await mark(officer, intake.id, b.id, { waiting: true, note: 'Label cannot be read' }));
+    const seen = await officer.client.get(`${INTAKES}?view=needs_senior&page_size=100`);
+    expect((seen.json() as { items: { id: string }[] }).items.map((item) => item.id)).not.toContain(
+      intake.id,
+    );
+
+    const open = await opened(2);
+    const [early] = open.parcels as [Parcel, Parcel];
+    expect(early.state).toBe('EXPECTED');
+    expect(shown(await mark(officer, open.id, early.id, { waiting: true })).waiting).toBe(true);
+    const view = await worklist(officer, open.id, 'waiting_for_vendor');
+    expect(view.items.map((item) => item.parcel?.id)).toEqual([early.id]);
+    expect(view.progress.waiting_for_vendor).toBe(1);
+
+    // A vendor counted blind has no parcel, so there is nothing to mark, and its count is zero.
+    const counted = await blind(2);
+    expect((await worklist(officer, counted.id)).progress.waiting_for_vendor).toBe(0);
+  }, 180_000);
+
+  // Break caught: a writer other than the act (a statement of the owner, of an application login, a delete, an update that un-clears) that the table's own guard would let through.
+  it('is held by the database for every writer: nothing writes the record but the act, it is never deleted or cleared twice, and a parcel has one live mark', async () => {
+    const intake = await cleared(1);
+    const [a] = intake.parcels as [Parcel];
+    const insert = `insert into intake_parcel_wait (id, intake_parcel_id, pickup_intake_id, responsible_hub_id, marked_by, note)
+                    values ($1, $2, $3, $4, $5, 'Waiting')`;
+    const row = [randomUUID(), a.id, intake.id, HUB_A, randomUUID()];
+    // No key of the act: refused.
+    await expect(routes.admin.query(insert, row)).rejects.toThrow(/written by the act/);
+    // Under the key, a mark is made by the guard from the parcel, and a second live mark for the parcel is refused by the unique key.
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `select set_config('melarc.authorization_key', 'hub.intake.itemize', true), set_config('melarc.principal_type', 'STAFF', true), set_config('melarc.principal_id', $1, true)`,
+        [randomUUID()],
+      );
+      await routes.admin.query(insert, row);
+      await expect(
+        routes.admin.query(insert, [randomUUID(), a.id, intake.id, HUB_A, randomUUID()]),
+      ).rejects.toThrow(/intake_parcel_wait_live_key|duplicate key/);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+    // A mark made by the act is never deleted, and a cleared one is never cleared again or marked live again.
+    shown(await mark(officer, intake.id, a.id, { waiting: true, note: 'Waiting' }));
+    await expect(
+      routes.admin.query(`delete from intake_parcel_wait where intake_parcel_id = $1`, [a.id]),
+    ).rejects.toThrow(/never removed/);
+    shown(await mark(officer, intake.id, a.id, { waiting: false }));
+    await expect(
+      routes.admin.query(
+        `update intake_parcel_wait set cleared_at = null where intake_parcel_id = $1`,
+        [a.id],
+      ),
+    ).rejects.toThrow(/written by the act/);
+    // Under the key of the act, a mark that has ended is still kept as it was (it was cleared once), and a live one changes its note and its ending and nothing else.
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `select set_config('melarc.authorization_key', 'hub.intake.itemize', true), set_config('melarc.principal_type', 'STAFF', true), set_config('melarc.principal_id', $1, true)`,
+        [randomUUID()],
+      );
+      await expect(
+        routes.admin.query(
+          `update intake_parcel_wait set note = 'Changed' where intake_parcel_id = $1`,
+          [a.id],
+        ),
+      ).rejects.toThrow(/cleared once/);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+    shown(await mark(officer, intake.id, a.id, { waiting: true, note: 'Waiting again' }));
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `select set_config('melarc.authorization_key', 'hub.intake.itemize', true), set_config('melarc.principal_type', 'STAFF', true), set_config('melarc.principal_id', $1, true)`,
+        [randomUUID()],
+      );
+      await expect(
+        routes.admin.query(
+          `update intake_parcel_wait set marked_by = $2 where intake_parcel_id = $1 and cleared_at is null`,
+          [a.id, randomUUID()],
+        ),
+      ).rejects.toThrow(/never change/);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+    await routes.admin.query('begin');
+    try {
+      await routes.admin.query(
+        `select set_config('melarc.authorization_key', 'hub.intake.itemize', true), set_config('melarc.principal_type', 'STAFF', true), set_config('melarc.principal_id', $1, true)`,
+        [randomUUID()],
+      );
+      await expect(
+        routes.admin.query(
+          `update intake_parcel_wait set note = 'Different', cleared_at = now(), cleared_by = $2, cleared_reason = 'UNMARKED' where intake_parcel_id = $1 and cleared_at is null`,
+          [a.id, randomUUID()],
+        ),
+      ).rejects.toThrow(/keeps its note/);
+    } finally {
+      await routes.admin.query('rollback');
+    }
+  }, 120_000);
 });

@@ -61,6 +61,8 @@ export const AUDIT_EVENT_CODES = [
   'hub.intake.condition_recorded',
   'hub.parcel.found',
   'hub.parcel.extra_added',
+  'hub.parcel.vendor_wait_marked',
+  'hub.parcel.vendor_wait_cleared',
   'hub.intake.corrected',
   'hub.intake.itemized',
   'hub.intake.closed',

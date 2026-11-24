@@ -1,5 +1,6 @@
 import { SERVICE_AREAS } from '../platform/database/schema/hub-configuration.js';
 import { described } from '../platform/openapi/described-schema.js';
+import { PARCEL_WAIT_MARK } from './parcel-vendor-wait-schemas.js';
 
 /**
  * The shapes of `itemizeOrder` as the application describes them (S1.36; the contract's `OrderItemize` and `Order`, with the parcel the order is made for, D-D6). The conformance check compares what is
@@ -641,6 +642,8 @@ const INTAKE_PROGRESS = {
     'orders',
   ],
   properties: {
+    // The parcels the officer is waiting on the vendor's details for (5.120.0, D-S7-12): optional in the contract so that an answer of an earlier version stays valid; this application always says it.
+    waiting_for_vendor: COUNT,
     // Null for an intake counted blind whose count is not committed: nothing is known to have been received, which is not zero.
     received: COUNT_OR_NULL,
     awaiting_arrival: COUNT,
@@ -691,6 +694,8 @@ export const INTAKE_ORDER_LIST_SCHEMA = described({
                   state: { type: 'string', enum: ['EXPECTED', 'ARRIVED', 'MISSING', 'VOID'] },
                   door_photo_evidence_id: NULLABLE_UUID,
                   hub_photo_evidence_id: NULLABLE_UUID,
+                  // Since when the officer is waiting on the vendor's details for this parcel, and the officer's note; null when it is not (5.120.0, D-S7-12).
+                  waiting_for_vendor: PARCEL_WAIT_MARK,
                 },
               },
               { type: 'null' },

@@ -370,7 +370,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 
 **Every operation in [openapi.yaml](../contracts/openapi.yaml) carries exactly one class, and the implementation must verify it** — every catalogued id exists in the contract, every contract id is catalogued, and none is classified twice. **A new critical operation cannot be added without a performance classification.**
 
-**220 operations: 123 `CRITICAL_WRITE` · 0 `ASYNC` · 97 `NORMAL`.**
+**221 operations: 123 `CRITICAL_WRITE` · 0 `ASYNC` · 98 `NORMAL`.**
 
 | `operationId`| Class| Why|
 |---|---|---|
@@ -402,6 +402,7 @@ An operation is **`CRITICAL_WRITE`** when it changes or confirms **custody · mo
 | `listPayerCorrections`| `NORMAL`| — A read: the corrections of the hubs of the grant, cursor-paged, with each one's order and names (Stage 7)|
 | `getPayerCorrection`| `NORMAL`| — A read, and the `ETag` source `approvePayerCorrection` takes (Stage 7)|
 | `correctOrderRecipient`| `CRITICAL_WRITE`| a person's details on an order whose price is fixed — corrects the name, the phone or the address with a reason and keeps the old details in the order's history; the price, the zone and the promise never move (Run F, D-S7-1)|
+| `setParcelWaitingForVendor`| `NORMAL`| a mark on one parcel, idempotent by nature and taken off by the same act; the order of the parcel ends it (Run G1, D-S7-12)|
 | `listDestinationZones`| `NORMAL`| — A read: the active zones of the hub an intake belongs to, by name, for an officer to choose one for an address that matches none (Run F, D-S7-5)|
 | `resolveCutoffException`| `NORMAL`| —|
 | `resolveHandshake`| `CRITICAL_WRITE`| authorised resolution of a verification gate by hand|

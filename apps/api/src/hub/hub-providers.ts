@@ -21,6 +21,7 @@ import { HubItemization } from './itemization.service.js';
 import { IntakeWorklist } from './intake-worklist.service.js';
 import { HubOrderReads } from './order-reads.service.js';
 import { OrderReversals } from './order-reversals.service.js';
+import { ParcelVendorWaits } from './parcel-vendor-wait.service.js';
 import { PayerCorrections } from './payer-corrections.service.js';
 import { ReceivingReads } from './receiving-reads.service.js';
 
@@ -50,6 +51,8 @@ export const HUB_PAYER_CORRECTIONS = Symbol('HUB_PAYER_CORRECTIONS');
 export const HUB_INTAKE_WORKLIST = Symbol('HUB_INTAKE_WORKLIST');
 /** The injection token of the reversal of an arrival (Stage 7), which its controller asks for. */
 export const HUB_ORDER_REVERSALS = Symbol('HUB_ORDER_REVERSALS');
+/** The injection token of the mark of a parcel the officer is waiting on the vendor's details for (Run G1, D-S7-12), which its controller asks for. */
+export const HUB_PARCEL_VENDOR_WAITS = Symbol('HUB_PARCEL_VENDOR_WAITS');
 
 const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
@@ -181,6 +184,18 @@ export const hubProviders: readonly FactoryProvider[] = [
       optional(IDEMPOTENCY_STORE),
       optional(CLOCK),
     ],
+  },
+  {
+    provide: HUB_PARCEL_VENDOR_WAITS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      clock: Clock | undefined,
+    ): ParcelVendorWaits | undefined =>
+      runner === undefined || audit === undefined || clock === undefined
+        ? undefined
+        : new ParcelVendorWaits({ runner, audit, clock }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER), optional(CLOCK)],
   },
   {
     provide: HUB_PAYER_CORRECTIONS,
