@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { parseIntakeListPage } from './intake-list-shape';
 import {
   parseCandidates,
+  parseZoneList,
   parseClosed,
   parseClosedExceptionPage,
   parseClosure,
@@ -226,6 +227,52 @@ describe('what an order would be (the terms the officer reviews)', () => {
     expect(parseCandidates([])).toBeUndefined();
     expect(parseCandidates([{ zone_id: 'not-an-id', name: 'Tema' }])).toBeUndefined();
     expect(parseCandidates(undefined)).toBeUndefined();
+  });
+});
+
+describe('the zones of a hub (Run G1, D-S7-5)', () => {
+  // Break caught: the list the API gave read as something else (a zone lost, a name changed, the order of the API not kept), or a zone with more than its identifier and its name given to a screen.
+  it('reads the list the API gave, in its order, with each zone’s identifier and name and nothing else', () => {
+    const zones = parseZoneList(load('destination-zones'));
+    expect(zones?.map((zone) => zone.name)).toEqual([
+      'Accra Central',
+      'Amasaman & Environs',
+      'Dansoman',
+      'Kasoa Corridor',
+      'Lapaz/Sowutuom',
+      'Madina/Adenta',
+      'Tema',
+    ]);
+    for (const zone of zones ?? [])
+      expect(Object.keys(zone).toSorted()).toEqual(['name', 'zone_id']);
+  });
+
+  it('reads a hub with no zone as an empty list, and refuses what is not the list', () => {
+    expect(parseZoneList({ items: [] })).toEqual([]);
+    for (const wrong of [undefined, null, 'Tema', [], {}, { items: {} }, { items: [null] }]) {
+      expect(parseZoneList(wrong), JSON.stringify(wrong)).toBeUndefined();
+    }
+  });
+
+  // Break caught: a zone offered twice, or by an identifier that is not one, or with no name or an empty one, or a hub that names more zones than a person can choose from.
+  it('refuses a zone offered twice, one with no usable identifier or name, and an absurd number of zones', () => {
+    const id = '5eed0101-0000-4000-8000-000000000001';
+    expect(
+      parseZoneList({
+        items: [
+          { zone_id: id, name: 'A' },
+          { zone_id: id, name: 'B' },
+        ],
+      }),
+    ).toBeUndefined();
+    expect(parseZoneList({ items: [{ zone_id: 'x', name: 'A' }] })).toBeUndefined();
+    expect(parseZoneList({ items: [{ zone_id: id, name: '' }] })).toBeUndefined();
+    expect(parseZoneList({ items: [{ zone_id: id }] })).toBeUndefined();
+    const many = Array.from({ length: 201 }, (_, index) => ({
+      zone_id: `5eed0101-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      name: `Zone ${String(index)}`,
+    }));
+    expect(parseZoneList({ items: many })).toBeUndefined();
   });
 });
 

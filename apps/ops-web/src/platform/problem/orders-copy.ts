@@ -207,6 +207,9 @@ export const ORDERS_WORDS = {
       splitPercentage: 'The sender pays (%)',
       zone: 'Which zone is it?',
       zoneHelp: 'The address matches more than one zone. Choose the right one.',
+      /** For an address no zone of the hub matches (D-S7-5): the officer who knows the zone chooses it, and says why. */
+      zoneUnresolvedHelp:
+        'The address does not match a zone of this hub. Choose the zone the address is in, and say why.',
       zoneNote: 'Why this zone',
       zoneNoteHelp: 'A few words, so it can be checked later.',
       reason: 'Why are you changing this order?',

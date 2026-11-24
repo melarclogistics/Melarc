@@ -9,6 +9,7 @@ import {
 } from '../../../test-support/interface-states';
 import {
   captured,
+  capturedRefusal,
   EARLY_ORDER_ID,
   NEW_TOKEN,
   orderOf,
@@ -225,6 +226,45 @@ describe('changing an order, and checking the price first', () => {
       name: 'Ama Mensah',
       location: { address: '14 Madina Estate, opposite the pharmacy' },
     });
+  });
+});
+
+describe('a new address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () => {
+  const INTAKE = (captured('order-early') as { pickup_intake_id: string }).pickup_intake_id;
+  const ZONES = `GET /hub-intakes/${INTAKE}/destination-zones`;
+  const TEMA = '5eed0101-0000-4000-8000-000000000001';
+
+  // Break caught: the change of an address to one no zone matches that leaves the officer to reword it, the zones of the order's own hub not offered (they are read for the order's vendor), the choice not on the
+  // preview and on the change, or not taking the focus.
+  it('offers the hub’s zones for the new address, and changes the order with the zone chosen and the reason', async () => {
+    let previews = 0;
+    const { user } = open({
+      [PREVIEW]: () => {
+        previews += 1;
+        const unresolved = capturedRefusal('preview-zone-unresolved');
+        return previews === 1 ? json(unresolved.status, unresolved.body) : json(200, previewOf());
+      },
+      [ZONES]: () => json(200, captured('destination-zones')),
+      [SAVE]: () => json(200, SAVED(), { ETag: '"o2"' }),
+    });
+    const address = await screen.findByLabelText(/Delivery address/);
+    await user.clear(address);
+    await user.type(address, 'Behind the new market');
+    await user.type(
+      screen.getByLabelText(/Why are you changing this order\?/),
+      'The recipient moved',
+    );
+    const group = await screen.findByRole('group', { name: /Which zone is it\?/ }, PRICE_WAIT);
+    expect(within(group).getAllByRole('radio')).toHaveLength(7);
+    expect(within(group).getAllByRole('radio')[0]).toHaveFocus();
+    expect(sent(ZONES)).toHaveLength(1);
+    await user.click(within(group).getByRole('radio', { name: 'Tema' }));
+    await user.type(screen.getByLabelText(/Why this zone/), 'It is next to the harbour');
+    await user.click(await pricedSave());
+    expect(await screen.findByText(`Order ${CODE} was changed.`)).toBeVisible();
+    const chosen = { zone_id: TEMA, note: 'It is next to the harbour' };
+    expect((await bodyOf(sent(PREVIEW).at(-1))).destination_zone_authorization).toEqual(chosen);
+    expect((await bodyOf(sent(SAVE)[0])).destination_zone_authorization).toEqual(chosen);
   });
 });
 

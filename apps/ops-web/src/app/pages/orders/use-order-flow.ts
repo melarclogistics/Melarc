@@ -63,6 +63,8 @@ export interface OrderFlowConfig {
   readonly previewOperation: 'previewOrder' | 'previewOrderAmendment';
   readonly preview: (values: OrderFormValues) => Promise<PreviewOutcome>;
   readonly save: (command: OrderCommand, key: string) => Promise<SaveOutcome>;
+  /** The hub's own zones (`listDestinationZones`), for an address that matches none: the officer chooses the one it is in. Read once for the page, and only when an address needs it. */
+  readonly zones: () => Promise<readonly ZoneCandidateView[]>;
   /** The version the save takes: the latest read. */
   readonly version: () => string;
   /** Reads the record again, for the version, after the vendor or the order changed under the officer. */
@@ -113,6 +115,14 @@ export function termsDifferences(before: TermsView, now: TermsView): readonly Te
   return found;
 }
 
+/** Why the officer is asked to choose a zone. */
+export type ZoneWhy = 'ambiguous' | 'unresolved';
+
+/** What a save answers to the flow: the save's own outcomes, and the zones of the hub offered for an address that matches none. */
+type FlowSaveOutcome =
+  | Exclude<SaveOutcome, { readonly kind: 'zone-unresolved' }>
+  | { readonly kind: 'zone-offered'; readonly zones: readonly ZoneCandidateView[] };
+
 /** The answer of the server to the entries of one key: a price, or a refusal (told on the fields). */
 interface Answer {
   readonly key: string;
@@ -129,8 +139,10 @@ export interface OrderFlow {
   readonly pressable: boolean;
   /** The refusal of the price, if the server refused to work it out: the form tells it on the field it names. */
   readonly checkProblem: Problem | undefined;
-  /** The zones an address matched with each other, for the officer to choose one: the server's own, from the refusal. */
+  /** The zones for the officer to choose one from: the ones an address matched with each other (the server's own, from the refusal), or the hub's zones for an address that matches none. */
   readonly candidates: readonly ZoneCandidateView[] | undefined;
+  /** Why the zones are offered: the address matches more than one, or none. */
+  readonly zonesWhy: ZoneWhy;
   /** Saves the order on the price on the screen. Ignored unless the price is the price of what is entered, and for a moment after the price changed at the save. */
   readonly save: () => void;
   /** Checks the price of what is entered again, at once: the way out of a price that could not be checked. */
@@ -146,7 +158,12 @@ const worthShowing = (problem: Problem): boolean =>
 
 export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): OrderFlow {
   const [answer, setAnswer] = useState<Answer | undefined>(undefined);
-  const [candidates, setCandidates] = useState<readonly ZoneCandidateView[] | undefined>(undefined);
+  const [offer, setOffer] = useState<
+    { readonly why: ZoneWhy; readonly zones: readonly ZoneCandidateView[] } | undefined
+  >(undefined);
+  const candidates = offer?.zones;
+  /** The hub's zones, read once for the page when an address first needed them (a read that failed is not kept: the next address asks again). */
+  const hubZones = useRef<readonly ZoneCandidateView[] | undefined>(undefined);
   const latest = useRef(config);
   const entered = useRef(values);
   const alive = useRef(true);
@@ -183,6 +200,19 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
   const key = config.keyOf(values);
   const complete = config.complete(values, candidates !== undefined);
 
+  /** The hub's zones for an address that matches none: read once, and `undefined` where they cannot be offered (the read failed, or the hub has none), which leaves the refusal to be told as it always was. */
+  const zonesOfTheHub = useCallback(async (): Promise<readonly ZoneCandidateView[] | undefined> => {
+    if (hubZones.current !== undefined) return hubZones.current;
+    try {
+      const zones = await latest.current.zones();
+      if (zones.length === 0) return undefined;
+      hubZones.current = zones;
+      return zones;
+    } catch {
+      return undefined;
+    }
+  }, []);
+
   /** Asks for the price of what is wanted now. One request at a time: a request that is out when another is due makes the finishing one ask again, for what is wanted then. */
   const pump = useCallback((): Promise<void> => {
     const run = async (): Promise<void> => {
@@ -195,8 +225,10 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
       inFlight.current = true;
       let outcome: PreviewOutcome | undefined;
       let failure: unknown;
+      let zonesOfHub: readonly ZoneCandidateView[] | undefined;
       try {
         outcome = await latest.current.preview(target.values);
+        if (outcome.kind === 'zone-unresolved') zonesOfHub = await zonesOfTheHub();
       } catch (error) {
         failure = error;
       }
@@ -207,10 +239,20 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
         if (outcome?.kind === 'terms') {
           setAnswer({ key: target.key, terms: outcome.terms });
         } else if (outcome?.kind === 'zone-choice') {
-          setCandidates(outcome.candidates);
+          setOffer({ why: 'ambiguous', zones: outcome.candidates });
+          setAnswer({ key: target.key });
+        } else if (outcome?.kind === 'zone-unresolved' && zonesOfHub !== undefined) {
+          // No zone matches the address: the officer chooses the one it is in, from the hub's own, and says why.
+          setOffer({ why: 'unresolved', zones: zonesOfHub });
           setAnswer({ key: target.key });
         } else {
-          const problem = problemOf(failure, { operation: latest.current.previewOperation });
+          // An address no zone matches, where the zones cannot be offered, is told as it always was: on the address.
+          const problem = problemOf(
+            outcome?.kind === 'zone-unresolved' ? outcome.refusal : failure,
+            {
+              operation: latest.current.previewOperation,
+            },
+          );
           setAnswer({ key: target.key, ...(worthShowing(problem) ? { problem } : {}) });
           if (problem.kind === 'rate-limited' && askedAgainFor.current !== target.key) {
             // Too fast: once the wait the server asked for is over, one new check, by itself, of these same entries; the hold is the portal's own and never a loop.
@@ -237,7 +279,7 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
       }
     };
     return run();
-  }, []);
+  }, [zonesOfTheHub]);
 
   useEffect(() => {
     pumpAgain.current = pump;
@@ -260,8 +302,15 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     };
   }, [key, complete, pump]);
 
-  const command = useConfirmedCommand<OrderCommand, SaveOutcome>({
-    send: (sent, commandKey) => latest.current.save(sent, commandKey),
+  const command = useConfirmedCommand<OrderCommand, FlowSaveOutcome>({
+    send: async (sent, commandKey): Promise<FlowSaveOutcome> => {
+      const outcome = await latest.current.save(sent, commandKey);
+      if (outcome.kind !== 'zone-unresolved') return outcome;
+      // The address matches no zone now: the hub's zones are offered; where they cannot be, the refusal is told as it always was, on the address.
+      const zones = await zonesOfTheHub();
+      if (zones === undefined) throw outcome.refusal;
+      return { kind: 'zone-offered', zones };
+    },
     onDone: (outcome) => {
       if (outcome.kind === 'saved') {
         latest.current.onSaved(outcome.order);
@@ -269,7 +318,12 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
       }
       if (outcome.kind === 'zone-choice') {
         // The address matches more than one zone now: the officer chooses one and says why, as the price offers it.
-        setCandidates(outcome.candidates);
+        setOffer({ why: 'ambiguous', zones: outcome.candidates });
+        setAnswer(undefined);
+        return;
+      }
+      if (outcome.kind === 'zone-offered') {
+        setOffer({ why: 'unresolved', zones: outcome.zones });
         setAnswer(undefined);
         return;
       }
@@ -336,13 +390,14 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     pressable,
     checkProblem,
     candidates,
+    zonesWhy: offer?.why ?? 'ambiguous',
     save,
     checkAgain,
     changed: () => {
       command.dismiss();
     },
     clearCandidates: () => {
-      setCandidates(undefined);
+      setOffer(undefined);
     },
   };
 }

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 import { Checkbox } from '../../../components/ui/checkbox/Checkbox';
 import { DatePicker } from '../../../components/ui/date-picker/DatePicker';
 import type { UploadGate } from '../../../components/ui/evidence-upload/UploadGate';
@@ -6,6 +8,7 @@ import { Input } from '../../../components/ui/input/Input';
 import { RadioGroup } from '../../../components/ui/radio/RadioGroup';
 import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { TaskFormSection } from '../../../components/ui/templates/TaskForm';
+import { VisuallyHidden } from '../../../components/ui/visually-hidden/VisuallyHidden';
 import {
   DESTINATIONS,
   looksLikeGhanaNumber,
@@ -23,6 +26,7 @@ import {
   type ZoneCandidateView,
 } from '../../../platform/hub-orders/orders-shape';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
+import type { ZoneWhy } from './use-order-flow';
 import { todayText } from '../../../platform/time/format-time';
 import { ReceivingPhoto } from '../receiving/ReceivingPhoto';
 import './orders-pages.css';
@@ -36,8 +40,10 @@ export interface OrderFieldsProps {
   readonly locked: boolean;
   /** The vendor the photos an order cites belong to (their owner). */
   readonly intakeId: string;
-  /** The zones the address matched with each other, for the officer to choose one. */
+  /** The zones for the officer to choose one from: the ones the address matched with each other, or the hub's own for an address that matches none. */
   readonly candidates: readonly ZoneCandidateView[] | undefined;
+  /** Why the zones are offered, which is what the section says about them. */
+  readonly zonesWhy: ZoneWhy;
   readonly gate: UploadGate;
   /** The form changes an order that exists: it asks why. */
   readonly amendment: boolean;
@@ -63,15 +69,28 @@ export function OrderFields({
   locked,
   intakeId,
   candidates,
+  zonesWhy,
   gate,
   amendment,
   change,
 }: OrderFieldsProps) {
   const errorOf = (field: OrderField): { error?: string } =>
     errors[field] === undefined ? {} : { error: errors[field] };
+  const zoneHelp = zonesWhy === 'unresolved' ? F.fields.zoneUnresolvedHelp : F.fields.zoneHelp;
+  const zoneBox = useRef<HTMLDivElement>(null);
+  const zonesOffered = candidates !== undefined;
+  useEffect(() => {
+    // The choice appears a moment after the officer stops typing, and it is what the form is waiting for: the focus goes to it (and a live region says that it is there), so that nobody has to hunt for it at the
+    // bottom of a form two screens tall (OB-S1-170b, decided by the Product Owner on 24 November 2026).
+    if (zonesOffered)
+      zoneBox.current?.querySelector<HTMLInputElement>('input[type="radio"]')?.focus();
+  }, [zonesOffered]);
 
   return (
     <>
+      <VisuallyHidden>
+        <span role="status">{zonesOffered ? zoneHelp : ''}</span>
+      </VisuallyHidden>
       <TaskFormSection title={F.sections.recipient}>
         <Field label={F.fields.name} required {...errorOf('name')}>
           <Input
@@ -145,23 +164,25 @@ export function OrderFields({
       </TaskFormSection>
 
       {candidates === undefined ? null : (
-        <TaskFormSection title={F.fields.zone} description={F.fields.zoneHelp}>
-          <RadioGroup
-            legend={F.fields.zone}
-            name="zone"
-            required
-            size="lg"
-            options={candidates.map((candidate) => ({
-              value: candidate.zone_id,
-              label: candidate.name,
-            }))}
-            value={values.zoneId}
-            disabled={locked}
-            {...errorOf('zone')}
-            onChange={(value) => {
-              change({ zoneId: value }, 'zone');
-            }}
-          />
+        <TaskFormSection title={F.fields.zone} description={zoneHelp}>
+          <div ref={zoneBox}>
+            <RadioGroup
+              legend={F.fields.zone}
+              name="zone"
+              required
+              size="lg"
+              options={candidates.map((candidate) => ({
+                value: candidate.zone_id,
+                label: candidate.name,
+              }))}
+              value={values.zoneId}
+              disabled={locked}
+              {...errorOf('zone')}
+              onChange={(value) => {
+                change({ zoneId: value }, 'zone');
+              }}
+            />
+          </div>
           <Field
             label={F.fields.zoneNote}
             required

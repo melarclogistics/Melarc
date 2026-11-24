@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000002",
+      "name": "Accra Central"
+    },
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000006",
+      "name": "Amasaman & Environs"
+    },
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000005",
+      "name": "Dansoman"
+    },
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000007",
+      "name": "Kasoa Corridor"
+    },
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000003",
+      "name": "Lapaz/Sowutuom"
+    },
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000004",
+      "name": "Madina/Adenta"
+    },
+    {
+      "zone_id": "5eed0101-0000-4000-8000-000000000001",
+      "name": "Tema"
+    }
+  ]
+}

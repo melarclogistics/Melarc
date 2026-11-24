@@ -10,6 +10,7 @@ import {
   itemizeOrder,
   previewOrder,
   previewOrderAmendment,
+  readDestinationZones,
   requestPayerCorrection,
   reverseOrderArrival,
   setParcelWaiting,
@@ -127,15 +128,90 @@ describe('previewOrder', () => {
     }
   });
 
-  // Break caught: the rule of an address the hub has no zone for lost (the officer is told to add the area or a landmark by it).
-  it('refuses an address no zone matches, with the rule that says so', async () => {
+  // Break caught: an address the hub has no zone for told as a failure the officer can only answer by rewording the address (the officer who knows the zone cannot say it), or any other missing setting
+  // taken for it.
+  it('answers that no zone matches, as a result, when the address matches none, and refuses any other missing setting as a failure', async () => {
     api = installFakeApi({
       [`POST /hub-intakes/${INTAKE}/orders/preview`]: () => refusalOf('preview-zone-unresolved'),
+    });
+    // The refusal itself comes with it, so that a screen that cannot offer the zones tells it as it always did.
+    expect(await previewOrder(client(), INTAKE, PREVIEW_BODY)).toMatchObject({
+      kind: 'zone-unresolved',
+      refusal: { status: 422, code: 'SETTING_MISSING', rule: 'destination_zone_unresolved' },
+    });
+    api.restore();
+    const { status, body } = capturedRefusal('preview-zone-unresolved');
+    api = installFakeApi({
+      [`POST /hub-intakes/${INTAKE}/orders/preview`]: () =>
+        json(status, { ...body, details: { rule: 'price_not_set' } }),
     });
     await expect(previewOrder(client(), INTAKE, PREVIEW_BODY)).rejects.toMatchObject({
       status: 422,
       code: 'SETTING_MISSING',
-      rule: 'destination_zone_unresolved',
+      rule: 'price_not_set',
+    });
+  });
+});
+
+describe('readDestinationZones (Run G1, D-S7-5)', () => {
+  const ZONES = `GET /hub-intakes/${INTAKE}/destination-zones`;
+
+  // Break caught: a read that sends a key, a version or a body (it changes nothing), or one that gives the zones as the API named them with more or less than their identifier and name.
+  it('reads the hub’s zones by identifier and name, with no key, no version and no body', async () => {
+    api = installFakeApi({ [ZONES]: () => json(200, captured('destination-zones')) });
+    const zones = await readDestinationZones(client(), INTAKE);
+    expect(last().method).toBe('GET');
+    expect(last().headers.get('Idempotency-Key')).toBeNull();
+    expect(last().headers.get('If-Match')).toBeNull();
+    expect(zones.map((zone) => zone.name)).toEqual([
+      'Accra Central',
+      'Amasaman & Environs',
+      'Dansoman',
+      'Kasoa Corridor',
+      'Lapaz/Sowutuom',
+      'Madina/Adenta',
+      'Tema',
+    ]);
+    for (const zone of zones) expect(Object.keys(zone).toSorted()).toEqual(['name', 'zone_id']);
+  });
+
+  // Break caught: an answer that is not the list (a body of another shape, a zone with no name) read as a hub with no zones, or as zones to choose from.
+  it.each([
+    ['a list that is not one', { items: 'Tema' }],
+    ['no list', {}],
+    ['a zone with no name', { items: [{ zone_id: '5eed0101-0000-4000-8000-000000000001' }] }],
+    ['a zone that is not an identifier', { items: [{ zone_id: 'tema', name: 'Tema' }] }],
+    [
+      'the same zone twice',
+      {
+        items: [
+          { zone_id: '5eed0101-0000-4000-8000-000000000001', name: 'Tema' },
+          { zone_id: '5eed0101-0000-4000-8000-000000000001', name: 'Tema again' },
+        ],
+      },
+    ],
+  ])('reads %s as an answer that is not the API’s', async (_name, answer) => {
+    api = installFakeApi({ [ZONES]: () => json(200, answer) });
+    await expect(readDestinationZones(client(), INTAKE)).rejects.toMatchObject({
+      kind: 'unexpected-response',
+    });
+  });
+
+  // Break caught: a hub with no zone told as an unreadable answer, so that the officer is told nothing is wrong with the zones.
+  it('reads a hub with no zone as an empty list', async () => {
+    api = installFakeApi({ [ZONES]: () => json(200, { items: [] }) });
+    expect(await readDestinationZones(client(), INTAKE)).toEqual([]);
+  });
+
+  // Break caught: a refusal of the read (no key, another hub) answered as zones, or as an empty list.
+  it('fails with the refusal when the read is refused', async () => {
+    api = installFakeApi({
+      [ZONES]: () =>
+        json(403, { code: 'PERMISSION_DENIED', message: 'x', request_id: 'r1', details: {} }),
+    });
+    await expect(readDestinationZones(client(), INTAKE)).rejects.toMatchObject({
+      status: 403,
+      code: 'PERMISSION_DENIED',
     });
   });
 });
@@ -168,6 +244,18 @@ describe('itemizeOrder', () => {
     const outcome = await itemizeOrder(client(), savedIntake, BODY, VERSION, KEY);
     expect(outcome.kind).toBe('terms-changed');
     if (outcome.kind === 'terms-changed') expect(outcome.current.total.amount_minor).toBe(3500);
+  });
+
+  // Break caught: a save that meets an address no zone matches now (the hub's aliases moved since the check) told as a failure that loses the officer's work, instead of the offer of the zones.
+  it('answers that no zone matches, as a result, when the save meets an address that matches none', async () => {
+    const { status, body } = capturedRefusal('preview-zone-unresolved');
+    api = installFakeApi({
+      [`POST /hub-intakes/${savedIntake}/orders`]: () => json(status, body),
+    });
+    expect(await itemizeOrder(client(), savedIntake, BODY, VERSION, KEY)).toMatchObject({
+      kind: 'zone-unresolved',
+      refusal: { rule: 'destination_zone_unresolved' },
+    });
   });
 
   // Break caught: a refusal that says the terms changed and does not give them taken as a result with nothing to read.
@@ -251,6 +339,21 @@ describe('previewOrderAmendment and amendOrder', () => {
     api = installFakeApi({ [`PATCH /orders/${orderId}`]: () => refusalOf('save-terms-changed') });
     const outcome = await amendOrder(client(), orderId, PATCH, VERSION, KEY);
     expect(outcome.kind).toBe('terms-changed');
+  });
+
+  // Break caught: the change of an address to one no zone matches told as a failure the officer can only answer by rewording it, on the preview or on the save.
+  it('answers that no zone matches, as a result, for a change of address, on the preview and on the save', async () => {
+    api = installFakeApi({
+      [`POST /orders/${orderId}/amendment-preview`]: () => refusalOf('preview-zone-unresolved'),
+      [`PATCH /orders/${orderId}`]: () => refusalOf('preview-zone-unresolved'),
+    });
+    expect(
+      await previewOrderAmendment(client(), orderId, intakeId, { size_class: 'MEDIUM' }),
+    ).toMatchObject({ kind: 'zone-unresolved', refusal: { rule: 'destination_zone_unresolved' } });
+    expect(await amendOrder(client(), orderId, PATCH, VERSION, KEY)).toMatchObject({
+      kind: 'zone-unresolved',
+      refusal: { rule: 'destination_zone_unresolved' },
+    });
   });
 });
 

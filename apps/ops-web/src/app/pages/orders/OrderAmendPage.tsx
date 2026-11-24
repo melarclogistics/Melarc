@@ -22,7 +22,11 @@ import {
   type OrderFieldErrors,
   type OrderFormValues,
 } from '../../../platform/hub-orders/order-form-model';
-import { amendOrder, previewOrderAmendment } from '../../../platform/hub-orders/orders-commands';
+import {
+  amendOrder,
+  previewOrderAmendment,
+  readDestinationZones,
+} from '../../../platform/hub-orders/orders-commands';
 import { useOrder, type OrderRecordView } from '../../../platform/hub-orders/use-orders-queries';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { copyFor } from '../../../platform/problem/problem-copy';
@@ -79,6 +83,7 @@ function AmendForm({
           command.version,
           key,
         ),
+      zones: () => readDestinationZones(client, intakeId),
       version: () => version.current,
       reload: async () => {
         const read = await reload();
@@ -203,6 +208,7 @@ function AmendForm({
           locked={locked}
           intakeId={intakeId}
           candidates={flow.candidates}
+          zonesWhy={flow.zonesWhy}
           gate={gate}
           amendment
           change={change}

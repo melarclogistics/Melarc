@@ -5,6 +5,7 @@ import { answerOf, OperationFailure, unexpectedResponse } from '../api/api-respo
 import { instantOf, isRecord, lineOf, uuidOf } from '../staff/staff-shape';
 import {
   parseCandidates,
+  parseZoneList,
   parseClosed,
   parseClosure,
   parseCorrection,
@@ -83,7 +84,9 @@ const namesRule = (failure: OperationFailure, rule: string): boolean =>
 /** What a preview answers: the terms, or, for an address that matches more than one zone, the zones to choose from. */
 export type PreviewOutcome =
   | { readonly kind: 'terms'; readonly terms: TermsView }
-  | { readonly kind: 'zone-choice'; readonly candidates: readonly ZoneCandidateView[] };
+  | { readonly kind: 'zone-choice'; readonly candidates: readonly ZoneCandidateView[] }
+  /** The address matches no zone of the hub: the officer chooses the zone it is in, from the hub's own (`readDestinationZones`), and says why (D-S7-5). The refusal is kept, to be told as it always was where the zones cannot be offered. */
+  | { readonly kind: 'zone-unresolved'; readonly refusal: OperationFailure };
 
 function previewOutcome(result: Parameters<typeof answerOf>[0], intakeId: string): PreviewOutcome {
   try {
@@ -97,6 +100,9 @@ function previewOutcome(result: Parameters<typeof answerOf>[0], intakeId: string
     if (error instanceof OperationFailure && namesRule(error, 'destination_zone_ambiguous')) {
       const candidates = parseCandidates(detailsOf(result.error).candidates);
       if (candidates !== undefined) return { kind: 'zone-choice', candidates };
+    }
+    if (error instanceof OperationFailure && namesRule(error, 'destination_zone_unresolved')) {
+      return { kind: 'zone-unresolved', refusal: error };
     }
     throw error;
   }
@@ -116,6 +122,24 @@ export async function previewOrder(
     body,
   });
   return previewOutcome(result, intakeId);
+}
+
+// ---- The hub's zones -----------------------------------------------------------------------------------------------------------------------------
+
+/**
+ * `listDestinationZones` (`hub.intake.itemize`, hub-scoped): the hub's own active zones, by identifier and name, **for an address that matches none** (D-S7-5): the officer chooses the one it is in and says why
+ * (`destination_zone_authorization`). A read: no key, no version and no body. The server still judges the choice. A list that is not the list is an answer that is not the API's.
+ */
+export async function readDestinationZones(
+  client: ApiClient,
+  intakeId: string,
+): Promise<readonly ZoneCandidateView[]> {
+  const answer = answerOf(
+    await client.GET('/hub-intakes/{id}/destination-zones', { params: { path: { id: intakeId } } }),
+  );
+  const zones = parseZoneList(answer.data);
+  if (zones === undefined) throw unexpectedResponse(answer.status);
+  return zones;
 }
 
 /** `previewOrderAmendment` (`hub.intake.itemize`): what an amendment would give, beside the quote the order holds. No key, no version and no reason are sent. */
@@ -139,7 +163,9 @@ export type SaveOutcome =
   | { readonly kind: 'saved'; readonly order: SavedOrderView; readonly version: string | undefined }
   | { readonly kind: 'terms-changed'; readonly current: TermsView }
   /** The address now matches more than one zone (the hub's aliases moved since the check): the zones the server named, for the officer to choose one and say why. */
-  | { readonly kind: 'zone-choice'; readonly candidates: readonly ZoneCandidateView[] };
+  | { readonly kind: 'zone-choice'; readonly candidates: readonly ZoneCandidateView[] }
+  /** The address now matches no zone (the hub's aliases moved since the check): the officer chooses one of the hub's, and says why. */
+  | { readonly kind: 'zone-unresolved'; readonly refusal: OperationFailure };
 
 function saveOutcome(result: Parameters<typeof answerOf>[0]): SaveOutcome {
   try {
@@ -156,6 +182,9 @@ function saveOutcome(result: Parameters<typeof answerOf>[0]): SaveOutcome {
     if (error instanceof OperationFailure && namesRule(error, 'destination_zone_ambiguous')) {
       const candidates = parseCandidates(detailsOf(result.error).candidates);
       if (candidates !== undefined) return { kind: 'zone-choice', candidates };
+    }
+    if (error instanceof OperationFailure && namesRule(error, 'destination_zone_unresolved')) {
+      return { kind: 'zone-unresolved', refusal: error };
     }
     throw error;
   }

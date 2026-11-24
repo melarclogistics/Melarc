@@ -1396,5 +1396,29 @@ export function parseCandidates(value: unknown): readonly ZoneCandidateView[] | 
   return found;
 }
 
+/** The most zones a hub's list may name before it is not a list a person can choose from: more is an answer that is not the API's. */
+const MAX_ZONES = 200;
+
+/**
+ * The zones of the hub an intake belongs to (`listDestinationZones`, D-S7-5): `{ zone_id, name }` for each active zone and nothing else, in the order the server gave. A hub with no zone is an empty list (the form
+ * then has nothing to offer and says what it said before); a list that is not the list, a zone with no usable identifier or name, or the same zone twice is not the API's answer.
+ */
+export function parseZoneList(value: unknown): readonly ZoneCandidateView[] | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items) || value.items.length > MAX_ZONES) {
+    return undefined;
+  }
+  const seen = new Set<string>();
+  const found: ZoneCandidateView[] = [];
+  for (const entry of value.items as unknown[]) {
+    if (!isRecord(entry)) return undefined;
+    const id = uuidOf(entry.zone_id);
+    const name = lineOf(entry.name);
+    if (id === undefined || name === undefined || seen.has(id.toLowerCase())) return undefined;
+    seen.add(id.toLowerCase());
+    found.push({ zone_id: id, name });
+  }
+  return found;
+}
+
 /** Contract types the guards above are held to by `test/hub-orders-contract.test.ts`. */
 export type ContractSchemas = components['schemas'];

@@ -21,6 +21,7 @@ import {
 import {
   itemizeOrder,
   previewOrder,
+  readDestinationZones,
   type SavedOrderView,
 } from '../../../platform/hub-orders/orders-commands';
 import type { WaitingMarkView, WorkItemView } from '../../../platform/hub-orders/orders-shape';
@@ -248,6 +249,7 @@ function OrderForm({
           command.version,
           key,
         ),
+      zones: () => readDestinationZones(client, facts.id),
       version: () => version.current,
       reload: async () => {
         const read = await reload();
@@ -374,6 +376,7 @@ function OrderForm({
           locked={locked}
           intakeId={facts.id}
           candidates={flow.candidates}
+          zonesWhy={flow.zonesWhy}
           gate={gate}
           amendment={false}
           change={change}

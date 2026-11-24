@@ -770,6 +770,151 @@ describe('an address that matches more than one zone', () => {
   });
 });
 
+describe('an address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () => {
+  const ZONES = `GET /hub-intakes/${VENDOR_ID}/destination-zones`;
+  const unresolved = () => {
+    const refusalBody = capturedRefusal('preview-zone-unresolved');
+    return json(refusalBody.status, refusalBody.body);
+  };
+  const GROUP = /Which zone is it\?/;
+
+  // Break caught: an address no zone matches that leaves an officer who knows the zone with nothing to do but reword the address; the zones of the hub not offered, or offered with one chosen for the officer, or sent without
+  // the reason; a choice that does not take the focus or is not announced when it appears; and the order saved without the zone it was priced with.
+  it('offers the hub’s zones with the reason, takes the focus to the choice and says it is there, and prices and saves with the zone the officer chose', async () => {
+    let previews = 0;
+    const { user } = open({
+      [PREVIEW]: () => {
+        previews += 1;
+        return previews === 1
+          ? unresolved()
+          : json(200, termsOf({ destination_zone_resolution: 'EXPLICITLY_AUTHORIZED' }));
+      },
+      [ZONES]: () => json(200, captured('destination-zones')),
+      [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' }),
+    });
+    await fillIn(user);
+    const group = await screen.findByRole('group', { name: GROUP }, PRICE_WAIT);
+    const radios = within(group).getAllByRole('radio');
+    expect(radios.map((radio) => (radio as HTMLInputElement).labels?.[0]?.textContent)).toEqual([
+      'Accra Central',
+      'Amasaman & Environs',
+      'Dansoman',
+      'Kasoa Corridor',
+      'Lapaz/Sowutuom',
+      'Madina/Adenta',
+      'Tema',
+    ]);
+    for (const radio of radios) expect(radio).not.toBeChecked();
+    // It says what the matter is, in its own words, and not the old ones that asked for more of the address.
+    const said = screen.getAllByText(
+      /The address does not match a zone of this hub\. Choose the zone/,
+    );
+    // Once in the section, to be read, and once in the live region that says the choice is there.
+    expect(said).toHaveLength(2);
+    expect(said.filter((element) => element.closest('[role="status"]') !== null)).toHaveLength(1);
+    expect(screen.queryByText(/Add the area or a landmark/)).toBeNull();
+    // The focus is on the choice, so that nobody has to hunt for it at the bottom of a form two screens tall.
+    expect(radios[0]).toHaveFocus();
+    expect(sent(ZONES)).toHaveLength(1);
+
+    // Nothing is chosen for the officer: the save says what is missing, then the price comes by itself for the zone and the reason.
+    await user.click(screen.getByRole('button', { name: 'Save the order' }));
+    expect(await screen.findByText('Choose the zone.')).toBeVisible();
+    await user.click(within(group).getByRole('radio', { name: 'Madina/Adenta' }));
+    await user.type(screen.getByLabelText(/Why this zone/), 'The sender said it is in Adenta');
+    expect(await pricedSave()).toBeVisible();
+    expect(await bodyOf(sent(PREVIEW).at(-1))).toMatchObject({
+      destination_zone_authorization: {
+        zone_id: '5eed0101-0000-4000-8000-000000000004',
+        note: 'The sender said it is in Adenta',
+      },
+    });
+    await user.click(await pricedSave());
+    await screen.findByText('Order ACC-OR-2CD3FG is saved.');
+    expect((await bodyOf(sent(SAVE)[0])).destination_zone_authorization).toEqual({
+      zone_id: '5eed0101-0000-4000-8000-000000000004',
+      note: 'The sender said it is in Adenta',
+    });
+  });
+
+  // Break caught: the choice and its reason kept for an address they were not made for, so that an order is priced in a zone nobody chose for it; the hub's zones read again for each address typed.
+  it('forgets the zone chosen when the address is changed, and offers the zones again for the new address without reading them again', async () => {
+    const { user } = open({
+      [PREVIEW]: unresolved,
+      [ZONES]: () => json(200, captured('destination-zones')),
+    });
+    await fillIn(user);
+    const group = await screen.findByRole('group', { name: GROUP }, PRICE_WAIT);
+    await user.click(within(group).getByRole('radio', { name: 'Tema' }));
+    await user.type(screen.getByLabelText(/Why this zone/), 'Near the harbour');
+    await user.type(screen.getByLabelText(/Delivery address/), ' Tema');
+    expect(screen.queryByRole('group', { name: GROUP })).toBeNull();
+    const again = await screen.findByRole('group', { name: GROUP }, PRICE_WAIT);
+    for (const radio of within(again).getAllByRole('radio')) expect(radio).not.toBeChecked();
+    expect(screen.getByLabelText(/Why this zone/)).toHaveValue('');
+    expect(sent(ZONES)).toHaveLength(1);
+  });
+
+  // Break caught: a hub whose zones cannot be read (a refusal, a fault, no zone at all) that leaves the officer with a form that says nothing, or one that loses what was typed: the address says what to do, as it did.
+  it.each([
+    ['a fault', () => json(503, { code: 'SERVICE_UNAVAILABLE', message: 'x', request_id: 'r1' })],
+    [
+      'a refusal',
+      () => json(403, { code: 'PERMISSION_DENIED', message: 'x', request_id: 'r1', details: {} }),
+    ],
+    ['a hub with no zone', () => json(200, { items: [] })],
+  ])(
+    'tells the address what to do, as it did, when the zones cannot be read: %s',
+    async (_name, answer) => {
+      const { user } = open({ [PREVIEW]: unresolved, [ZONES]: answer });
+      await fillIn(user);
+      expect(
+        await screen.findByText(
+          /The address does not match a zone of this hub, so the order cannot be priced\. Add the area or a landmark/,
+          undefined,
+          PRICE_WAIT,
+        ),
+      ).toBeVisible();
+      expect(screen.queryByRole('group', { name: GROUP })).toBeNull();
+      expect(screen.getByLabelText(/Delivery address/)).toHaveValue(
+        '12 Madina Estate, near the market',
+      );
+    },
+  );
+
+  // Break caught: a save that meets an address no zone matches, where the hub's zones cannot be read, that is told as nothing, or as a success: the refusal is told as it always was, with the entries kept.
+  it('tells the address what to do when the save meets an address no zone matches and the zones cannot be read', async () => {
+    const { user } = open({
+      [ZONES]: () => json(503, { code: 'SERVICE_UNAVAILABLE', message: 'x', request_id: 'r1' }),
+      [SAVE]: unresolved,
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    expect(await screen.findByText(/Add the area or a landmark to the address/)).toBeVisible();
+    expect(screen.queryByRole('group', { name: GROUP })).toBeNull();
+    expect(screen.getByLabelText(/Delivery address/)).toHaveValue(
+      '12 Madina Estate, near the market',
+    );
+    expect(sent(SAVE)).toHaveLength(1);
+  });
+
+  // Break caught: a save that meets an address no zone matches any more (the hub's aliases moved since the check) told as a failure that throws the officer's entries away, instead of the offer of the zones.
+  it('offers the zones when the save is the one that meets an address no zone matches', async () => {
+    const { user } = open({
+      [ZONES]: () => json(200, captured('destination-zones')),
+      [SAVE]: unresolved,
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    const group = await screen.findByRole('group', { name: GROUP });
+    expect(within(group).getAllByRole('radio')).toHaveLength(7);
+    expect(screen.getByLabelText(/Delivery address/)).toHaveValue(
+      '12 Madina Estate, near the market',
+    );
+    expect(sent(SAVE)).toHaveLength(1);
+  });
+});
+
 describe('a vendor with nothing to order', () => {
   it('says so, with the way back, for a vendor that is closed', async () => {
     open({
