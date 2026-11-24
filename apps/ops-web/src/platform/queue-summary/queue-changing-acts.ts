@@ -231,13 +231,14 @@ export const QUEUE_NEUTRAL_CALLS: readonly QueueNeutralCall[] = [
     ],
   ),
   ...neutral(
-    'Orders at a hub (S1.40): the price checked before an order is made or changed, the order made or changed, the recipient of a confirmed order corrected (its name, its phone and an address in the same zone, with a reason: the price, the zone and the date never move), the close of a vendor whose orders are made, and the request and the decision of a change of who pays. No queue of the hub counts what these change: the queue by run counts runs not yet checked in, and the parcels being searched for are the missing ones of a case in review, which none of these opens (only taking back an arrival does, and it is above).',
+    'Orders at a hub (S1.40): the price checked before an order is made or changed, the order made or changed, the recipient of a confirmed order corrected (its name, its phone and an address in the same zone, with a reason: the price, the zone and the date never move), the close of a vendor whose orders are made, the mark of a parcel the officer is waiting on the vendor’s details for (Run G1, D-S7-12: it moves no count of any queue, and the parcel stays one that needs its order), and the request and the decision of a change of who pays. No queue of the hub counts what these change: the queue by run counts runs not yet checked in, and the parcels being searched for are the missing ones of a case in review, which none of these opens (only taking back an arrival does, and it is above).',
     [
       ['POST', '/hub-intakes/{id}/orders/preview', 'previewOrder'],
       ['POST', '/orders/{id}/amendment-preview', 'previewOrderAmendment'],
       ['POST', '/hub-intakes/{id}/orders', 'itemizeOrder'],
       ['PATCH', '/orders/{id}', 'amendOrder'],
       ['POST', '/orders/{id}/recipient-correction', 'correctOrderRecipient'],
+      ['PUT', '/intake-parcels/{parcel_id}/waiting-for-vendor', 'setParcelWaitingForVendor'],
       ['POST', '/hub-intakes/{id}/close', 'closeHubIntake'],
       ['POST', '/orders/{id}/payer-correction', 'requestPayerCorrection'],
       ['POST', '/payer-corrections/{id}/decision', 'approvePayerCorrection'],

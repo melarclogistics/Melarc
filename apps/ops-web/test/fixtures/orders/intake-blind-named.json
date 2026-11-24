@@ -1,0 +1,20 @@
+{
+  "id": "01a124d3-7400-7123-a06c-ae2fed1496cf",
+  "code": "ACC-IN-PKCHRZ",
+  "state": "READY_FOR_ITEMIZATION",
+  "hub_id": "5eed0100-0000-4000-8000-000000000001",
+  "pickup_request_id": "33c1b91b-c671-4644-9a00-dc237b3b4e70",
+  "pickup_manifest_id": "b23f2ba6-8894-4516-912c-35271cadbb76",
+  "handed_over_by": "a19697ac-a9ef-43bb-ae1e-7b85d9b745d2",
+  "handed_over_at": "2026-11-24T10:15:38.569Z",
+  "declaration_captured_at": "2026-11-24T10:14:38.538Z",
+  "active_receiver_id": null,
+  "lock_acquired_at": null,
+  "count_phase": "POST_COUNT",
+  "rider_declared_count": 2,
+  "physical_count": 2,
+  "count_variance": "MATCH",
+  "count_difference": 0,
+  "condition": "OK",
+  "vendor_name": "Fixture Sender"
+}

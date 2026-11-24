@@ -1,0 +1,17 @@
+{
+  "status": 400,
+  "body": {
+    "code": "VALIDATION_FAILED",
+    "message": "The request is not valid",
+    "details": {
+      "violations": [
+        {
+          "in": "body",
+          "pointer": "/note",
+          "rule": "phone_number"
+        }
+      ]
+    },
+    "request_id": "4276d0ee-b5f3-4b1d-9752-77abb44b0b23"
+  }
+}

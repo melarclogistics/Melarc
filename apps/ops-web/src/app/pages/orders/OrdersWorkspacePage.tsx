@@ -46,6 +46,7 @@ import './orders-pages.css';
 /** The order the views are offered in: the work that is left first, then the rest. The first is the one a visit starts at. */
 const VIEW_ORDER: readonly Exclude<WorklistViewId, 'all'>[] = [
   'needs_order',
+  'waiting_for_vendor',
   'awaiting_arrival',
   'prepared',
   'itemized',
@@ -80,6 +81,9 @@ function countOf(
       return progress.payment_required;
     case 'missing':
       return progress.missing;
+    case 'waiting_for_vendor':
+      // The parcels the officer is waiting on the vendor's details for: the server's count, or none where it did not give one (never zero).
+      return progress.waiting_for_vendor;
   }
 }
 
@@ -126,14 +130,19 @@ function OrderLine({ item }: { readonly item: WorkItemView }) {
   );
 }
 
-/** Where the row stands, with the one fact beside it that the state does not say: that payment is due. */
+/** Where the row stands, with the facts beside it that the state does not say: that payment is due, and that the officer is waiting on the vendor's details for the parcel, with what was asked and how. */
 function Standing({ item }: { readonly item: WorkItemView }) {
+  const waiting = item.parcel?.waiting_for_vendor ?? null;
   return (
     <span className="orders-standing">
       <StatusBadge status={item.work_state} map={WORK_STATE_MAP} />
       {item.order?.payment_required === true ? (
         <span className="orders-quiet">{WORDS.workspace.paymentDue}</span>
       ) : null}
+      {waiting === null ? null : (
+        <span className="orders-quiet">{WORDS.workspace.waiting.label}</span>
+      )}
+      {waiting?.note == null ? null : <span className="orders-quiet">{waiting.note}</span>}
     </span>
   );
 }

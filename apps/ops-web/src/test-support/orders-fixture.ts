@@ -48,6 +48,8 @@ export interface ProgressOverrides {
   readonly payment_required?: number;
   readonly missing?: number;
   readonly orders?: number;
+  /** The parcels the officer is waiting on the vendor's details for (D-S7-12); the answers captured before it was built do not say it. */
+  readonly waiting_for_vendor?: number | null;
 }
 
 export const progressOf = (overrides: ProgressOverrides = {}) => ({
@@ -70,6 +72,8 @@ export function parcelRow(
     order?: Record<string, unknown> | null;
     origin?: 'DOOR_PHOTO' | 'HUB_EXTRA';
     parcelState?: string;
+    /** The mark of a parcel the officer is waiting on (D-S7-12), in the shape the API answered it. */
+    waiting?: { readonly since: string; readonly note: string | null };
   } = {},
 ) {
   const parcel = n === 4 ? EXPECTED_PARCEL : (PARCELS[n - 1] ?? arrivedParcel(n));
@@ -90,6 +94,7 @@ export function parcelRow(
             : 'ARRIVED'),
       door_photo_evidence_id: parcel.photo_evidence_id,
       hub_photo_evidence_id: null,
+      waiting_for_vendor: overrides.waiting ?? null,
     },
     order:
       overrides.order !== undefined

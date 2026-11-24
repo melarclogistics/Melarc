@@ -43,6 +43,7 @@ export const WORKLIST_VIEWS = [
   'itemized',
   'payment_required',
   'missing',
+  'waiting_for_vendor',
 ] as const;
 export const SIZE_CLASSES = ['SMALL', 'MEDIUM', 'LARGE'] as const;
 export const RECEIVING_MODES = ['PHOTO_CHECK_IN', 'BLIND_COUNT'] as const;
@@ -149,6 +150,8 @@ export interface ProgressView {
   readonly payment_required: number;
   readonly missing: number;
   readonly orders: number;
+  /** The parcels the officer is waiting on the vendor's details for (D-S7-12): the rows the view of this name opens. Null where the answer did not say (a missing figure is never zero). */
+  readonly waiting_for_vendor: number | null;
 }
 
 export function parseProgress(body: unknown): ProgressView | undefined {
@@ -161,7 +164,9 @@ export function parseProgress(body: unknown): ProgressView | undefined {
   const paymentRequired = whole(body.payment_required);
   const missing = whole(body.missing);
   const orders = whole(body.orders);
+  const waiting = optional(body.waiting_for_vendor, (value) => whole(value));
   if (
+    waiting === undefined ||
     received === undefined ||
     needsOrder === undefined ||
     awaiting === undefined ||
@@ -182,7 +187,21 @@ export function parseProgress(body: unknown): ProgressView | undefined {
     payment_required: paymentRequired,
     missing,
     orders,
+    waiting_for_vendor: waiting,
   };
+}
+
+/** The mark of a parcel the officer is waiting on the vendor's details for (D-S7-12): since when, and the officer's note (one short line), if one was written. */
+export interface WaitingMarkView {
+  readonly since: string;
+  readonly note: string | null;
+}
+
+function parseWaitingMark(value: unknown): WaitingMarkView | undefined {
+  if (!isRecord(value)) return undefined;
+  const since = instantOf(value.since);
+  const note = optional(value.note, lineOf);
+  return since === undefined || note === undefined ? undefined : { since, note };
 }
 
 export interface WorkParcelView {
@@ -193,6 +212,8 @@ export interface WorkParcelView {
   /** The rider's photo of the parcel, by its record: a photo is fetched only when it is wanted. */
   readonly door_photo_evidence_id: string | null;
   readonly hub_photo_evidence_id: string | null;
+  /** The officer is waiting on the vendor's details for this parcel (D-S7-12), held by the server so that every officer and tablet sees it; null when it is not waiting. */
+  readonly waiting_for_vendor: WaitingMarkView | null;
 }
 
 export interface WorkOrderView {
@@ -229,7 +250,9 @@ function parseWorkParcel(body: unknown): WorkParcelView | undefined {
   const ordinal = whole(body.ordinal);
   const door = optional(body.door_photo_evidence_id, uuidOf);
   const hub = optional(body.hub_photo_evidence_id, uuidOf);
+  const waiting = optional(body.waiting_for_vendor, parseWaitingMark);
   if (
+    waiting === undefined ||
     id === undefined ||
     ordinal === undefined ||
     ordinal < 1 ||
@@ -247,6 +270,7 @@ function parseWorkParcel(body: unknown): WorkParcelView | undefined {
     state: body.state,
     door_photo_evidence_id: door,
     hub_photo_evidence_id: hub,
+    waiting_for_vendor: waiting,
   };
 }
 
@@ -309,6 +333,8 @@ function parseWorkItem(body: unknown, mode: VendorMode): WorkItemView | undefine
   if ((body.work_state === 'PREPARED' || body.work_state === 'ITEMIZED') && order === null) {
     return undefined;
   }
+  // A parcel is waited on while it still needs its order: the mark ends when the order is made (D-S7-12), so a parcel with an order that is drawn as waited on is not the API's.
+  if (parcel?.waiting_for_vendor != null && order !== null) return undefined;
   return { work_state: body.work_state, parcel, order, reversed_order: reversed };
 }
 

@@ -2,7 +2,7 @@ import type { components } from '@melarc/api-client';
 
 import type { ApiClient } from '../api/api-client';
 import { answerOf, OperationFailure, unexpectedResponse } from '../api/api-response';
-import { isRecord, uuidOf } from '../staff/staff-shape';
+import { instantOf, isRecord, lineOf, uuidOf } from '../staff/staff-shape';
 import {
   parseCandidates,
   parseClosed,
@@ -226,6 +226,59 @@ export async function correctOrderRecipient(
   const order = parseSavedOrder(answer.data);
   if (order?.id.toLowerCase() !== orderId.toLowerCase()) throw unexpectedResponse(answer.status);
   return order;
+}
+
+// ---- A parcel the officer is waiting on ---------------------------------------------------------------------------------------------------------
+
+/** The mark as it stands after the act (`ParcelWaitingForVendor`): whether the parcel is waiting, since when and with what note. */
+export interface ParcelWaitView {
+  readonly parcel_id: string;
+  readonly waiting: boolean;
+  readonly since: string | null;
+  readonly note: string | null;
+}
+
+function parseParcelWait(body: unknown): ParcelWaitView | undefined {
+  if (!isRecord(body)) return undefined;
+  const parcel = uuidOf(body.parcel_id);
+  const since = body.since === null ? null : instantOf(body.since);
+  const note = body.note === null ? null : lineOf(body.note);
+  if (
+    parcel === undefined ||
+    typeof body.waiting !== 'boolean' ||
+    since === undefined ||
+    note === undefined
+  ) {
+    return undefined;
+  }
+  // A mark has its moment and an end of one has none, as the contract says.
+  if (body.waiting === (since === null)) return undefined;
+  return { parcel_id: parcel, waiting: body.waiting, since, note };
+}
+
+/**
+ * `setParcelWaitingForVendor` (`hub.intake.itemize`, D-S7-12): marks a parcel as waiting for the vendor's details, with an optional note of one short line, or takes the mark off. It states the parcel's desired
+ * state, so it is idempotent by nature and **takes no `Idempotency-Key`**, and it takes the vendor's version as `If-Match` (which it does not move). The note is sent only with a mark and only when there is one. The
+ * answer is the mark as it now stands: it must be this parcel and the state that was asked.
+ */
+export async function setParcelWaiting(
+  client: ApiClient,
+  parcelId: string,
+  waiting: boolean,
+  note: string | undefined,
+  version: string,
+): Promise<ParcelWaitView> {
+  const answer = answerOf(
+    await client.PUT('/intake-parcels/{parcel_id}/waiting-for-vendor', {
+      params: { path: { parcel_id: parcelId }, header: { 'If-Match': version } },
+      body: waiting && note !== undefined ? { waiting, note } : { waiting },
+    }),
+  );
+  const mark = parseParcelWait(answer.data);
+  if (mark?.parcel_id.toLowerCase() !== parcelId.toLowerCase() || mark.waiting !== waiting) {
+    throw unexpectedResponse(answer.status);
+  }
+  return mark;
 }
 
 // ---- A mistaken arrival ------------------------------------------------------------------------------------------------------------------------

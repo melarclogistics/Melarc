@@ -54,6 +54,14 @@ export const ORDERS_WORDS = {
       itemized: { label: 'Confirmed', none: 'No order is confirmed yet.' },
       payment_required: { label: 'Payment due', none: 'No order is waiting for payment.' },
       missing: { label: 'Missing', none: 'No parcel is missing.' },
+      waiting_for_vendor: {
+        label: 'Waiting for the vendor’s details',
+        none: 'No parcel is waiting for the vendor’s details.',
+      },
+    },
+    /** A parcel the officer is waiting on the vendor's details for (D-S7-12): said on its row, beside where it stands, with the officer's note if there is one. */
+    waiting: {
+      label: 'Waiting for the vendor’s details',
     },
     columns: {
       parcel: 'Parcel',

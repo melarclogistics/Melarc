@@ -12,6 +12,7 @@ import {
   previewOrderAmendment,
   requestPayerCorrection,
   reverseOrderArrival,
+  setParcelWaiting,
   type AmendSaveBody,
   type OrderPreviewBody,
   type OrderSaveBody,
@@ -276,6 +277,63 @@ describe('reverseOrderArrival', () => {
       [`POST /orders/${OTHER_ID}/arrival-reversal`]: () => json(200, reversal),
     });
     await expect(reverseOrderArrival(client(), OTHER_ID, 'x', VERSION, KEY)).rejects.toMatchObject({
+      kind: 'unexpected-response',
+    });
+  });
+});
+
+describe('setParcelWaiting (Run G1, D-S7-12)', () => {
+  const PARCEL = 'a1a1a1a1-2222-4333-8444-555555555555';
+  const AT = '2026-11-24T10:30:00.000Z';
+  const route = `PUT /intake-parcels/${PARCEL}/waiting-for-vendor`;
+
+  // Break caught: a mark that sends a key (it is idempotent by nature and takes none), or no version (the vendor's token is the one it takes), a note that is sent when there is none, a body that is not the
+  // desired state, or the unmark that sends a note.
+  it('puts the desired state on the vendor’s version, with the note only when there is one, and no key', async () => {
+    api = installFakeApi({
+      [route]: () =>
+        json(200, { parcel_id: PARCEL, waiting: true, since: AT, note: 'Called the vendor' }),
+    });
+    const marked = await setParcelWaiting(client(), PARCEL, true, 'Called the vendor', VERSION);
+    expect(last().method).toBe('PUT');
+    expect(last().headers.get('If-Match')).toBe(VERSION);
+    expect(last().headers.get('Idempotency-Key')).toBeNull();
+    expect(await bodyOf()).toEqual({ waiting: true, note: 'Called the vendor' });
+    expect(marked).toEqual({
+      parcel_id: PARCEL,
+      waiting: true,
+      since: AT,
+      note: 'Called the vendor',
+    });
+
+    api.restore();
+    api = installFakeApi({
+      [route]: () => json(200, { parcel_id: PARCEL, waiting: true, since: AT, note: null }),
+    });
+    await setParcelWaiting(client(), PARCEL, true, undefined, VERSION);
+    expect(await bodyOf()).toEqual({ waiting: true });
+
+    api.restore();
+    api = installFakeApi({
+      [route]: () => json(200, { parcel_id: PARCEL, waiting: false, since: null, note: null }),
+    });
+    const off = await setParcelWaiting(client(), PARCEL, false, 'ignored', VERSION);
+    expect(await bodyOf()).toEqual({ waiting: false });
+    expect(off.waiting).toBe(false);
+  });
+
+  // Break caught: an answer for another parcel, one that says the opposite of what was asked, or one that is not a mark, read as the act done.
+  it.each([
+    ['another parcel', { parcel_id: OTHER_ID, waiting: true, since: AT, note: null }],
+    ['the opposite state', { parcel_id: PARCEL, waiting: false, since: null, note: null }],
+    ['a mark with no moment', { parcel_id: PARCEL, waiting: true, since: null, note: null }],
+    ['a note that is not text', { parcel_id: PARCEL, waiting: true, since: AT, note: 5 }],
+    ['nothing of a mark', { ok: true }],
+  ])('reads %s as an answer that is not the API’s', async (_name, body) => {
+    api = installFakeApi({ [route]: () => json(200, body) });
+    await expect(
+      setParcelWaiting(client(), PARCEL, true, undefined, VERSION),
+    ).rejects.toMatchObject({
       kind: 'unexpected-response',
     });
   });

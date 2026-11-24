@@ -49,6 +49,8 @@ describe('the worklist', () => {
       payment_required: 0,
       missing: 0,
       orders: 2,
+      // The captured answer is an earlier version's and does not say how many parcels wait: none is told, which is not zero.
+      waiting_for_vendor: null,
     });
     expect(list?.items.map((item) => item.work_state).toSorted()).toEqual([
       'ITEMIZED',
@@ -402,6 +404,76 @@ describe('who pays after the price is fixed', () => {
     const early = copy(load('correction')) as Record<string, unknown>;
     early.decided_at = '2026-11-22T10:00:00.000Z';
     expect(parseCorrection(early)).toBeUndefined();
+  });
+});
+
+describe('a parcel the officer is waiting on the vendor’s details for (Run G1, D-S7-12)', () => {
+  const waiting = (over: Record<string, unknown> = {}) => {
+    const list = copy(load('worklist-needs-order')) as {
+      progress: Record<string, unknown>;
+      items: { parcel: Record<string, unknown>; work_state: string; order: unknown }[];
+    };
+    const row = list.items.find((item) => item.work_state === 'NEEDS_ORDER');
+    if (row === undefined) throw new Error('the fixture has a parcel that needs an order');
+    row.parcel = { ...row.parcel, ...over };
+    return { list, row };
+  };
+
+  // Break caught: a mark the page cannot read (the tab and the note would be empty), a mark with no moment, a note that is not text.
+  it('reads the mark of a parcel: since when and the note, and none for a parcel that is not waiting', () => {
+    const { list } = waiting({
+      waiting_for_vendor: { since: '2026-11-24T10:30:00.000Z', note: 'Called the vendor' },
+    });
+    const page = parseWorklist(list);
+    const marked = page?.items.find((item) => item.parcel?.waiting_for_vendor !== null);
+    expect(marked?.parcel?.waiting_for_vendor).toEqual({
+      since: '2026-11-24T10:30:00.000Z',
+      note: 'Called the vendor',
+    });
+    // An answer that does not say it (an earlier version's, the captured ones) is a parcel that is not waiting.
+    expect(
+      parseWorklist(copy(load('worklist-needs-order')))?.items.every(
+        (item) => item.parcel?.waiting_for_vendor === null,
+      ),
+    ).toBe(true);
+    expect(
+      parseWorklist(
+        waiting({ waiting_for_vendor: { since: '2026-11-24T10:30:00.000Z', note: null } }).list,
+      ),
+    ).toBeDefined();
+    for (const bad of [
+      { since: 'yesterday', note: null },
+      { note: null },
+      { since: '2026-11-24T10:30:00.000Z', note: 5 },
+      'waiting',
+    ]) {
+      expect(
+        parseWorklist(waiting({ waiting_for_vendor: bad }).list),
+        JSON.stringify(bad),
+      ).toBeUndefined();
+    }
+  });
+
+  // Break caught: a parcel that has its order drawn as one that is waited on (the mark ends when the order is made).
+  it('refuses a mark on a parcel that has an order', () => {
+    const { list, row } = waiting({
+      waiting_for_vendor: { since: '2026-11-24T10:30:00.000Z', note: null },
+    });
+    row.work_state = 'ITEMIZED';
+    row.order = (copy(load('worklist-photo')) as { items: { order: unknown }[] }).items[0]?.order;
+    expect(parseWorklist(list)).toBeUndefined();
+  });
+
+  // Break caught: the count of the parcels that wait read as zero when the server did not say (a missing figure is never zero), or read when it is not a count.
+  it('reads the count of the parcels that wait, and none when the answer did not give it', () => {
+    const { list } = waiting();
+    expect(parseWorklist(list)?.progress.waiting_for_vendor).toBeNull();
+    list.progress.waiting_for_vendor = 2;
+    expect(parseWorklist(list)?.progress.waiting_for_vendor).toBe(2);
+    list.progress.waiting_for_vendor = -1;
+    expect(parseWorklist(list)).toBeUndefined();
+    list.progress.waiting_for_vendor = 'two';
+    expect(parseWorklist(list)).toBeUndefined();
   });
 });
 

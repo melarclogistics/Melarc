@@ -90,7 +90,8 @@ export const isWorklistView = (value: string | null): value is WorklistViewId =>
   value === 'prepared' ||
   value === 'itemized' ||
   value === 'payment_required' ||
-  value === 'missing';
+  value === 'missing' ||
+  value === 'waiting_for_vendor';
 
 /** The way a window of the day is told: `09:00 to 13:00`, or nothing where the server gave none. */
 export function windowText(start: string | null, end: string | null): string | undefined {

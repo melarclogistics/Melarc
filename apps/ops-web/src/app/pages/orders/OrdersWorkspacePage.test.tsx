@@ -384,6 +384,106 @@ describeInterfaceStates('the orders of a vendor', {
   },
 });
 
+describe('a parcel the officer is waiting on the vendor’s details for (Run G1, Part 2, item 4; D-S7-12)', () => {
+  const MARK = {
+    since: '2026-11-24T10:30:00.000Z',
+    note: 'Called the vendor, waiting on WhatsApp',
+  };
+  const WAITING_LIST = worklistOf(
+    [
+      parcelRow(1, 'ITEMIZED'),
+      parcelRow(2, 'NEEDS_ORDER', { waiting: MARK }),
+      parcelRow(3, 'NEEDS_ORDER'),
+    ],
+    { needs_order: 2, itemized: 1, orders: 1, waiting_for_vendor: 1 },
+  );
+  const handlers = (): Record<string, Handler> => ({
+    [LIST]: (request) => {
+      const view = new URL(request.url).searchParams.get('view');
+      return json(
+        200,
+        view === 'waiting_for_vendor'
+          ? { ...WAITING_LIST, items: [WAITING_LIST.items[1]] }
+          : WAITING_LIST,
+      );
+    },
+  });
+
+  // Break caught: a parcel the officer is waiting on that the other officers cannot see on the vendor's page; a tab with no count (or the count worked out by the page); a view the server is not asked for.
+  it('has a tab of its own with the server’s count, and says on the parcel’s row that it is waited on, with the note', async () => {
+    const { user } = open(handlers());
+    const views = within(await screen.findByRole('tablist', { name: 'Views of the orders' }));
+    const tab = await views.findByRole('tab', { name: /Waiting for the vendor’s details/ });
+    expect(tab).toHaveTextContent('1');
+    // The parcel's row, in the list as it opens, says it and says what was asked and how.
+    const rows = within(await screen.findByRole('table', { name: 'Parcels and orders' }));
+    expect(await rows.findByText('Waiting for the vendor’s details')).toBeVisible();
+    expect(rows.getByText('Called the vendor, waiting on WhatsApp')).toBeVisible();
+    // The tab asks the server for its view, and lists the parcels that wait.
+    await user.click(tab);
+    await waitFor(() => {
+      expect(
+        api.requests.some(
+          (request) =>
+            new URL(request.url).searchParams.get('view') === 'waiting_for_vendor' &&
+            new URL(request.url).pathname.endsWith('/orders'),
+        ),
+      ).toBe(true);
+    });
+    expect(await screen.findByText('Called the vendor, waiting on WhatsApp')).toBeVisible();
+  });
+
+  // Break caught: a count drawn as zero for a server that did not give one, so that the tab says "0" over parcels that wait.
+  it('draws no count on the tab when the server did not give one', async () => {
+    open({
+      [LIST]: () =>
+        json(200, {
+          ...WAITING_LIST,
+          progress: { ...WAITING_LIST.progress, waiting_for_vendor: null },
+        }),
+    });
+    const views = within(await screen.findByRole('tablist', { name: 'Views of the orders' }));
+    const tab = await views.findByRole('tab', { name: /Waiting for the vendor’s details/ });
+    expect(tab.textContent).not.toMatch(/\d/);
+  });
+
+  // Break caught: a tab of parcels that wait for a vendor counted without photos, which has no parcel to mark.
+  it('has no such tab for a vendor counted without photos', async () => {
+    open({
+      [RECORD]: () =>
+        json(
+          200,
+          {
+            ...preCountFixture({ id: VENDOR_ID }),
+            state: 'ITEMIZING',
+            count_phase: 'POST_COUNT',
+            rider_declared_count: 3,
+            physical_count: 3,
+            count_variance: 'MATCH',
+            count_difference: 0,
+            condition: 'OK',
+            condition_findings: [],
+            parcel_photo_ids: [],
+          },
+          { ETag: '"v1"' },
+        ),
+      ['GET /receiving-runs/' + MANIFEST_ID]: () =>
+        json(200, runFixture([blindVendorFixture({ intake_id: VENDOR_ID })])),
+      [LIST]: () =>
+        json(
+          200,
+          worklistOf(
+            [blindRow(1)],
+            { needs_order: 2, orders: 1, itemized: 1, received: 3 },
+            { receiving_mode: 'BLIND_COUNT' },
+          ),
+        ),
+    });
+    const views = within(await screen.findByRole('tablist', { name: 'Views of the orders' }));
+    expect(views.queryByRole('tab', { name: /Waiting for the vendor’s details/ })).toBeNull();
+  });
+});
+
 describe('the next order while the check-in is open (Run F, Part 2, item 5)', () => {
   // Break caught: "Make the next order" offered for a vendor with door photos before it is cleared: the form it leads to ends in a refusal, and nothing said why at the top of the page.
   it('offers no order for the parcels that are here until the vendor is cleared, and says why at the top', async () => {

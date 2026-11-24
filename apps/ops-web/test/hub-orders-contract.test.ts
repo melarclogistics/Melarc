@@ -211,6 +211,7 @@ describe('each screen is behind the key of the operation that is its point', () 
     ['amendOrder', 'hub.intake.itemize'],
     ['reverseOrderArrival', 'hub.osd.adjudicate'],
     ['correctOrderRecipient', 'hub.intake.itemize'],
+    ['setParcelWaitingForVendor', 'hub.intake.itemize'],
     ['requestPayerCorrection', 'pricing.correction.create'],
     ['approvePayerCorrection', 'pricing.correction.approve'],
     ['getIntakeClosure', 'hub.intake.close'],
@@ -237,6 +238,8 @@ describe('each act sends the headers its operation declares, and no other', () =
     ['amendOrder', ['Idempotency-Key', 'If-Match']],
     ['reverseOrderArrival', ['Idempotency-Key', 'If-Match']],
     ['correctOrderRecipient', ['Idempotency-Key', 'If-Match']],
+    // The mark states the parcel's desired state, so it takes no key (idempotent by nature), and the vendor's version.
+    ['setParcelWaitingForVendor', ['If-Match']],
     ['requestPayerCorrection', ['Idempotency-Key', 'If-Match']],
     ['approvePayerCorrection', ['Idempotency-Key', 'If-Match']],
     ['closeHubIntake', ['Idempotency-Key', 'If-Match']],
@@ -267,7 +270,12 @@ describe('each act sends the headers its operation declares, and no other', () =
 
 describe('the answers the tests are made of are the contract’s', () => {
   const SCHEMAS: readonly (readonly [string, readonly string[]])[] = [
-    ['Order', ['order', 'order-early', 'order-reversed', 'order-saved', 'amend-saved']],
+    [
+      'Order',
+      ['order', 'order-early', 'order-reversed', 'order-saved', 'amend-saved', 'order-with-photo'],
+    ],
+    // The mark of a parcel the officer is waiting on (Run G1, D-S7-12), as the API answered it.
+    ['ParcelWaitingForVendor', ['parcel-wait', 'parcel-wait-off']],
     ['OrderPreview', ['preview', 'amend-preview']],
     ['OrderArrivalReversal', ['reversal']],
     ['PayerCorrection', ['correction', 'correction-requested', 'correction-decided']],
@@ -284,6 +292,9 @@ describe('the answers the tests are made of are the contract’s', () => {
         'worklist-reversed',
         'worklist-blind',
         'worklist-blind-awaiting',
+        'worklist-waiting',
+        'worklist-waiting-view',
+        'worklist-needs-order-waiting',
       ],
     ],
   ];
