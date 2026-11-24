@@ -75,7 +75,8 @@ p.orders-photo__none {
 }
 
 .orders-saved:focus-visible,
-.orders-notice:focus-visible {
+.orders-notice:focus-visible,
+.orders-refusal:focus-visible {
   outline: 2px solid var(--color-border-strong);
   outline-offset: var(--space-1);
   border-radius: var(--radius-md);
@@ -326,4 +327,9 @@ p.orders-photo__none {
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-4);
   align-items: baseline;
+}
+
+/* A refusal that removes the save, told where the save was (Run G1, Part 2, item 8): a row of its own among the actions. It is focusable (above) so that the focus has somewhere to go when the button it was on is gone. */
+.orders-refusal {
+  flex: 1 1 100%;
 }

@@ -37,7 +37,7 @@ import { problemOf } from '../../../platform/problem/problem-copy';
 import { recordPath } from '../receiving/receiving-presentation';
 import { WithRecord } from '../receiving/WithRecord';
 import { OrderFields } from './OrderFields';
-import { FlowActions, FlowAlerts } from './OrderFlowParts';
+import { FlowActions, FlowAlerts, movedRule } from './OrderFlowParts';
 import { OrderPhoto } from './OrderPhoto';
 import { OrderLayout } from './OrderLayout';
 import { ParcelWaiting } from './ParcelWaiting';
@@ -279,6 +279,12 @@ function OrderForm({
     // in the field the officer is typing in.
     if (command.phase === 'refused' && tiedToAField) focusFirstInvalid(form.current);
   }, [command.phase, tiedToAField]);
+  useEffect(() => {
+    // A refusal that removes the save (the parcel has its order, no place is left) is told where the save was, and the focus, which was on the save, goes to it: it would be lost with the button (Run G1, Part 2, item 8).
+    if (command.phase === 'conflict' && !movedRule(command.problem?.rule)) {
+      form.current?.querySelector<HTMLElement>('[data-refusal]')?.focus();
+    }
+  }, [command.phase, command.problem?.rule]);
   useEffect(() => {
     if (command.phase === 'unknown')
       form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();

@@ -32,7 +32,7 @@ import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { copyFor } from '../../../platform/problem/problem-copy';
 import { UUID } from '../staff/WithProfile';
 import { OrderFields } from './OrderFields';
-import { FlowActions, FlowAlerts } from './OrderFlowParts';
+import { FlowActions, FlowAlerts, movedRule } from './OrderFlowParts';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { OrderLayout } from './OrderLayout';
 import { ParcelPhotoOpener } from './ParcelPhotoOpener';
@@ -129,6 +129,12 @@ function AmendForm({
     // A save refused about a field leaves the error on the field and the focus on it; the price's own refusals take no focus, which is in the field being typed in.
     if (command.phase === 'refused' && tiedToAField) focusFirstInvalid(form.current);
   }, [command.phase, tiedToAField]);
+  useEffect(() => {
+    // A refusal that removes the save (the parcel has its order, no place is left) is told where the save was, and the focus, which was on the save, goes to it: it would be lost with the button (Run G1, Part 2, item 8).
+    if (command.phase === 'conflict' && !movedRule(command.problem?.rule)) {
+      form.current?.querySelector<HTMLElement>('[data-refusal]')?.focus();
+    }
+  }, [command.phase, command.problem?.rule]);
   useEffect(() => {
     if (command.phase === 'unknown')
       form.current?.querySelector<HTMLElement>('[data-recovery]')?.focus();

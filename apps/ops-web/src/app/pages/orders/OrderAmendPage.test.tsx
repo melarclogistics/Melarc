@@ -317,6 +317,33 @@ describe('a new address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () =>
   });
 });
 
+describe('a refusal that removes the save, on the change page (Run G1, Part 2, item 8)', () => {
+  // Break caught: a refusal about the order that removes the save told in an alert at the top of a long form while the save was at the foot, and the focus lost with the button.
+  it('tells it next to where the save was, once, and moves the focus to it', async () => {
+    const { user } = open({
+      [SAVE]: () =>
+        json(409, {
+          code: 'STATE_CONFLICT',
+          message: 'Diagnostic text that must never reach a screen.',
+          request_id: 'r-amend',
+          details: { rule: 'order_confirmed' },
+        }),
+    });
+    await changeSize(user);
+    await user.click(await pricedSave());
+    await waitFor(() => {
+      expect(document.querySelector('[data-refusal]')).not.toBeNull();
+    });
+    const beside = document.querySelector<HTMLElement>('[data-refusal]');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(beside?.querySelector('[role="alert"]')).not.toBeNull();
+    await waitFor(() => {
+      expect(beside).toHaveFocus();
+    });
+    expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
+  });
+});
+
 describe('the price an order holds, when its change page opens (Run G1, Part 2, item 11)', () => {
   // Break caught: the link that looks at the order after a save whose outcome is not known named Open the orders (the name of the link that opens a vendor's orders), when it opens one order: it is named for what it opens.
   it('names the link that looks at the order for what it opens when the outcome of a save is not known', async () => {

@@ -242,6 +242,8 @@ export const ORDERS_WORDS = {
         'The price could not be worked out for what you entered. The fields marked say what to change.',
       /** The check itself failed (the network, a fault, too many requests): no field is at fault, and nothing entered is lost. */
       failed: 'The price could not be checked.',
+      /** Beside the save, which cannot be pressed while the price could not be checked (Run G1, Part 2, item 8): the price column that explains it is a screen above at 768 px. */
+      failedBesideSave: 'The price could not be checked, so the order cannot be saved yet.',
       kept: 'Your entries are kept.',
     },
     /** The line above the save: what was typed, so that the officer reads what is about to be saved. */

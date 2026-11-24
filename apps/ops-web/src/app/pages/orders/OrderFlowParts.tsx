@@ -20,7 +20,8 @@ export const movedRule = (rule: string | undefined): boolean =>
 
 /**
  * What the flow of an order says above the form, in the words of the floor: an outcome nobody knows, a vendor or a price that changed under the officer (nothing was saved, the entries stay), a refusal that is
- * about no field, and the refusal of the review. A refusal about a field is told on the field and not here (`tiedToAField`).
+ * about no field, and the refusal of the review. A refusal about a field is told on the field and not here (`tiedToAField`), and **a refusal that removes the save (the parcel has its order, no place is left) is told
+ * beside the actions, where the save was** (`FlowActions`), and not here: at 768 px the form is two screens tall (Run G1, Part 2, item 8).
  */
 export function FlowAlerts({
   flow,
@@ -39,25 +40,18 @@ export function FlowAlerts({
           <p>{F.unknownOutcome}</p>
         </Alert>
       ) : null}
-      {command.phase === 'conflict' && command.problem !== undefined ? (
+      {command.phase === 'conflict' && command.problem !== undefined && moved ? (
         <Alert variant="danger" announce>
-          {moved ? (
-            <>
-              <p className="orders-review__changed-title">
-                {rule === 'configuration_changing'
-                  ? WORDS.review.changing.title
-                  : WORDS.review.stale.title}
-              </p>
-              <p>
-                {rule === 'configuration_changing'
-                  ? WORDS.review.changing.text
-                  : WORDS.review.stale.text}
-              </p>
-            </>
-          ) : (
-            // A refusal of the state of the parcel or of the vendor (the parcel has its order, is missing, the check-in is open, no place is left) is told in its own words, and not as a vendor that changed.
-            <p>{command.problem.message}</p>
-          )}
+          <p className="orders-review__changed-title">
+            {rule === 'configuration_changing'
+              ? WORDS.review.changing.title
+              : WORDS.review.stale.title}
+          </p>
+          <p>
+            {rule === 'configuration_changing'
+              ? WORDS.review.changing.text
+              : WORDS.review.stale.text}
+          </p>
         </Alert>
       ) : null}
       {command.phase === 'refused' && command.problem !== undefined && !tiedToAField ? (
@@ -136,12 +130,28 @@ export function FlowActions({
             {F.acts.checkAgain}
           </Button>
         ) : (
-          <ButtonLink to={cancelTo} variant="secondary" size="lg">
-            {F.acts.cancel}
-          </ButtonLink>
+          <>
+            {/* A refusal of the state of the parcel or of the vendor (the parcel has its order, is missing, the check-in is open, no place is left) removes the save: it is told here, where the save was, in its own
+                words and not as a vendor that changed, and it takes the focus (Run G1, Part 2, item 8): at 768 px the form is two screens tall, and an alert at its top is not where the officer is. */}
+            {command.problem === undefined ? null : (
+              <div className="orders-refusal" tabIndex={-1} data-refusal>
+                <Alert variant="danger" announce>
+                  <p>{command.problem.message}</p>
+                </Alert>
+              </div>
+            )}
+            <ButtonLink to={cancelTo} variant="secondary" size="lg">
+              {F.acts.cancel}
+            </ButtonLink>
+          </>
         )
       ) : (
         <>
+          {price.kind === 'failed' ? (
+            <p className="orders-note" id="orders-save-why">
+              {WORDS.form.price.failedBesideSave}
+            </p>
+          ) : null}
           {typed === '' ? null : (
             <p className="orders-typed" id="orders-typed">
               <span className="orders-typed__label">{WORDS.form.typed}</span> {typed}
@@ -159,7 +169,11 @@ export function FlowActions({
               price.kind === 'failed' ||
               gate.busy
             }
-            aria-describedby={typed === '' ? 'orders-form-gate' : 'orders-typed orders-form-gate'}
+            aria-describedby={[
+              ...(price.kind === 'failed' ? ['orders-save-why'] : []),
+              ...(typed === '' ? [] : ['orders-typed']),
+              'orders-form-gate',
+            ].join(' ')}
           >
             {total === undefined
               ? price.kind === 'checking'

@@ -1140,6 +1140,55 @@ describe('a refusal of the parcel or of the vendor (Run F, Part 2, items 5 and 1
     expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
   });
 
+  // Break caught (Run G1, Part 2, item 8): a refusal that removes the save (the parcel has its order) told in an alert at the top of a form that is two screens tall at 768 px, while the save was at the foot and was
+  // replaced by a link: nothing says why the button is gone, and the focus, which was on the button, is lost. It is told next to the save, once, and takes the focus.
+  it('tells a refusal that removes the save next to where the save was, once, and moves the focus to it', async () => {
+    const { user } = open({
+      [SAVE]: () =>
+        json(409, {
+          code: 'STATE_CONFLICT',
+          message: 'Diagnostic text that must never reach a screen.',
+          request_id: 'r9',
+          details: { rule: 'parcel_ordered' },
+        }),
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    const alert = await alertSaying('This parcel already has an order. Open the orders to see it.');
+    // Once: not in the alerts above the form as well as beside the save.
+    expect(
+      screen.getAllByText('This parcel already has an order. Open the orders to see it.'),
+    ).toHaveLength(1);
+    // The one alert of the page: the top of the form has none of it.
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    const beside = alert.closest('[data-refusal]');
+    expect(beside).not.toBeNull();
+    // Where the save was: in the same row of actions as the way back.
+    expect(beside?.parentElement).toContainElement(
+      screen.getByRole('link', { name: 'Back to the orders' }),
+    );
+    await waitFor(() => {
+      expect(beside).toHaveFocus();
+    });
+  });
+
+  // Break caught (Run G1, Part 2, item 8): a save that cannot be pressed because the price could not be checked, with nothing beside it that says so (the explanation is in the price column, which at 768 px is a screen
+  // above the save).
+  it('says beside the save, when the price could not be checked, why it cannot be pressed yet', async () => {
+    const { user } = open({
+      [PREVIEW]: () => errorResponse(500, 'INTERNAL_ERROR'),
+    });
+    await fillIn(user);
+    await screen.findByText('The price could not be checked.', {}, PRICE_WAIT);
+    const why = screen.getByText(
+      'The price could not be checked, so the order cannot be saved yet.',
+    );
+    const save = screen.getByRole('button', { name: 'Save the order' });
+    expect(save).toBeDisabled();
+    expect(save.getAttribute('aria-describedby')?.split(' ')).toContain(why.id);
+    expect(why.parentElement).toContainElement(save);
+  });
+
   // Break caught: a form for an arrived parcel, or for no parcel in particular, while the vendor's check-in is open: the officer fills it in and the save is refused as check_in_open.
   it('says the check-in is open before the officer fills in a form for a parcel that is here', async () => {
     open(
