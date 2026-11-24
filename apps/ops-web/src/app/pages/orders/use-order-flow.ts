@@ -159,6 +159,9 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
   const armedUntil = useRef(0);
   const shown = useRef<Answer | undefined>(undefined);
   const hold = holdOf(useQueryClient());
+  const holdNow = useRef(hold);
+  /** The pump as it is now, for the wait that follows a 429 (which the pump itself starts). */
+  const pumpAgain = useRef<() => Promise<void>>(() => Promise.resolve());
   /** The entries a check was already made again for by itself, after a 429: one for each, so that the wait is never a loop. */
   const askedAgainFor = useRef<string | undefined>(undefined);
   const waitAbort = useRef<AbortController | undefined>(undefined);
@@ -166,6 +169,7 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
   useEffect(() => {
     latest.current = config;
     entered.current = values;
+    holdNow.current = hold;
   });
   useEffect(() => {
     alive.current = true;
@@ -214,18 +218,14 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
             waitAbort.current?.abort();
             const wait = new AbortController();
             waitAbort.current = wait;
-            void hold
+            void holdNow.current
               .untilFree('order-price', wait.signal)
               .then(() => {
                 if (!alive.current || desired.current?.key !== target.key) return;
-                if (
-                  shown.current !== undefined &&
-                  shown.current.key === target.key &&
-                  shown.current.problem === undefined
-                )
+                if (shown.current?.key === target.key && shown.current.problem === undefined)
                   return;
                 setAnswer(undefined);
-                return pump();
+                return pumpAgain.current();
               })
               .catch(() => undefined);
           }
@@ -238,6 +238,10 @@ export function useOrderFlow(config: OrderFlowConfig, values: OrderFormValues): 
     };
     return run();
   }, []);
+
+  useEffect(() => {
+    pumpAgain.current = pump;
+  }, [pump]);
 
   useEffect(() => {
     if (timer.current !== undefined) clearTimeout(timer.current);

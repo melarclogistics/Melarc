@@ -1088,7 +1088,12 @@ describe('a price check that could not be made (Run G1, Part 2, item 1)', () => 
     const { user } = open({ [PREVIEW]: () => tooFast() });
     await fillIn(user);
     await screen.findByText('The price could not be checked.', {}, PRICE_WAIT);
-    await waitFor(() => expect(sent(PREVIEW)).toHaveLength(2), { timeout: 6000 });
+    await waitFor(
+      () => {
+        expect(sent(PREVIEW)).toHaveLength(2);
+      },
+      { timeout: 6000 },
+    );
     expect(await screen.findByRole('button', { name: 'Check the price again' })).toBeVisible();
     // The wait of the second 429 passes, and nothing is sent: one new check by itself, and no more.
     await pause(2200);
@@ -1124,7 +1129,9 @@ describe('a price check that could not be made (Run G1, Part 2, item 1)', () => 
         }),
     });
     await fillIn(user);
-    await waitFor(() => expect(waiting).toHaveLength(1), PRICE_WAIT);
+    await waitFor(() => {
+      expect(waiting).toHaveLength(1);
+    }, PRICE_WAIT);
     // The officer changes the size while the first check is out; then the first answer, for the medium parcel, arrives.
     await user.click(screen.getByRole('radio', { name: 'Large' }));
     waiting[0]?.(json(200, termsOf()));
@@ -1132,7 +1139,9 @@ describe('a price check that could not be made (Run G1, Part 2, item 1)', () => 
     // It is not drawn: the screen is no medium parcel's.
     expect(screen.queryByRole('button', { name: /^Save the order at / })).toBeNull();
     // The check for what is on the screen is made, and its answer is the one drawn.
-    await waitFor(() => expect(waiting).toHaveLength(2), PRICE_WAIT);
+    await waitFor(() => {
+      expect(waiting).toHaveLength(2);
+    }, PRICE_WAIT);
     expect(await bodyOf(sent(PREVIEW)[1])).toMatchObject({ size_class: 'LARGE' });
     waiting[1]?.(json(200, termsOf({}, 4000, NEW_TOKEN)));
     expect(await pricedSave()).toHaveTextContent('Save the order at GH₵40.00');
