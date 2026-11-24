@@ -2209,6 +2209,8 @@ The status of a record in words (§18 is the pattern; this is its look and its t
 | `ORDER_PRICE` | `EARLY_QUOTE` | info | Waiting for its parcel |
 | `ORDER_PRICE` | `FROZEN` | success | Confirmed — price fixed |
 | `ORDER_PRICE` | `REVERSED` | neutral | Taken back |
+| `ORDER_PRICE` | `PARCEL_MISSING` | danger | Parcel missing |
+| `ORDER_PRICE` | `PARCEL_NOT_RECEIVED` | neutral | Parcel not received |
 | `PAYER_CORRECTION` | `REQUESTED` | waiting | Waiting for a decision |
 | `PAYER_CORRECTION` | `APPROVED` | success | Approved |
 | `PAYER_CORRECTION` | `REJECTED` | neutral | Rejected |

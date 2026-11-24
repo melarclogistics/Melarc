@@ -87,6 +87,8 @@ function Run({
 }) {
   const me = useSignedInSession();
   const mayCount = me?.holds('hub.intake.count') === true;
+  // The key that makes orders, for the way from a vendor whose check-in is open to its early orders (D-D6).
+  const mayOrder = me?.holds('hub.intake.itemize') === true;
   // An officer sent here from the count of a vendor that was photographed at the door is told why, once: that vendor is checked in on this page and is never counted.
   const sentHere =
     (useLocation().state as { readonly told?: string } | null)?.told === 'photographed';
@@ -146,6 +148,7 @@ function Run({
           key={vendor.intake_id}
           vendor={vendor}
           mayCount={mayCount}
+          mayOrder={mayOrder}
           acts={acts}
           next={nextWaiting(page.vendors, vendor)}
           firstToCheck={vendor.intake_id === firstWaiting?.intake_id}

@@ -1012,6 +1012,52 @@ describe('an officer who can look at the run and cannot check parcels in', () =>
   });
 });
 
+/**
+ * The way in to the early orders from the vendor's section (Run G2, Part 2, item 1; D-D6): a vendor whose check-in is open is a vendor whose parcels are on their way to the table, and an officer who may make
+ * orders may start them from the photos before the parcels are checked in, from the section where they are looking at the photos.
+ */
+describe('the way to the early orders from a vendor whose check-in is open', () => {
+  const ORDERS = `/intakes/${KENTE_INTAKE_ID}/orders`;
+  const ORDER_KEYS = ['hub.read', 'hub.intake.count', 'hub.intake.itemize'];
+
+  // Break caught: the orders of a vendor reachable only after its check-in is final (the early orders not found by the officer who is looking at the photos), or the link missing from the section that has them.
+  it('offers the officer who may make orders the way to start them from the photos', async () => {
+    open({ keys: ORDER_KEYS });
+    const found = within(await kente());
+    expect(found.getByRole('link', { name: 'Start orders from the photos' })).toHaveAttribute(
+      'href',
+      ORDERS,
+    );
+  });
+
+  // Break caught: the way drawn for an officer who may not make orders (the orders page would refuse each act), or for a vendor that is past its check-in (it has its own way on).
+  it('offers it to nobody who may not make orders, and not to a vendor that is past its check-in', async () => {
+    open({ keys: KEYS });
+    await kente();
+    expect(screen.queryByRole('link', { name: 'Start orders from the photos' })).toBeNull();
+  });
+
+  it('offers it no longer once the vendor is checked in, and offers the orders as before', async () => {
+    const parcels = [1, 2, 3].map((n) => arrivedParcel(n));
+    open({
+      keys: ORDER_KEYS,
+      run: runFixture([
+        photoVendorFixture(3, { state: 'READY_FOR_ITEMIZATION', ...countsOf(parcels) }, parcels),
+      ]),
+    });
+    const found = within(await kente());
+    await found.findByRole('link', { name: 'Make orders' });
+    expect(found.queryByRole('link', { name: 'Start orders from the photos' })).toBeNull();
+  });
+
+  // Break caught: the way drawn for a vendor counted without photos, which has no photo to make an order from.
+  it('is not drawn for a vendor counted without photos', async () => {
+    open({ keys: ORDER_KEYS, run: runFixture([blindVendorFixture()]) });
+    await section(BLIND_VENDOR);
+    expect(screen.queryByRole('link', { name: 'Start orders from the photos' })).toBeNull();
+  });
+});
+
 describe('a photo taken at the hub: a parcel that is not on the list, and damage', () => {
   const EXTRA_PHOTO = uuid(0xe1, 1);
   const DAMAGE_PHOTO = uuid(0xe2, 1);

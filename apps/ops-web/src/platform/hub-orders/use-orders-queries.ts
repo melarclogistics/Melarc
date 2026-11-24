@@ -196,15 +196,19 @@ export type NextToOrder =
  * The next parcel that needs an order (`listIntakeOrders`, view `needs_order`, `hub.read`), **moving forward from the parcel just saved or marked** and passing over a parcel the officer is waiting on the vendor's
  * details for (D-S7-12). With no `after` it is the lowest parcel that needs an order and is not waited on; with one it is the first after that place, and when none is left after it, the lowest again. Nothing
  * of this is worked out from a count: the rows are the server's.
+ *
+ * **While the vendor's check-in is open** (`view` is `awaiting_arrival`, D-D6) the parcels to order are the ones that are not here yet, from their photos: the same walk over the view of the parcels that are
+ * not here yet, **passing over the ones that already have an order** (that view lists every parcel that is not here, with an order or without one, and its rows say which).
  */
 export function useNextToOrder(
   intakeId: string,
   after: number | undefined,
   enabled = true,
+  view: 'needs_order' | 'awaiting_arrival' = 'needs_order',
 ): UseQueryResult<NextToOrder> {
   const client = useApiClient();
   return useQuery({
-    queryKey: [...worklistKey(intakeId), 'next', after ?? null] as const,
+    queryKey: [...worklistKey(intakeId), 'next', view, after ?? null] as const,
     enabled,
     ...NOT_KEPT,
     queryFn: async (): Promise<NextToOrder> => {
@@ -212,9 +216,11 @@ export function useNextToOrder(
       let lowest: string | undefined;
       let seen = false;
       for (let page = 0; page < MOST_PAGES; page += 1) {
-        const read = await readWorklistPage(client, intakeId, 'needs_order', token);
+        const read = await readWorklistPage(client, intakeId, view, token);
         for (const item of read.items) {
           if (item.parcel === null) continue;
+          // A parcel that is not here yet and has its order is not one to make an order for.
+          if (view === 'awaiting_arrival' && item.order !== null) continue;
           seen = true;
           if (item.parcel.waiting_for_vendor !== null) continue;
           lowest ??= item.parcel.id;
@@ -403,8 +409,11 @@ export function usePayerCorrection(
 }
 
 export interface ItemizableParams extends PagedParams {
-  /** The vendors that are ready for their orders, or the ones being worked: the server's `state` filter. */
-  readonly state?: 'READY_FOR_ITEMIZATION' | 'ITEMIZING';
+  /**
+   * The vendors that are ready for their orders, or the ones being worked: the server's `state` filter. **`AWAITING_COUNT` is the vendors whose check-in is open** (D-D6): the ones an officer begins early orders for
+   * from their photos; a vendor counted without photos that waits for its count is in that answer too, and the list leaves it out.
+   */
+  readonly state?: 'READY_FOR_ITEMIZATION' | 'ITEMIZING' | 'AWAITING_COUNT';
   /** The vendors that wait for a senior officer: the server's `view` (D-S7-7). Asked instead of a state, never beside one. */
   readonly view?: 'needs_senior';
 }
@@ -435,7 +444,9 @@ export function useItemizableIntakes(
           },
         }),
       );
-      const page = parseIntakeListPage(answer.data);
+      const page = parseIntakeListPage(answer.data, {
+        checkingIn: params.state === 'AWAITING_COUNT',
+      });
       if (page === undefined) throw unexpectedResponse(answer.status);
       return page;
     },

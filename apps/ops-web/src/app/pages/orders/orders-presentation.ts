@@ -51,11 +51,15 @@ export const WORK_STATE_MAP: StatusMap<WorkState> = {
 };
 
 /** What an order's price is, beside what its commercial state is: an early quote is not a fixed price. */
-export type OrderStanding = 'EARLY_QUOTE' | 'FROZEN' | 'REVERSED';
+export type OrderStanding =
+  'EARLY_QUOTE' | 'FROZEN' | 'REVERSED' | 'PARCEL_MISSING' | 'PARCEL_NOT_RECEIVED';
 export const ORDER_STANDING_MAP: StatusMap<OrderStanding> = {
   EARLY_QUOTE: { tone: 'info', label: WORDS.record.status.EARLY_QUOTE },
   FROZEN: { tone: 'success', label: WORDS.record.status.FROZEN },
   REVERSED: { tone: 'neutral', label: WORDS.record.status.REVERSED },
+  // The order made early for a parcel that is missing is not waiting for it, and one whose parcel was written off is a record (D-D6, D-S7-4).
+  PARCEL_MISSING: { tone: 'danger', label: WORDS.record.status.PARCEL_MISSING },
+  PARCEL_NOT_RECEIVED: { tone: 'neutral', label: WORDS.record.status.PARCEL_NOT_RECEIVED },
 };
 
 export const CORRECTION_STATE_MAP: StatusMap<CorrectionState> = {

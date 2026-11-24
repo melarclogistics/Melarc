@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { preCountFixture } from '../../test-support/hub-intake-fixture';
+import { checkInFixture, parcelFixture } from '../../test-support/receiving-fixture';
 import { parseIntakeListPage } from './intake-list-shape';
 import {
   parseCandidates,
@@ -609,6 +611,47 @@ describe('the vendors a hub has cleared for their orders', () => {
     const page = copy(load('intakes-itemizing')) as { items: Record<string, unknown>[] };
     page.items[0] = { ...page.items[0], state: 'AWAITING_COUNT' };
     expect(parseIntakeListPage(page)).toBeUndefined();
+  });
+});
+
+/**
+ * The vendors whose check-in is open (Run G2, Part 2, item 1; D-D6): the list the officer begins early orders from. The server's `AWAITING_COUNT` filter answers a vendor checked in against its photos **and** a vendor
+ * counted without them that waits for its count; only the first has a photo to make an order from, so the second is left out, and one that is anywhere else is not this list's.
+ */
+describe('the vendors whose check-in is open', () => {
+  const NOT_HERE = [1, 2, 3].map((n) => parcelFixture(n));
+  const open = (over: Record<string, unknown> = {}) =>
+    checkInFixture(NOT_HERE, { state: 'AWAITING_COUNT', ...over });
+  const pageOf = (...items: unknown[]) => ({ items, next_page_token: null });
+
+  // Break caught: a vendor whose check-in is open refused with the page (the list of vendors cleared for orders refuses it), so that the officer who wants to begin early orders is told the list could not be read; or
+  // the parcels it expects not kept, and the screen left to say "0 parcels" of a vendor that arrived with three.
+  it('keeps how many parcels the vendor expects and how many are here, and leaves out a vendor counted without photos', () => {
+    const page = parseIntakeListPage(
+      pageOf(open(), preCountFixture({ id: 'b1b1b1b1-2222-4333-8444-555555555555' })),
+      {
+        checkingIn: true,
+      },
+    );
+    expect(page?.items).toHaveLength(1);
+    expect(page?.items[0]).toMatchObject({
+      mode: 'PHOTO_CHECK_IN',
+      state: 'AWAITING_COUNT',
+      expected: 3,
+      received: 0,
+    });
+  });
+
+  // Break caught: a vendor that is past its check-in in the list of those whose check-in is open (it is not one an early order is made for).
+  it('refuses a vendor whose check-in is not open', () => {
+    expect(
+      parseIntakeListPage(pageOf(open({ state: 'ITEMIZING' })), { checkingIn: true }),
+    ).toBeUndefined();
+  });
+
+  // Break caught: the early list's leniency leaking into the list of the vendors cleared for orders, which refuses a vendor that is not cleared (above) and says nothing of what it expects.
+  it('keeps no expected count for a vendor counted without photos in the ordinary list', () => {
+    expect(parseIntakeListPage(load('intakes-ready-blind-named'))?.items[0]?.expected).toBeNull();
   });
 });
 

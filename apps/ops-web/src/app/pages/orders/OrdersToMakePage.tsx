@@ -25,11 +25,15 @@ import './orders-pages.css';
 
 const K = WORDS.toMake;
 
-/** The views are the server's `state` filter: the vendors cleared and waiting for their first order, and the ones whose orders are being made. */
+/**
+ * The views are the server's `state` filter: the vendors cleared and waiting for their first order, the ones whose orders are being made, the ones that wait for a senior, and **the vendors whose check-in is open**
+ * (D-D6, Run G2, Part 2, item 1): the way in to the early orders, from the photos, before the parcels are checked in for good.
+ */
 const VIEWS: readonly [WorkView, ...WorkView[]] = [
   { id: 'READY_FOR_ITEMIZATION', open: undefined, ...K.views.READY_FOR_ITEMIZATION },
   { id: 'ITEMIZING', open: undefined, ...K.views.ITEMIZING },
   { id: 'NEEDS_SENIOR', open: undefined, ...K.views.NEEDS_SENIOR },
+  { id: 'AWAITING_COUNT', open: undefined, ...K.views.AWAITING_COUNT },
 ];
 
 const refusalWords = (problem: Problem): string =>
@@ -43,7 +47,9 @@ function useQueue(params: WorkListParams) {
           state:
             params.view === 'ITEMIZING'
               ? ('ITEMIZING' as const)
-              : ('READY_FOR_ITEMIZATION' as const),
+              : params.view === 'AWAITING_COUNT'
+                ? ('AWAITING_COUNT' as const)
+                : ('READY_FOR_ITEMIZATION' as const),
         }),
     ...(params.pageToken === undefined ? {} : { pageToken: params.pageToken }),
     ...(params.enabled === undefined ? {} : { enabled: params.enabled }),
@@ -64,7 +70,19 @@ export function OrdersToMakePage() {
   const [params] = useSearchParams();
   // The reason a senior is needed, and the act of it, are of the one view that lists what a senior decides (D-S7-11): the other two have no such column, empty or not.
   const seniorView = params.get('view') === 'NEEDS_SENIOR';
+  // The vendors whose check-in is open are listed to begin their orders from the photos (D-D6): the act is for an officer who may make orders, and a reader has the vendor's name as the way in.
+  const checkingView = params.get('view') === 'AWAITING_COUNT';
   if (me === undefined) return null;
+  const mayItemize = me.holds('hub.intake.itemize');
+  const startAct = (item: ItemizableIntakeView): ReactNode =>
+    mayItemize && item.state === 'AWAITING_COUNT' ? (
+      <Link
+        to={ordersPath(item.id)}
+        aria-label={`${WORDS.workspace.acts.earlyOrders}: ${nameOf(item)}`}
+      >
+        {WORDS.workspace.acts.earlyOrders}
+      </Link>
+    ) : null;
   const seniorAct = (item: ItemizableIntakeView): ReactNode => {
     if (item.senior_needed === 'ARRIVAL_TAKEN_BACK') {
       return me.holds('hub.osd.adjudicate') ? (
@@ -103,7 +121,13 @@ export function OrdersToMakePage() {
       kind: 'count',
       cell: (item) => (
         <CellLines
-          first={<NoWrap>{K.received(item.received)}</NoWrap>}
+          first={
+            <NoWrap>
+              {item.state === 'AWAITING_COUNT' && item.received !== null && item.expected !== null
+                ? K.here(item.received, item.expected)
+                : K.received(item.received)}
+            </NoWrap>
+          }
           second={item.missing === null || item.missing === 0 ? '' : K.missing(item.missing)}
         />
       ),
@@ -119,6 +143,9 @@ export function OrdersToMakePage() {
           <NoWrap>{K.ordersLine(item.orders_made, item.parcels_needing_order)}</NoWrap>
         ),
     },
+    ...(checkingView
+      ? [{ id: 'start', header: '', cell: (item: ItemizableIntakeView) => startAct(item) }]
+      : []),
     ...(seniorView
       ? [
           {
@@ -184,6 +211,9 @@ export function OrdersToMakePage() {
                       },
                     ]),
                 { label: K.columns.handedOver, value: waitedText(item.handed_over_at) ?? '' },
+                ...(checkingView && startAct(item) !== null
+                  ? [{ label: K.columns.start, value: startAct(item) }]
+                  : []),
               ]}
             />
           ),

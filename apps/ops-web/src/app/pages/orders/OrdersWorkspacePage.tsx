@@ -92,9 +92,13 @@ function viewsOf(
   facts: VendorFacts,
   progress: ProgressView | undefined,
 ): readonly [WorkView, ...WorkView[]] {
+  // A vendor whose check-in is still open opens on the parcels that are not here yet (D-D6): they are the only ones an officer can make an order for, and the views of the parcels that are here have nothing to do yet.
+  const photoViews: readonly Exclude<WorklistViewId, 'all'>[] = facts.checkingIn
+    ? ['awaiting_arrival', ...VIEW_ORDER.filter((view) => view !== 'awaiting_arrival')]
+    : VIEW_ORDER;
   const wanted: readonly WorklistViewId[] =
     facts.mode === 'PHOTO_CHECK_IN'
-      ? [...VIEW_ORDER, 'all']
+      ? [...photoViews, 'all']
       : ['prepared', 'itemized', 'payment_required', 'all'];
   const [first, ...rest] = wanted.map((view): WorkView => {
     const words = WORDS.workspace.views[view];
@@ -239,7 +243,15 @@ function ParcelPanel({
         ]}
       />
       {item.work_state === 'AWAITING_ARRIVAL' ? <p>{WORDS.workspace.panel.notYet}</p> : null}
-      {item.work_state === 'MISSING' ? <p>{WORDS.workspace.panel.missing}</p> : null}
+      {item.work_state === 'MISSING' ? (
+        <p>
+          {item.order === null
+            ? WORDS.workspace.panel.missing
+            : facts.writtenOff
+              ? WORDS.workspace.panel.notReceived
+              : WORDS.workspace.panel.missingOrder}
+        </p>
+      ) : null}
       {item.work_state === 'NEEDS_ORDER' && !facts.cleared && !facts.closed ? (
         <p>
           {WORDS.workspace.notes.notCleared}{' '}
@@ -347,12 +359,17 @@ function Workspace({
   const everyParcelHasAnOrder = stillToOrder === 0;
   // An order for a parcel that arrived is taken once the vendor is cleared, never while its check-in is open (the server would refuse it as `check_in_open`), for either kind of vendor.
   const canMakeOrders = mayItemize && !facts.closed && facts.cleared;
+  // While the check-in is open the next order is for a parcel that is not here yet (D-D6): offered while the server counts one, and the form finds which.
+  const canOrderEarly =
+    mayItemize && !facts.closed && facts.checkingIn && (progress?.awaiting_arrival ?? 0) > 0;
   const primary: ReactNode = facts.closed ? (
     <ButtonLink to={summaryPath(facts.id)}>{WORDS.workspace.acts.summary}</ButtonLink>
   ) : canMakeOrders && stillToOrder !== 0 && (blind ? stillToOrder !== null : true) ? (
     <ButtonLink to={newOrderPath(facts.id)}>
       {blind ? WORDS.workspace.acts.makeBlind : WORDS.workspace.acts.makeNext}
     </ButtonLink>
+  ) : canOrderEarly ? (
+    <ButtonLink to={newOrderPath(facts.id)}>{WORDS.workspace.acts.makeNext}</ButtonLink>
   ) : mayClose && facts.cleared && everyParcelHasAnOrder ? (
     <ButtonLink to={closePath(facts.id)}>{WORDS.workspace.acts.close}</ButtonLink>
   ) : undefined;

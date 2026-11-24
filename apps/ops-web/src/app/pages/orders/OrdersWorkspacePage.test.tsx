@@ -19,6 +19,7 @@ import {
 import {
   blindVendorFixture,
   checkInFixture,
+  parcelFixture,
   photoLinkHandlers,
   runFixture,
 } from '../../../test-support/receiving-fixture';
@@ -223,6 +224,173 @@ describe('a vendor with door photos', () => {
         ),
     });
     expect(await within(await table()).findByText('Payment due')).toBeVisible();
+  });
+});
+
+describe('a vendor whose check-in is still open: the early orders (Run G2, Part 2, item 1; D-D6, OB-S1-169 item 9)', () => {
+  // The vendor's three parcels are not checked in yet: one has an order made from its photo, two have none.
+  const NOT_HERE = Array.from({ length: 3 }, (_, index) => parcelFixture(index + 1));
+  const ROWS_EARLY = [
+    parcelRow(1, 'PREPARED', { parcelState: 'EXPECTED' }),
+    parcelRow(2, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED' }),
+    parcelRow(3, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED' }),
+  ];
+  const PROGRESS_EARLY = {
+    received: 0,
+    awaiting_arrival: 3,
+    needs_order: 0,
+    prepared: 1,
+    itemized: 0,
+    orders: 1,
+  };
+  const early = (
+    handlers: Record<string, Handler> = {},
+    keys: readonly string[] = OFFICER,
+    progress: Record<string, unknown> = PROGRESS_EARLY,
+  ) =>
+    open(
+      {
+        [RECORD]: () =>
+          json(200, checkInFixture(NOT_HERE, { id: VENDOR_ID, state: 'AWAITING_COUNT' }), {
+            ETag: '"v1"',
+          }),
+        [LIST]: () =>
+          json(
+            200,
+            worklistOf(ROWS_EARLY, progress, {
+              intake_state: 'AWAITING_COUNT',
+            }),
+          ),
+        ...handlers,
+      },
+      keys,
+      'AWAITING_COUNT',
+    );
+
+  // Break caught: a vendor whose check-in is open that opens on "Needs an order" (nothing is there: the parcels that are here cannot be ordered yet), so that the one thing an officer can do, the early orders, is a tab away.
+  it('opens on the parcels that are not here yet', async () => {
+    early();
+    await table();
+    expect(listReads()[0]?.get('view')).toBe('awaiting_arrival');
+    const views = within(screen.getByRole('tablist', { name: 'Views of the orders' }));
+    expect(views.getByRole('tab', { name: /Not here yet/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    // The other views are still there.
+    expect(views.getByRole('tab', { name: /Needs an order/ })).toBeVisible();
+  });
+
+  // Break caught: no way to the next order while the check-in is open (the page offered it only to a vendor that is cleared), or a close offered to a vendor that is still being checked in.
+  it('offers the next order, and no close, to an officer who may make orders', async () => {
+    early();
+    await table();
+    expect(screen.getByRole('link', { name: 'Make the next order' })).toHaveAttribute(
+      'href',
+      `/intakes/${VENDOR_ID}/orders/new`,
+    );
+    expect(screen.queryByRole('link', { name: 'Close this vendor' })).toBeNull();
+    // Each parcel that is not here yet and has no order has its own act.
+    expect(within(await table()).getByRole('link', { name: /Make order: Parcel 2/ })).toBeVisible();
+  });
+
+  // Break caught: a note that says the parcels that are here can be ordered once the check-in is finished and says nothing of what can be done now.
+  it('says that the parcels that are not here yet can be ordered now, and what happens at the check-in', async () => {
+    early();
+    await table();
+    expect(
+      await screen.findByText(/You can make orders now for the parcels that are not here yet/),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toMatch(FORBIDDEN);
+  });
+
+  // Break caught: the next order offered to a session that may only read, or when there is no parcel left that is not here yet.
+  it('offers the next order to nobody who may not make orders, and when no parcel is left that is not here yet', async () => {
+    early({}, ['hub.read']);
+    await table();
+    expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+  });
+
+  it('offers no next order when no parcel is left that is not here yet', async () => {
+    early({}, OFFICER, { ...PROGRESS_EARLY, awaiting_arrival: 0, received: 3, prepared: 0 });
+    await table();
+    expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+  });
+});
+
+describe('the order of a parcel that is missing (Run G2, Part 2, item 1; D-D6, D-S7-4)', () => {
+  const ORDER_OF_MISSING = {
+    id: 'a0000003-0000-4000-8000-000000000003',
+    code: 'ACC-OR-6NP7QR',
+    recipient_name: 'Ama Mensah',
+    service_area: 'ACCRA_TEMA',
+    size_class: 'SMALL',
+    commercial_state: null,
+    confirmed: false,
+    payment_required: false,
+  };
+  const WRITTEN_OFF_FINDING = {
+    id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+    kind: 'ADJUDICATION',
+    intake_parcel_id: null,
+    condition: null,
+    outcome: 'WRITTEN_OFF',
+    note: 'The vendor was told and the parcel did not come.',
+    evidence_ids: [],
+    recorded_by_name: 'Kojo Mensah',
+    recorded_at: '2026-11-14T11:00:00Z',
+  };
+  const missing = (findings: readonly unknown[] = []) =>
+    open(
+      {
+        [RECORD]: () =>
+          json(
+            200,
+            checkInFixture(PARCELS, {
+              id: VENDOR_ID,
+              state: 'ITEMIZING',
+              condition_findings: findings,
+            }),
+            { ETag: '"v1"' },
+          ),
+        [LIST]: () =>
+          json(
+            200,
+            worklistOf(
+              [parcelRow(3, 'MISSING', { order: ORDER_OF_MISSING, parcelState: 'MISSING' })],
+              { received: 2, missing: 1, needs_order: 0, prepared: 1, itemized: 2, orders: 3 },
+            ),
+          ),
+      },
+      OFFICER,
+      'ITEMIZING',
+    );
+
+  // Break caught: a parcel that is missing whose order says only "Missing" (an officer who opens it cannot tell that the order will not go out, or what would change that), or is offered no way to the order.
+  it('says that the order will not go out unless the parcel is found, with the way to the order', async () => {
+    const { user } = missing();
+    await user.click(within(await table()).getByRole('button', { name: /Parcel 3/ }));
+    expect(
+      await screen.findByText(
+        'Parcel missing — this order will not go out unless the parcel is found.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Open order' })).toHaveAttribute(
+      'href',
+      `/orders/${ORDER_OF_MISSING.id}`,
+    );
+  });
+
+  // Break caught: a parcel that was written off still told as one that may be found (the order would be left as a promise), or an order of a parcel that was written off with no word of what it is.
+  it('says that the parcel was not received once the vendor’s missing parcels are written off', async () => {
+    const { user } = missing([WRITTEN_OFF_FINDING]);
+    await user.click(within(await table()).getByRole('button', { name: /Parcel 3/ }));
+    expect(
+      await screen.findByText(
+        'Parcel not received — the order stays on record, with no price to pay, and will not go out.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/this order will not go out unless the parcel is found/)).toBeNull();
   });
 });
 
@@ -509,17 +677,14 @@ describe('a parcel the officer is waiting on the vendor’s details for (Run G1,
   });
 });
 
-describe('the next order while the check-in is open (Run F, Part 2, item 5)', () => {
-  // Break caught: "Make the next order" offered for a vendor with door photos before it is cleared: the form it leads to ends in a refusal, and nothing said why at the top of the page.
+describe('the next order while the check-in is open (Run F, Part 2, item 5; changed by Run G2, Part 2, item 1)', () => {
+  // Break caught: an order offered for a parcel that is here while the vendor is still being checked in: the form it leads to ends in a refusal, and nothing said why at the top of the page. Run F offered no next order
+  // at all; since the early orders (D-D6) it is offered for the parcels that are not here yet, and the parcels that are here still wait, which the page says.
   it('offers no order for the parcels that are here until the vendor is cleared, and says why at the top', async () => {
     open({}, OFFICER, 'AWAITING_COUNT');
     await table();
-    expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
-    expect(
-      screen.getByText(
-        /The vendor is still being checked in\. The parcels that are here can be ordered/,
-      ),
-    ).toBeVisible();
+    expect(within(await table()).queryByRole('link', { name: /Make order: Parcel 2/ })).toBeNull();
+    expect(screen.getByText(/The parcels that are here can be ordered once it is\./)).toBeVisible();
   });
 });
 

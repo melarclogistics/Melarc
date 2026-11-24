@@ -37,6 +37,8 @@ export interface VendorSectionProps {
   readonly vendor: VendorView;
   /** The officer holds the key that checks parcels in: without it the section shows the vendor and offers no act. */
   readonly mayCount: boolean;
+  /** The officer holds the key that makes orders: a vendor whose check-in is open may then have its orders started from the photos (D-D6). */
+  readonly mayOrder: boolean;
   readonly acts: RunActs;
   /** The vendor to check in after this one, or nothing when none waits. */
   readonly next: VendorView | undefined;
@@ -194,13 +196,14 @@ function BlindVendor({
 function PhotoVendor({
   vendor,
   mayCount,
+  mayOrder,
   firstToCheck,
   acts,
   onNotice,
   readAgain,
 }: Pick<
   VendorSectionProps,
-  'vendor' | 'mayCount' | 'firstToCheck' | 'acts' | 'onNotice' | 'readAgain'
+  'vendor' | 'mayCount' | 'mayOrder' | 'firstToCheck' | 'acts' | 'onNotice' | 'readAgain'
 >) {
   const [chosen, setChosen] = useState(false);
   const [dialog, setDialog] = useState<'all' | 'finish' | 'extra' | undefined>(undefined);
@@ -255,6 +258,14 @@ function PhotoVendor({
           {tapping ? (
             <p className="receiving-tally" role="status">
               {WORDS.vendor.tally(vendor.arrived_count ?? 0, expected, vendor.extra_count)}
+            </p>
+          ) : null}
+          {/* The orders of a vendor whose check-in is open may be started from its photos (D-D6): the officer who is looking at them is offered the way, and the orders page says which parcels are not here yet. */}
+          {mayOrder && expected > 0 ? (
+            <p>
+              <ButtonLink to={ordersPath(vendor.intake_id)} variant="secondary">
+                {ORDERS_WORDS.workspace.acts.earlyOrders}
+              </ButtonLink>
             </p>
           ) : null}
         </>
@@ -459,6 +470,7 @@ function PhotoVendor({
 export function VendorSection({
   vendor,
   mayCount,
+  mayOrder,
   acts,
   next,
   firstToCheck,
@@ -490,6 +502,7 @@ export function VendorSection({
         <PhotoVendor
           vendor={vendor}
           mayCount={mayCount}
+          mayOrder={mayOrder}
           firstToCheck={firstToCheck}
           acts={acts}
           onNotice={onNotice}

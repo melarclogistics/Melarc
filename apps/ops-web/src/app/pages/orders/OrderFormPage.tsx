@@ -107,15 +107,35 @@ function Saved({
   const left = useWorklist(facts.id, { view: 'needs_order', pageSize: 1 });
   const blind = facts.mode === 'BLIND_COUNT';
   const last = useLastOrders(facts.id, LAST_ORDERS, blind);
+  // **An order made while the vendor's check-in is open is for a parcel that is not here yet** (D-D6): what is next is the next of those, forward from this one and passing the ones that have an order or are waited on.
+  const early = facts.checkingIn && !facts.closed;
+  const nextEarly = useNextToOrder(facts.id, after, early, 'awaiting_arrival');
   useEffect(() => {
     box.current?.focus();
   }, []);
   const remaining = left.data?.progress.needs_order ?? undefined;
-  // The next order and the close are offered only when the server would take them (Run G1, Part 2, item 2): the vendor is cleared (its check-in is final) and not closed. After an early order for a parcel that is
-  // not here yet the vendor is still being checked in, and each would open a page that says so: a dead end, which *Back to the orders* is not.
+  // The next order and the close are offered only when the server would take them (Run G1, Part 2, item 2): the vendor is cleared (its check-in is final) and not closed. While the check-in is open the next order is
+  // for a parcel that is not here yet, when one is left (Run G2, item 1); the close is never offered, and *Back to the orders* is the way out of a screen with nothing next.
   const open = facts.cleared && !facts.closed;
+  const nextEarlyParcel = nextEarly.status === 'success' && nextEarly.data.kind === 'parcel';
   const made = left.data?.progress.orders;
   const received = left.data?.progress.received ?? null;
+  // The next order, for the next parcel (the form finds which, forward from this one). The first order of a vendor moves it from ready to being worked, and its version with it: the next order is made on the vendor as it is now,
+  // read before the next form opens, or its save would be refused as stale and the officer would have to check the price again for nothing. A click that opens a new tab or window is left alone.
+  const nextLink = (
+    <ButtonLink
+      to={newOrderPath(facts.id, undefined, after)}
+      size="lg"
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+          return;
+        event.preventDefault();
+        void onReload().then(() => navigate(newOrderPath(facts.id, undefined, after)));
+      }}
+    >
+      {WORDS.workspace.acts.makeNext}
+    </ButtonLink>
+  );
   return (
     <div className="orders-saved" ref={box} tabIndex={-1}>
       <Alert variant="success">
@@ -148,7 +168,17 @@ function Saved({
           ) : null}
         </div>
       ) : null}
-      {remaining === undefined ? null : (
+      {early ? (
+        <>
+          <p className="orders-note">{F.earlySaved}</p>
+          {nextEarly.status === 'success' && nextEarly.data.kind === 'none' ? (
+            <p className="orders-note">{F.earlyNone}</p>
+          ) : null}
+          {nextEarly.status === 'success' && nextEarly.data.kind === 'all-waiting' ? (
+            <p className="orders-note">{F.waiting.allWaiting}</p>
+          ) : null}
+        </>
+      ) : remaining === undefined ? null : (
         <p className="orders-note">
           {remaining > 0
             ? facts.mode === 'BLIND_COUNT'
@@ -158,27 +188,12 @@ function Saved({
         </p>
       )}
       <div className="orders-saved__acts">
-        {!open ? null : remaining === undefined || remaining > 0 ? (
-          <ButtonLink
-            to={newOrderPath(facts.id, undefined, after)}
-            size="lg"
-            onClick={(event) => {
-              // The first order of a vendor moves it from ready to being worked, and its version with it: the next order is made on the vendor as it is now, read before the next form opens, or its
-              // save would be refused as stale and the officer would have to check the price again for nothing. A click that opens a new tab or window is left alone.
-              if (
-                event.button !== 0 ||
-                event.metaKey ||
-                event.ctrlKey ||
-                event.shiftKey ||
-                event.altKey
-              )
-                return;
-              event.preventDefault();
-              void onReload().then(() => navigate(newOrderPath(facts.id, undefined, after)));
-            }}
-          >
-            {WORDS.workspace.acts.makeNext}
-          </ButtonLink>
+        {early ? (
+          nextEarlyParcel ? (
+            nextLink
+          ) : null
+        ) : !open ? null : remaining === undefined || remaining > 0 ? (
+          nextLink
         ) : me?.holds('hub.intake.close') === true ? (
           <ButtonLink to={closePath(facts.id)} size="lg">
             {WORDS.workspace.acts.close}
@@ -445,7 +460,13 @@ function NextParcel({
   readonly facts: VendorFacts;
   readonly after: number | undefined;
 }) {
-  const next = useNextToOrder(facts.id, after);
+  // While the check-in is open the parcels to order are the ones that are not here yet (D-D6), from their photos.
+  const next = useNextToOrder(
+    facts.id,
+    after,
+    true,
+    facts.checkingIn ? 'awaiting_arrival' : 'needs_order',
+  );
   if (next.status === 'pending') return <Skeleton lines={4} />;
   if (next.status === 'error') {
     return (
@@ -471,7 +492,7 @@ function NextParcel({
       />
     );
   }
-  return <NothingToOrder facts={facts} words={F.noParcel} />;
+  return <NothingToOrder facts={facts} words={facts.checkingIn ? F.earlyNone : F.noParcel} />;
 }
 
 /** A parcel that already has its order (the officer went Back to its form): said with the order's code and a link to it, and never an empty form to be refused at the price. */
@@ -584,8 +605,9 @@ function Entry({
       />
     );
   }
-  // While the vendor's check-in is open the parcels that are here wait for it to finish: the server would refuse their order, so the page says so before the officer fills in a form.
-  if (!facts.cleared && (parcelParam === null || !UUID.test(parcelParam))) {
+  // While the vendor's check-in is open the parcels that are here wait for it to finish: the server would refuse their order, so the page says so before the officer fills in a form. **The parcels that are not
+  // here yet are not waiting** (D-D6): with no parcel named the form is for the next of them, from their photos.
+  if (!facts.cleared && !facts.checkingIn && (parcelParam === null || !UUID.test(parcelParam))) {
     return <NothingToOrder facts={facts} words={F.checkInOpen} />;
   }
   if (parcelParam === null || !UUID.test(parcelParam)) {

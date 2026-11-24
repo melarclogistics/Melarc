@@ -16,6 +16,12 @@ import { SENIOR_DECIDES } from './receiving-copy';
 const orders = (count: number): string => (count === 1 ? '1 order' : `${String(count)} orders`);
 const parcels = (count: number): string => (count === 1 ? '1 parcel' : `${String(count)} parcels`);
 
+/** What the order made early for a parcel that is missing says, on the order's page and on the parcel's row (D-D6), and once the vendor's missing parcels are written off (D-S7-4): drafts, said once and drawn in both places. */
+const PARCEL_MISSING_ORDER =
+  'Parcel missing — this order will not go out unless the parcel is found.';
+const PARCEL_NOT_RECEIVED_ORDER =
+  'Parcel not received — the order stays on record, with no price to pay, and will not go out.';
+
 export const ORDERS_WORDS = {
   common: {
     receiving: 'Receiving',
@@ -87,7 +93,8 @@ export const ORDERS_WORDS = {
       makeBlind: 'Make an order',
       makeOrders: 'Make orders',
       seeOrders: 'See the orders',
-      earlyOrders: 'Make orders from the photos',
+      /** The way in to the orders of a vendor whose check-in is still open (D-D6): from the vendor's section of the run, from its record and from Orders to make. A draft, with the rest of the table. */
+      earlyOrders: 'Start orders from the photos',
       close: 'Close this vendor',
       summary: 'See the summary',
       closedExceptions: 'Closed with parcels left',
@@ -122,7 +129,7 @@ export const ORDERS_WORDS = {
         'An order made for a parcel that is not here yet keeps the price it was calculated at, and is confirmed when the check-in is final.',
       notCleared: 'This vendor is not cleared for orders yet.',
       checkInOpen:
-        'The vendor is still being checked in. The parcels that are here can be ordered once the check-in is finished.',
+        'The vendor is still being checked in. You can make orders now for the parcels that are not here yet, from their photos: each is confirmed when the check-in is final. The parcels that are here can be ordered once it is.',
     },
     panel: {
       photo: 'Photo of the parcel',
@@ -139,6 +146,10 @@ export const ORDERS_WORDS = {
         'The parcel is not checked in yet. You can make its order now: it is confirmed when the check-in is final.',
       missing:
         'The parcel is missing, so no order can be confirmed for it. If it is found, check it in from the missing list.',
+      /** The order made early for a parcel that is missing (D-D6): it stays on the list as missing, is never priced or sent, and is only told what would change that. Drafts. */
+      missingOrder: PARCEL_MISSING_ORDER,
+      /** The same order once the vendor's missing parcels were written off (D-S7-4): it stays as a record, with no price to pay. */
+      notReceived: PARCEL_NOT_RECEIVED_ORDER,
     },
     problems: {
       readOrders: 'The orders could not be read.',
@@ -284,6 +295,12 @@ export const ORDERS_WORDS = {
     sending: 'Saving the order…',
     checkInOpen:
       'The vendor is still being checked in, so the parcels that are here cannot be ordered yet. Finish the check-in first.',
+    /** The early orders (D-D6, Run G2, Part 2, item 1): every parcel that is not here yet has its order, or is waited on, while the vendor is still being checked in. Drafts. */
+    earlyNone:
+      'Every parcel that is not here yet has an order. The parcels that are here can be ordered once the check-in is finished.',
+    /** After an order made for a parcel that is not here yet: what it waits for, and when it is confirmed. */
+    earlySaved:
+      'The order waits for its parcel. It is confirmed, and its price fixed, when the vendor’s check-in is final.',
     unknownOutcome:
       'We could not tell whether the order was saved. Look at the orders before you try again.',
     checkRecord: 'Look at the orders',
@@ -422,6 +439,9 @@ export const ORDERS_WORDS = {
       EARLY_QUOTE: 'Waiting for its parcel',
       FROZEN: 'Confirmed — price fixed',
       REVERSED: 'Taken back',
+      // The order made early for a parcel that is missing (D-D6), and once the vendor's missing parcels are written off (D-S7-4). Drafts.
+      PARCEL_MISSING: 'Parcel missing',
+      PARCEL_NOT_RECEIVED: 'Parcel not received',
     },
     sentence: {
       EARLY_QUOTE:
@@ -429,6 +449,8 @@ export const ORDERS_WORDS = {
       FROZEN: 'Confirmed: its price is fixed.',
       REVERSED:
         'The arrival was taken back, so the order no longer stands. The price and the history are kept.',
+      PARCEL_MISSING: PARCEL_MISSING_ORDER,
+      PARCEL_NOT_RECEIVED: PARCEL_NOT_RECEIVED_ORDER,
     },
     sections: {
       /** The photo of the parcel the order is made for (D-S7-14): a tile that opens it whole. */
@@ -462,6 +484,10 @@ export const ORDERS_WORDS = {
       earlyQuote: 'Calculated price (not fixed)',
       frozen: 'Fixed price',
       earlyHelp: 'This is the price it was calculated at. It is fixed when the order is confirmed.',
+      // An order whose parcel is missing is not confirmed unless the parcel is found, and one whose parcel was not received owes nothing.
+      missingHelp:
+        'This is the price it was calculated at. It is fixed only if the parcel is found and checked in.',
+      notReceivedHelp: 'The parcel was not received, so nothing is owed for this order.',
       frozenHelp: 'This is the price. A correction changes who pays, never this figure.',
       estimateNote:
         'The estimate shown when the pickup was booked is on the pickup, and it is not this price.',
@@ -846,6 +872,11 @@ export const ORDERS_WORDS = {
         label: 'Needs a senior',
         none: 'No vendor is waiting for a senior officer.',
       },
+      // The vendors whose check-in is open (D-D6): the way in to the early orders, from the photos. Drafts.
+      AWAITING_COUNT: {
+        label: 'Being checked in',
+        none: 'No vendor is being checked in against its photos.',
+      },
     },
     columns: {
       vendor: 'Vendor',
@@ -854,6 +885,8 @@ export const ORDERS_WORDS = {
       orders: 'Orders',
       why: 'Why a senior',
       handedOver: 'Handed over',
+      /** The card of a vendor whose check-in is open names the act that starts its orders. */
+      start: 'Orders',
     },
     /** What a row says of a vendor's orders, from the counts the list gives (the database's own): *3 made, 2 to make*. Nothing is said where the list gave none. */
     ordersLine: (made: number, left: number | null): string =>
@@ -864,6 +897,8 @@ export const ORDERS_WORDS = {
       review: 'Review the vendor',
     },
     received: (count: number | null): string => (count === null ? 'Not counted' : parcels(count)),
+    /** How many of the parcels a vendor arrived with are here so far, while its check-in is open: *2 of 5 here*. */
+    here: (here: number, expected: number): string => `${String(here)} of ${String(expected)} here`,
     missing: (count: number): string => `${String(count)} missing`,
     blind: 'Counted without photos',
     /** The line under a vendor counted without photos that is named by its vendor: its code, and how it was counted (Run G1, Part 2, item 9). */

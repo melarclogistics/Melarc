@@ -15,7 +15,10 @@ import {
   ORDER_CODE,
   ORDER_ID,
   orderOf,
+  PARCELS,
+  VENDOR_ID,
 } from '../../../test-support/orders-fixture';
+import { checkInFixture } from '../../../test-support/receiving-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
@@ -517,6 +520,89 @@ describe('an order that waits for its parcel', () => {
     open(orderOf('early'), ['hub.read', 'pricing.read'], {}, EARLY_ORDER_ID);
     await screen.findByText(/Made before the parcel was checked in for good\./);
     expect(screen.queryByRole('link', { name: 'Change this order' })).toBeNull();
+  });
+});
+
+describe('the order of a parcel that is missing (Run G2, Part 2, item 1; D-D6, D-S7-4)', () => {
+  const VENDOR_READ = `GET /hub-intakes/${VENDOR_ID}`;
+  const MISSING = (): unknown =>
+    orderOf('early', { pickup_intake_id: VENDOR_ID, intake_parcel_state: 'MISSING' });
+  const WRITTEN_OFF = {
+    id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+    kind: 'ADJUDICATION',
+    intake_parcel_id: null,
+    condition: null,
+    outcome: 'WRITTEN_OFF',
+    note: 'The vendor was told and the parcel did not come.',
+    evidence_ids: [],
+    recorded_by_name: 'Kojo Mensah',
+    recorded_at: '2026-11-14T11:00:00Z',
+  };
+  const vendor = (findings: readonly unknown[]): Handler => {
+    return () =>
+      json(
+        200,
+        checkInFixture(PARCELS, {
+          id: VENDOR_ID,
+          state: 'ITEMIZING',
+          condition_findings: findings,
+        }),
+        { ETag: '"v1"' },
+      );
+  };
+
+  // Break caught: the order of a parcel that is missing drawn as one that waits for its parcel (it will not be confirmed unless the parcel is found, and the page promised it would), or no word of what would change that.
+  it('says that the parcel is missing and that the order will not go out unless it is found', async () => {
+    open(MISSING(), OFFICER, { [VENDOR_READ]: vendor([]) }, EARLY_ORDER_ID);
+    expect(
+      await screen.findByText(
+        'Parcel missing — this order will not go out unless the parcel is found.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText('Waiting for its parcel')).toBeNull();
+    expect(screen.queryByText(/It is fixed when the order is confirmed/)).toBeNull();
+    // Nothing can be changed on an order whose parcel is not here.
+    expect(screen.queryByRole('link', { name: 'Change this order' })).toBeNull();
+  });
+
+  // Break caught: a parcel that was written off still told as one that may be found, so that the order is left as a promise to the vendor.
+  it('says that the parcel was not received, with nothing owed, once the vendor’s missing parcels are written off', async () => {
+    open(MISSING(), OFFICER, { [VENDOR_READ]: vendor([WRITTEN_OFF]) }, EARLY_ORDER_ID);
+    expect(
+      await screen.findByText(
+        'Parcel not received — the order stays on record, with no price to pay, and will not go out.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/this order will not go out unless the parcel is found/)).toBeNull();
+    expect(
+      screen.getByText(/The parcel was not received, so nothing is owed for this order\./),
+    ).toBeVisible();
+  });
+
+  // Break caught: a vendor that cannot be read (a refusal, a lost connection) that takes the whole order's page with it, or that says the parcel was not received when nothing says so.
+  it('says the parcel is missing, and keeps the order, when the vendor cannot be read', async () => {
+    open(
+      MISSING(),
+      OFFICER,
+      { [VENDOR_READ]: () => refusal(403, 'PERMISSION_DENIED') },
+      EARLY_ORDER_ID,
+    );
+    expect(
+      await screen.findByText(
+        'Parcel missing — this order will not go out unless the parcel is found.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/Parcel not received/)).toBeNull();
+    expect(
+      screen.getByRole('heading', { level: 1, name: (orderOf('early') as { code: string }).code }),
+    ).toBeVisible();
+  });
+
+  // Break caught: the read of the vendor made for every order (it is for the order of a parcel that is missing alone).
+  it('reads the vendor only for the order of a parcel that is missing', async () => {
+    open(orderOf('early', { pickup_intake_id: VENDOR_ID }), OFFICER, {}, EARLY_ORDER_ID);
+    await screen.findByText(/Made before the parcel was checked in for good\./);
+    expect(sent(VENDOR_READ)).toHaveLength(0);
   });
 });
 

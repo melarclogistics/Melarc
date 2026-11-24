@@ -8,6 +8,7 @@ import {
   OFFLINE_NOT_APPLICABLE,
 } from '../../../test-support/interface-states';
 import { captured } from '../../../test-support/orders-fixture';
+import { checkInFixture, parcelFixture } from '../../../test-support/receiving-fixture';
 import { renderApp } from '../../../test-support/render-app';
 import { refusal, sessionWith, staffApi } from '../../../test-support/staff-api';
 
@@ -96,6 +97,7 @@ describe('the vendors with orders to make', () => {
       'Ready to start',
       'Being worked',
       'Needs a senior',
+      'Being checked in',
     ]);
     expect(rows.queryByText(/orders? made/i)).toBeNull();
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
@@ -142,6 +144,83 @@ describe('the vendors with orders to make', () => {
     const link = within(await table()).getByRole('link', { name: 'Fixture Sender' });
     expect(link).toHaveAttribute('href', `/intakes/${VENDOR}/orders`);
     expect(screen.queryByRole('button', { name: /Make orders for/ })).toBeNull();
+  });
+});
+
+/**
+ * The vendors whose check-in is open (Run G2, Part 2, item 1; D-D6): the way in to the early orders from Orders to make. The vendors an officer may begin orders for from their photos, before their parcels are
+ * checked in for good: each with how many parcels it expects and how many are here, and the act that starts the orders for an officer who may make them.
+ */
+describe('the vendors whose check-in is open (the early orders)', () => {
+  const NOT_HERE = [1, 2, 3].map((n) => parcelFixture(n));
+  const CHECKING_ID = 'd3d3d3d3-4444-4555-8666-777777777777';
+  const CHECKING = checkInFixture(NOT_HERE, {
+    id: CHECKING_ID,
+    code: 'ACC-IN-5KQVEZ',
+    state: 'AWAITING_COUNT',
+  });
+  const BLIND_WAITING = preCountFixture({ id: BLIND_ID });
+  const checkingIn = (...items: readonly unknown[]): Record<string, Handler> => ({
+    [LIST]: (request) => {
+      const query = new URL(request.url).searchParams;
+      return json(
+        200,
+        pageOf(
+          query.get('state') === 'AWAITING_COUNT'
+            ? items
+            : query.get('state') === 'ITEMIZING'
+              ? [WORKED]
+              : [READY],
+        ),
+      );
+    },
+  });
+  const viewTab = (name: string): HTMLElement =>
+    within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
+      name,
+    });
+
+  // Break caught: no way from Orders to make to a vendor whose check-in is open (the early orders reachable from the receiving run alone), a view that is not the server's filter, or a blind vendor that waits for its count
+  // listed as one to start orders for (it has no photo to make an order from) or refusing the whole list.
+  it('lists the vendors whose check-in is open from the server’s filter, with how many parcels are here, and leaves out a vendor counted without photos', async () => {
+    const { user } = open(checkingIn(CHECKING, BLIND_WAITING));
+    await user.click(await screen.findByRole('tab', { name: 'Being checked in' }));
+    const rows = within(await table());
+    expect(await rows.findByRole('link', { name: 'Kente Crafts' })).toHaveAttribute(
+      'href',
+      `/intakes/${CHECKING_ID}/orders`,
+    );
+    expect(rows.getAllByText('0 of 3 here').length).toBeGreaterThan(0);
+    expect(rows.queryByText('Counted without photos')).toBeNull();
+    expect(reads().some((read) => read.get('state') === 'AWAITING_COUNT')).toBe(true);
+    expect(viewTab('Being checked in')).toHaveAttribute('aria-selected', 'true');
+    expect(document.body.textContent).not.toMatch(FORBIDDEN);
+  });
+
+  // Break caught: an officer who may make orders given only the vendor's name to start from (the act that starts them not said), or a session that may not make orders given the act.
+  it('offers the officer who may make orders the act that starts them, and a reader none', async () => {
+    const { user } = open(checkingIn(CHECKING));
+    await user.click(await screen.findByRole('tab', { name: 'Being checked in' }));
+    const rows = within(await table());
+    expect(
+      await rows.findByRole('link', { name: 'Start orders from the photos: Kente Crafts' }),
+    ).toHaveAttribute('href', `/intakes/${CHECKING_ID}/orders`);
+  });
+
+  it('offers a session that may only read no act, and the vendor’s name as the way in', async () => {
+    const { user } = open(checkingIn(CHECKING), ['hub.read']);
+    await user.click(await screen.findByRole('tab', { name: 'Being checked in' }));
+    const rows = within(await table());
+    expect(await rows.findByRole('link', { name: 'Kente Crafts' })).toBeVisible();
+    expect(rows.queryByRole('link', { name: /Start orders from the photos/ })).toBeNull();
+  });
+
+  it('says that no vendor is being checked in when none is', async () => {
+    const { user } = open(checkingIn());
+    await user.click(await screen.findByRole('tab', { name: 'Being checked in' }));
+    expect(
+      await screen.findByText('No vendor is being checked in against its photos.'),
+    ).toBeVisible();
   });
 });
 

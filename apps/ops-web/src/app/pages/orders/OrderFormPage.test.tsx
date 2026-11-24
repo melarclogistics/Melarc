@@ -34,6 +34,7 @@ import {
   blindVendorFixture,
   checkInFixture,
   EVIDENCE_LIMITS,
+  parcelFixture,
   photoLinkHandlers,
   runFixture,
 } from '../../../test-support/receiving-fixture';
@@ -1431,8 +1432,8 @@ describe('the screen after an order is saved offers only what the server would t
     ...photoLinkHandlers([...PARCELS, EXPECTED_PARCEL]),
   });
 
-  // Break caught: a saved screen that offers "Make the next order" for a vendor whose check-in is still open (it opens "The vendor is still being checked in…", a dead end) and "Close this vendor" to a senior who
-  // cannot close it yet; the way back to the orders missing.
+  // Break caught: a saved screen that offers "Make the next order" for a vendor whose check-in is still open when no parcel is left that is not here yet (it opens "The vendor is still being checked in…", a dead end) and
+  // "Close this vendor" to a senior who cannot close it yet; the way back to the orders missing. (When a parcel is left that is not here yet the next order is offered: Run G2, Part 2, item 1.)
   it.each([
     ['with parcels that arrived and have no order', 2],
     ['with nothing left to order', 0],
@@ -1443,9 +1444,8 @@ describe('the screen after an order is saved offers only what the server would t
       await fillIn(user);
       await user.click(await pricedSave());
       expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
-      await screen.findByText(
-        /parcel needs an order|parcels need an order|Every parcel that arrived/,
-      );
+      // No parcel is left that is not here yet (the list is empty): the screen says so, and what the parcels that are here wait for.
+      await screen.findByText(/Every parcel that is not here yet has an order./);
       expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
       expect(screen.queryByRole('link', { name: 'Close this vendor' })).toBeNull();
       expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
@@ -1488,6 +1488,163 @@ describe('the screen after an order is saved offers only what the server would t
       expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
     },
   );
+});
+
+describe('the early orders as a loop (Run G2, Part 2, item 1; D-D6, OB-S1-169 item 9)', () => {
+  // The vendor's four parcels are not checked in yet (its check-in is open): the first has an order made from its photo, and the third is waited on for the vendor's details.
+  const NOT_HERE = [1, 2, 3].map((n) => parcelFixture(n)).concat(EXPECTED_PARCEL);
+  const N2 = NOT_HERE[1]?.id ?? '';
+  const MARK = { since: '2026-11-24T10:30:00.000Z', note: null };
+  const NOT_HERE_ROWS = [
+    parcelRow(1, 'PREPARED', { parcelState: 'EXPECTED' }),
+    parcelRow(2, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED' }),
+    parcelRow(3, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED', waiting: MARK }),
+    parcelRow(4, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED' }),
+  ];
+  const SAVED_EARLY = (parcel: string) => ({
+    ...orderOf('early'),
+    id: '33333333-4444-4555-8666-777777777777',
+    code: 'ACC-OR-4HJ5KM',
+    intake_parcel_id: parcel,
+  });
+  /** The worklist as the server answers it by view: `awaiting_arrival` lists the parcels that are not here yet, with an order or without. */
+  const listOf =
+    (rows: readonly ReturnType<typeof parcelRow>[]): Handler =>
+    () =>
+      json(
+        200,
+        worklistOf(
+          rows,
+          {
+            received: 0,
+            awaiting_arrival: rows.length,
+            needs_order: 0,
+            prepared: rows.filter((row) => row.order !== null).length,
+            orders: rows.filter((row) => row.order !== null).length,
+            itemized: 0,
+            waiting_for_vendor: rows.filter((row) => row.parcel.waiting_for_vendor !== null).length,
+          },
+          { intake_state: 'AWAITING_COUNT' },
+        ),
+      );
+  const early = (
+    path = `/intakes/${VENDOR_ID}/orders/new`,
+    rows: readonly ReturnType<typeof parcelRow>[] = NOT_HERE_ROWS,
+    more: Record<string, Handler> = {},
+  ) =>
+    open(
+      {
+        [RECORD]: () =>
+          json(200, checkInFixture(NOT_HERE, { id: VENDOR_ID, state: 'AWAITING_COUNT' }), {
+            ETag: '"v1"',
+          }),
+        [LIST]: listOf(rows),
+        ...photoLinkHandlers(NOT_HERE),
+        ...more,
+      },
+      path,
+    );
+  const listViews = () =>
+    sent(LIST).map((request) => new URL(request.url).searchParams.get('view'));
+
+  // Break caught: a form for no parcel that tells the officer to finish the check-in first (a dead end for a vendor whose parcels are not here yet), or one that opens on a parcel that has its order, or on one that is
+  // waited on.
+  it('opens the form of the first parcel that is not here yet and has no order, passing the one that has an order and the one that is waited on', async () => {
+    early();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 2' }),
+    ).toBeVisible();
+    // It asked the parcels that are not here yet, and not the ones that arrived (there are none to order yet).
+    expect(listViews()).toContain('awaiting_arrival');
+    expect(listViews()).not.toContain('needs_order');
+  });
+
+  // Break caught: the next order that goes back to the lowest parcel, or onto the parcel the officer is waiting on the vendor for.
+  it('moves forward from the parcel just saved, and passes over a parcel that is waited on', async () => {
+    early(`/intakes/${VENDOR_ID}/orders/new?after=2`);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 4' }),
+    ).toBeVisible();
+  });
+
+  // Break caught: a vendor whose parcels all have an order, or are waited on, told that the check-in must be finished (it is not what is in the way), or sent to a form.
+  it('says that every parcel that is not here yet has an order, and what can be done next', async () => {
+    early(`/intakes/${VENDOR_ID}/orders/new`, [
+      parcelRow(1, 'PREPARED', { parcelState: 'EXPECTED' }),
+      parcelRow(2, 'PREPARED', { parcelState: 'EXPECTED' }),
+    ]);
+    expect(
+      await screen.findByText(/Every parcel that is not here yet has an order\./),
+    ).toBeVisible();
+    expect(screen.getByText(/can be ordered once the check-in is finished/)).toBeVisible();
+    expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+  });
+
+  it('says that every parcel that is left is waiting for the vendor’s details, and leads to them', async () => {
+    early(`/intakes/${VENDOR_ID}/orders/new`, [
+      parcelRow(3, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED', waiting: MARK }),
+    ]);
+    expect(
+      await screen.findByText('Every parcel that is left is waiting for the vendor’s details.'),
+    ).toBeVisible();
+    expect(screen.getByRole('link', { name: 'See the parcels that wait' })).toHaveAttribute(
+      'href',
+      `/intakes/${VENDOR_ID}/orders?view=waiting_for_vendor`,
+    );
+  });
+
+  // Break caught: the saved screen of an early order that leaves the officer at a dead end (Run G1 offered neither the next order nor the close while the check-in is open), so that the loop is a trip back to the
+  // list for each parcel; or one that offers the close to a vendor that is still being checked in; or that does not say what the order waits for.
+  it('after an early order offers the next parcel that is not here yet, and never the close', async () => {
+    const { user } = early(`/intakes/${VENDOR_ID}/orders/new?parcel=${N2}`, undefined, {
+      [SAVE]: () => json(201, SAVED_EARLY(N2), { ETag: '"o1"' }),
+    });
+    await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 2' });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    expect(await screen.findByText('Order ACC-OR-4HJ5KM is saved.')).toBeVisible();
+    // What the order waits for, and when it is confirmed.
+    expect(
+      await screen.findByText(/The order waits for its parcel\. It is confirmed/),
+    ).toBeVisible();
+    // Forward from parcel 2, passing parcel 3 that is waited on: parcel 4.
+    const next = screen.getByRole('link', { name: 'Make the next order' });
+    expect(next).toHaveAttribute('href', `/intakes/${VENDOR_ID}/orders/new?after=2`);
+    expect(screen.queryByRole('link', { name: 'Close this vendor' })).toBeNull();
+    await user.click(next);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 4' }),
+    ).toBeVisible();
+  });
+
+  it('after the last early order says that every parcel that is not here yet has an order, and offers no next order', async () => {
+    // Two parcels that are not here yet: the first has its order, and the second gets its order now, which is the last.
+    let rows = [
+      parcelRow(1, 'PREPARED', { parcelState: 'EXPECTED' }),
+      parcelRow(2, 'AWAITING_ARRIVAL', { parcelState: 'EXPECTED' }),
+    ];
+    const { user } = early(`/intakes/${VENDOR_ID}/orders/new?parcel=${N2}`, undefined, {
+      [LIST]: (request) => listOf(rows)(request),
+      [SAVE]: () => {
+        rows = [
+          parcelRow(1, 'PREPARED', { parcelState: 'EXPECTED' }),
+          parcelRow(2, 'PREPARED', { parcelState: 'EXPECTED' }),
+        ];
+        return json(201, SAVED_EARLY(N2), { ETag: '"o1"' });
+      },
+    });
+    await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 2' });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    expect(await screen.findByText('Order ACC-OR-4HJ5KM is saved.')).toBeVisible();
+    expect(
+      await screen.findByText(/Every parcel that is not here yet has an order\./),
+    ).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Close this vendor' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+  });
 });
 
 describe('a parcel the officer is waiting on the vendor’s details for (Run G1, Part 2, item 4; D-S7-12)', () => {

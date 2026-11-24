@@ -19,6 +19,7 @@ import type { TimelineEntry } from '../../../components/ui/timeline/Timeline';
 import { destinationOf, phoneAsWritten } from '../../../platform/hub-orders/order-form-model';
 import type { OrderView } from '../../../platform/hub-orders/orders-shape';
 import { useOrder, type OrderRecordView } from '../../../platform/hub-orders/use-orders-queries';
+import { useIntakeRecord } from '../../../platform/hub-receiving/use-intake-record';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { copyFor, problemOf } from '../../../platform/problem/problem-copy';
 import { useSignedInSession } from '../../../platform/session/use-permissions';
@@ -26,6 +27,7 @@ import { formatInstant } from '../../../platform/time/format-time';
 import { serviceDateText } from '../pickup/pickup-presentation';
 import { UUID } from '../staff/WithProfile';
 import { Cedis } from './Cedis';
+import { vendorFactsOf } from './vendor-facts';
 import { ParcelPhotoOpener } from './ParcelPhotoOpener';
 import {
   CorrectRecipientDialog,
@@ -46,8 +48,18 @@ import './orders-pages.css';
 
 const R = WORDS.record;
 
-const standingOf = (order: OrderView): OrderStanding =>
-  order.commercial_state === 'REVERSED' ? 'REVERSED' : order.price_status;
+/**
+ * Where an order stands: taken back, or what its price is. **An order made early for a parcel that is missing is not one that waits for it** (D-D6): it is told as the order of a parcel that is missing, and, once the vendor's
+ * missing parcels were written off, as the order of a parcel that was not received (D-S7-4). The write-off is the vendor's (`writtenOff`), known only where the page read it.
+ */
+const standingOf = (order: OrderView, writtenOff = false): OrderStanding =>
+  order.commercial_state === 'REVERSED'
+    ? 'REVERSED'
+    : order.intake_parcel_state === 'MISSING'
+      ? writtenOff
+        ? 'PARCEL_NOT_RECEIVED'
+        : 'PARCEL_MISSING'
+      : order.price_status;
 
 /** The code of the order the change page just saved, handed over in the history state: text of the shape of a code and nothing else, because a history state is the browser's and never trusted. */
 function amendedCodeOf(state: unknown): string | undefined {
@@ -103,7 +115,13 @@ function historyOf(order: OrderView): readonly TimelineEntry[] {
 }
 
 /** The price, told as what it is: a price calculated and kept until the order is confirmed, or the price fixed. The estimate of the booking is a third thing and is said to be elsewhere. */
-function PriceBlock({ order }: { readonly order: OrderView }) {
+function PriceBlock({
+  order,
+  standing,
+}: {
+  readonly order: OrderView;
+  readonly standing: OrderStanding;
+}) {
   const frozen = order.price_status === 'FROZEN';
   const total =
     order.locked_price ??
@@ -124,7 +142,15 @@ function PriceBlock({ order }: { readonly order: OrderView }) {
           ]}
         />
       )}
-      <p className="orders-note">{frozen ? R.price.frozenHelp : R.price.earlyHelp}</p>
+      <p className="orders-note">
+        {frozen
+          ? R.price.frozenHelp
+          : standing === 'PARCEL_NOT_RECEIVED'
+            ? R.price.notReceivedHelp
+            : standing === 'PARCEL_MISSING'
+              ? R.price.missingHelp
+              : R.price.earlyHelp}
+      </p>
       {order.components.length === 0 ? null : (
         <DescriptionList
           heading={WORDS.review.components}
@@ -252,6 +278,13 @@ function RecordBody({
     return amended === undefined ? undefined : <p>{WORDS.form.doneAmend(amended)}</p>;
   });
   const box = useRef<HTMLDivElement>(null);
+  // Whether the vendor's missing parcels were written off is the vendor's to say (D-S7-4), and is read for the order of a parcel that is missing alone. A vendor that cannot be read leaves the order told as missing.
+  const parcelMissing =
+    record.order.intake_parcel_state === 'MISSING' &&
+    record.order.commercial_state !== 'REVERSED' &&
+    record.order.pickup_intake_id !== null;
+  const vendor = useIntakeRecord(record.order.pickup_intake_id ?? '', parcelMissing);
+  const writtenOff = vendor.data !== undefined && vendorFactsOf(vendor.data).writtenOff;
   useEffect(() => {
     if (notice !== undefined) box.current?.focus();
   }, [notice]);
@@ -262,7 +295,7 @@ function RecordBody({
   }, [location.state, navigate]);
   if (me === undefined) return null;
   const { order, etag } = record;
-  const standing = standingOf(order);
+  const standing = standingOf(order, writtenOff);
   const reversed = standing === 'REVERSED';
   const frozen = order.price_status === 'FROZEN';
   const parcelGone =
@@ -379,7 +412,7 @@ function RecordBody({
               <Holds order={order} />
             </Panel>
             <Panel title={R.sections.price} headingLevel={2} region>
-              <PriceBlock order={order} />
+              <PriceBlock order={order} standing={standing} />
             </Panel>
             <Panel title={R.sections.payer} headingLevel={2} region>
               <PayerBlock order={order} />
