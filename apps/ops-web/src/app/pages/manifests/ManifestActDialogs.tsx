@@ -123,6 +123,8 @@ function OpenAct<Command extends object, Result>({
         aria-busy={command.phase === 'sending' ? true : undefined}
         onSubmit={(event) => {
           event.preventDefault();
+          // Its submit stays inside the dialog: one drawn where a form holds it (the mark on the form of an order) must never be heard by that form, which would save what is on it (as AlertDialog does).
+          event.stopPropagation();
           if (command.locked) return;
           const built = build();
           if (built === undefined) {

@@ -1295,6 +1295,40 @@ describe('a parcel the officer is waiting on the vendor’s details for (Run G1,
     expect(await bodyOf(request)).toEqual({ waiting: true, note: 'Called the vendor' });
   });
 
+  // Break caught (the security review of the commit before): the dialog is drawn where the order's form holds it, so its submit bubbled to the form and saved the order that was filled and priced behind it, when
+  // the officer only meant to mark the parcel. Marking sends the mark and nothing else, by the button and by Enter in the note.
+  it.each([
+    ['the button', false],
+    ['Enter in the note', true],
+  ])(
+    'marking a parcel on a form that is filled and priced, by %s, saves no order',
+    async (_name, byEnter) => {
+      const { user } = open(
+        {
+          [LIST]: listOf([parcelRow(1, 'NEEDS_ORDER'), parcelRow(3, 'NEEDS_ORDER')]),
+          [WAIT(P1)]: () => marked(P1, 'Called the vendor'),
+          [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' }),
+        },
+        `/intakes/${VENDOR_ID}/orders/new?parcel=${P1}`,
+      );
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 1' });
+      await fillIn(user);
+      await pricedSave();
+      const dialog = await markDialog(user, 'Called the vendor');
+      if (byEnter) await user.keyboard('{Enter}');
+      else await user.click(within(dialog).getByRole('button', { name: 'Mark the parcel' }));
+      // What was typed is not saved by the mark: the guard of the form asks before it is lost, as it does for any way on, and the order is saved by nobody.
+      const guard = await screen.findByRole('alertdialog');
+      expect(within(guard).getByText('Leave this page?')).toBeVisible();
+      expect(sent(WAIT(P1))).toHaveLength(1);
+      expect(sent(SAVE)).toHaveLength(0);
+      await user.click(within(guard).getByRole('button', { name: 'Leave the page' }));
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 3' });
+      expect(sent(WAIT(P1))).toHaveLength(1);
+      expect(sent(SAVE)).toHaveLength(0);
+    },
+  );
+
   // Break caught: a note that is optional made required, or sent as an empty text.
   it('marks a parcel with no note, and sends none', async () => {
     const { user } = open(
