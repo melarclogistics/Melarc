@@ -2,7 +2,7 @@ import type { components } from '@melarc/api-client';
 
 import { MAX_COUNT } from '../api/count-range';
 import { OPERATIONAL_CODE } from '../pickup/pickup-shape';
-import { nameOf } from './display-name';
+import { optionalNameOf } from './display-name';
 import { instantOf, isOneOf, isRecord, optional, uuidListOf, uuidOf } from '../staff/staff-shape';
 
 /**
@@ -214,7 +214,7 @@ function parseBase(body: Record<string, unknown>): IntakeBaseView | undefined {
   const captured = instantOf(body.declaration_captured_at);
   const receiver = optional(body.active_receiver_id, uuidOf);
   const lockedAt = optional(body.lock_acquired_at, instantOf);
-  const vendor = optional(body.vendor_name, nameOf);
+  const vendor = optionalNameOf(body.vendor_name);
   if (
     id === undefined ||
     code === undefined ||

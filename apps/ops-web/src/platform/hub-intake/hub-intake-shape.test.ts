@@ -105,11 +105,19 @@ describe('the vendor of an intake counted without photos (Run G1, Part 2, item 9
     expect(parseIntake({ ...postCountFixture(), vendor_name: null })?.vendor_name).toBeNull();
   });
 
-  // Break caught: a name that is not text (a number, an object, a line with a control character) given to a screen as the vendor's name.
-  it.each([7, {}, ['Kente'], '', 'Kente\nCrafts', 'x'.repeat(500)])(
-    'refuses a name that is %j',
+  // Break caught: a value that is not text at all (a number, an object, a list) read as a vendor's name, or as no name, when it is not what the API says.
+  it.each([7, {}, ['Kente'], true])('refuses a name that is %j, which is not text', (name) => {
+    expect(parseIntake({ ...preCountFixture(), vendor_name: name })).toBeUndefined();
+  });
+
+  // Break caught (the security review of b568c3a): an intake made unreadable by what is written in one optional field. A name that does not pass as one (empty, with a control character, too long, or a number
+  // that could be dialled) is no name: the intake is still read, and the screens call the vendor by its code, as they always did. The number is never drawn as a name.
+  it.each(['', '   ', 'Kente\nCrafts', 'x'.repeat(500), '024 123 4567 Shop', '+233241234567'])(
+    'reads the intake all the same when the name is %j, with no name',
     (name) => {
-      expect(parseIntake({ ...preCountFixture(), vendor_name: name })).toBeUndefined();
+      const intake = parseIntake({ ...preCountFixture(), vendor_name: name });
+      expect(intake).toBeDefined();
+      expect(intake?.vendor_name).toBeNull();
     },
   );
 });

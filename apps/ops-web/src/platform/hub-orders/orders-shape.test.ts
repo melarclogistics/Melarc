@@ -425,6 +425,20 @@ describe('the close', () => {
     expect(parseClosedExceptionPage(broken)).toBeUndefined();
   });
 
+  // Break caught (the security review of b568c3a): the list a senior finds the work a close left behind in made unreadable by one vendor's name that does not pass as a name (a number that could be dialled, too long):
+  // the row is read and told by its code, and the number is never drawn.
+  it.each(['024 123 4567 Shop', 'x'.repeat(500), 'Kente\nCrafts'])(
+    'reads a closed vendor whose name is %j as a vendor with no name',
+    (name) => {
+      const page = copy(load('closed-exceptions-named')) as { items: { vendor_name: unknown }[] };
+      page.items[0] = { ...page.items[0], vendor_name: name };
+      const read = parseClosedExceptionPage(page);
+      expect(read?.items).toHaveLength(2);
+      expect(read?.items[0]?.vendor_name).toBeNull();
+      expect(read?.items[1]?.vendor_name).toBe('Fixture Sender');
+    },
+  );
+
   it('accepts the closes that left work, newest first, and none that has nothing left', () => {
     const page = parseClosedExceptionPage(load('closed-exceptions'));
     expect(page?.items).toHaveLength(1);

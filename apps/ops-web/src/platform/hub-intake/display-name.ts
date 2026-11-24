@@ -16,3 +16,14 @@ export function nameOf(value: unknown): string | undefined {
   if (/(?:\+?\d[\s().-]?){7,}/.test(text)) return undefined;
   return text;
 }
+
+/**
+ * A name an answer may carry or leave out (the vendor's name on a record that has others to read): absent or null is no name, **and so is a string that does not pass as a name** (empty, with a control character,
+ * too long, or a number that could be dialled), because one optional field must never make a whole record unreadable (a vendor named with seven digits in a run would otherwise be one nobody can open); the screens
+ * call such a vendor by its code, as they always did, and the number is never drawn as a name. What is not text at all is not the API's answer: `undefined`.
+ */
+export function optionalNameOf(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  return nameOf(value) ?? null;
+}
