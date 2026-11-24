@@ -17,6 +17,7 @@ import {
   blindRow,
   captured,
   capturedRefusal,
+  EXPECTED_PARCEL,
   NEW_TOKEN,
   PARCELS,
   parcelRow,
@@ -1146,4 +1147,85 @@ describe('a price check that could not be made (Run G1, Part 2, item 1)', () => 
     waiting[1]?.(json(200, termsOf({}, 4000, NEW_TOKEN)));
     expect(await pricedSave()).toHaveTextContent('Save the order at GH₵40.00');
   });
+});
+
+describe('the screen after an order is saved offers only what the server would take (Run G1, Part 2, item 2)', () => {
+  const EARLY = EXPECTED_PARCEL.id;
+  const SAVED_EARLY = {
+    ...orderOf('frozen'),
+    id: '33333333-4444-4555-8666-777777777777',
+    code: 'ACC-OR-2CD3FG',
+    intake_parcel_id: EARLY,
+  };
+  /** A vendor whose check-in is still open, with a parcel that is not here yet: the order made for it waits for its parcel. */
+  const checkInOpen = (left: number) => ({
+    [RECORD]: () =>
+      json(
+        200,
+        checkInFixture([...PARCELS, EXPECTED_PARCEL], { id: VENDOR_ID, state: 'AWAITING_COUNT' }),
+        { ETag: '"v1"' },
+      ),
+    [LIST]: () =>
+      json(200, worklistOf([], { needs_order: left, awaiting_arrival: 1, orders: 1, itemized: 0 })),
+    [SAVE]: () => json(201, SAVED_EARLY, { ETag: '"o1"' }),
+    ...photoLinkHandlers([...PARCELS, EXPECTED_PARCEL]),
+  });
+
+  // Break caught: a saved screen that offers "Make the next order" for a vendor whose check-in is still open (it opens "The vendor is still being checked in…", a dead end) and "Close this vendor" to a senior who
+  // cannot close it yet; the way back to the orders missing.
+  it.each([
+    ['with parcels that arrived and have no order', 2],
+    ['with nothing left to order', 0],
+  ] as const)(
+    'offers neither the next order nor the close after an early order of a vendor still being checked in, %s, and offers the way back',
+    async (_name, left) => {
+      const { user } = open(checkInOpen(left), `/intakes/${VENDOR_ID}/orders/new?parcel=${EARLY}`);
+      await fillIn(user);
+      await user.click(await pricedSave());
+      expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+      await screen.findByText(
+        /parcel needs an order|parcels need an order|Every parcel that arrived/,
+      );
+      expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Close this vendor' })).toBeNull();
+      expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+    },
+  );
+
+  // Break caught: the dead ends removed by removing the real ways on too: a cleared vendor with a parcel left that is not offered the next order, a senior with nothing left that is not offered the close, and an
+  // officer who cannot close that is offered it.
+  it('still offers the next order to a vendor that is cleared with a parcel left, and the close to the one who may close it when none is left', async () => {
+    const { user } = open({
+      [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555')),
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+    expect(await screen.findByRole('link', { name: 'Make the next order' })).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Close this vendor' })).toBeNull();
+  });
+
+  it.each([
+    ['holds the key to close', KEYS, true],
+    ['does not hold it', ['hub.read', 'hub.intake.itemize', 'pricing.read'], false],
+  ] as const)(
+    'offers the close of a cleared vendor with nothing left to the officer who %s',
+    async (_name, keys, offered) => {
+      const { user } = open(
+        {
+          [LIST]: () => json(200, worklistOf([], { needs_order: 0, orders: 3, itemized: 3 })),
+          [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555')),
+        },
+        undefined,
+        keys,
+      );
+      await fillIn(user);
+      await user.click(await pricedSave());
+      expect(await screen.findByText('Order ACC-OR-2CD3FG is saved.')).toBeVisible();
+      expect(await screen.findByText(/Every parcel that arrived has an order/)).toBeVisible();
+      expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Close this vendor' }) !== null).toBe(offered);
+      expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+    },
+  );
 });

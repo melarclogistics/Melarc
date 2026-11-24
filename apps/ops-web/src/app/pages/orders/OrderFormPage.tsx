@@ -100,6 +100,9 @@ function Saved({
     box.current?.focus();
   }, []);
   const remaining = left.data?.progress.needs_order ?? undefined;
+  // The next order and the close are offered only when the server would take them (Run G1, Part 2, item 2): the vendor is cleared (its check-in is final) and not closed. After an early order for a parcel that is
+  // not here yet the vendor is still being checked in, and each would open a page that says so: a dead end, which *Back to the orders* is not.
+  const open = facts.cleared && !facts.closed;
   const made = left.data?.progress.orders;
   const received = left.data?.progress.received ?? null;
   return (
@@ -144,7 +147,7 @@ function Saved({
         </p>
       )}
       <div className="orders-saved__acts">
-        {remaining === undefined || remaining > 0 ? (
+        {!open ? null : remaining === undefined || remaining > 0 ? (
           <ButtonLink
             to={newOrderPath(facts.id)}
             size="lg"
