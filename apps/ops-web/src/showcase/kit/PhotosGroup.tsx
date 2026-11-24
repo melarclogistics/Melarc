@@ -12,6 +12,7 @@ import { PhotoGrid, type PhotoGridItem } from '../../components/ui/photo-grid/Ph
 import { PhotoViewer, type PhotoViewerItem } from '../../components/ui/photo-viewer/PhotoViewer';
 import { RadioGroup } from '../../components/ui/radio/RadioGroup';
 import { ReadState, type ReadQuery } from '../../components/ui/read-state/ReadState';
+import labelSampleUrl from '../assets/label-sample.png?no-inline';
 import { KitSection, Specimen } from './Section';
 
 const nothing = (): void => undefined;
@@ -53,16 +54,27 @@ const READY: ReadQuery<true> = {
  * has more pixels than any screen has room for, and is as tall as the screen allows and more) and against the box a receiving screen puts it in. **The image is a file of this site** (the brand's symbol): the strict
  * policy of the page refuses any other address, and no photo is read from a store or made up to look like a parcel. The symbol has no size of its own, so the size of a photo's pixels is given by the attributes.
  */
-function SampleFullPicture({ label }: { readonly label: string }) {
+function SampleFullPicture({
+  label,
+  source = '/favicon.svg',
+  width,
+  height,
+}: {
+  readonly label: string;
+  readonly source?: string;
+  /** The size of the photo's pixels, for a picture that has none of its own (the symbol of the first specimen). **A photo that has a size of its own (the label) is given none**, as a real photo is: with both the box is clamped by each limit alone and the bitmap is letterboxed in it. */
+  readonly width?: number;
+  readonly height?: number;
+}) {
   return (
     <ReadState query={READY} isEmpty={() => false} empty={null}>
       {() => (
         <img
           className="photo-picture photo-picture--full"
-          src="/favicon.svg"
+          src={source}
           alt={label}
-          width={1600}
-          height={1200}
+          {...(width === undefined ? {} : { width })}
+          {...(height === undefined ? {} : { height })}
           decoding="async"
         />
       )}
@@ -154,12 +166,19 @@ function PhotoGridSpecimens() {
   );
 }
 
+const LABEL_ITEMS: readonly PhotoViewerItem[] = [1, 2].map((n) => ({
+  key: `label-${String(n)}`,
+  label: `Sample label ${String(n)}`,
+  ...(n === 1 ? { detail: 'A made-up label, 800 x 1200 pixels: drawn, not photographed.' } : {}),
+}));
+
 function PhotoViewerSpecimen() {
   const [index, setIndex] = useState<number | null>(null);
+  const [labelIndex, setLabelIndex] = useState<number | null>(null);
   return (
     <KitSection
       title="PhotoViewer"
-      note="One photo at a time over the dialog, among the others of its grid: where the person is (3 of 12), two buttons the size of the hub floor beside it, the arrow keys and a swipe of a finger, one neighbour loaded ahead, and Escape to close. The viewer is as tall as the screen allows and the photo takes the room that the controls leave, so that the buttons never leave the screen and do not move from one photo to the next. It decides nothing: the page draws each picture. Press the button, then try the arrow keys; on a touch screen, swipe across the photo."
+      note="One photo at a time over the dialog, among the others of its grid: where the person is (3 of 12), two buttons the size of the hub floor beside it, the arrow keys and a swipe of a finger, one neighbour loaded ahead, and Escape to close. Looking closely (Run G2): zoom by the two buttons, by plus and minus and by a pinch or a double tap, look around a zoomed photo by dragging it or by the arrows, and turn it a quarter either way by the buttons or R (Shift and R for the other way); each photo starts whole and upright, and everything is instant under reduced motion. The second specimen is a label as tall as a parcel's. The viewer is as tall as the screen allows and the photo takes the room that the controls leave, so that the buttons never leave the screen and do not move from one photo to the next. It decides nothing: the page draws each picture. Press the button, then try the arrow keys; on a touch screen, swipe across the photo."
     >
       <div className="showcase-kit-grid">
         <Specimen label="Five sample photos">
@@ -185,7 +204,7 @@ function PhotoViewerSpecimen() {
               // As a receiving screen draws it: the picture in the read's box, and under it a button of the page's, which keeps its size while the picture takes the room that is left.
               renderPicture={(item, { current }) => (
                 <>
-                  <SampleFullPicture label={item.label} />
+                  <SampleFullPicture label={item.label} width={1600} height={1200} />
                   {current ? (
                     <div className="showcase-photo-act">
                       <Button type="button" variant="secondary" size="lg">
@@ -194,6 +213,32 @@ function PhotoViewerSpecimen() {
                     </div>
                   ) : null}
                 </>
+              )}
+            />
+          )}
+        </Specimen>
+        <Specimen label="Two sample labels, to zoom and turn (800 x 1200)">
+          <Button
+            type="button"
+            variant="secondary"
+            size="lg"
+            onClick={() => {
+              setLabelIndex(0);
+            }}
+          >
+            Open the sample label
+          </Button>
+          {labelIndex === null ? null : (
+            <PhotoViewer
+              items={LABEL_ITEMS}
+              index={labelIndex}
+              onIndexChange={setLabelIndex}
+              onClose={() => {
+                setLabelIndex(null);
+              }}
+              note="These are samples: no photo is read from a store."
+              renderPicture={(item) => (
+                <SampleFullPicture label={item.label} source={labelSampleUrl} />
               )}
             />
           )}
