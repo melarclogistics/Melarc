@@ -175,6 +175,7 @@ A third external review traced the second round's work and found six more cases;
 5. **A telephone number never enters a note** (the audit's screening, asked first by every act that takes a note): `VALIDATION_FAILED` on the note with the rule `phone_number`, in any form a person in Ghana writes one.
 6. **The correction of a recipient is bound to its record by the database** (migration `0127`): the order takes the recipient the record says it became, and the place (map link, coordinates) does not move in a correction.
 7. **The senior's reason is kept after a stale assessment** (D-S7-15): the senior reads the assessment as it now is and confirms the reason again; the reason is never written afresh.
+8. **How the officer goes from one parcel to the next** (Run G1): *Make the next order* moves **forward** from the parcel just saved or marked, passes over a parcel that is waited on, and goes back to the lowest parcel only when none is left after it; when every parcel that is left is waited on it says so and leads to them; a parcel that already has an order says so with its order's code and a link, and draws no form. **For an address no zone matches** the officer is offered the hub's own zones (`listDestinationZones`) and chooses the one the address is in with a reason (`destination_zone_authorization`); the server still judges the choice. A price check that fails for a reason that is no field's keeps the entries and is checked again on one press (after a 429, once, by itself, when the server's wait is over).
 
 ---
 
