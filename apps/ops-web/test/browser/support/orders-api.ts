@@ -87,6 +87,8 @@ export interface World {
   principal: string;
   /** How many parcels the vendor arrived with: three, unless a test works a longer list a page at a time. */
   parcelCount: number;
+  /** Why the vendor waits for a senior officer (D-S7-7), or none: the list of vendors that wait for one holds the vendor only when the world says so, and says why, as the API's does. */
+  seniorNeeded: 'CLOSE_EXCEPTION' | null;
   vendorState: 'READY_FOR_ITEMIZATION' | 'ITEMIZING' | 'CLOSED';
   orders: StoredOrder[];
   corrections: StoredCorrection[];
@@ -128,6 +130,7 @@ export function world(over: Partial<World> = {}): World {
   return {
     principal: IDS.me,
     parcelCount: 3,
+    seniorNeeded: null,
     permissions: [
       'hub.read',
       'hub.intake.itemize',
@@ -448,11 +451,26 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     );
   }
 
-  // The vendors a hub cleared for their orders.
+  // The vendors a hub cleared for their orders, as the list counts them: the orders made and the parcels still to order are the count of the whole vendor (D-S7-6), and the vendors that wait for a senior officer are a
+  // view of the server's (D-S7-7), which holds the vendor only when the world says one is needed and says why.
   if (method === 'GET' && path === '/api/v1/hub-intakes') {
     if (await needs('hub.read')) return;
-    const asked = new URLSearchParams(call.search).get('state');
-    const items = asked === w.vendorState ? [vendorWire(w)] : [];
+    const asked = new URLSearchParams(call.search);
+    // `senior_needed` is present when a senior officer is needed, in whichever view the vendor is listed (the contract's words), and absent otherwise.
+    const counted = {
+      ...vendorWire(w),
+      orders_made: w.orders.length,
+      parcels_needing_order: Math.max(0, w.parcelCount - w.orders.length),
+      ...(w.seniorNeeded === null ? {} : { senior_needed: w.seniorNeeded }),
+    };
+    const items =
+      asked.get('view') === 'needs_senior'
+        ? w.seniorNeeded === null
+          ? []
+          : [counted]
+        : asked.get('state') === w.vendorState
+          ? [counted]
+          : [];
     return route.fulfill(ok({ items, next_page_token: null }));
   }
   if (method === 'GET' && path === `/api/v1/hub-intakes/${VENDOR_ID}`) {

@@ -60,6 +60,13 @@ p.orders-photo__none {
   gap: var(--space-2);
 }
 
+/* The reason a vendor waits for a senior officer and, under it, the act of that reason, in the one fact of a card (the table has a column for each). */
+.orders-senior {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
 /* The page that says what came of an act (an order saved, a vendor closed) and the way on: focus comes to it, so that a keyboard or a screen reader is told what happened. */
 .orders-saved {
   display: grid;

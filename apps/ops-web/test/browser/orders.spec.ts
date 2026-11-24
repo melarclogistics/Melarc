@@ -913,6 +913,16 @@ const SCREENS: readonly Screen[] = [
     },
   },
   {
+    // The vendors that wait for a senior officer (D-S7-7): why, and the act of that reason for the senior who holds its key.
+    name: 'the queue of the vendors with orders to make, the view of the vendors that need a senior',
+    path: '/orders-to-make',
+    world: () => ({ ...firstMade(), seniorNeeded: 'CLOSE_EXCEPTION' }),
+    ready: (page) => page.getByRole('link', { name: 'Close with an exception: Kente Crafts' }),
+    then: async (page) => {
+      await page.getByRole('tab', { name: 'Needs a senior' }).click();
+    },
+  },
+  {
     name: 'the orders of a vendor',
     path: ORDERS,
     world: firstMade,
@@ -1127,4 +1137,101 @@ test.describe('the buttons that follow what a page says', () => {
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
+});
+
+test.describe('the queue of the vendors with orders to make, as the list counts it', () => {
+  // Break caught: a row that cannot say how many orders are made and how many parcels are still to order (the officer opens every vendor to find out), or a count the page works out for itself and not the list's own (D-S7-6).
+  test('a row says how many orders are made and how many parcels are still to order, as the list counted them', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, '/orders-to-make', firstMade());
+    await page.getByRole('tab', { name: 'Being worked' }).click();
+    await expect(
+      page
+        .getByRole('table', { name: 'Vendors with orders to make' })
+        .getByText('1 made, 2 to make'),
+    ).toBeVisible();
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a vendor that waits for a senior drawn among the others with no view of its own, a reason the page makes up, or an act offered to an account that does not hold the key of that reason (D-S7-7).
+  test('the vendors that wait for a senior are a view of their own, say why, and give the act to the senior alone', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, '/orders-to-make', {
+      ...firstMade(),
+      seniorNeeded: 'CLOSE_EXCEPTION',
+    });
+    await page.getByRole('tab', { name: 'Needs a senior' }).click();
+    const table = page.getByRole('table', { name: 'Vendors with orders to make' });
+    await expect(
+      table.getByText(
+        'Parcels are still to be ordered. A senior officer can close it with an exception.',
+      ),
+    ).toBeVisible();
+    expect(
+      made(api, 'GET', '/hub-intakes').some((call) => call.search.includes('view=needs_senior')),
+    ).toBe(true);
+    // The senior's act leads to the close of that vendor, where the exception is decided.
+    await page.getByRole('link', { name: 'Close with an exception: Kente Crafts' }).click();
+    await expect(page).toHaveURL(`/intakes/${VENDOR}/close`);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: the act of a senior offered to an officer who cannot decide it, or an officer left to look for who can.
+  test('an officer who cannot decide it is told who does, and is given no act', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, '/orders-to-make', {
+      ...firstMade(),
+      seniorNeeded: 'CLOSE_EXCEPTION',
+      permissions: SENIOR_KEYS.filter((key) => key !== 'hub.intake.close_exception'),
+    });
+    await page.getByRole('tab', { name: 'Needs a senior' }).click();
+    const table = page.getByRole('table', { name: 'Vendors with orders to make' });
+    await expect(table.getByText('A senior officer decides.')).toBeVisible();
+    await expect(page.getByRole('link', { name: /Close with an exception/ })).toHaveCount(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (found by the sweep at 320 px): a card that tells a senior why a vendor waits and gives no act, because the act of the table is a column of its own that a card does not have; and, as much, a card that
+  // leaves an officer without being told who decides.
+  for (const account of [
+    { name: 'a senior', keys: SENIOR_KEYS },
+    { name: 'an officer', keys: SENIOR_KEYS.filter((key) => key !== 'hub.intake.close_exception') },
+  ]) {
+    test(`on a narrow screen the card of a vendor that waits for a senior gives ${account.name} what to do about it`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 320, height: 640 });
+      const { api, watch } = await open(page, '/orders-to-make', {
+        ...firstMade(),
+        seniorNeeded: 'CLOSE_EXCEPTION',
+        permissions: account.keys,
+      });
+      await page.getByRole('tab', { name: 'Needs a senior' }).click();
+      await expect(
+        page
+          .getByText(
+            'Parcels are still to be ordered. A senior officer can close it with an exception.',
+          )
+          .filter({ visible: true }),
+      ).toBeVisible();
+      if (account.keys.includes('hub.intake.close_exception')) {
+        await expect(
+          page.getByRole('link', { name: 'Close with an exception: Kente Crafts' }),
+        ).toBeVisible();
+      } else {
+        await expect(
+          page.getByText('A senior officer decides.').filter({ visible: true }),
+        ).toBeVisible();
+        await expect(page.getByRole('link', { name: /Close with an exception/ })).toHaveCount(0);
+      }
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems).toEqual([]);
+    });
+  }
 });

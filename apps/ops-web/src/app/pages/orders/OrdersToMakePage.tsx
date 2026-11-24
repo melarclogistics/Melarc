@@ -167,9 +167,20 @@ export function OrdersToMakePage() {
                         value: K.ordersLine(item.orders_made, item.parcels_needing_order),
                       },
                     ]),
+                // The table has a column for the reason and one for its act; a card holds both in the one fact, so that a senior who sees why a vendor waits is given what to do about it, and an officer is told who decides.
                 ...(item.senior_needed === null
                   ? []
-                  : [{ label: K.columns.why, value: K.senior[item.senior_needed] }]),
+                  : [
+                      {
+                        label: K.columns.why,
+                        value: (
+                          <span className="orders-senior">
+                            <span>{K.senior[item.senior_needed]}</span>
+                            {seniorAct(item)}
+                          </span>
+                        ),
+                      },
+                    ]),
                 { label: K.columns.handedOver, value: waitedText(item.handed_over_at) ?? '' },
               ]}
             />
