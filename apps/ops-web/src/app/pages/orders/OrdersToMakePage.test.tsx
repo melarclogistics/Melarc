@@ -197,9 +197,8 @@ describeInterfaceStates('the vendors with orders to make', {
   },
 });
 
-describe('how many orders a vendor has, and the vendors that wait for a senior (Run F, Part 2; D-S7-6 and D-S7-7)', () => {
+describe('how many orders a vendor has, and the vendors that wait for a senior (Run F, Part 2; D-S7-6 and D-S7-7; narrowed by D-S7-11, Run G1)', () => {
   const COUNTED = { ...WORKED, orders_made: 3, parcels_needing_order: 2 };
-  const CLOSE_NEEDS_SENIOR = { ...COUNTED, senior_needed: 'CLOSE_EXCEPTION' };
   const TAKEN_BACK = {
     ...COUNTED,
     id: 'c2c2c2c2-3333-4444-8555-666666666666',
@@ -207,79 +206,70 @@ describe('how many orders a vendor has, and the vendors that wait for a senior (
     state: 'RECONCILIATION_REQUIRED',
     senior_needed: 'ARRIVAL_TAKEN_BACK',
   };
+  /** The list answers each view: the vendors that wait for a senior in `needs_senior`, and the others in the states. */
+  const handlers = (): Record<string, Handler> => ({
+    [LIST]: (request) => {
+      const query = new URL(request.url).searchParams;
+      if (query.get('view') === 'needs_senior') return json(200, pageOf([TAKEN_BACK]));
+      return json(200, pageOf(query.get('state') === 'ITEMIZING' ? [COUNTED] : [READY]));
+    },
+  });
+  const viewTab = (name: string): HTMLElement =>
+    within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
+      name,
+    });
 
   // Break caught: a row that cannot say how many orders are made and how many are left (the officer opens every vendor to find out), or a count the page works out itself instead of the list's own.
   it('says on each row how many orders are made and how many parcels are still to order, as the list gave them', async () => {
-    const { user } = open({ [LIST]: byState([READY], [COUNTED]) });
+    const { user } = open(handlers());
     await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
-    await user.click(
-      within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
-        name: 'Being worked',
-      }),
-    );
+    await user.click(viewTab('Being worked'));
     const rows = within(await table());
     expect(await rows.findByText('3 made, 2 to make')).toBeVisible();
   });
 
-  // Break caught: a vendor that waits for a senior drawn among the others, a view that is not the server's, a reason the page makes up, or an act offered to a session that does not hold the key.
-  it('lists the vendors that wait for a senior in a view of their own, says why, and offers the act only to the senior who holds the key', async () => {
-    const handlers = {
-      [LIST]: ((request) =>
-        new URL(request.url).searchParams.get('view') === 'needs_senior'
-          ? json(200, pageOf([CLOSE_NEEDS_SENIOR, TAKEN_BACK]))
-          : json(200, pageOf([READY]))) as Handler,
-    };
-    const asOfficer = open(handlers);
+  // Break caught (D-S7-11, 24 November 2026): a vendor with parcels still to order told as waiting for a senior officer (those parcels are the officer's: the officer calls the vendor and makes the order); an officer
+  // reading "A senior officer decides" on work that is theirs; a column of the reason that is empty in the two views that have none.
+  it('tells an officer nothing of a senior on a vendor whose parcels are theirs to order, and draws no column of the reason in the views that have none', async () => {
+    const { user } = open(handlers());
     await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
-    await asOfficer.user.click(
-      within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
-        name: 'Needs a senior',
-      }),
-    );
-    await table();
+    for (const view of ['Ready to start', 'Being worked']) {
+      await user.click(viewTab(view));
+      const rows = within(await table());
+      await rows.findByRole('link', { name: 'Fixture Sender' });
+      expect(rows.queryByText('A senior officer decides.')).toBeNull();
+      expect(rows.queryByText(/Parcels are still to be ordered/)).toBeNull();
+    }
+    expect(document.body.textContent).not.toMatch(/senior officer can close it with an exception/);
+  });
+
+  // Break caught: a vendor that waits for a senior drawn among the others, a view that is not the server's, a reason the page makes up, an act offered to a session that does not hold the key, or the column of the
+  // reason missing from the one view that has it.
+  it('lists the vendors an arrival taken back sent to review in a view of their own, says why, and offers the act only to the senior who holds the key', async () => {
+    const asOfficer = open(handlers());
+    await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
+    await asOfficer.user.click(viewTab('Needs a senior'));
+    const rows = within(await table());
     expect(
-      await screen.findByText(
-        'Parcels are still to be ordered. A senior officer can close it with an exception.',
-      ),
-    ).toBeVisible();
-    expect(
-      screen.getByText('An arrival was taken back. A senior officer reviews it.'),
+      await rows.findByText('An arrival was taken back. A senior officer reviews it.'),
     ).toBeVisible();
     expect(reads().some((read) => read.get('view') === 'needs_senior')).toBe(true);
     // An officer is told who decides, and is given no act of the senior's.
-    expect(within(await table()).getAllByText('A senior officer decides.')).toHaveLength(2);
-    expect(screen.queryByRole('link', { name: /Close with an exception/ })).toBeNull();
+    expect(rows.getAllByText('A senior officer decides.')).toHaveLength(1);
     expect(screen.queryByRole('link', { name: /Review the vendor/ })).toBeNull();
   });
 
-  // Break caught: an act offered to the wrong senior (the exception close to one who cannot decide it, the review to one who cannot adjudicate), or no act at all to the senior who can: each reason has its own act and its own key.
-  it('offers the senior the act of each reason, and the officer none', async () => {
-    const handlers = {
-      [LIST]: ((request) =>
-        new URL(request.url).searchParams.get('view') === 'needs_senior'
-          ? json(200, pageOf([CLOSE_NEEDS_SENIOR, TAKEN_BACK]))
-          : json(200, pageOf([READY]))) as Handler,
-    };
-    const { user } = open(handlers, [
-      ...OFFICER,
-      'hub.intake.close_exception',
-      'hub.osd.adjudicate',
-    ]);
+  // Break caught: the review offered to a senior who cannot adjudicate, or not offered to the one who can.
+  it('offers the senior who holds the key the review of the vendor, and the officer none', async () => {
+    const { user } = open(handlers(), [...OFFICER, 'hub.osd.adjudicate']);
     await screen.findByRole('heading', { level: 1, name: 'Orders to make' });
-    await user.click(
-      within(screen.getByRole('tablist', { name: 'Views of the vendors' })).getByRole('tab', {
-        name: 'Needs a senior',
-      }),
-    );
+    await user.click(viewTab('Needs a senior'));
     await screen.findByText('An arrival was taken back. A senior officer reviews it.');
     const rows = within(await table());
-    expect(await rows.findByRole('link', { name: /Close with an exception/ })).toHaveAttribute(
-      'href',
-      `/intakes/${VENDOR}/close`,
-    );
-    expect(rows.getByRole('link', { name: /Review the vendor/ })).toHaveAttribute(
+    expect(await rows.findByRole('link', { name: /Review the vendor/ })).toHaveAttribute(
       'href',
       '/intakes/c2c2c2c2-3333-4444-8555-666666666666/discrepancy',
     );
+    expect(rows.queryByText('A senior officer decides.')).toBeNull();
   });
 });

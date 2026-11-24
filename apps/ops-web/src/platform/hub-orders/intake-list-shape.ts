@@ -25,8 +25,8 @@ export interface ItemizableIntakeView {
   /** The orders that stand, and the received parcels that still need one: the database's own count of the whole vendor (D-S7-6), null where the list did not say. */
   readonly orders_made: number | null;
   readonly parcels_needing_order: number | null;
-  /** Why a senior officer is needed (D-S7-7), when one is. */
-  readonly senior_needed: 'CLOSE_EXCEPTION' | 'ARRIVAL_TAKEN_BACK' | null;
+  /** Why a senior officer is needed (D-S7-7, narrowed by D-S7-11), when one is: an arrival that was taken back. A vendor with parcels still to order is the officer's and never has a reason. */
+  readonly senior_needed: 'ARRIVAL_TAKEN_BACK' | null;
 }
 
 const MAX_PAGE_ITEMS = 500;
@@ -36,10 +36,10 @@ const READY: readonly IntakeState[] = ['READY_FOR_ITEMIZATION', 'ITEMIZING'];
 const countOf = (value: unknown): number | null =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 
-/** The reason a senior is needed as the list says it: absent is none, and a value that is not one of the two is a refusal of the row (undefined). */
+/** The reason a senior is needed as the list says it: absent is none, and a value that is not the one reason is a refusal of the row (undefined). */
 function seniorOf(value: unknown): ItemizableIntakeView['senior_needed'] | undefined {
   if (value === undefined) return null;
-  return value === 'CLOSE_EXCEPTION' || value === 'ARRIVAL_TAKEN_BACK' ? value : undefined;
+  return value === 'ARRIVAL_TAKEN_BACK' ? value : undefined;
 }
 
 /** A vendor is in the list in the states where orders are made, and in reconciliation only when a senior is needed for it (an arrival that was taken back). */

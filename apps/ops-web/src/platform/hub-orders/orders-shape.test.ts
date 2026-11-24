@@ -421,6 +421,19 @@ describe('the vendors a hub has cleared for their orders', () => {
     ).toBe(true);
   });
 
+  // Break caught (D-S7-11, 24 November 2026): the reason a senior is needed that the Product Owner withdrew (a vendor with parcels still to order is the officer's) read as one, so that a page would draw it.
+  it('knows one reason a senior is needed, an arrival taken back, and refuses the withdrawn one', () => {
+    const page = copy(load('intakes-itemizing')) as { items: Record<string, unknown>[] };
+    page.items[0] = {
+      ...page.items[0],
+      state: 'RECONCILIATION_REQUIRED',
+      senior_needed: 'ARRIVAL_TAKEN_BACK',
+    };
+    expect(parseIntakeListPage(page)?.items[0]?.senior_needed).toBe('ARRIVAL_TAKEN_BACK');
+    page.items[0] = { ...page.items[0], state: 'ITEMIZING', senior_needed: 'CLOSE_EXCEPTION' };
+    expect(parseIntakeListPage(page)).toBeUndefined();
+  });
+
   // Break caught: a vendor that is not cleared for orders in a list of those that are.
   it('refuses a vendor that is not cleared for orders', () => {
     const page = copy(load('intakes-itemizing')) as { items: Record<string, unknown>[] };

@@ -24,13 +24,7 @@ import { ActDialog } from '../manifests/ManifestActDialogs';
 import { recordPath } from '../receiving/receiving-presentation';
 import { WithRecord } from '../receiving/WithRecord';
 import { OrderPhoto } from './OrderPhoto';
-import {
-  ORDERS_TO_MAKE_PATH,
-  ordersPath,
-  RECEIVING_PATH,
-  summaryPath,
-  TO_MAKE_CRUMB,
-} from './orders-presentation';
+import { ordersPath, RECEIVING_PATH, summaryPath, TO_MAKE_CRUMB } from './orders-presentation';
 import { vendorFactsOf, type VendorFacts } from './vendor-facts';
 import './orders-pages.css';
 
@@ -369,10 +363,7 @@ function CloseForm({
                 </Field>
               </>
             ) : (
-              <p className="orders-note">
-                {C.exception.mustAsk}{' '}
-                <Link to={`${ORDERS_TO_MAKE_PATH}?view=NEEDS_SENIOR`}>{C.exception.seeList}</Link>
-              </p>
+              <p className="orders-note">{C.exception.mustAsk}</p>
             )}
           </TaskFormSection>
         ) : null}

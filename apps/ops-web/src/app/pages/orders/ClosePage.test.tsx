@@ -250,14 +250,15 @@ describe('closing with parcels still to order (a senior officer’s exception)',
   // Break caught: an officer with the close alone offered the exception, or told to ask an administrator.
   it('tells an officer who may only close that a senior officer can close with parcels still to order', async () => {
     open({ [CLOSURE]: () => json(200, withParcelLeft()) }, OFFICER);
-    // Not told to ask someone to open a page the senior cannot find: pointed to the list a senior officer works from.
+    // Told what is theirs to do (D-S7-11: parcels still to order are the officer's, who calls or messages the vendor), and not pointed to a list a vendor with parcels left is never in. Never to ask an administrator.
     expect(
-      await screen.findByText(/A senior officer finds this vendor under Needs a senior\./),
+      await screen.findByText(
+        /Make their orders: call or message the vendor for what is missing\./,
+      ),
     ).toBeVisible();
+    expect(screen.queryByText(/Needs a senior/)).toBeNull();
+    expect(screen.queryByRole('link', { name: /list for a senior officer/ })).toBeNull();
     expect(screen.queryByText(/Ask one to open this page/)).toBeNull();
-    expect(
-      screen.getByRole('link', { name: 'Open the list for a senior officer' }),
-    ).toHaveAttribute('href', '/orders-to-make?view=NEEDS_SENIOR');
     expect(screen.queryByRole('button', { name: 'Close with a reason' })).toBeNull();
     expect(screen.queryByLabelText(/Why are you closing/)).toBeNull();
   });

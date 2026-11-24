@@ -597,9 +597,9 @@ export const ORDERS_WORDS = {
       reasonLabel: 'Why are you closing with parcels still to order?',
       reasonHelp: 'Say what happened and who follows it up. It is kept with the close.',
       reasonRequired: 'Write why you are closing with parcels still to order.',
+      // Parcels still to order are the officer's (D-S7-11): the officer calls or messages the vendor and makes the order, and a senior closes with a reason only when that cannot be done.
       mustAsk:
-        'A senior officer can close with parcels still to order. A senior officer finds this vendor under Needs a senior.',
-      seeList: 'Open the list for a senior officer',
+        'Only a senior officer can close while parcels received have no order. Make their orders: call or message the vendor for what is missing.',
     },
     confirm: {
       title: 'Close this vendor?',
@@ -809,11 +809,8 @@ export const ORDERS_WORDS = {
     ordersLine: (made: number, left: number | null): string =>
       left === null ? `${String(made)} made` : `${String(made)} made, ${String(left)} to make`,
     senior: {
-      CLOSE_EXCEPTION:
-        'Parcels are still to be ordered. A senior officer can close it with an exception.',
       ARRIVAL_TAKEN_BACK: 'An arrival was taken back. A senior officer reviews it.',
       decides: 'A senior officer decides.',
-      close: 'Close with an exception',
       review: 'Review the vendor',
     },
     received: (count: number | null): string => (count === null ? 'Not counted' : parcels(count)),

@@ -19,7 +19,7 @@ import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { waitedText } from '../../../platform/time/waited';
 import { WorkList, type WorkView } from '../pickup-work/WorkList';
 import { decisionPath } from '../receiving/receiving-presentation';
-import { closePath, ordersPath } from './orders-presentation';
+import { ordersPath } from './orders-presentation';
 import './orders-pages.css';
 
 const K = WORDS.toMake;
@@ -62,15 +62,6 @@ export function OrdersToMakePage() {
   const me = useSignedInSession();
   if (me === undefined) return null;
   const seniorAct = (item: ItemizableIntakeView): ReactNode => {
-    if (item.senior_needed === 'CLOSE_EXCEPTION') {
-      return me.holds('hub.intake.close_exception') ? (
-        <Link to={closePath(item.id)} aria-label={`${K.senior.close}: ${nameOf(item)}`}>
-          {K.senior.close}
-        </Link>
-      ) : (
-        K.senior.decides
-      );
-    }
     if (item.senior_needed === 'ARRIVAL_TAKEN_BACK') {
       return me.holds('hub.osd.adjudicate') ? (
         <Link to={decisionPath(item.id)} aria-label={`${K.senior.review}: ${nameOf(item)}`}>
@@ -123,11 +114,7 @@ export function OrdersToMakePage() {
       header: K.columns.why,
       cell: (item) => (item.senior_needed === null ? '' : K.senior[item.senior_needed]),
     },
-    {
-      id: 'act',
-      header: '',
-      cell: (item) => seniorAct(item),
-    },
+    { id: 'act', header: '', cell: (item) => seniorAct(item) },
     {
       id: 'handedOver',
       header: K.columns.handedOver,
