@@ -543,11 +543,15 @@ test.describe('a parcel the officer is waiting on the vendor’s details for (Ru
     const rows = page.getByRole('table', { name: 'Parcels and orders' });
     await expect(rows.getByText('Parcel 1', { exact: true })).toBeVisible();
     await expect(rows.getByText('Called the vendor, waiting on WhatsApp')).toBeVisible();
-    expect(
-      made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).some((call) =>
-        call.search.includes('view=waiting_for_vendor'),
-      ),
-    ).toBe(true);
+    // The unfiltered list already shows the same note, so the row says nothing of which list it came from: the tab's view is asked for, and the test waits for the request and does not assume it is made by now
+    // (a slower runner than a developer's machine found that).
+    await expect
+      .poll(() =>
+        made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).some((call) =>
+          call.search.includes('view=waiting_for_vendor'),
+        ),
+      )
+      .toBe(true);
 
     // The parcel's own form says it is waited on, and one press takes the mark off.
     await page.goto(FIRST_PARCEL);
