@@ -4245,8 +4245,8 @@ paths:
         with `parity_exception`: `VALIDATION_FAILED`, rule `required`; optional for a close that has parity, and judged when
         given). It is compared with what a close would find once the intake's lock is held, **with the identity of every
         outstanding parcel**: an order added, a parcel found, a count corrected or an outstanding parcel replaced by another is
-        `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`, and the senior reads it and writes the
-        reason again. The `ETag` of the intake does not move when an order is added, which is why the token exists. A close
+        `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`, and the senior reads it and confirms
+        the reason again: **the typed reason is kept, never written afresh** (5.120.0, D-S7-15). The `ETag` of the intake does not move when an order is added, which is why the token exists. A close
         with every order and a close with the exception write the same envelope `intake.completed`, whose message says only that the
         hub has finished checking in the pickup.
 

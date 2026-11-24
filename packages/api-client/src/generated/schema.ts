@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.119.0
- *   SHA-256 493e3c4200179cf747dbd64748bc36b594c076e744db03ce83785a34148a3ce2 (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.120.0
+ *   SHA-256 efbc266ecc7ae181268182f1bda0686e50e6f5c108b31ad5ec576f854752ae8c (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -1842,6 +1842,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/intake-parcels/{parcel_id}/waiting-for-vendor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The parcel of an intake (`IntakeParcel.id`). UUID v7. */
+                parcel_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a parcel as waiting for the vendor's details, or take the mark off
+         * @description **5.120.0 (Run G1, D-S7-12 of the Product Owner's decisions of 24 November 2026).** Permission
+         *     `hub.intake.itemize` (no new key), for staff of the Ops Portal alone, by the hubs of the grant
+         *     (`HUB_SCOPE_VIOLATION` for a parcel of an intake outside them, `NOT_FOUND` for one that does not exist).
+         *
+         *     **A parcel an officer cannot order yet** (a label that cannot be read, a missing phone, an address that makes no
+         *     sense) **is the officer's** (D-S7-11): the officer calls or messages the vendor, gets the details and makes the
+         *     order, and no senior is asked. This act says that the officer is waiting: the parcel is marked **`waiting for the
+         *     vendor's details`**, with an optional short note of what was asked and how (for example "Called the vendor,
+         *     waiting on WhatsApp"). **The server holds the mark, so every officer and every tablet sees it**: the parcel's row
+         *     in `listIntakeOrders` says it (`waiting_for_vendor`), a view of its own opens the parcels that wait and
+         *     `progress.waiting_for_vendor` counts them. *Make the next order* passes over a marked parcel, and **the mark is
+         *     cleared by the server when the parcel's order is made** (in the transaction of the order, for every writer) or by
+         *     an officer with this act. No senior, no money.
+         *
+         *     **One parcel at a time, stated as the state it should be in** (`waiting` true or false), so the act is
+         *     **idempotent by nature and takes no `Idempotency-Key`**: the same mark twice is the same answer (and the second
+         *     writes no event), taking off a mark that is not there changes nothing, and a new `note` on a parcel that already
+         *     waits replaces the note and keeps the moment. It takes the vendor's `ETag` as `If-Match`, as the order of a
+         *     parcel does (a token that is missing is `VALIDATION_FAILED`; one that is weak, another vendor's or out of
+         *     date is `STATE_CONFLICT`, `details.rule` `stale`), **and does not move that token**: the mark is no part of what a save compares, so a price check or an
+         *     order on screen for another parcel is not made stale by it.
+         *
+         *     The `note` is **one short line**: at most 120 characters, no line break, and only with `waiting` true; a note of
+         *     spaces is no note. It holds no phone number (`VALIDATION_FAILED` on `/note`). `STATE_CONFLICT` rules: the
+         *     vendor is in reconciliation (`reconciliation_open`) or is past its orders (`intake_not_ready`), the parcel
+         *     already has its order (`parcel_ordered`), is missing (`parcel_missing`) or was taken back (`parcel_void`).
+         *     Taking a mark off is allowed in any state. A vendor counted without photos has no parcel to mark. The audit
+         *     event is `hub.parcel.vendor_wait_marked` or `hub.parcel.vendor_wait_cleared`, written only when something
+         *     changed.
+         */
+        put: operations["setParcelWaitingForVendor"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/hub-intakes/{id}/summary": {
         parameters: {
             query?: never;
@@ -2035,6 +2086,17 @@ export interface paths {
          *     migration 0114: the sentence was corrected, because a row made up for an order that does not exist would
          *     be a record of nothing.) For an intake checked in against door photos every count is the number of rows of
          *     its view, as 5.116.0 says.
+         *
+         *     **5.120.0 (Run G1, D-S7-12). A parcel the officer is waiting on the vendor's details for says so.** A parcel an
+         *     officer cannot order yet (a label that cannot be read, a missing phone, an address that makes no sense) is the
+         *     officer's, who calls or messages the vendor and gets the details; `setParcelWaitingForVendor` marks it, **held by
+         *     the server so that every officer and every tablet sees it**. The parcel of a row says it in
+         *     `waiting_for_vendor` (`since`, and the officer's `note` if one was written; `null` when it is not waiting), the
+         *     view `waiting_for_vendor` opens the parcels that wait, and `progress.waiting_for_vendor` counts them (zero for an
+         *     intake counted blind, which has no parcel to mark). **A parcel that waits still needs its order**: it stays in
+         *     `needs_order` (and `awaiting_arrival` if it is not here yet) and in the close's outstanding count; the mark is
+         *     cleared by the server when the parcel's order is made. Both members are optional in the schema so that an answer
+         *     of an earlier version stays valid; the application always states them.
          */
         get: operations["listIntakeOrders"];
         put?: never;
@@ -2575,8 +2637,8 @@ export interface paths {
          *     with `parity_exception`: `VALIDATION_FAILED`, rule `required`; optional for a close that has parity, and judged when
          *     given). It is compared with what a close would find once the intake's lock is held, **with the identity of every
          *     outstanding parcel**: an order added, a parcel found, a count corrected or an outstanding parcel replaced by another is
-         *     `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`, and the senior reads it and writes the
-         *     reason again. The `ETag` of the intake does not move when an order is added, which is why the token exists. A close
+         *     `STATE_CONFLICT`, rule `assessment_changed`, with `details.current_assessment`, and the senior reads it and confirms
+         *     the reason again: **the typed reason is kept, never written afresh** (5.120.0, D-S7-15). The `ETag` of the intake does not move when an order is added, which is why the token exists. A close
          *     with every order and a close with the exception write the same envelope `intake.completed`, whose message says only that the
          *     hub has finished checking in the pickup.
          *
@@ -10486,6 +10548,8 @@ export interface components {
             payment_required: number;
             missing: number;
             orders: number;
+            /** @description The parcels the officer is waiting on the vendor's details for: a live mark on a parcel that still needs its order, the rows the view of this name opens; zero for an intake counted blind (5.120.0, D-S7-12). */
+            waiting_for_vendor?: number;
         };
         /** @description The parcel worklist of an intake with the counts of the whole intake beside the page (5.114.0). No price, no portion of a price and no phone number: `hub.read` does not open the money. */
         IntakeOrderList: {
@@ -10516,6 +10580,12 @@ export interface components {
                     door_photo_evidence_id?: string | null;
                     /** Format: uuid */
                     hub_photo_evidence_id?: string | null;
+                    /** @description Since when the officer is waiting on the vendor's details for this parcel, and the officer's note; null when it is not waiting (5.120.0, D-S7-12). */
+                    waiting_for_vendor?: {
+                        /** Format: date-time */
+                        since: string;
+                        note: string | null;
+                    } | null;
                 } | null;
                 order: {
                     /** Format: uuid */
@@ -10575,6 +10645,8 @@ export interface components {
                 /** Format: uuid */
                 intake_id: string;
                 intake_code: string;
+                /** @description The vendor, by name, as receiving names a vendor (5.120.0, Run G1 Part 1 item 4): the stop's dispatch snapshot, so that a vendor counted without photos is never told by its code alone. Optional in the schema so that an answer of an earlier version stays valid; the application always states it. */
+                vendor_name?: string;
                 /** Format: uuid */
                 pickup_request_id: string;
                 /** Format: uuid */
@@ -10959,15 +11031,17 @@ export interface components {
             active_receiver_id?: string | null;
             /** Format: date-time */
             lock_acquired_at?: string | null;
+            /** @description The vendor, by name, as receiving names a vendor with photos (5.120.0, Run G1 Part 1 item 4): the stop's dispatch snapshot, for a sender with no organisation the sender's display name. Said by every read of an intake (`getHubIntake`, `listHubIntakes`), so that the order screens never call a vendor counted without photos by its code alone. **No part of the intake's `ETag`** (a vendor renamed makes no count stale), and absent from the answers of an act that are built from the stored row alone. Optional in the schema so that an answer of an earlier version stays valid. */
+            vendor_name?: string;
             /** @description The orders that stand (5.119.0, D-S7-6): only the list of intakes carries it. */
             orders_made?: number;
             /** @description The received parcels with no order; null while a blind count is not committed (5.119.0). */
             parcels_needing_order?: number | null;
             /**
-             * @description Why a senior officer is needed (5.119.0, D-S7-7), when one is.
+             * @description Why a senior officer is needed (5.119.0, D-S7-7; narrowed to the one reason by 5.120.0, D-S7-11), when one is: an arrival that a senior took back sent the vendor to review.
              * @enum {string}
              */
-            senior_needed?: "CLOSE_EXCEPTION" | "ARRIVAL_TAKEN_BACK";
+            senior_needed?: "ARRIVAL_TAKEN_BACK";
             /** @enum {string} */
             state: "AWAITING_COUNT" | "COUNTED" | "RECONCILIATION_REQUIRED" | "READY_FOR_ITEMIZATION" | "ITEMIZING" | "CLOSED";
             /** @enum {string} */
@@ -11244,10 +11318,10 @@ export interface components {
             /** @description The received parcels with no order; null while a blind count is not committed (5.119.0). */
             parcels_needing_order?: number | null;
             /**
-             * @description Why a senior officer is needed (5.119.0, D-S7-7), when one is.
+             * @description Why a senior officer is needed (5.119.0, D-S7-7; narrowed to the one reason by 5.120.0, D-S7-11), when one is: an arrival that a senior took back sent the vendor to review.
              * @enum {string}
              */
-            senior_needed?: "CLOSE_EXCEPTION" | "ARRIVAL_TAKEN_BACK";
+            senior_needed?: "ARRIVAL_TAKEN_BACK";
         };
         /** @description One vendor's section of a run's receiving page: the intake it is, with its mode, its state, its counts and, for a photo vendor, its parcels with their photos. **For a blind-count vendor it carries no parcel and no number of the rider's before the count.** The full record of a photo vendor is `HubIntakeCheckIn`. */
         ReceivingVendor: {
@@ -11373,6 +11447,25 @@ export interface components {
         ParcelArrival: {
             /** @description The parcel's desired state: true checks it in (or finds it); false takes the tap back or voids an extra. */
             arrived: boolean;
+        };
+        /** @description The body of `setParcelWaitingForVendor` (5.120.0, D-S7-12). */
+        ParcelWaiting: {
+            /** @description The desired state: true marks the parcel as waiting for the vendor's details (or renews the note of a mark that stands); false takes the mark off. */
+            waiting: boolean;
+            /** @description What was asked of the vendor and how, one short line (no line break, no phone number); only with waiting true. A note of spaces is no note. */
+            note?: string;
+        };
+        /** @description The answer of `setParcelWaitingForVendor`: the mark as it now stands, whether or not the act changed it (5.120.0, D-S7-12). */
+        ParcelWaitingForVendor: {
+            /** Format: uuid */
+            parcel_id: string;
+            waiting: boolean;
+            /**
+             * Format: date-time
+             * @description When the mark was made (it keeps its moment when its note is renewed); null when the parcel is not waiting.
+             */
+            since: string | null;
+            note: string | null;
         };
         /** @description The body of `finishCheckIn`. */
         CheckInFinish: {
@@ -11795,7 +11888,9 @@ export interface components {
          *     alone. A zone carries its identifier, its `zone_code` and `zone_name` as they were when the price was
          *     calculated, and its `service_area`, **a code** (`ACCRA_TEMA`, `AMASAMAN_ENVIRONS`, `KASOA_CORRIDOR`): the
          *     words an officer reads for it are the screens'. `alias` is the address text that placed the parcel, when the
-         *     server placed it, and `authorization_note` the reason the officer gave, when the officer chose the zone.
+         *     server placed it, **as it was when the order was confirmed (5.120.0): it does not follow a correction** (a correction of the recipient's
+         *     address restates the text the order is delivered to and leaves this snapshot, the zone and the price as they were), and `authorization_note`
+         *     the reason the officer gave, when the officer chose the zone.
          */
         DestinationZoneSnapshot: {
             /** @enum {string} */
@@ -11832,6 +11927,11 @@ export interface components {
              * @enum {string|null}
              */
             intake_parcel_state?: "EXPECTED" | "ARRIVED" | "MISSING" | "VOID" | null;
+            /**
+             * Format: uuid
+             * @description **5.120.0 (Run G1, D-S7-14, AC-SLICE-001-90). Staff only.** The picture of the parcel the order is made for: the rider's door photo of a door parcel, the officer's photo of an extra (the identifier of an evidence record), so that the order's page and the change page show the parcel beside the order and open it whole, through `createEvidenceRetrievalAuthorization` as the form does. Null for an order of a vendor counted without photos (it has no parcel). **A vendor's view of its own order never carries it** (the vendor's view is an allowlist). Optional in the schema so that an answer of an earlier version stays valid; the application always states it.
+             */
+            intake_parcel_photo_evidence_id?: string | null;
             /**
              * @description **Null until the freeze (5.110.0): an order that waits for its parcel is not in the commercial machine
              *     yet.** The freeze enters it at `PRICED` and the commercial gate moves it on in the same change
@@ -17091,11 +17191,13 @@ export interface operations {
                 /** @description Narrow to one intake state. AWAITING_COUNT is the awaiting-receive queue. */
                 state?: "AWAITING_COUNT" | "COUNTED" | "RECONCILIATION_REQUIRED" | "READY_FOR_ITEMIZATION" | "ITEMIZING" | "CLOSED";
                 /**
-                 * @description **5.119.0 (Run F, D-S7-7).** `needs_senior` narrows to the vendors whose orders wait for a senior officer:
-                 *     a vendor sent back to review by an arrival that was taken back (`ARRIVAL_TAKEN_BACK`), and a vendor whose orders
-                 *     are under way and that still has received parcels with no order, so that it closes only by a senior's exception
-                 *     or by the orders that remain (`CLOSE_EXCEPTION`). Each item then says which in `senior_needed`. A value that is
-                 *     not a view is `VALIDATION_FAILED`.
+                 * @description **5.119.0 (Run F, D-S7-7), narrowed by 5.120.0 (Run G1, D-S7-11).** `needs_senior` narrows to the vendors that wait
+                 *     for a senior officer, and a senior officer is for the decisions that affect the business or money: a vendor sent back
+                 *     to review by an arrival that was taken back (`ARRIVAL_TAKEN_BACK`). **A vendor whose parcels still need an order is
+                 *     never listed**, however many it has left: a parcel an officer cannot order yet (a label that cannot be read, a missing
+                 *     phone, an address that makes no sense) is the officer's, who calls or messages the vendor and makes the order. The close of a vendor with
+                 *     parcels left stays a senior's act on its close page (`closeHubIntake`, the exception). Each item says why in
+                 *     `senior_needed`. A value that is not a view is `VALIDATION_FAILED`.
                  */
                 view?: "needs_senior";
                 page_size?: components["parameters"]["PageSize"];
@@ -17578,6 +17680,45 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    setParcelWaitingForVendor: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description ETag from the last read. A mismatch returns 409 `STATE_CONFLICT`. Version-based rather
+                 *     than state-based, so a concurrent change that does not alter state is still caught.
+                 */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                /** @description The parcel of an intake (`IntakeParcel.id`). UUID v7. */
+                parcel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParcelWaiting"];
+            };
+        };
+        responses: {
+            /** @description The mark as it now stands, whether or not the act changed it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParcelWaitingForVendor"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getIntakeSummary: {
         parameters: {
             query?: never;
@@ -17689,7 +17830,7 @@ export interface operations {
     listIntakeOrders: {
         parameters: {
             query?: {
-                view?: "all" | "needs_order" | "awaiting_arrival" | "prepared" | "itemized" | "payment_required" | "missing";
+                view?: "all" | "needs_order" | "awaiting_arrival" | "prepared" | "itemized" | "payment_required" | "missing" | "waiting_for_vendor";
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
             };
