@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
+import { MANIFEST_ID } from '../../src/test-support/manifest-fixture';
 import { expect, test } from './support/guarded-test';
 import {
   IDS,
@@ -74,6 +75,17 @@ async function fillIn(page: Page, size = 'Medium'): Promise<void> {
   await page.getByRole('radio', { name: size }).check();
 }
 
+/**
+ * The save, pressed the way a person presses it: after the moment in which a press is ignored has passed. A price that has just appeared (D-S7-2, OB-S1-170a) opens it, so that the second tap of a double tap that
+ * straddles the moment the price appears saves nothing; a person who looks at the price and then presses is after it.
+ */
+async function pressSave(page: Page, name: string | RegExp): Promise<void> {
+  const save = page.getByRole('button', { name });
+  await expect(save).toBeVisible();
+  await page.waitForTimeout(GUARD_WAIT_MS);
+  await save.click();
+}
+
 const overflowOf = (page: Page): Promise<number> =>
   page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
@@ -136,7 +148,7 @@ test.describe('making the orders of a vendor', () => {
     for (const never of ['price', 'total', 'zone', 'locked_price', 'reviewed_terms'])
       expect(preview).not.toHaveProperty(never);
 
-    await saveAt.click();
+    await pressSave(page, 'Save the order at GH₵40.00');
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Make the next order' })).toBeVisible();
 
@@ -160,7 +172,7 @@ test.describe('making the orders of a vendor', () => {
   }) => {
     const { api, watch } = await open(page, NEW_ORDER, { repriceOnce: 4500 });
     await fillIn(page);
-    await page.getByRole('button', { name: 'Save the order at GH₵40.00' }).click();
+    await pressSave(page, 'Save the order at GH₵40.00');
 
     const alert = page
       .getByRole('alert')
@@ -235,6 +247,8 @@ test.describe('making the orders of a vendor', () => {
     const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
     await expect(save).toBeVisible();
     await tabTo(page, save, 24);
+    // The price has just appeared: a press in the moment after it is ignored, so the officer reads it (the keyboard is no quicker than a finger).
+    await page.waitForTimeout(GUARD_WAIT_MS);
     await page.keyboard.press('Enter');
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     // Focus is on what happened, so that it is read out and the officer is not left on a button that is gone.
@@ -251,14 +265,14 @@ test.describe('making the orders of a vendor', () => {
   }) => {
     const { api } = await open(page, NEW_ORDER);
     await fillIn(page, 'Small');
-    await page.getByRole('button', { name: /^Save the order at / }).click();
+    await pressSave(page, /^Save the order at /);
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     await page.getByRole('link', { name: 'Make the next order' }).click();
     await expect(
       page.getByRole('heading', { level: 1, name: 'Make an order for parcel 2' }),
     ).toBeVisible();
     await fillIn(page, 'Medium');
-    await page.getByRole('button', { name: /^Save the order at / }).click();
+    await pressSave(page, /^Save the order at /);
     await expect(page.getByText(/^Order ACC-OR-4HJ5KM is saved\.$/)).toBeVisible();
     await page.getByRole('link', { name: 'Make the next order' }).click();
     await expect(
@@ -266,7 +280,7 @@ test.describe('making the orders of a vendor', () => {
     ).toBeVisible();
     await fillIn(page, 'Large');
     await expect(page.getByText('GH₵50.00').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Save the order at GH₵50.00' }).click();
+    await pressSave(page, 'Save the order at GH₵50.00');
     await expect(page.getByText(/^Order ACC-OR-6NP7QR is saved\.$/)).toBeVisible();
 
     // Every parcel has its order, and the page leads to the close and not to another order. No save was refused as stale, and no officer was asked to check a price again.
@@ -309,6 +323,8 @@ test.describe('a double tap never saves what was not read (D-S7-2, item 2 of the
     await fillIn(page);
     const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
     await expect(save).toBeVisible();
+    // The price has been read: the first tap is a press that is meant, and the second is the one that straddles the change.
+    await page.waitForTimeout(GUARD_WAIT_MS);
 
     await doubleTap(page, save);
     // The first tap was refused with the terms as they now are (GH₵45.00), and the button that says the new figure is in the same place: the second tap, 120 ms after the first, did not press it.
@@ -379,11 +395,323 @@ test.describe('a double tap never saves what was not read (D-S7-2, item 2 of the
     await fillIn(page);
     const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
     await expect(save).toBeVisible();
+    // The price has been read: both taps are presses that are meant.
+    await page.waitForTimeout(GUARD_WAIT_MS);
 
     await doubleTap(page, save);
     await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
     expect(api.world.orders).toHaveLength(1);
     expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('a price that appears while the officer taps (Run G1, Part 2, item 10; OB-S1-170a)', () => {
+  // Break caught: the second tap of a double tap that straddles the moment a price first appears (the first on the button that says the price is being checked, the second on the save that now says it) saving a price the
+  // officer did not read: the answer arrives between the two taps, and the second lands on the save at once.
+  test('a tap that lands as the price appears saves nothing, and a tap after the moment saves', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER, { previewDelayMs: 500 });
+    await fillIn(page);
+    const checking = page.getByRole('button', { name: 'Checking the price…' });
+    await expect(checking).toBeDisabled();
+    const save = page.getByRole('button', { name: 'Save the order at GH₵40.00' });
+    // The first tap is on the button that is there (it does nothing); the second is on the place the save takes, the moment the price has appeared.
+    const box = await checking.boundingBox();
+    if (box === null) throw new Error('the button has no place on the screen');
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(save).toBeVisible();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(150);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
+    expect(api.world.orders).toHaveLength(0);
+
+    // The officer read the price and presses: that saves.
+    await page.waitForTimeout(GUARD_WAIT_MS);
+    await save.click();
+    await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
+    expect(api.world.orders).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('a price that could not be checked, and the checks of a whole order (Run G1, Part 2, item 1)', () => {
+  // Break caught: a form left stuck by a check that failed for a reason that is no field's (a lost connection, a fault, a 429): the price column telling the officer to look at fields none of which is marked, the save
+  // disabled and nothing offering a new check. Reproduced in Chromium by the review of Run F.
+  for (const kind of ['network', 'server'] as const) {
+    test(`a ${kind === 'network' ? 'lost connection' : 'fault of the server'} on the first check is told as what it is, keeps the entries, and the officer checks again`, async ({
+      page,
+    }) => {
+      const { api, watch } = await open(page, NEW_ORDER, {
+        previewFault: { kind, times: 1, retryAfterSeconds: 0 },
+      });
+      await fillIn(page);
+      await expect(
+        page.getByText('The price could not be checked.', { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText('Your entries are kept.')).toBeVisible();
+      await expect(page.getByText(/The fields marked say what to change/)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Save the order' })).toBeDisabled();
+      await expect(page.getByLabel('Recipient’s name')).toHaveValue('Kofi Asante');
+      await page.getByRole('button', { name: 'Check the price again' }).click();
+      await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible();
+      expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`)).toHaveLength(2);
+      expect(api.unexpected).toEqual([]);
+      expect(watch.problems.filter((problem) => !/500|Failed|ERR_/.test(problem))).toEqual([]);
+    });
+  }
+
+  // Break caught: a 429 on the first check that leaves the form stuck, or a check that is made again in a loop: after the wait the server asked for there is one new check, by itself, and no more.
+  test('a 429 on the first check is checked again once, by itself, when the wait is over', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER, {
+      previewFault: { kind: 'rate-limit', times: 1, retryAfterSeconds: 2 },
+    });
+    await fillIn(page);
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible({
+      timeout: 10_000,
+    });
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`)).toHaveLength(2);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('429'))).toEqual([]);
+  });
+
+  // Break caught (Run G1, Part 3): a form that asks for the price at every key of a whole order, so that the hub's server is asked a dozen times for one parcel and a slow answer to an early one is drawn late. Typed
+  // as a person types, a whole order is checked once, a moment after the last thing the officer chose.
+  test('typing a whole order asks for the price once', async ({ page }) => {
+    const { api, watch } = await open(page, NEW_ORDER);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    await page.getByLabel('Recipient’s name').pressSequentially('Kofi Asante', { delay: 20 });
+    await page.getByLabel('Recipient’s phone').pressSequentially('024 765 4321', { delay: 20 });
+    await page
+      .getByLabel('Delivery address')
+      .pressSequentially('7 Spintex Road, near the mall', { delay: 20 });
+    await page.getByRole('radio', { name: 'Medium' }).check();
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible();
+    await page.waitForTimeout(900);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`)).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('a parcel the officer is waiting on the vendor’s details for (Run G1, Part 2, item 4; D-S7-12)', () => {
+  const FIRST_PARCEL = `${NEW_ORDER}?parcel=${parcelIdOf(1)}`;
+
+  // Break caught: a parcel an officer cannot order yet that has no way to be marked, so that the next officer meets the same parcel; a mark that is not on the server; the next order that reopens the parcel just
+  // marked; a mark that cannot be taken off; a note that holds a number let through.
+  test('the officer marks a parcel with a note, goes on to the next one, sees it under its tab, and takes the mark off', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, FIRST_PARCEL);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Waiting for the vendor’s details' }).click();
+    const dialog = page.getByRole('alertdialog');
+    // A number does not go into the note: the API says so on the note, and the dialog keeps what was typed.
+    await dialog.getByLabel('What you asked, and how').fill('rang 0244123456');
+    await dialog.getByRole('button', { name: 'Mark the parcel' }).click();
+    await expect(
+      dialog.getByText('Leave the number out of the note.', { exact: true }),
+    ).toBeVisible();
+    await expect(dialog.getByLabel('What you asked, and how')).toHaveValue('rang 0244123456');
+    await dialog
+      .getByLabel('What you asked, and how')
+      .fill('Called the vendor, waiting on WhatsApp');
+    await dialog.getByRole('button', { name: 'Mark the parcel' }).click();
+
+    // On to the next parcel, which is parcel 2 and not the one just marked.
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Make an order for parcel 2' }),
+    ).toBeVisible();
+    expect(api.world.waiting.get(1)?.note).toBe('Called the vendor, waiting on WhatsApp');
+    const marks = made(api, 'PUT', `/intake-parcels/${parcelIdOf(1)}/waiting-for-vendor`);
+    expect(marks.at(-1)?.ifMatch).toBe('"v1"');
+    expect(marks.at(-1)?.idempotencyKey).toBeUndefined();
+
+    // The vendor's orders page has a tab for the parcels that wait, with the server's count and the note.
+    await page.goto(ORDERS);
+    await page.getByRole('tab', { name: /Waiting for the vendor’s details/ }).click();
+    const rows = page.getByRole('table', { name: 'Parcels and orders' });
+    await expect(rows.getByText('Parcel 1', { exact: true })).toBeVisible();
+    await expect(rows.getByText('Called the vendor, waiting on WhatsApp')).toBeVisible();
+    expect(
+      made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).some((call) =>
+        call.search.includes('view=waiting_for_vendor'),
+      ),
+    ).toBe(true);
+
+    // The parcel's own form says it is waited on, and one press takes the mark off.
+    await page.goto(FIRST_PARCEL);
+    await expect(
+      page.getByText('You are waiting for the vendor’s details for this parcel.'),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Take the mark off' }).click();
+    await expect(
+      page.getByText('You are waiting for the vendor’s details for this parcel.'),
+    ).toHaveCount(0);
+    expect(api.world.waiting.size).toBe(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('400'))).toEqual([]);
+  });
+
+  // Break caught: the second mark of a filled and priced form saving the order behind the dialog (the submit of the dialog heard by the form it is drawn in), found by the security review of the commit that built it.
+  test('marking a parcel on a filled and priced form saves no order', async ({ page }) => {
+    const { api, watch } = await open(page, FIRST_PARCEL);
+    await fillIn(page);
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible();
+    await page.getByRole('button', { name: 'Waiting for the vendor’s details' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByLabel('What you asked, and how').fill('Called the vendor');
+    await dialog.getByLabel('What you asked, and how').press('Enter');
+    await expect
+      .poll(() => made(api, 'PUT', `/intake-parcels/${parcelIdOf(1)}/waiting-for-vendor`).length)
+      .toBe(1);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
+    expect(api.world.orders).toHaveLength(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('an address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () => {
+  // Break caught: an address no zone matches that leaves the officer to reword it; the zones of the hub not offered; a choice that does not take the focus; the zone sent without its reason or not at all.
+  test('the form offers the hub’s zones, takes the focus to the choice, and prices and saves with the zone and the reason', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER);
+    await page.getByLabel('Recipient’s name').fill('Kofi Asante');
+    await page.getByLabel('Recipient’s phone').fill('024 765 4321');
+    await page.getByLabel('Delivery address').fill('Nowhere Lane, Kumasi');
+    await page.getByRole('radio', { name: 'Medium' }).check();
+    const group = page.getByRole('group', { name: /Which zone is it\?/ });
+    await expect(group).toBeVisible();
+    await expect(group.getByRole('radio')).toHaveCount(7);
+    await expect(group.getByRole('radio').first()).toBeFocused();
+    await group.getByRole('radio', { name: 'Madina/Adenta' }).check();
+    await page.getByLabel(/Why this zone/).fill('The sender said it is in Adenta');
+    await expect(page.getByRole('button', { name: 'Save the order at GH₵40.00' })).toBeVisible();
+    await pressSave(page, 'Save the order at GH₵40.00');
+    await expect(page.getByText(/^Order ACC-OR-2CD3FG is saved\.$/)).toBeVisible();
+    const chosen = {
+      zone_id: '5eed0101-0000-4000-8000-000000000004',
+      note: 'The sender said it is in Adenta',
+    };
+    expect(
+      (
+        made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`).at(-1)?.body as Record<
+          string,
+          unknown
+        >
+      ).destination_zone_authorization,
+    ).toEqual(chosen);
+    expect(
+      (made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)[0]?.body as Record<string, unknown>)
+        .destination_zone_authorization,
+    ).toEqual(chosen);
+    expect(made(api, 'GET', `/hub-intakes/${VENDOR}/destination-zones`)).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('422'))).toEqual([]);
+  });
+});
+
+test.describe('the parcel’s photo on the order’s page (Run G1, Part 2, item 6; D-S7-14)', () => {
+  // Break caught: an order that shows nothing of the parcel it was made for, a photo that cannot be opened whole, or one that opens with no way back to the order.
+  test('a tile that opens the photo whole, and gives the officer back the order', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    const tile = page.getByRole('button', { name: 'Photo of the parcel' });
+    await expect(tile).toBeVisible();
+    await tile.click();
+    const viewer = page.getByRole('dialog', { name: 'Photo of the parcel' });
+    await expect(viewer).toBeVisible();
+    await expect(viewer.getByRole('img', { name: 'Photo of the parcel' })).toBeVisible();
+    await expect.poll(() => api.images.length).toBeGreaterThan(0);
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    await expect(tile).toBeFocused();
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('the recipient correction, refused (Run G1, Part 2, item 7)', () => {
+  // Break caught: a refused phone told as "Check the note marked below" with nothing marked; the phone shown to the officer in the API's international form and not as they write it.
+  test('a refused phone is marked on the phone with the focus on it, and the phone is shown as it is written', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    await expect(
+      page.getByRole('region', { name: 'What it holds' }).getByText('024 123 4567'),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Correct the recipient' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog.getByLabel(/Recipient’s phone/)).toHaveValue('024 123 4567');
+    await dialog.getByLabel(/Recipient’s phone/).fill('not a number');
+    await dialog.getByLabel(/Why are you correcting this\?/).fill('A typo');
+    await dialog.getByRole('button', { name: 'Save the correction' }).click();
+    await expect(
+      dialog.getByText('That doesn’t look like a phone number. Check the digits.'),
+    ).toBeVisible();
+    await expect(dialog.getByLabel(/Recipient’s phone/)).toBeFocused();
+    await expect(dialog.getByText(/Check the note marked below/)).toHaveCount(0);
+    expect(made(api, 'POST', `/orders/${FIRST.id}/recipient-correction`)).toHaveLength(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('400'))).toEqual([]);
+  });
+});
+
+test.describe('a refusal that removes the save (Run G1, Part 2, item 8)', () => {
+  // Break caught: a refusal that removes the save told in an alert at the top of a form that is two screens tall at 768 px, with the focus lost with the button: it is told beside the save, in view, with the focus.
+  test('is told beside the save, in view, with the focus on it, at 768 px', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    const { api, watch } = await open(page, `${NEW_ORDER}?parcel=${parcelIdOf(1)}`, {
+      takenAtSave: 1,
+    });
+    await fillIn(page);
+    await pressSave(page, 'Save the order at GH₵40.00');
+    const beside = page.locator('[data-refusal]');
+    await expect(beside).toBeVisible();
+    await expect(
+      beside.getByText('This parcel already has an order. Open the orders to see it.'),
+    ).toBeVisible();
+    await expect(beside).toBeFocused();
+    await expect(beside).toBeInViewport();
+    await expect(page.getByRole('alert')).toHaveCount(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
+  });
+});
+
+test.describe('a vendor counted without photos is named by its vendor (Run G1, Part 2, item 9)', () => {
+  // Break caught: a vendor counted without photos called by its code alone in the queue and on its page, and its run read just to find its name.
+  test('the queue and the vendor’s page name it, with no read of its run', async ({ page }) => {
+    const { api, watch } = await open(page, '/orders-to-make', {
+      mode: 'BLIND_COUNT',
+      vendorState: 'ITEMIZING',
+    });
+    await page.getByRole('tab', { name: 'Being worked' }).click();
+    const row = page.getByRole('table', { name: 'Vendors with orders to make' });
+    await expect(row.getByText(/ACC-IN-[A-Z0-9]+ · Counted without photos/)).toBeVisible();
+    await row.getByRole('link', { name: 'Fixture Sender' }).click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Orders for Fixture Sender' }),
+    ).toBeVisible();
+    expect(made(api, 'GET', `/receiving-runs/${MANIFEST_ID}`)).toHaveLength(0);
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
@@ -454,25 +782,24 @@ test.describe('what the stand-in keeps that the API keeps (Run F, Part 3)', () =
   });
 
   // Break caught: a stand-in that prices a parcel that already has an order, so that the answer of the screen to that refusal (parcel_ordered) was never seen in a browser.
-  test('a parcel that already has an order is refused when its price is asked for, in words, and nothing is saved', async ({
+  test('a parcel that already has an order says so with its code and a link, draws no form, and asks for no price', async ({
     page,
   }) => {
     const { api, watch } = await open(page, `${NEW_ORDER}?parcel=${parcelIdOf(1)}`, {
       vendorState: 'ITEMIZING',
       orders: [storedOrder(1)],
     });
-    await expect(
-      page.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
-    ).toBeVisible();
-    await fillIn(page);
-    await expect(
-      page.getByRole('alert').filter({ hasText: 'This parcel already has an order.' }),
-    ).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Save the order at / })).toHaveCount(0);
+    await expect(page.getByText('Parcel 1 already has its order, ACC-OR-2CD3FG.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open the order' })).toHaveAttribute(
+      'href',
+      `/orders/${FIRST.id}`,
+    );
+    await expect(page.getByLabel('Recipient’s name')).toHaveCount(0);
+    expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders/preview`)).toHaveLength(0);
     expect(made(api, 'POST', `/hub-intakes/${VENDOR}/orders`)).toHaveLength(0);
     expect(api.world.orders).toHaveLength(1);
     expect(api.unexpected).toEqual([]);
-    expect(watch.problems.filter((problem) => !problem.includes('409'))).toEqual([]);
+    expect(watch.problems).toEqual([]);
   });
 
   // Break caught: a digest that covers the size and the price alone, which accepts a save whose terms (who pays, the declared value) are not the ones that were priced; and a key seen with another body that makes a second
@@ -566,17 +893,23 @@ test.describe('what the stand-in keeps that the API keeps (Run F, Part 3)', () =
     const rows = page.getByRole('table', { name: 'Parcels and orders' });
     await expect(rows.getByText('Parcel 1', { exact: true })).toBeVisible();
     const first = made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).at(-1);
-    const size = Number(new URLSearchParams(first?.search).get('page_size') ?? '100');
+    // The API's own page is twenty-five when the page does not say.
+    const size = Number(new URLSearchParams(first?.search).get('page_size') ?? '25');
     expect(size).toBeLessThan(130);
     await expect(rows.getByText(`Parcel ${String(size)}`, { exact: true })).toBeVisible();
     await expect(rows.getByText(`Parcel ${String(size + 1)}`, { exact: true })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Next page' }).click();
-    await expect(rows.getByText('Parcel 130', { exact: true })).toBeVisible();
+    await expect(rows.getByText(`Parcel ${String(size + 1)}`, { exact: true })).toBeVisible();
     await expect(rows.getByText('Parcel 1', { exact: true })).toHaveCount(0);
     // The second page was asked for with the token the first one gave, and never as one list.
     const second = made(api, 'GET', `/hub-intakes/${VENDOR}/orders`).at(-1);
     expect(new URLSearchParams(second?.search).get('page_token')).toBe(String(size));
+    // And so on to the last page, which holds what is left of the hundred and thirty.
+    for (let page_ = 2; page_ * size < 130; page_ += 1) {
+      await page.getByRole('button', { name: 'Next page' }).click();
+    }
+    await expect(rows.getByText('Parcel 130', { exact: true })).toBeVisible();
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
@@ -694,15 +1027,12 @@ test.describe('closing a vendor and its summary', () => {
     });
     await expect(page.getByRole('heading', { level: 1, name: 'Close Kente Crafts' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Close this vendor' })).toHaveCount(0);
+    // D-S7-11: parcels still to order are the officer's, who calls or messages the vendor: the page says what is theirs to do, and does not point to a list this vendor is never in.
     await expect(
-      page.getByText(
-        /A senior officer can close with parcels still to order\. A senior officer finds this vendor under Needs a senior\./,
-      ),
+      page.getByText(/Make their orders: call or message the vendor for what is missing\./),
     ).toBeVisible();
-    // The way on is the senior officers' list, and not a request to ask one of them to open this page.
-    await expect(
-      page.getByRole('link', { name: 'Open the list for a senior officer' }),
-    ).toHaveAttribute('href', '/orders-to-make?view=NEEDS_SENIOR');
+    await expect(page.getByText(/Needs a senior/)).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /list for a senior officer/ })).toHaveCount(0);
     expect(made(api, 'POST', `/hub-intakes/${VENDOR}/close`)).toHaveLength(0);
   });
 });
@@ -829,7 +1159,7 @@ test.describe('changing an order that is not confirmed', () => {
       size_class: 'LARGE',
     });
 
-    await page.getByRole('button', { name: 'Save the change at GH₵50.00' }).click();
+    await pressSave(page, 'Save the change at GH₵50.00');
     await expect(page).toHaveURL(`/orders/${EARLY.id}`);
     await expect(page.getByText(`Order ${EARLY.code} was changed.`)).toBeVisible();
     // The order is read again as it now stands, with the change in its history and no word of the values.
@@ -876,6 +1206,8 @@ const SENIOR_KEYS = [
   'pickup.read',
   'pricing.correction.create',
   'pricing.correction.approve',
+  // A senior officer reviews an arrival that was taken back (D-S7-11).
+  'hub.osd.adjudicate',
 ];
 const heading = (page: Page, name: string): Locator =>
   page.getByRole('heading', { level: 1, name });
@@ -926,8 +1258,8 @@ const SCREENS: readonly Screen[] = [
     // The vendors that wait for a senior officer (D-S7-7): why, and the act of that reason for the senior who holds its key.
     name: 'the queue of the vendors with orders to make, the view of the vendors that need a senior',
     path: '/orders-to-make',
-    world: () => ({ ...firstMade(), seniorNeeded: 'CLOSE_EXCEPTION' }),
-    ready: (page) => page.getByRole('link', { name: 'Close with an exception: Kente Crafts' }),
+    world: () => ({ ...firstMade(), seniorNeeded: 'ARRIVAL_TAKEN_BACK', permissions: SENIOR_KEYS }),
+    ready: (page) => page.getByRole('link', { name: 'Review the vendor: Kente Crafts' }),
     then: async (page) => {
       await page.getByRole('tab', { name: 'Needs a senior' }).click();
     },
@@ -1020,7 +1352,7 @@ const SCREENS: readonly Screen[] = [
     then: async (page) => {
       await expect(heading(page, 'Make an order for parcel 2')).toBeVisible();
       await fillIn(page);
-      await page.getByRole('button', { name: /^Save the order at / }).click();
+      await pressSave(page, /^Save the order at /);
     },
   },
   {
@@ -1031,7 +1363,7 @@ const SCREENS: readonly Screen[] = [
     ready: (page) => page.getByText('Write this code on the parcel.'),
     then: async (page) => {
       await fillIn(page);
-      await page.getByRole('button', { name: /^Save the order at / }).click();
+      await pressSave(page, /^Save the order at /);
     },
   },
   {
@@ -1063,6 +1395,121 @@ const SCREENS: readonly Screen[] = [
     }),
     // The page of a change is the checker's queue with the change open: the heading is the queue's, and the change is there by the decision it waits for.
     ready: (page) => page.getByRole('button', { name: 'Approve' }),
+  },
+  // What Run G1 built (Part 2): each state at the three widths, with axe.
+  {
+    // D-S7-12: the parcels the officer is waiting on the vendor's details for, under a tab of their own, with the note.
+    name: 'the vendor’s orders, the tab of the parcels that wait for the vendor’s details',
+    path: ORDERS,
+    world: () => ({
+      waiting: new Map([[1, { since: '2026-11-03T08:12:00.000Z', note: 'Called the vendor' }]]),
+    }),
+    // The note is drawn in the table, or in the card of the row where the table gives way to cards: whichever is on the screen.
+    ready: (page) => page.getByText('Called the vendor').filter({ visible: true }),
+    then: async (page) => {
+      await page.getByRole('tab', { name: /Waiting for the vendor’s details/ }).click();
+    },
+  },
+  {
+    name: 'the form of a parcel marked as waited on',
+    path: `${NEW_ORDER}?parcel=${parcelIdOf(1)}`,
+    world: () => ({
+      waiting: new Map([[1, { since: '2026-11-03T08:12:00.000Z', note: 'Called the vendor' }]]),
+    }),
+    ready: (page) => page.getByText('You are waiting for the vendor’s details for this parcel.'),
+  },
+  {
+    // D-S7-5: the zone choice for an address no zone matches.
+    name: 'the zone choice for an address no zone matches',
+    path: NEW_ORDER,
+    world: () => ({}),
+    ready: (page) => page.getByRole('group', { name: /Which zone is it\?/ }),
+    // The price check that told the address matches no zone is the refusal this state is made of.
+    refused: '422',
+    then: async (page) => {
+      await page.getByLabel('Recipient’s name').fill('Kofi Asante');
+      await page.getByLabel('Recipient’s phone').fill('024 765 4321');
+      await page.getByLabel('Delivery address').fill('Nowhere Lane, Kumasi');
+      await page.getByRole('radio', { name: 'Medium' }).check();
+    },
+  },
+  {
+    // The price could not be checked (a fault of the server): the column says so, keeps the entries and offers the check again.
+    name: 'the form when the price could not be checked',
+    path: NEW_ORDER,
+    world: () => ({ previewFault: { kind: 'server' as const, times: 1, retryAfterSeconds: 0 } }),
+    ready: (page) => page.getByRole('button', { name: 'Check the price again' }),
+    then: async (page) => {
+      await fillIn(page);
+    },
+    refused: '500',
+  },
+  {
+    // A refusal that removes the save, told beside the save (item 8).
+    name: 'the form when a parcel was ordered meanwhile, the refusal beside the save',
+    path: `${NEW_ORDER}?parcel=${parcelIdOf(1)}`,
+    world: () => ({ takenAtSave: 1 }),
+    ready: (page) => page.locator('[data-refusal]'),
+    then: async (page) => {
+      await fillIn(page);
+      await pressSave(page, 'Save the order at GH₵40.00');
+    },
+    refused: '409',
+  },
+  {
+    // D-S7-14: the parcel's photo as a tile on the order's page.
+    name: 'an order with the photo of its parcel',
+    path: `/orders/${FIRST.id}`,
+    world: firstMade,
+    ready: (page) => page.getByRole('button', { name: 'Photo of the parcel' }),
+  },
+  {
+    name: 'an order with the photo of its parcel opened whole',
+    path: `/orders/${FIRST.id}`,
+    world: firstMade,
+    ready: (page) => page.getByRole('dialog', { name: 'Photo of the parcel' }),
+    then: async (page) => {
+      await page.getByRole('button', { name: 'Photo of the parcel' }).click();
+    },
+  },
+  {
+    name: 'the change of an order with the photo of its parcel beside the form',
+    path: `/orders/${EARLY_ID}/amend`,
+    world: () => ({
+      vendorState: 'ITEMIZING' as const,
+      orders: [
+        storedOrder(1),
+        storedOrder(2, { status: 'EARLY_QUOTE', size: 'SMALL', price: 3500 }),
+      ],
+    }),
+    ready: (page) => page.getByRole('button', { name: 'Photo of the parcel' }),
+  },
+  {
+    // D-S7-1 and Part 2 item 7: the correction dialog with a refused phone, marked on the phone.
+    name: 'the correction of the recipient with a refused phone',
+    path: `/orders/${FIRST.id}`,
+    world: firstMade,
+    ready: (page) =>
+      page
+        .getByRole('alertdialog')
+        .getByText('That doesn’t look like a phone number. Check the digits.'),
+    then: async (page) => {
+      await page.getByRole('button', { name: 'Correct the recipient' }).click();
+      const dialog = page.getByRole('alertdialog');
+      await dialog.getByLabel(/Recipient’s phone/).fill('not a number');
+      await dialog.getByLabel(/Why are you correcting this\?/).fill('A typo');
+      await dialog.getByRole('button', { name: 'Save the correction' }).click();
+    },
+    refused: '400',
+  },
+  {
+    name: 'the queue of the vendors with orders to make, a vendor counted without photos named by its vendor',
+    path: '/orders-to-make',
+    world: () => ({ mode: 'BLIND_COUNT' as const, vendorState: 'ITEMIZING' as const }),
+    ready: (page) => page.getByRole('link', { name: 'Fixture Sender' }),
+    then: async (page) => {
+      await page.getByRole('tab', { name: 'Being worked' }).click();
+    },
   },
 ];
 
@@ -1168,7 +1615,7 @@ test.describe('a vendor counted without photos', () => {
   }) => {
     const { api, watch } = await open(page, NEW_ORDER, blindMade(3));
     await fillIn(page);
-    await page.getByRole('button', { name: /^Save the order at / }).click();
+    await pressSave(page, /^Save the order at /);
 
     await expect(page.getByText('Order ACC-OR-8STVWX is saved.')).toBeVisible();
     await expect(page.getByText('Write this code on the parcel.')).toBeVisible();
@@ -1198,7 +1645,7 @@ test.describe('a vendor counted without photos', () => {
   }) => {
     const { api, watch } = await open(page, NEW_ORDER, blindMade(8));
     await fillIn(page);
-    await page.getByRole('button', { name: /^Save the order at / }).click();
+    await pressSave(page, /^Save the order at /);
     await expect(page.getByText('Order 9 of 9 for this vendor.')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Make the next order' })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Close this vendor' })).toBeVisible();
@@ -1229,21 +1676,20 @@ test.describe('the queue of the vendors with orders to make, as the list counts 
   }) => {
     const { api, watch } = await open(page, '/orders-to-make', {
       ...firstMade(),
-      seniorNeeded: 'CLOSE_EXCEPTION',
+      seniorNeeded: 'ARRIVAL_TAKEN_BACK',
+      permissions: SENIOR_KEYS,
     });
     await page.getByRole('tab', { name: 'Needs a senior' }).click();
     const table = page.getByRole('table', { name: 'Vendors with orders to make' });
     await expect(
-      table.getByText(
-        'Parcels are still to be ordered. A senior officer can close it with an exception.',
-      ),
+      table.getByText('An arrival was taken back. A senior officer reviews it.'),
     ).toBeVisible();
     expect(
       made(api, 'GET', '/hub-intakes').some((call) => call.search.includes('view=needs_senior')),
     ).toBe(true);
-    // The senior's act leads to the close of that vendor, where the exception is decided.
-    await page.getByRole('link', { name: 'Close with an exception: Kente Crafts' }).click();
-    await expect(page).toHaveURL(`/intakes/${VENDOR}/close`);
+    // The senior's act leads to the decision of that vendor, where a taken-back arrival is reviewed (D-S7-11: the close with an exception stays on the close page, and is no reason to be listed here).
+    await page.getByRole('link', { name: 'Review the vendor: Kente Crafts' }).click();
+    await expect(page).toHaveURL(`/intakes/${VENDOR}/discrepancy`);
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
@@ -1254,13 +1700,29 @@ test.describe('the queue of the vendors with orders to make, as the list counts 
   }) => {
     const { api, watch } = await open(page, '/orders-to-make', {
       ...firstMade(),
-      seniorNeeded: 'CLOSE_EXCEPTION',
-      permissions: SENIOR_KEYS.filter((key) => key !== 'hub.intake.close_exception'),
+      seniorNeeded: 'ARRIVAL_TAKEN_BACK',
+      permissions: SENIOR_KEYS.filter((key) => key !== 'hub.osd.adjudicate'),
     });
     await page.getByRole('tab', { name: 'Needs a senior' }).click();
     const table = page.getByRole('table', { name: 'Vendors with orders to make' });
     await expect(table.getByText('A senior officer decides.')).toBeVisible();
-    await expect(page.getByRole('link', { name: /Close with an exception/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Review the vendor/ })).toHaveCount(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (Run G1, D-S7-11): a vendor whose parcels still need an order listed as needing a senior, and told to an officer as "A senior officer decides" when the officer's own work is the order of its parcels; and a column that says why in the other two views, where it is empty.
+  test('a vendor with parcels still to order is the officer’s: it is not under Needs a senior, and the views that are not that one have no column of reasons', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, '/orders-to-make', firstMade());
+    await page.getByRole('tab', { name: 'Being worked' }).click();
+    const table = page.getByRole('table', { name: 'Vendors with orders to make' });
+    await expect(table.getByText('1 made, 2 to make')).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'Why a senior' })).toHaveCount(0);
+    await expect(table.getByText('A senior officer decides.')).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Needs a senior' }).click();
+    await expect(page.getByText('No vendor is waiting for a senior officer.')).toBeVisible();
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
@@ -1269,7 +1731,7 @@ test.describe('the queue of the vendors with orders to make, as the list counts 
   // leaves an officer without being told who decides.
   for (const account of [
     { name: 'a senior', keys: SENIOR_KEYS },
-    { name: 'an officer', keys: SENIOR_KEYS.filter((key) => key !== 'hub.intake.close_exception') },
+    { name: 'an officer', keys: SENIOR_KEYS.filter((key) => key !== 'hub.osd.adjudicate') },
   ]) {
     test(`on a narrow screen the card of a vendor that waits for a senior gives ${account.name} what to do about it`, async ({
       page,
@@ -1277,26 +1739,24 @@ test.describe('the queue of the vendors with orders to make, as the list counts 
       await page.setViewportSize({ width: 320, height: 640 });
       const { api, watch } = await open(page, '/orders-to-make', {
         ...firstMade(),
-        seniorNeeded: 'CLOSE_EXCEPTION',
+        seniorNeeded: 'ARRIVAL_TAKEN_BACK',
         permissions: account.keys,
       });
       await page.getByRole('tab', { name: 'Needs a senior' }).click();
       await expect(
         page
-          .getByText(
-            'Parcels are still to be ordered. A senior officer can close it with an exception.',
-          )
+          .getByText('An arrival was taken back. A senior officer reviews it.')
           .filter({ visible: true }),
       ).toBeVisible();
-      if (account.keys.includes('hub.intake.close_exception')) {
+      if (account.keys.includes('hub.osd.adjudicate')) {
         await expect(
-          page.getByRole('link', { name: 'Close with an exception: Kente Crafts' }),
+          page.getByRole('link', { name: 'Review the vendor: Kente Crafts' }),
         ).toBeVisible();
       } else {
         await expect(
           page.getByText('A senior officer decides.').filter({ visible: true }),
         ).toBeVisible();
-        await expect(page.getByRole('link', { name: /Close with an exception/ })).toHaveCount(0);
+        await expect(page.getByRole('link', { name: /Review the vendor/ })).toHaveCount(0);
       }
       expect(api.unexpected).toEqual([]);
       expect(watch.problems).toEqual([]);

@@ -96,8 +96,16 @@ export interface World {
   mode: 'PHOTO_CHECK_IN' | 'BLIND_COUNT';
   /** How many parcels the vendor arrived with: three, unless a test works a longer list a page at a time. For a vendor counted without photos it is the committed count. */
   parcelCount: number;
-  /** Why the vendor waits for a senior officer (D-S7-7), or none: the list of vendors that wait for one holds the vendor only when the world says so, and says why, as the API's does. */
-  seniorNeeded: 'CLOSE_EXCEPTION' | null;
+  /** Why the vendor waits for a senior officer (D-S7-7, narrowed by D-S7-11), or none: only an arrival a senior took back. The list of vendors that wait for one holds the vendor only when the world says so, and says why, as the API's does; a vendor whose parcels still need an order is the officer's and is never listed there. */
+  seniorNeeded: 'ARRIVAL_TAKEN_BACK' | null;
+  /** The parcels the officer is waiting on the vendor's details for (D-S7-12), by the parcel's place: when it was marked and the note. The server holds it, and an order for the parcel ends it. */
+  waiting: Map<number, { since: string; note: string | null }>;
+  /** The parcel another officer makes the order for between the price check and the save of this one: its place. The save then finds the parcel ordered and is refused as the API refuses it, and the order is there. */
+  takenAtSave: number | undefined;
+  /** The next price checks (of an order and of a change) answer a fault instead of a price: a lost connection, a fault of the server, or a 429 with the wait it asks for. Each check that meets it uses one of its `times`. */
+  previewFault:
+    | { kind: 'network' | 'server' | 'rate-limit'; times: number; retryAfterSeconds: number }
+    | undefined;
   vendorState: 'READY_FOR_ITEMIZATION' | 'ITEMIZING' | 'CLOSED';
   orders: StoredOrder[];
   corrections: StoredCorrection[];
@@ -141,6 +149,9 @@ export function world(over: Partial<World> = {}): World {
     mode: 'PHOTO_CHECK_IN',
     parcelCount: 3,
     seniorNeeded: null,
+    waiting: new Map(),
+    takenAtSave: undefined,
+    previewFault: undefined,
     permissions: [
       'hub.read',
       'hub.intake.itemize',
@@ -258,6 +269,8 @@ function vendorWire(w: World) {
       condition: 'OK',
       condition_findings: [],
       parcel_photo_ids: [],
+      // The API names the vendor now (Run G1, Part 1 item 4): from the stop's dispatch snapshot.
+      vendor_name: 'Fixture Sender',
     };
   }
   return checkInFixture(PARCELS, {
@@ -282,6 +295,9 @@ function orderWire(order: StoredOrder): Record<string, unknown> {
     pickup_intake_id: VENDOR_ID,
     intake_parcel_id: order.parcelless === true ? null : (parcelOf(order.parcel)?.id ?? null),
     intake_parcel_state: order.parcelless === true ? null : 'ARRIVED',
+    // The picture of the parcel the order is made for (Run G1, D-S7-14): null for a vendor counted without photos.
+    intake_parcel_photo_evidence_id:
+      order.parcelless === true ? null : (parcelOf(order.parcel)?.photo_evidence_id ?? null),
     size_class: order.size,
     locked_price: frozen ? money(order.price) : null,
     price_status: order.status,
@@ -323,7 +339,10 @@ function orderWire(order: StoredOrder): Record<string, unknown> {
 
 function rowOf(w: World, ordinal: number) {
   const order = orderForParcel(w, ordinal);
-  if (order === undefined) return parcelRow(ordinal, 'NEEDS_ORDER');
+  const mark = w.waiting.get(ordinal);
+  if (order === undefined) {
+    return parcelRow(ordinal, 'NEEDS_ORDER', mark === undefined ? {} : { waiting: mark });
+  }
   return parcelRow(ordinal, order.status === 'FROZEN' ? 'ITEMIZED' : 'PREPARED', {
     order: {
       id: order.id,
@@ -339,8 +358,8 @@ function rowOf(w: World, ordinal: number) {
   });
 }
 
-/** The most rows a page of the worklist holds when the browser does not say (the contract's page size is smaller than a long vendor). */
-const PAGE_SIZE = 100;
+/** The most rows a page of the worklist holds when the browser does not say: the API's own default, twenty-five (a long vendor is worked a page at a time). */
+const PAGE_SIZE = 25;
 
 /**
  * The worklist of a vendor counted without photos: its rows are its orders (it has no parcel to list), the work still to do is a number (the count less the orders, which opens no rows), and the view of the
@@ -392,7 +411,9 @@ function worklistWire(w: World, view: string | null, pageSize: number, offset: n
       ? row.work_state === 'NEEDS_ORDER'
       : view === 'itemized'
         ? row.work_state === 'ITEMIZED'
-        : true,
+        : view === 'waiting_for_vendor'
+          ? row.parcel.waiting_for_vendor !== null
+          : true,
   );
   // A page at a time, from the place the token names: the token of the next page is where it begins, and there is none after the last.
   const items = wanted.slice(offset, offset + pageSize);
@@ -406,6 +427,7 @@ function worklistWire(w: World, view: string | null, pageSize: number, offset: n
       prepared: w.orders.filter((each) => each.status !== 'FROZEN').length,
       orders: made,
       payment_required: w.orders.filter((each) => (each.sender ?? 0) > 0).length,
+      waiting_for_vendor: w.waiting.size,
     },
     { intake_state: w.vendorState, next_page_token: next },
   );
@@ -476,6 +498,42 @@ function correctionWire(w: World, stored: StoredCorrection) {
   });
 }
 
+/** The stand-in server's zones: an address that names nowhere matches no zone of the hub (D-S7-5), and the officer then chooses one of the hub's and says why. */
+const UNMATCHED_ADDRESS = /nowhere/i;
+const addressOf = (body: Record<string, unknown>): string | undefined => {
+  const address = asRecordOf(asRecordOf(body.recipient).location).address;
+  return typeof address === 'string' ? address : undefined;
+};
+function asRecordOf(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+/** The refusal of an address no zone matches, as the API words it, unless the officer already chose a zone for it. */
+const unresolved = (body: Record<string, unknown>) => {
+  const address = addressOf(body);
+  return address !== undefined &&
+    UNMATCHED_ADDRESS.test(address) &&
+    body.destination_zone_authorization === undefined
+    ? error(422, 'SETTING_MISSING', { rule: 'destination_zone_unresolved' })
+    : undefined;
+};
+/** What a zone the officer chose is called in the terms: the hub's own list names it. */
+const chosenZone = (body: Record<string, unknown>) => {
+  const chosen = asRecordOf(body.destination_zone_authorization).zone_id;
+  const zones = (captured('destination-zones') as { items: { zone_id: string; name: string }[] })
+    .items;
+  return zones.find((zone) => zone.zone_id === chosen);
+};
+/** The terms of a price when the officer chose the zone: the resolution says so, and the zone is the one chosen. */
+const zoneOverrides = (body: Record<string, unknown>): Record<string, unknown> => {
+  const zone = chosenZone(body);
+  if (zone === undefined) return {};
+  const snapshot = captured('preview').destination_zone_snapshot as Record<string, unknown>;
+  return {
+    destination_zone_resolution: 'EXPLICITLY_AUTHORIZED',
+    destination_zone_snapshot: { ...snapshot, zone_id: zone.zone_id, zone_name: zone.name },
+  };
+};
+
 const parsed = (text: string | null): unknown => {
   if (text === null) return undefined;
   try {
@@ -486,6 +544,24 @@ const parsed = (text: string | null): unknown => {
 };
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+
+/** A price check that meets the fault the world holds is answered with it, once for each of its times: a lost connection, a fault of the server, or a 429 with the wait it asks for. */
+async function faultOf(route: Route, w: World): Promise<boolean> {
+  const fault = w.previewFault;
+  if (fault === undefined || fault.times <= 0) return false;
+  fault.times -= 1;
+  if (fault.kind === 'network') {
+    await route.abort('failed');
+  } else if (fault.kind === 'server') {
+    await route.fulfill(error(500, 'INTERNAL_ERROR'));
+  } else {
+    await route.fulfill({
+      ...error(429, 'RATE_LIMITED'),
+      headers: { ...JSON_HEADERS, 'retry-after': String(fault.retryAfterSeconds) },
+    });
+  }
+  return true;
+}
 
 async function answer(route: Route, state: OrdersApi, call: Call): Promise<void> {
   const { world: w } = state;
@@ -515,6 +591,48 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
         authorized_hubs: [{ id: IDS.hub, display_name: 'Accra Hub' }],
       }),
     );
+  }
+
+  // The hub's own zones, for an address that matches none (D-S7-5).
+  if (method === 'GET' && path === `/api/v1/hub-intakes/${VENDOR_ID}/destination-zones`) {
+    if (await needs('hub.intake.itemize')) return;
+    return route.fulfill(ok(captured('destination-zones')));
+  }
+  // A parcel the officer is waiting on the vendor's details for (D-S7-12): the server holds the mark, on the vendor's version, which the mark does not move; a note that holds a number is refused on the note.
+  const waits = id(/^\/api\/v1\/intake-parcels\/([0-9a-f-]{36})\/waiting-for-vendor$/);
+  if (method === 'PUT' && waits !== undefined) {
+    if (await needs('hub.intake.itemize')) return;
+    if (call.ifMatch === undefined) {
+      return route.fulfill(
+        error(400, 'VALIDATION_FAILED', {
+          violations: [{ in: 'header', pointer: '/If-Match', rule: 'required' }],
+        }),
+      );
+    }
+    if (call.ifMatch !== vendorEtag(w)) {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
+    }
+    const ordinal = PARCELS.findIndex((each) => each.id === waits) + 1;
+    if (ordinal === 0) return route.fulfill(error(404, 'NOT_FOUND'));
+    if (orderForParcel(w, ordinal) !== undefined) {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'parcel_ordered' }));
+    }
+    const note = typeof body.note === 'string' ? body.note : null;
+    if (body.waiting === true) {
+      if (note !== null && /(?:\+?\d[\s().-]?){7,}/.test(note)) {
+        return route.fulfill(
+          error(400, 'VALIDATION_FAILED', {
+            violations: [{ in: 'body', pointer: '/note', rule: 'phone_number' }],
+          }),
+        );
+      }
+      w.waiting.set(ordinal, { since: '2026-11-03T08:12:00.000Z', note });
+      return route.fulfill(
+        ok({ parcel_id: waits, waiting: true, since: '2026-11-03T08:12:00.000Z', note }),
+      );
+    }
+    w.waiting.delete(ordinal);
+    return route.fulfill(ok({ parcel_id: waits, waiting: false, since: null, note: null }));
   }
 
   // The vendors a hub cleared for their orders, as the list counts them: the orders made and the parcels still to order are the count of the whole vendor (D-S7-6), and the vendors that wait for a senior officer are a
@@ -571,8 +689,11 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
   // The price, checked before anything is saved: the stand-in's server works it out and writes nothing.
   if (method === 'POST' && path === `/api/v1/hub-intakes/${VENDOR_ID}/orders/preview`) {
     if (await needs('hub.intake.itemize')) return;
+    if (await faultOf(route, w)) return;
     const size = SIZES.find((each) => each === body.size_class);
     if (size === undefined) return route.fulfill(error(422, 'SIZE_CLASS_REQUIRED'));
+    const unmatched = unresolved(body);
+    if (unmatched !== undefined) return route.fulfill(unmatched);
     const parcel = typeof body.parcel_id === 'string' ? body.parcel_id : undefined;
     // A parcel that has an order is not priced for another: the preview refuses it as the save does.
     const ordinal = PARCELS.findIndex((each) => each.id === parcel) + 1;
@@ -584,7 +705,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     return route.fulfill(
       ok(
         termsOf(
-          { parcel_id: body.parcel_id ?? null },
+          { parcel_id: body.parcel_id ?? null, ...zoneOverrides(body) },
           price,
           tokenOf(size, price, parcel, termsOfBody(body)),
         ),
@@ -609,6 +730,8 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (call.ifMatch !== vendorEtag(w)) {
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
     }
+    const unmatched = unresolved(body);
+    if (unmatched !== undefined) return route.fulfill(unmatched);
     const size = SIZES.find((each) => each === body.size_class);
     const parcelId = typeof body.parcel_id === 'string' ? body.parcel_id : undefined;
     // A vendor counted without photos makes its orders for no parcel, as many as it counted and no more: the next is the one after those made.
@@ -618,6 +741,13 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
       : PARCELS.findIndex((each) => each.id === parcelId) + 1;
     if (size === undefined || ordinal === 0)
       return route.fulfill(error(422, 'SIZE_CLASS_REQUIRED'));
+    // Another officer made the order for this parcel while this one was being filled in.
+    if (!blind && w.takenAtSave === ordinal && orderForParcel(w, ordinal) === undefined) {
+      w.orders.push(storedOrder(ordinal));
+      w.waiting.delete(ordinal);
+      if (w.vendorState === 'READY_FOR_ITEMIZATION') w.vendorState = 'ITEMIZING';
+      w.takenAtSave = undefined;
+    }
     if (blind ? w.orders.length >= w.parcelCount : orderForParcel(w, ordinal) !== undefined) {
       return route.fulfill(
         error(409, 'STATE_CONFLICT', {
@@ -656,6 +786,8 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
           : '',
     });
     w.orders.push(made);
+    // The server clears the mark of a parcel when its order is made (D-S7-12).
+    w.waiting.delete(ordinal);
     // The first order of a vendor moves it from ready to being worked, and its version with it.
     if (w.vendorState === 'READY_FOR_ITEMIZATION') w.vendorState = 'ITEMIZING';
     const saved = { ...orderWire(made) };
@@ -747,6 +879,23 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (typeof body.note !== 'string' || body.note.trim() === '') {
       return route.fulfill(error(422, 'REASON_REQUIRED'));
     }
+    // What the API refuses by the place it names (Run G1, Part 1 item 5 and the places of the recipient): a name left empty, a phone that is not a number, and a reason that holds a number.
+    const given = asRecord(body.recipient);
+    const violations: { in: string; pointer: string; rule: string }[] = [];
+    if (typeof given.name === 'string' && given.name.trim() === '') {
+      violations.push({ in: 'body', pointer: '/recipient/name', rule: 'required' });
+    }
+    if (
+      typeof given.phone === 'string' &&
+      !/^(?:\+|00)?\d{9,15}$/.test(given.phone.replace(/[\s().-]/g, ''))
+    ) {
+      violations.push({ in: 'body', pointer: '/recipient/phone', rule: 'format' });
+    }
+    if (/(?:\+?\d[\s().-]?){7,}/.test(body.note)) {
+      violations.push({ in: 'body', pointer: '/note', rule: 'phone_number' });
+    }
+    if (violations.length > 0)
+      return route.fulfill(error(400, 'VALIDATION_FAILED', { violations }));
     if (call.ifMatch !== `"o${String(order.version)}"`) {
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'stale' }));
     }
@@ -790,6 +939,9 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (await needs('hub.intake.itemize')) return;
     const order = orderById(w, amendPreview);
     if (order === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
+    if (await faultOf(route, w)) return;
+    const unmatched = unresolved(body);
+    if (unmatched !== undefined) return route.fulfill(unmatched);
     const size = SIZES.find((each) => each === body.size_class) ?? order.size;
     const facts = termsOfBody(body);
     await pause(w.previewDelayMs);
@@ -800,6 +952,10 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
             order_id: order.id,
             order_version: order.version,
             status: 'CURRENT_PREVIEW',
+            // An order made before the parcel is checked in for good is confirmed when its arrival is committed, and keeps its quote until then (5.117.0): the preview says so.
+            will_confirm:
+              order.status === 'EARLY_QUOTE' ? 'WHEN_ARRIVAL_IS_COMMITTED' : 'ON_CONFIRMATION',
+            ...zoneOverrides(body),
             // What the order holds now, as the API gives it: the quote beside which the amendment is read.
             current: {
               ...(captured('amend-preview').current as Record<string, unknown>),
@@ -917,7 +1073,11 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
   }
   if (method === 'GET' && path === '/api/v1/hub-intake-exceptions') {
     if (await needs('hub.intake.close_exception')) return;
-    const item = (captured('closed-exceptions').items as Record<string, unknown>[])[0] ?? {};
+    const item =
+      (captured('closed-exceptions-named').items as Record<string, unknown>[]).find(
+        (each) =>
+          each.receiving_mode === (w.mode === 'BLIND_COUNT' ? 'BLIND_COUNT' : 'PHOTO_CHECK_IN'),
+      ) ?? {};
     return route.fulfill(ok({ items: [{ ...item, intake_id: VENDOR_ID }], next_page_token: null }));
   }
   if (method === 'GET' && path === '/api/v1/notifications') {
