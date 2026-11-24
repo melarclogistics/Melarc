@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
 
 import { CardFacts } from '../../../components/ui/card-facts/CardFacts';
 import {
@@ -60,6 +61,9 @@ const nameOf = (item: ItemizableIntakeView): string => item.vendor_name ?? item.
  */
 export function OrdersToMakePage() {
   const me = useSignedInSession();
+  const [params] = useSearchParams();
+  // The reason a senior is needed, and the act of it, are of the one view that lists what a senior decides (D-S7-11): the other two have no such column, empty or not.
+  const seniorView = params.get('view') === 'NEEDS_SENIOR';
   if (me === undefined) return null;
   const seniorAct = (item: ItemizableIntakeView): ReactNode => {
     if (item.senior_needed === 'ARRIVAL_TAKEN_BACK') {
@@ -109,12 +113,17 @@ export function OrdersToMakePage() {
           <NoWrap>{K.ordersLine(item.orders_made, item.parcels_needing_order)}</NoWrap>
         ),
     },
-    {
-      id: 'why',
-      header: K.columns.why,
-      cell: (item) => (item.senior_needed === null ? '' : K.senior[item.senior_needed]),
-    },
-    { id: 'act', header: '', cell: (item) => seniorAct(item) },
+    ...(seniorView
+      ? [
+          {
+            id: 'why',
+            header: K.columns.why,
+            cell: (item: ItemizableIntakeView) =>
+              item.senior_needed === null ? '' : K.senior[item.senior_needed],
+          },
+          { id: 'act', header: '', cell: (item: ItemizableIntakeView) => seniorAct(item) },
+        ]
+      : []),
     {
       id: 'handedOver',
       header: K.columns.handedOver,

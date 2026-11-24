@@ -237,6 +237,7 @@ describe('how many orders a vendor has, and the vendors that wait for a senior (
       await user.click(viewTab(view));
       const rows = within(await table());
       await rows.findByRole('link', { name: 'Fixture Sender' });
+      expect(rows.queryByRole('columnheader', { name: 'Why a senior' })).toBeNull();
       expect(rows.queryByText('A senior officer decides.')).toBeNull();
       expect(rows.queryByText(/Parcels are still to be ordered/)).toBeNull();
     }
@@ -253,6 +254,7 @@ describe('how many orders a vendor has, and the vendors that wait for a senior (
     expect(
       await rows.findByText('An arrival was taken back. A senior officer reviews it.'),
     ).toBeVisible();
+    expect(rows.getByRole('columnheader', { name: 'Why a senior' })).toBeVisible();
     expect(reads().some((read) => read.get('view') === 'needs_senior')).toBe(true);
     // An officer is told who decides, and is given no act of the senior's.
     expect(rows.getAllByText('A senior officer decides.')).toHaveLength(1);
