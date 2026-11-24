@@ -10,6 +10,7 @@ import {
 import { MANIFEST_ID } from '../../../test-support/manifest-fixture';
 import {
   blindRow,
+  captured,
   PARCELS,
   parcelRow,
   VENDOR_ID,
@@ -256,6 +257,30 @@ describe('a vendor counted without photos', () => {
       },
       keys,
     );
+
+  // Break caught (Run G1, Part 2, item 9): a vendor counted without photos named by its run (a read of its own, for this page alone) or not named at all: the record names it, and nothing else is read for the name.
+  it('is named by the vendor the record names, with no other read for the name', async () => {
+    open({
+      [RECORD]: () =>
+        json(
+          200,
+          { ...captured('intake-blind-named'), id: VENDOR_ID, state: 'ITEMIZING' },
+          { ETag: '"v1"' },
+        ),
+      [LIST]: () =>
+        json(
+          200,
+          worklistOf(
+            [blindRow(1)],
+            { received: 3, needs_order: 2, itemized: 1, orders: 1, awaiting_arrival: 0 },
+            { receiving_mode: 'BLIND_COUNT' },
+          ),
+        ),
+    });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Orders for Fixture Sender' }),
+    ).toBeVisible();
+  });
 
   // Break caught: how many more orders are needed worked out by the page, or the count awaited drawn as zero.
   it('says how many more orders are needed, as the server counted them', async () => {

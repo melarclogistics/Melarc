@@ -74,6 +74,23 @@ const sent = (route: string) =>
       `${request.method} ${new URL(request.url).pathname.replace('/api/v1', '')}` === route,
   );
 
+describe('the summary of a vendor counted without photos (Run G1, Part 2, item 9)', () => {
+  // Break caught: the summary of a vendor counted without photos titled by nothing.
+  it('is named by the vendor the record names', async () => {
+    open({
+      [RECORD]: () =>
+        json(
+          200,
+          { ...captured('intake-blind-named'), id: VENDOR_ID, state: 'CLOSED' },
+          { ETag: '"v1"' },
+        ),
+    });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Summary for Fixture Sender' }),
+    ).toBeVisible();
+  });
+});
+
 describe('the summary of a closed vendor', () => {
   // Break caught: a summary that draws what the receiving side holds (the rider's number, the parcels, the count), a price worked out by the page, or an identifier on the screen.
   it('lists the orders made and where each stands, with the price the server gave, and nothing of the receiving side', async () => {

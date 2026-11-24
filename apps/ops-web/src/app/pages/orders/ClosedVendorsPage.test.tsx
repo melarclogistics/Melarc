@@ -78,6 +78,30 @@ describe('the vendors closed with parcels still to order', () => {
     expect(screen.queryByText(DIAGNOSTIC)).toBeNull();
   });
 
+  // Break caught (Run G1, Part 2, item 9): a closed vendor told by its code alone (a vendor counted without photos has no other name on the page), or the code lost when the vendor is named: the name is the title,
+  // the code and how it was received stay beneath it, and the row opens the vendor by name.
+  it('names each closed vendor by its vendor, with its code and how it was received beneath', async () => {
+    const named = captured('closed-exceptions-named') as { items: Record<string, unknown>[] };
+    open({ [LIST]: () => json(200, named) });
+    const rows = within(await table());
+    expect(rows.getAllByRole('button', { name: 'Open the vendor: Fixture Sender' })).toHaveLength(
+      2,
+    );
+    // The vendor's name is what each row is titled by (the row header), and the code stays beneath it.
+    const headers = rows.getAllByRole('rowheader');
+    expect(headers).toHaveLength(2);
+    for (const header of headers) {
+      expect(within(header).getByText('Fixture Sender')).toBeVisible();
+    }
+    for (const item of named.items) {
+      const how =
+        item.receiving_mode === 'BLIND_COUNT'
+          ? 'Counted without photos'
+          : 'Checked in against photos';
+      expect(rows.getByText(`${item.intake_code as string} · ${how}`)).toBeVisible();
+    }
+  });
+
   // Break caught: the counts of the vendor drawn from the page's own sums, an act that adds an order to a closed vendor, or a summary offered to an account that cannot read it.
   it('opens the vendor beside the list with its counts, and leads to the vendor and to its summary', async () => {
     const { user } = open();

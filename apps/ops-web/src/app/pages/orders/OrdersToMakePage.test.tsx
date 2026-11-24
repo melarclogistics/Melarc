@@ -120,6 +120,21 @@ describe('the vendors with orders to make', () => {
     expect(rows.queryByText('Fixture Sender')).toBeNull();
   });
 
+  // Break caught (Run G1, Part 2, item 9): a vendor counted without photos told by its code alone, so that an officer cannot tell one from another, or its code lost: the vendor's name is the link and the code
+  // stays under it with how it was counted.
+  it('names a vendor counted without photos by its vendor, with its code and how it was counted beneath', async () => {
+    const named =
+      (captured('intakes-ready-blind-named') as { items: Record<string, unknown>[] }).items[0] ??
+      {};
+    open({ [LIST]: byState([named], []) });
+    const rows = within(await table());
+    expect(rows.getByRole('link', { name: 'Fixture Sender' })).toHaveAttribute(
+      'href',
+      `/intakes/${named.id as string}/orders`,
+    );
+    expect(rows.getByText(`${named.code as string} · Counted without photos`)).toBeVisible();
+  });
+
   // Break caught (the review of 23 November 2026, item 16): a row that opens a panel holding less than the page it leads to, so that an officer opens a row to find the link to the row. The vendor's name is the
   // link to its orders, and no panel is drawn.
   it('opens the vendor’s orders from its name, with no panel between', async () => {

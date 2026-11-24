@@ -15,6 +15,7 @@ import {
   preCountFixture,
   shortCountFixture,
 } from '../../test-support/hub-intake-fixture';
+import { captured } from '../../test-support/orders-fixture';
 import {
   parseFinding,
   parseIntake,
@@ -50,6 +51,7 @@ describe('an intake that has not been counted', () => {
       active_receiver_id: INTAKE_RECEIVER_ID,
       lock_acquired_at: '2026-11-14T09:10:00Z',
       state: 'AWAITING_COUNT',
+      vendor_name: null,
       count_phase: 'PRE_COUNT',
     });
     expect(Object.keys(intake ?? {})).not.toContain('rider_declared_count');
@@ -90,6 +92,26 @@ describe('an intake that has not been counted', () => {
     expect(parseIntake(preCountFixture({ state: 'READY_FOR_ITEMIZATION' }))).toBeUndefined();
     expect(parseIntake(postCountFixture({ state: 'AWAITING_COUNT' }))).toBeUndefined();
   });
+});
+
+describe('the vendor of an intake counted without photos (Run G1, Part 2, item 9)', () => {
+  // Break caught: a vendor counted without photos that the order screens can only call by its code (the API names it now, from the stop's dispatch snapshot), or a name taken from somewhere else.
+  it('is named by the vendor the API names, counted or not, and by nothing where it names none', () => {
+    expect(parseIntake(captured('intake-blind-named'))?.vendor_name).toBe('Fixture Sender');
+    expect(parseIntake({ ...preCountFixture(), vendor_name: 'Kente Crafts' })?.vendor_name).toBe(
+      'Kente Crafts',
+    );
+    expect(parseIntake(preCountFixture())?.vendor_name).toBeNull();
+    expect(parseIntake({ ...postCountFixture(), vendor_name: null })?.vendor_name).toBeNull();
+  });
+
+  // Break caught: a name that is not text (a number, an object, a line with a control character) given to a screen as the vendor's name.
+  it.each([7, {}, ['Kente'], '', 'Kente\nCrafts', 'x'.repeat(500)])(
+    'refuses a name that is %j',
+    (name) => {
+      expect(parseIntake({ ...preCountFixture(), vendor_name: name })).toBeUndefined();
+    },
+  );
 });
 
 describe('an intake that has been counted', () => {

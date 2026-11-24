@@ -50,7 +50,16 @@ export function ClosedVendorsPage() {
       id: 'vendor',
       header: K.columns.vendor,
       rowHeader: true,
-      cell: (item) => <RowTitle title={item.intake_code} name={K.modes[item.receiving_mode]} />,
+      cell: (item) => (
+        <RowTitle
+          title={item.vendor_name ?? item.intake_code}
+          name={
+            item.vendor_name === null
+              ? K.modes[item.receiving_mode]
+              : K.modeLine(item.intake_code, K.modes[item.receiving_mode])
+          }
+        />
+      ),
     },
     {
       id: 'closed',
@@ -95,7 +104,7 @@ export function ClosedVendorsPage() {
         table={{
           columns,
           density: 'touch',
-          openLabel: (item) => `${K.acts.openVendor}: ${item.intake_code}`,
+          openLabel: (item) => `${K.acts.openVendor}: ${item.vendor_name ?? item.intake_code}`,
           card: (item) => (
             <CardFacts
               facts={[
@@ -104,7 +113,7 @@ export function ClosedVendorsPage() {
               ]}
             />
           ),
-          cardTitle: (item) => item.intake_code,
+          cardTitle: (item) => item.vendor_name ?? item.intake_code,
         }}
         panel={(item) => ({
           code: item.intake_code,

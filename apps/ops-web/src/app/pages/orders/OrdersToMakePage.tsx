@@ -85,7 +85,13 @@ export function OrdersToMakePage() {
       cell: (item) => (
         <RowTitle
           title={nameOf(item)}
-          name={item.vendor_name === null ? K.blind : item.code}
+          name={
+            item.mode === 'BLIND_COUNT'
+              ? item.vendor_name === null
+                ? K.blind
+                : K.blindLine(item.code)
+              : item.code
+          }
           to={ordersPath(item.id)}
         />
       ),

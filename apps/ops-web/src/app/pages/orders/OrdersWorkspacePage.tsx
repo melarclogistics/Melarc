@@ -519,9 +519,8 @@ export function OrdersWorkspacePage() {
   );
 }
 
-/** The workspace for a record: the vendor's name is the record's own for a vendor checked in against its photos (a vendor counted without photos has none, and is told by its code). */
+/** The workspace for a record: the vendor's name is the record's own, for a vendor checked in against its photos and for one counted without them (Run G1, Part 2, item 9). */
 function NamedWorkspace({ record }: { readonly record: IntakeRecordView }) {
   const facts = vendorFactsOf(record);
-  const name = record.kind === 'check-in' ? record.view.vendor_name : undefined;
-  return <Workspace facts={facts} name={name} />;
+  return <Workspace facts={facts} name={facts.name ?? undefined} />;
 }

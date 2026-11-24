@@ -388,7 +388,7 @@ function Closing({
     { readonly read: number; readonly closure: ClosureView } | undefined
   >(undefined);
   const replacement = answered?.read === read.dataUpdatedAt ? answered.closure : undefined;
-  const vendorName = record.kind === 'check-in' ? record.view.vendor_name : undefined;
+  const vendorName = facts.name ?? undefined;
   return (
     <ReadState<ClosureView>
       query={read}

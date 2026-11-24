@@ -543,7 +543,7 @@ function Entry({
     pageSize: 1,
     enabled: blind && facts.cleared && !facts.closed,
   });
-  const vendorName = record.kind === 'check-in' ? record.view.vendor_name : undefined;
+  const vendorName = facts.name ?? undefined;
 
   if (facts.closed) return <NothingToOrder facts={facts} words={F.closedVendor} />;
   if (blind) {

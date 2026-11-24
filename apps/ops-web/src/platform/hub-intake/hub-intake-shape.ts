@@ -2,6 +2,7 @@ import type { components } from '@melarc/api-client';
 
 import { MAX_COUNT } from '../api/count-range';
 import { OPERATIONAL_CODE } from '../pickup/pickup-shape';
+import { nameOf } from './display-name';
 import { instantOf, isOneOf, isRecord, optional, uuidListOf, uuidOf } from '../staff/staff-shape';
 
 /**
@@ -121,6 +122,8 @@ export interface IntakeBaseView {
   /** The last time the holder showed it was working: the database's moment, refreshed by the holder. */
   readonly lock_acquired_at: string | null;
   readonly state: IntakeState;
+  /** The vendor by name, as the API names it (from the stop's dispatch snapshot, Run G1 Part 1 item 4), so that no screen calls a vendor counted without photos by its code alone. Null where the API names none. No part of the intake's version. */
+  readonly vendor_name: string | null;
 }
 
 /** An intake that has not been counted: **no declaration, no count, no comparison, no photo** (the type has no place for one). */
@@ -211,6 +214,7 @@ function parseBase(body: Record<string, unknown>): IntakeBaseView | undefined {
   const captured = instantOf(body.declaration_captured_at);
   const receiver = optional(body.active_receiver_id, uuidOf);
   const lockedAt = optional(body.lock_acquired_at, instantOf);
+  const vendor = optional(body.vendor_name, nameOf);
   if (
     id === undefined ||
     code === undefined ||
@@ -222,6 +226,7 @@ function parseBase(body: Record<string, unknown>): IntakeBaseView | undefined {
     captured === undefined ||
     receiver === undefined ||
     lockedAt === undefined ||
+    vendor === undefined ||
     !isOneOf(INTAKE_STATES, body.state)
   ) {
     return undefined;
@@ -237,6 +242,7 @@ function parseBase(body: Record<string, unknown>): IntakeBaseView | undefined {
     active_receiver_id: receiver,
     lock_acquired_at: lockedAt,
     state: body.state,
+    vendor_name: vendor,
   };
 }
 

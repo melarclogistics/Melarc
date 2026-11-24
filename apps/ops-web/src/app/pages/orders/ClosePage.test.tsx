@@ -9,6 +9,7 @@ import {
 } from '../../../test-support/interface-states';
 import {
   ASSESSMENT,
+  captured,
   closureOf,
   NEW_ASSESSMENT,
   PARCELS,
@@ -80,6 +81,23 @@ const withParcelLeft = (overrides: Record<string, unknown> = {}) =>
     assessment_token: ASSESSMENT,
     ...overrides,
   });
+
+describe('the close of a vendor counted without photos (Run G1, Part 2, item 9)', () => {
+  // Break caught: the close of a vendor counted without photos titled by nothing (it is the one act that cannot be taken back, and the officer must know which vendor it is for).
+  it('is named by the vendor the record names', async () => {
+    open({
+      [RECORD]: () =>
+        json(
+          200,
+          { ...captured('intake-blind-named'), id: VENDOR_ID, state: 'ITEMIZING' },
+          { ETag: '"v1"' },
+        ),
+    });
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Close Fixture Sender' }),
+    ).toBeVisible();
+  });
+});
 
 describe('closing a vendor that has parity', () => {
   // Break caught: a figure worked out by the page, a close without the assessment the officer read, a close with no key or no version, or a vendor said to be paid when it is only closed.

@@ -1,0 +1,33 @@
+{
+  "items": [
+    {
+      "intake_id": "01a124d3-7400-7533-b8f2-20553383ce74",
+      "intake_code": "ACC-IN-84JZ9N",
+      "vendor_name": "Fixture Sender",
+      "pickup_request_id": "b4efb7c8-05c7-4325-97ef-aede60295051",
+      "responsible_hub_id": "5eed0100-0000-4000-8000-000000000001",
+      "receiving_mode": "BLIND_COUNT",
+      "closed_at": "2026-11-24T13:15:45.965Z",
+      "closed_by": "0596afc6-91d5-4932-9864-59403ff271cb",
+      "exception_note": "The rest comes tomorrow",
+      "received": 3,
+      "ordered": 1,
+      "outstanding_count": 2
+    },
+    {
+      "intake_id": "01a124d3-7400-7dfa-a969-02da3b718f6e",
+      "intake_code": "ACC-IN-YDK5ZS",
+      "vendor_name": "Fixture Sender",
+      "pickup_request_id": "45ea4f2f-f1a6-4327-a909-2597e5b52295",
+      "responsible_hub_id": "5eed0100-0000-4000-8000-000000000001",
+      "receiving_mode": "PHOTO_CHECK_IN",
+      "closed_at": "2026-11-24T13:15:44.004Z",
+      "closed_by": "0596afc6-91d5-4932-9864-59403ff271cb",
+      "exception_note": "Two parcels are on the rider’s bike",
+      "received": 3,
+      "ordered": 1,
+      "outstanding_count": 2
+    }
+  ],
+  "next_page_token": null
+}

@@ -14,7 +14,7 @@ export interface ItemizableIntakeView {
   readonly code: string;
   readonly state: IntakeState;
   readonly mode: 'PHOTO_CHECK_IN' | 'BLIND_COUNT';
-  /** The vendor's name where the list carries it (a vendor checked in against photos); null for a vendor counted without photos. */
+  /** The vendor's name where the list carries it (a vendor checked in against photos, and, since Run G1, one counted without them); null where it names none. */
   readonly vendor_name: string | null;
   readonly run_code: string | null;
   readonly pickup_manifest_id: string;
@@ -79,7 +79,7 @@ function parseItem(entry: unknown): ItemizableIntakeView | undefined {
     code: intake.code,
     state: intake.state,
     mode: 'BLIND_COUNT',
-    vendor_name: null,
+    vendor_name: intake.vendor_name,
     run_code: null,
     pickup_manifest_id: intake.pickup_manifest_id,
     handed_over_at: intake.handed_over_at,

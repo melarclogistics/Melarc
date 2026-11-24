@@ -411,6 +411,20 @@ describe('the close', () => {
     ).toBeUndefined();
   });
 
+  // Break caught: a closed vendor named by its code alone, or a name read from the wrong member, in the list a senior finds the work a close left behind in (Run G1, Part 2, item 9).
+  it('names each closed vendor by its vendor, counted without photos or not', () => {
+    const page = parseClosedExceptionPage(load('closed-exceptions-named'));
+    expect(page?.items.map((item) => [item.receiving_mode, item.vendor_name])).toEqual([
+      ['BLIND_COUNT', 'Fixture Sender'],
+      ['PHOTO_CHECK_IN', 'Fixture Sender'],
+    ]);
+    // The captured list of Run F named none, and says so as no name.
+    expect(parseClosedExceptionPage(load('closed-exceptions'))?.items[0]?.vendor_name).toBeNull();
+    const broken = copy(load('closed-exceptions-named')) as { items: { vendor_name: unknown }[] };
+    broken.items[0] = { ...broken.items[0], vendor_name: 7 };
+    expect(parseClosedExceptionPage(broken)).toBeUndefined();
+  });
+
   it('accepts the closes that left work, newest first, and none that has nothing left', () => {
     const page = parseClosedExceptionPage(load('closed-exceptions'));
     expect(page?.items).toHaveLength(1);
@@ -546,6 +560,13 @@ describe('the vendors a hub has cleared for their orders', () => {
     expect(page?.items.length).toBeGreaterThan(0);
     expect(page?.items[0]).toMatchObject({ mode: 'PHOTO_CHECK_IN', state: 'ITEMIZING' });
     expect(page?.items[0]?.vendor_name).not.toBeNull();
+  });
+
+  // Break caught: a vendor counted without photos, in the list of vendors, called by its code alone, so that an officer cannot tell one from another (Run G1, Part 2, item 9).
+  it('names a vendor counted without photos by its vendor', () => {
+    const page = parseIntakeListPage(load('intakes-ready-blind-named'));
+    expect(page?.items).toHaveLength(1);
+    expect(page?.items[0]).toMatchObject({ mode: 'BLIND_COUNT', vendor_name: 'Fixture Sender' });
   });
 
   it('accepts the vendors that are ready for their first order', () => {

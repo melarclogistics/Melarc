@@ -1,6 +1,7 @@
 import type { components } from '@melarc/api-client';
 
 import { MAX_COUNT } from '../api/count-range';
+import { nameOf } from '../hub-intake/display-name';
 import type { VendorMode } from '../hub-receiving/receiving-shape';
 import {
   OPERATIONAL_CODE,
@@ -1120,6 +1121,8 @@ export interface ClosedExceptionView {
   readonly pickup_request_id: string;
   readonly responsible_hub_id: string;
   readonly receiving_mode: VendorMode;
+  /** The vendor by name, as the API names it (Run G1, Part 1 item 4), so that a closed vendor is not told by its code alone; null where it names none. */
+  readonly vendor_name: string | null;
   readonly closed_at: string;
   readonly closed_by: string;
   readonly exception_note: string | null;
@@ -1137,10 +1140,12 @@ export function parseClosedException(body: unknown): ClosedExceptionView | undef
   const closedAt = instantOf(body.closed_at);
   const closedBy = uuidOf(body.closed_by);
   const note = optional(body.exception_note, noteOf);
+  const vendor = optional(body.vendor_name, nameOf);
   const received = whole(body.received);
   const ordered = whole(body.ordered);
   const outstanding = whole(body.outstanding_count);
   if (
+    vendor === undefined ||
     intakeId === undefined ||
     code === undefined ||
     request === undefined ||
@@ -1162,6 +1167,7 @@ export function parseClosedException(body: unknown): ClosedExceptionView | undef
     pickup_request_id: request,
     responsible_hub_id: hub,
     receiving_mode: body.receiving_mode,
+    vendor_name: vendor,
     closed_at: closedAt,
     closed_by: closedBy,
     exception_note: note,

@@ -799,6 +799,8 @@ export const ORDERS_WORDS = {
       mode: 'How it was received',
     },
     modes: { PHOTO_CHECK_IN: 'Checked in against photos', BLIND_COUNT: 'Counted without photos' },
+    /** The line under a closed vendor named by its vendor: its code, and how it was received (Run G1, Part 2, item 9). */
+    modeLine: (code: string, how: string): string => `${code} · ${how}`,
     noReason: 'No reason was recorded.',
     acts: { openVendor: 'Open the vendor', openSummary: 'See the summary' },
     stillCount: (count: number): string => (count === 1 ? '1 parcel' : `${String(count)} parcels`),
@@ -853,6 +855,8 @@ export const ORDERS_WORDS = {
     received: (count: number | null): string => (count === null ? 'Not counted' : parcels(count)),
     missing: (count: number): string => `${String(count)} missing`,
     blind: 'Counted without photos',
+    /** The line under a vendor counted without photos that is named by its vendor: its code, and how it was counted (Run G1, Part 2, item 9). */
+    blindLine: (code: string): string => `${code} · Counted without photos`,
     acts: { open: 'Make orders', openFor: (vendor: string): string => `Make orders for ${vendor}` },
   },
 } as const;

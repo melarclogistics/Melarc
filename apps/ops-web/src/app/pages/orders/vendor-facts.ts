@@ -9,6 +9,8 @@ import type { VendorMode } from '../../../platform/hub-receiving/receiving-shape
 export interface VendorFacts {
   readonly id: string;
   readonly code: string;
+  /** The vendor by name, as the record names it (a vendor checked in against photos, and one counted without them): the screens call a vendor by it and by its code only where there is none. */
+  readonly name: string | null;
   readonly state: IntakeState;
   readonly mode: VendorMode;
   readonly hubId: string;
@@ -29,6 +31,7 @@ export function vendorFactsOf(record: IntakeRecordView): VendorFacts {
     return {
       id: view.id,
       code: view.code,
+      name: view.vendor_name,
       state: view.state,
       mode: 'PHOTO_CHECK_IN',
       hubId: view.hub_id,
@@ -43,6 +46,7 @@ export function vendorFactsOf(record: IntakeRecordView): VendorFacts {
   return {
     id: intake.id,
     code: intake.code,
+    name: intake.vendor_name,
     state: intake.state,
     mode: 'BLIND_COUNT',
     hubId: intake.hub_id,

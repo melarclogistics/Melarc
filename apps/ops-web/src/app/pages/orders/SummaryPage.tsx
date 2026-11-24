@@ -234,7 +234,7 @@ export function SummaryPage() {
       {(record) => (
         <Summarizing
           id={vendorFactsOf(record).id}
-          name={record.kind === 'check-in' ? record.view.vendor_name : undefined}
+          name={vendorFactsOf(record).name ?? undefined}
           code={vendorFactsOf(record).code}
         />
       )}
