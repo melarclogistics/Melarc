@@ -7483,3 +7483,154 @@ describe('a vendor counted without photos is named by its vendor, on every read 
     expect(row?.vendor_name).not.toMatch(/ACC-IN-|name not available/);
   }, 180_000);
 });
+
+describe('a telephone number in a note is refused by every act of Stage 7 that takes one (Run G1, Part 1, item 5: the Product Owner’s decision of 24 November 2026)', () => {
+  const ORDER = (id: string): string => `${API}/orders/${id}`;
+  // The five forms an officer naturally types, as the brief names them. Each act is asked with each, and refuses it with a rule of its own on the field of the note.
+  const FORMS = [
+    ['a local number', 'the right number is 0244123456'],
+    ['a local number in groups of a space', 'ring 024 412 3456'],
+    ['a local number in groups of a hyphen', 'ring 024-412-3456'],
+    ['the international number without a plus', 'try 233244123456'],
+    ['the international number with a plus', 'try +233244123456'],
+  ] as const;
+  /** What the ledger must never hold: any of the numbers above, in any of their written forms. */
+  const NUMBER_IN_THE_LEDGER = '(024\\D*412\\D*3456|233\\D*244\\D*123\\D*456|0244123456)';
+
+  const violation = (
+    response: TestResponse,
+  ): [number, string | undefined, string | undefined, string | undefined] => {
+    const parsed = response.json() as {
+      code?: string;
+      details?: { violations?: { pointer?: string; rule?: string }[] };
+    };
+    const first = parsed.details?.violations?.[0];
+    return [response.status, parsed.code, first?.pointer, first?.rule];
+  };
+
+  // Break caught: a note that holds a number reaching the append-only ledger; an act that does not ask (so that its refusal is a 500 from the ledger after the act began); a refusal on the wrong field or with the
+  // rule of a shape ("format"), which tells the officer nothing; a refusal that changes something first.
+  it('refuses each form, on the note, with the rule phone_number, and leaves no number in the ledger', async () => {
+    const intake = await cleared(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    const made = orderOf(await itemize(officer, intake.id, body(a.id)));
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const orderEtag = async (actor: Actor): Promise<string> =>
+      (await actor.client.get(ORDER(made.id))).header('etag') ?? '';
+    const intakeEtag = async (actor: Actor): Promise<string> => (await read(actor, intake.id)).etag;
+    const closure = (await boss.client.get(`${ONE(intake.id)}/closure`)).json() as {
+      assessment_token: string;
+    };
+
+    const acts: readonly [string, string, (note: string) => Promise<TestResponse>][] = [
+      [
+        'amendOrder (the amendment’s note)',
+        '/note',
+        async (note) =>
+          officer.client.request('PATCH', ORDER(made.id), {
+            body: { note, size_class: 'MEDIUM', reviewed_terms: NO_PREVIEW },
+            origin: OPS,
+            headers: { 'If-Match': await orderEtag(officer), 'Idempotency-Key': randomUUID() },
+          }),
+      ],
+      [
+        'correctOrderRecipient (the correction’s reason)',
+        '/note',
+        async (note) =>
+          officer.client.post(
+            `${ORDER(made.id)}/recipient-correction`,
+            { note, recipient: { name: 'Ama B' } },
+            {
+              origin: OPS,
+              headers: { 'If-Match': await orderEtag(officer), 'Idempotency-Key': randomUUID() },
+            },
+          ),
+      ],
+      [
+        'requestPayerCorrection (the correction’s note)',
+        '/note',
+        async (note) =>
+          officer.client.post(
+            `${ORDER(made.id)}/payer-correction`,
+            { note, proposed: { payer_intent: 'SENDER_PAYS_FULL' } },
+            {
+              origin: OPS,
+              headers: { 'If-Match': await orderEtag(officer), 'Idempotency-Key': randomUUID() },
+            },
+          ),
+      ],
+      [
+        'closeHubIntake (the exception’s reason)',
+        '/parity_exception/note',
+        async (note) =>
+          boss.client.post(
+            `${ONE(intake.id)}/close`,
+            {
+              reviewed_assessment: closure.assessment_token,
+              parity_exception: { note },
+            },
+            {
+              origin: OPS,
+              headers: { 'If-Match': await intakeEtag(boss), 'Idempotency-Key': randomUUID() },
+            },
+          ),
+      ],
+      [
+        'reverseOrderArrival (the reversal’s reason)',
+        '/note',
+        async (note) =>
+          boss.client.post(
+            `${ORDER(made.id)}/arrival-reversal`,
+            { note },
+            {
+              origin: OPS,
+              headers: { 'If-Match': await orderEtag(boss), 'Idempotency-Key': randomUUID() },
+            },
+          ),
+      ],
+      [
+        'setParcelWaitingForVendor (the note of the mark)',
+        '/note',
+        async (note) =>
+          officer.client.request('PUT', `${API}/intake-parcels/${b.id}/waiting-for-vendor`, {
+            body: { waiting: true, note },
+            origin: OPS,
+            headers: { 'If-Match': await intakeEtag(officer) },
+          }),
+      ],
+    ];
+    for (const [act, pointer, ask] of acts) {
+      for (const [form, note] of FORMS) {
+        expect(violation(await ask(note)), `${act}: ${form}`).toEqual([
+          400,
+          'VALIDATION_FAILED',
+          pointer,
+          'phone_number',
+        ]);
+      }
+    }
+    // Nothing moved: the order is as it was, the parcel is not marked, the vendor is not closed, and no event of the ledger holds a number.
+    expect((await read(officer, intake.id)).intake.state).toBe('ITEMIZING');
+    const after = (
+      await officer.client.get(`${ORDERS(intake.id)}?view=waiting_for_vendor`)
+    ).json() as {
+      progress: { waiting_for_vendor: number };
+    };
+    expect(after.progress.waiting_for_vendor).toBe(0);
+    const leaked = await routes.rows<{ event_code: string }>(
+      `select event_code from audit_event where note ~ $1`,
+      [NUMBER_IN_THE_LEDGER],
+    );
+    expect(leaked).toEqual([]);
+    // The same acts keep taking an honest note: the refusal is of the number and of nothing else.
+    expect(
+      (
+        await officer.client.request('PUT', `${API}/intake-parcels/${b.id}/waiting-for-vendor`, {
+          body: { waiting: true, note: 'Called the vendor, waiting on WhatsApp at 10.30' },
+          origin: OPS,
+          headers: { 'If-Match': await intakeEtag(officer) },
+        })
+      ).status,
+    ).toBe(200);
+  }, 240_000);
+});

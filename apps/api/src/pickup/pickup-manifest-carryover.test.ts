@@ -127,7 +127,8 @@ describe('the note of an entry', () => {
     ]);
     expect(rulesOf(judged)).toEqual([
       ['/carryover/0/note', 'maxLength'],
-      ['/carryover/1/note', 'format'],
+      // A telephone number in a note has a rule of its own since Run G1 (Part 1, item 5); it was 'format' for an international one.
+      ['/carryover/1/note', 'phone_number'],
     ]);
     expect(JSON.stringify(judged)).not.toContain('233');
   });

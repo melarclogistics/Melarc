@@ -57,7 +57,9 @@ function noteOf(body: ParcelWaitBody, waiting: boolean): string | null {
   const trimmed = body.note.trim();
   if (trimmed === '') return null;
   if (CONTROL_CHARACTER.test(trimmed)) throw invalid('/note', 'single_line');
-  if (noteRefusal(trimmed) !== undefined) throw invalid('/note', 'format');
+  // What the audit would refuse of a note, told with the rule of its own: the shape (`format`) or a telephone number in the words (`phone_number`: "Leave the number out of the note.").
+  const refused = noteRefusal(trimmed);
+  if (refused !== undefined) throw invalid('/note', refused);
   return trimmed;
 }
 

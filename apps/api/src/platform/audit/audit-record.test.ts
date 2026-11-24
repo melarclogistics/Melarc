@@ -449,8 +449,18 @@ describe('the audit record: the note, asked before the act (F04 of 23 October 20
     ['a tab', 'one\ttwo', 'format'],
     ['a NUL byte', 'one\u0000two', 'format'],
     ['an email address', 'ask kwame@example.test', 'format'],
-    ['an international number', 'call +233201234567', 'format'],
-    ['a local-looking number that is not E.164', 'ref 0201234567', undefined],
+    // A phone number in the words of a note is refused with a rule of its own, in every form a person in Ghana writes one (Run G1, Part 1, item 5: the Product Owner's decision of 24 November 2026). This replaces
+    // the row that accepted 'ref 0201234567' as "a local-looking number that is not E.164": the ledger is append-only, and an officer naturally types "the right number is 0244123456".
+    ['an international number', 'call +233201234567', 'phone_number'],
+    ['a local number', 'ref 0201234567', 'phone_number'],
+    ['a local number in a sentence', 'the right number is 0244123456', 'phone_number'],
+    ['a local number in groups of a space', 'ring 024 412 3456', 'phone_number'],
+    ['a local number in groups of a hyphen', '024-412-3456', 'phone_number'],
+    ['the international number without a plus', '233244123456', 'phone_number'],
+    ['the international number with 00', '00233244123456', 'phone_number'],
+    ['full-width digits', '０２４４１２３４５６', 'phone_number'],
+    ['a time, a date and a count', 'at 10.30 on 2026-11-24, 12 parcels', undefined],
+    ['the code of an order', 'order ACC-OR-E5VMPB', undefined],
   ] as const)('agrees with the writer for %s', (_label, note, expected) => {
     expect(noteRefusal(note)).toBe(expected);
     if (expected === undefined) {
@@ -458,6 +468,21 @@ describe('the audit record: the note, asked before the act (F04 of 23 October 20
     } else {
       expect(refusal(() => build({ note })).code).toBe('AUDIT_DETAIL_REFUSED');
     }
+  });
+
+  // Break caught: the question and the writer disagreeing about WHICH refusal: a note with a control character and a number is told as the shape (the officer fixes the line first), an address is a shape, and a number
+  // in a fact of an event (not a note) keeps the narrower screening, so that no identifier can make the ledger refuse an event.
+  it('tells a number apart from the shape of a note, and screens the facts of an event as it always did', () => {
+    expect(noteRefusal('one\ntwo 0244123456')).toBe('format');
+    expect(noteRefusal('ask kwame@example.test or 0244123456')).toBe('format');
+    expect(noteRefusal('x'.repeat(1001))).toBe('maxLength');
+    // A fact: a local number is the narrower screening's business only when it is an international number with a plus; a hexadecimal identifier ending in digits that look like a number is not refused.
+    expect(build({ detail: { reference: '5eed0900-0000-4000-8000-233456789012' } }).detail).toEqual(
+      {
+        reference: '5eed0900-0000-4000-8000-233456789012',
+      },
+    );
+    expect(() => build({ detail: { channel: '+233201234567' } })).toThrow(AuditRefusedError);
   });
 
   it('keeps a secret that travels inside the text out of the stored note, as the writer always did', () => {
