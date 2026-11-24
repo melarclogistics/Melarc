@@ -2,8 +2,8 @@
  * GENERATED FILE - DO NOT EDIT.
  *
  * Wire types for the Melarc API, generated from contracts/openapi.yaml:
- *   Melarc Platform API 5.120.0
- *   SHA-256 efbc266ecc7ae181268182f1bda0686e50e6f5c108b31ad5ec576f854752ae8c (of the contract, line endings normalized to LF)
+ *   Melarc Platform API 5.121.0
+ *   SHA-256 38948348fb4b3c8f2900c96d3202328140805eff53e50c9d1fbb125888bdd938 (of the contract, line endings normalized to LF)
  * Generator: openapi-typescript 7.13.0
  * Regenerate with: pnpm run api-client:generate
  */
@@ -12017,7 +12017,7 @@ export interface components {
              * @description Staff only (5.115.0). The waybill photograph behind the carrier cost.
              */
             carrier_waybill_evidence_id?: string | null;
-            /** @description Staff only (5.115.0), on `getOrder`. How the order was corrected before it froze: who, when, why and the members that changed (never their values, which hold a person's details). */
+            /** @description Staff only (5.115.0), on `getOrder`. How the order was corrected: who, when, why and what changed, by name and never by value (values hold a person's details). **`changed` names the members of the order** for an amendment before the price froze (`recipient`, `size_class`, ...) **and the parts of the recipient** for the correction of a confirmed order's recipient (`kind` `RECIPIENT_CORRECTION`, 5.121.0: `recipient.address`, `recipient.name` and `recipient.phone`, each when it was corrected, sorted: the names of the enhanced event `order.amendment.recorded`), so that a screen says that it was the name, the phone or the address that was corrected and not that "the recipient" changed. */
             amendments?: {
                 /** Format: uuid */
                 id: string;

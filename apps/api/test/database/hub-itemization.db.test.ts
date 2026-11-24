@@ -6653,7 +6653,8 @@ describe('the recipient of a confirmed order is corrected (Run F, Part 1, D-S7-1
       expect.objectContaining({
         kind: 'RECIPIENT_CORRECTION',
         note: 'The surname was typed wrongly at the door',
-        changed: ['recipient'],
+        // Run G2, Part 1, item 3: the history says which parts of the recipient were corrected, by name and never by value (the words of the audit event), and not that "the recipient" changed.
+        changed: ['recipient.name', 'recipient.phone'],
       }),
     ]);
     const record = (
@@ -6735,6 +6736,10 @@ describe('the recipient of a confirmed order is corrected (Run F, Part 1, D-S7-1
     expect(moved.destination_zone_snapshot).toEqual(before.destination_zone_snapshot);
     expect(moved.locked_price).toEqual(before.locked_price);
     expect(moved.derived_delivery_date).toEqual(before.derived_delivery_date);
+    // The order's history says it was the address that was corrected (Run G2, Part 1, item 3), by name: the address itself is in the record and never in a read of the history.
+    const history = ((await officer.client.get(ORDER(made.id))).json() as Seen).amendments;
+    expect(history.map((entry) => entry.changed)).toEqual([['recipient.address']]);
+    expect(JSON.stringify(history)).not.toContain('Madina');
 
     for (const address of ['5 Adenta Housing Down', 'Kumasi, Adum']) {
       const refused = await correct(officer, made.id, {
@@ -6771,14 +6776,14 @@ describe('the recipient of a confirmed order is corrected (Run F, Part 1, D-S7-1
       ),
     ).toEqual([409, 'STATE_CONFLICT', 'address_changes_zone']);
     // The carrier's recipient may be named again: no address moves.
-    expect(
-      (
-        await correct(officer, carrier.id, {
-          note: 'The name was misspelt',
-          recipient: { name: 'Kofi Boateng' },
-        })
-      ).status,
-    ).toBe(200);
+    const renamed = await correct(officer, carrier.id, {
+      note: 'The name was misspelt',
+      recipient: { name: 'Kofi Boateng' },
+    });
+    expect(renamed.status).toBe(200);
+    // The name alone was corrected, and the history says the name and nothing more (Run G2, Part 1, item 3).
+    const named = (await officer.client.get(ORDER(carrier.id))).json() as Seen;
+    expect(named.amendments.map((entry) => entry.changed)).toEqual([['recipient.name']]);
   });
 
   // Break caught (the security review of this change): an address "corrected" by its map link or its coordinates alone, which moves where the order goes with the text as it was and skips the judgement of the

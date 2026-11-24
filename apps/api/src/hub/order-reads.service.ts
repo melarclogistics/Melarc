@@ -16,6 +16,34 @@ import { ErrorCode } from '../platform/http/error-codes.js';
 import { primaryHubOfStaff } from '../platform/lookup/primary-hub.js';
 import { loadOrder, orderViewOf, type OrderView } from './order-view.js';
 
+/** The parts of a recipient that a correction names, as the record keeps them and as the audit event names them (`recipient.name`, `recipient.phone` and `recipient.address`): never a value, which holds a person's details. */
+const RECIPIENT_PARTS = [
+  ['name', 'recipient.name'],
+  ['phone', 'recipient.phone'],
+  ['location', 'recipient.address'],
+] as const;
+
+const objectOf = (value: unknown): Record<string, unknown> => {
+  const parsed = typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
+  return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+};
+
+/**
+ * What an amendment record says changed, in names only. An amendment before the price froze names the members of the order (`recipient`, `size_class`, ...); **the correction of a confirmed order's recipient names the
+ * parts of the recipient that were corrected** (Run G2, Part 1, item 3), so that the history says that it was the name, the phone or the address and not that "the recipient" changed.
+ */
+function changedOf(row: { kind: string; before: unknown; after: unknown }): string[] {
+  const after = objectOf(row.after);
+  if (row.kind !== 'RECIPIENT_CORRECTION') return Object.keys(after).toSorted();
+  const was = objectOf(objectOf(row.before).recipient);
+  const became = objectOf(after.recipient);
+  return RECIPIENT_PARTS.filter(
+    ([part]) => JSON.stringify(was[part]) !== JSON.stringify(became[part]),
+  )
+    .map(([, name]) => name)
+    .toSorted();
+}
+
 export interface OrderReadsOptions {
   readonly runner: Pick<OperationRunner, 'read'>;
   readonly audit: AuditWriter;
@@ -210,13 +238,14 @@ export class HubOrderReads {
   async #historyOf(tx: ReturnType<typeof transactionOf>, id: string): Promise<OrderHistory> {
     const amended = (
       await tx.execute(
-        sql`select id, amended_by, amended_at, note, after, kind from order_amendment where order_id = ${id}::uuid order by amended_at, id`,
+        sql`select id, amended_by, amended_at, note, before, after, kind from order_amendment where order_id = ${id}::uuid order by amended_at, id`,
       )
     ).rows as unknown as {
       id: string;
       amended_by: string;
       amended_at: string | Date;
       note: string;
+      before: unknown;
       after: unknown;
       kind: 'AMENDMENT' | 'RECIPIENT_CORRECTION';
     }[];
@@ -233,12 +262,7 @@ export class HubOrderReads {
         amended_at: timestampOf(row.amended_at).toISOString(),
         note: row.note,
         kind: row.kind,
-        changed: Object.keys(
-          (typeof row.after === 'string' ? JSON.parse(row.after) : row.after) as Record<
-            string,
-            unknown
-          >,
-        ).toSorted(),
+        changed: changedOf(row),
       })),
       reversal:
         reversed === undefined
