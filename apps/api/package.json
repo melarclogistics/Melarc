@@ -31,7 +31,7 @@
     "bootstrap:resume": "node dist/tools/bootstrap-resume.js"
   },
   "dependencies": {
-    "@nestjs/common": "12.1.2",
+    "@nestjs/common": "12.6.0",
     "@nestjs/core": "12.1.2",
     "@nestjs/platform-express": "12.1.2",
     "@nestjs/swagger": "12.1.1",
