@@ -27,6 +27,20 @@ describe('a phone number in the text of a note (Run G1, Part 1, item 5)', () => 
     ['a number written right after another number', 'parcel 12 0244123456'],
     ['a number written right after a short group with a hyphen', 'ref 7-024-412-3456'],
     ['a number glued to a word', 'phone:0244123456'],
+    // What a person (or a keyboard) writes for a separator besides the hyphen: a validator that reads only the ASCII forms is one a careful writer goes around (the security review of 0f5d34f).
+    ['groups joined by an en dash', '024–412–3456'],
+    ['groups joined by an em dash', '024—412—3456'],
+    ['groups joined by a non-breaking hyphen', '024‑412‑3456'],
+    ['groups joined by a minus sign', '024−412−3456'],
+    ['groups joined by a slash', '024/412/3456'],
+    ['groups joined by an underscore', '024_412_3456'],
+    ['groups joined by a middle dot', '024·412·3456'],
+    ['groups joined by a spaced hyphen', '024 - 412 - 3456'],
+    ['groups joined by a spaced slash', '024 / 412 / 3456'],
+    ['digits with a zero-width space between them', '024​412​3456'],
+    ['digits with a soft hyphen between them', '024­412­3456'],
+    ['digits with a zero-width joiner between them', '0‍2‍4‍4‍1‍2‍3‍4‍5‍6'],
+    ['the international number with a plus and spaced hyphens', '+233 - 24 - 412 - 3456'],
   ])('is found in %s', (_label, text) => {
     expect(holdsPhoneNumber(text), text).toBe(true);
   });
@@ -39,6 +53,9 @@ describe('a phone number in the text of a note (Run G1, Part 1, item 5)', () => 
     ['the code of an order', 'order ACC-OR-E5VMPB is for this parcel'],
     ['the code of an intake', 'vendor ACC-IN-7K3M9Q'],
     ['a count', '12 parcels of 3 boxes each'],
+    ['a date with slashes', 'Spoke on 24/11/2026'],
+    ['a fraction and a range', 'took 3/4 of the day, rooms 12 - 14'],
+    ['a time with zero-width characters', 'at 10​.​30'],
     ['an amount', 'Charged GH₵ 1,000,000 by mistake'],
     ['a short number', 'waybill 12345678'],
     ['nine digits', 'ref 244123456'],
