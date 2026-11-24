@@ -574,6 +574,9 @@ export const ORDERS_WORDS = {
     confirm: 'Save the correction',
     cancel: 'Cancel',
     reasonRequired: 'Write why you are correcting this.',
+    /** The reason holds a phone number (the notes of every act refuse one, Part 1 item 5): said on the reason, in its own words. */
+    numberInReason: 'Leave the number out of the reason.',
+    reasonRefused: 'This reason was not accepted as written. Write it again in other words.',
     nothingChanged: 'Nothing was changed. Correct a detail, or cancel.',
     done: (code: string): string => `The recipient of order ${code} was corrected.`,
   },
@@ -1267,7 +1270,11 @@ export const ORDERS_COPY: readonly CopyRule[] = [
     code: 'REASON_REQUIRED',
     text: 'Write why you are correcting this.',
   },
-  { operation: 'correctOrderRecipient', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
+  {
+    operation: 'correctOrderRecipient',
+    code: 'VALIDATION_FAILED',
+    text: 'Check what is marked below: it was not accepted as written.',
+  },
   {
     operation: 'correctOrderRecipient',
     context: 'no_change',

@@ -117,6 +117,18 @@ export function looksLikeGhanaNumber(text: string): boolean {
   return /^(?:(?:\+|00)?233|0)[2-5]\d{8}$/.test(text.replace(/[\s().-]/g, ''));
 }
 
+/**
+ * A phone number as the officer writes it, **for display only**: the API gives a Ghana number whole and international (`+233241234567`), and an officer reads and writes `024 123 4567`. A number that is not a Ghana number
+ * (or not a whole one) is shown exactly as it was given: a display never makes a number up. Nothing here decides what is sent; the server judges the number it is given.
+ */
+export function phoneAsWritten(text: string): string {
+  const digits = text.replace(/[\s().-]/g, '');
+  const national =
+    /^(?:(?:\+|00)?233)([2-5]\d{8})$/.exec(digits)?.[1] ?? /^0([2-5]\d{8})$/.exec(digits)?.[1];
+  if (national === undefined) return text;
+  return `0${national.slice(0, 2)} ${national.slice(2, 5)} ${national.slice(5)}`;
+}
+
 export function problemsWith(
   values: OrderFormValues,
   options: { readonly amendment?: boolean; readonly zoneNeeded?: boolean } = {},
@@ -297,7 +309,7 @@ export function valuesOf(order: OrderView): OrderFormValues {
   return {
     ...EMPTY_ORDER_FORM,
     name: order.recipient?.name ?? '',
-    phone: order.recipient?.phone ?? '',
+    phone: phoneAsWritten(order.recipient?.phone ?? ''),
     address: order.recipient?.location.address ?? '',
     landmark: order.recipient?.location.landmark ?? '',
     sizeClass: order.size_class,

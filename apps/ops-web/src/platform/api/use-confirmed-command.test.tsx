@@ -365,6 +365,61 @@ describe('useConfirmedCommand: a refusal', () => {
     ]);
   });
 
+  // Break caught: a refusal told to the screen after it has been drawn (a screen that marks a field from it is a render behind, and the focus effect that follows the refusal finds nothing marked), told twice, or told for
+  // what is not a refusal (an unknown outcome, a done command, a screen that has gone).
+  it('tells the screen of a refusal and of a conflict once, as the refusal arrives, and of nothing else', async () => {
+    const onRefused = vi.fn();
+    const send = vi
+      .fn<(command: Command, key: string) => Promise<string>>()
+      .mockRejectedValueOnce(refusal(422, 'REASON_NOT_ACTIVE'))
+      .mockRejectedValueOnce(refusal(409, 'STATE_CONFLICT'))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce('answer');
+    const { result } = mount({ send, onRefused, retryable: false });
+
+    await submit(result);
+    expect(onRefused).toHaveBeenCalledTimes(1);
+    expect(onRefused.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'invalid',
+      code: 'REASON_NOT_ACTIVE',
+    });
+
+    await submit(result);
+    expect(onRefused).toHaveBeenCalledTimes(2);
+    expect(onRefused.mock.calls[1]?.[0]).toMatchObject({ kind: 'conflict' });
+
+    // An outcome nobody knows is not a refusal, and neither is a command that was done.
+    await submit(result);
+    expect(result.current.phase).toBe('unknown');
+    expect(onRefused).toHaveBeenCalledTimes(2);
+    act(() => {
+      result.current.checkRecord();
+    });
+    await submit(result);
+    expect(result.current.phase).toBe('done');
+    expect(onRefused).toHaveBeenCalledTimes(2);
+  });
+
+  // Break caught: a refusal of a retry (the first attempt's outcome is still not known, so the dialog stays locked and offers the record) told to the screen as a refusal, which would mark fields on a form that is locked.
+  it('does not tell the screen of a refusal of a retry while the first attempt is still in doubt', async () => {
+    const onRefused = vi.fn();
+    const send = vi
+      .fn<(command: Command, key: string) => Promise<string>>()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockRejectedValueOnce(refusal(422, 'REASON_NOT_ACTIVE'));
+    const { result } = mount({ send, onRefused });
+
+    await submit(result);
+    expect(result.current.phase).toBe('unknown');
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    expect(result.current.phase).toBe('unknown');
+    expect(result.current.problem).toMatchObject({ code: 'REASON_NOT_ACTIVE' });
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
   it('can be dismissed back to idle', async () => {
     const { result } = mount({ send: () => Promise.reject(refusal(422, 'REASON_NOT_ACTIVE')) });
     await submit(result);

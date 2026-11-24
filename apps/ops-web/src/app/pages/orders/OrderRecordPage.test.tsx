@@ -9,6 +9,7 @@ import {
 } from '../../../test-support/interface-states';
 import {
   captured,
+  capturedRefusal,
   correctionOf,
   EARLY_ORDER_ID,
   ORDER_CODE,
@@ -246,6 +247,129 @@ describe('the recipient of a confirmed order, corrected (D-S7-1, Run F)', () => 
     open(orderOf('frozen'), ['hub.read', 'pricing.read', 'pricing.correction.create']);
     await screen.findByRole('heading', { level: 1, name: ORDER_CODE });
     expect(screen.queryByRole('button', { name: 'Correct the recipient' })).toBeNull();
+  });
+
+  // Break caught: a number the API gives as +233241234567 shown to the officer as that (it is not the number they wrote on the parcel), in the dialog and on the page, and a correction of the name that sends a phone the
+  // officer never touched because the shown form differs from the held one.
+  it('shows the phone as the officer writes it, in the dialog and on the page, and sends no phone that was not corrected', async () => {
+    const { user, asked } = await openDialog({
+      [CORRECT]: () => json(200, orderOf('frozen'), { ETag: '"o2"' }),
+    });
+    expect(asked.getByLabelText(/Recipient’s phone/)).toHaveValue('024 123 4567');
+    expect(
+      within(screen.getByRole('region', { name: 'What it holds' })).getByText('024 123 4567'),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('+233241234567');
+    const name = asked.getByLabelText(/Recipient’s name/);
+    await user.clear(name);
+    await user.type(name, 'Ama Mensah-Boateng');
+    await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'The surname was short');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    await screen.findByText(`The recipient of order ${ORDER_CODE} was corrected.`);
+    expect(await bodyOf(sent(CORRECT)[0])).toEqual({
+      note: 'The surname was short',
+      recipient: { name: 'Ama Mensah-Boateng' },
+    });
+  });
+
+  // Break caught: the same guidance the form gives while a number is typed missing from the dialog (an officer is told nothing until the server refuses it), or given as a rule.
+  it('tells the officer, while a phone is typed, when it does not look like a Ghana number, and says nothing of a good one', async () => {
+    const { user, asked } = await openDialog();
+    const phone = asked.getByLabelText(/Recipient’s phone/);
+    await user.clear(phone);
+    await user.type(phone, '12345');
+    expect(
+      asked.getByText('This doesn’t look like a Ghana number. Check it, for example 024 123 4567.'),
+    ).toBeVisible();
+    await user.clear(phone);
+    await user.type(phone, '024 765 4321');
+    expect(asked.queryByText(/doesn’t look like a Ghana number/)).toBeNull();
+    expect(asked.getByText('As the recipient gave it, for example 024 123 4567.')).toBeVisible();
+  });
+
+  // Break caught: a refused phone, name or address told only as "Check the note marked below" with nothing marked, so the officer cannot tell what to change; the field not marked, or not given the focus.
+  it('marks a refused phone on the phone and gives it the focus, as the API said it', async () => {
+    const answer = capturedRefusal('correction-refused-phone');
+    const { user, asked } = await openDialog({
+      [CORRECT]: () => json(answer.status, answer.body),
+    });
+    const phone = asked.getByLabelText(/Recipient’s phone/);
+    await user.clear(phone);
+    await user.type(phone, 'not a number');
+    await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'A typo');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    expect(
+      await asked.findByText('That doesn’t look like a phone number. Check the digits.'),
+    ).toBeVisible();
+    await waitFor(() => {
+      expect(phone).toHaveFocus();
+    });
+    expect(phone).toHaveAttribute('aria-invalid', 'true');
+    expect(asked.queryByText(/Check the note marked below/)).toBeNull();
+    expect(sent(CORRECT)).toHaveLength(1);
+  });
+
+  it.each([['name', 'correction-refused-name', /Recipient’s name/, 'Enter the recipient’s name.']])(
+    'marks a refused %s on its own field',
+    async (_field, fixture, label, words) => {
+      const answer = capturedRefusal(fixture);
+      const { user, asked } = await openDialog({
+        [CORRECT]: () => json(answer.status, answer.body),
+      });
+      const name = asked.getByLabelText(label);
+      await user.clear(name);
+      await user.type(name, 'Ama B');
+      await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'A typo');
+      await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+      expect(await asked.findByText(words)).toBeVisible();
+      await waitFor(() => {
+        expect(name).toHaveAttribute('aria-invalid', 'true');
+      });
+    },
+  );
+
+  // Break caught: an address refused at the place named by the API marked on no field.
+  it('marks a refused address on the address', async () => {
+    const { user, asked } = await openDialog({
+      [CORRECT]: () =>
+        json(400, {
+          code: 'VALIDATION_FAILED',
+          message: 'The request is not valid',
+          request_id: 'r-address',
+          details: {
+            violations: [{ in: 'body', pointer: '/recipient/location/address', rule: 'required' }],
+          },
+        }),
+    });
+    const address = asked.getByLabelText(/Delivery address/);
+    await user.clear(address);
+    await user.type(address, 'Behind the market');
+    await user.type(asked.getByLabelText(/Why are you correcting this\?/), 'A typo');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    expect(await asked.findByText('Enter the delivery address.')).toBeVisible();
+    await waitFor(() => {
+      expect(address).toHaveAttribute('aria-invalid', 'true');
+    });
+  });
+
+  // Break caught: a reason that holds a number refused by the audit's screen and told as "Check the note marked below" with no mark, or in words that name a note the officer never wrote; the reason not kept.
+  it('says on the reason, in its own words, that a number must be left out, and keeps what was typed', async () => {
+    const answer = capturedRefusal('correction-refused-note-number');
+    const { user, asked } = await openDialog({
+      [CORRECT]: () => json(answer.status, answer.body),
+    });
+    const name = asked.getByLabelText(/Recipient’s name/);
+    await user.clear(name);
+    await user.type(name, 'Ama B');
+    const reason = asked.getByLabelText(/Why are you correcting this\?/);
+    await user.type(reason, 'The vendor said call 0244123456');
+    await user.click(asked.getByRole('button', { name: 'Save the correction' }));
+    expect(await asked.findByText('Leave the number out of the reason.')).toBeVisible();
+    await waitFor(() => {
+      expect(reason).toHaveFocus();
+    });
+    expect(reason).toHaveValue('The vendor said call 0244123456');
+    expect(asked.queryByText(/Check the note marked below/)).toBeNull();
   });
 
   // Break caught: a form that starts empty (the officer retypes what was right), a correction with no reason, or one that changes nothing (a wasted trip, told by the server).

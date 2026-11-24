@@ -87,6 +87,8 @@ function OpenAct<Command extends object, Result>({
     send,
     onDone,
     onReload,
+    // Told as the refusal arrives, in the turn that sets the phase: what the dialog marks on a field is drawn with it, and the focus below finds it.
+    ...(onRefused === undefined ? {} : { onRefused }),
     retryable,
     operation,
   });
@@ -101,13 +103,6 @@ function OpenAct<Command extends object, Result>({
     }
   }, [command.phase]);
   const problem = command.problem;
-  useEffect(() => {
-    if (problem !== undefined && (command.phase === 'refused' || command.phase === 'conflict')) {
-      onRefused?.(problem);
-    }
-    // Told once for each refusal that arrives, not for each render of the page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [problem, command.phase]);
 
   return (
     <Dialog

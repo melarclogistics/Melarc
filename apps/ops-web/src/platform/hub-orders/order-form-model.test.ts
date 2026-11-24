@@ -10,6 +10,7 @@ import {
   isEmptyPatch,
   looksLikeGhanaNumber,
   payerProposalOf,
+  phoneAsWritten,
   previewBodyOf,
   problemsWith,
   saveBodyOf,
@@ -75,6 +76,29 @@ const early = () => {
   if (order === undefined) throw new Error('the captured order is not one the judge accepts');
   return order;
 };
+
+describe('a phone number as the officer writes it, for display (Run G1, Part 2, item 7)', () => {
+  // Break caught: a number the API gives as +233241234567 shown to the officer as that, so that it is not the number they wrote on the parcel, or a number put in the wrong groups.
+  it.each([
+    ['+233241234567', '024 123 4567'],
+    ['+233557654321', '055 765 4321'],
+    ['233241234567', '024 123 4567'],
+    ['00233241234567', '024 123 4567'],
+    ['0241234567', '024 123 4567'],
+    ['+233 24 123 4567', '024 123 4567'],
+    ['+233302221234', '030 222 1234'],
+  ])('shows %s as %s', (given, shown) => {
+    expect(phoneAsWritten(given)).toBe(shown);
+  });
+
+  // Break caught: a number that is not a Ghana number, or not a whole one, changed into something the API did not give (a display must never make a number up).
+  it.each(['+442079460958', '12345', '', '+233 24 123', 'abc', '+2332412345678', '0911234567'])(
+    'leaves %s as it is',
+    (given) => {
+      expect(phoneAsWritten(given)).toBe(given);
+    },
+  );
+});
 
 describe('what is wrong with the form, before anything is sent', () => {
   it('has nothing wrong with a complete order for the door', () => {

@@ -8,6 +8,7 @@ import { Textarea } from '../../../components/ui/textarea/Textarea';
 import { useApiClient } from '../../../platform/api/api-client';
 import {
   EMPTY_ORDER_FORM,
+  looksLikeGhanaNumber,
   payerProposalOf,
   problemsWith,
   valuesOf,
@@ -33,6 +34,7 @@ import {
 } from '../../../platform/hub-orders/orders-shape';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { ActDialog } from '../manifests/ManifestActDialogs';
+import { refusedFields } from './order-refusal-fields';
 import './orders-pages.css';
 
 const isBasis = (value: string): value is SplitBasis =>
@@ -395,7 +397,27 @@ export function CorrectRecipientDialog({
       onReload={onReload}
       onRefused={(problem) => {
         if (problem.kind === 'conflict' && problem.rule === 'stale') onStale?.();
-        if (problem.code === 'REASON_REQUIRED') setErrors({ reason: R.reasonRequired });
+        if (problem.code === 'REASON_REQUIRED') {
+          setErrors({ reason: R.reasonRequired });
+          return;
+        }
+        // What the server refused is marked where the officer can change it: the name, the phone and the address on their own fields, as the form marks them, and the reason in words of its own.
+        const refused = refusedFields(problem);
+        const found: RecipientErrors = {};
+        if (refused.name !== undefined) found.name = refused.name;
+        if (refused.phone !== undefined) found.phone = refused.phone;
+        if (refused.address !== undefined) found.address = refused.address;
+        const onNote = (problem.violations ?? []).filter(
+          (violation) => violation.pointer === '/note',
+        );
+        if (onNote.length > 0) {
+          found.reason = onNote.some((violation) => violation.rule === 'phone_number')
+            ? R.numberInReason
+            : onNote.some((violation) => violation.rule === 'required')
+              ? R.reasonRequired
+              : R.reasonRefused;
+        }
+        if (Object.keys(found).length > 0) setErrors(found);
       }}
     >
       {errors.nothing === undefined ? null : (
@@ -416,6 +438,11 @@ export function CorrectRecipientDialog({
       <Field
         label={F.phone}
         required
+        help={
+          values.phone.trim() !== '' && !looksLikeGhanaNumber(values.phone)
+            ? F.phoneLook
+            : F.phoneHelp
+        }
         {...(errors.phone === undefined ? {} : { error: errors.phone })}
       >
         <Input

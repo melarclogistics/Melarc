@@ -16,7 +16,7 @@ import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
 import type { TimelineEntry } from '../../../components/ui/timeline/Timeline';
-import { destinationOf } from '../../../platform/hub-orders/order-form-model';
+import { destinationOf, phoneAsWritten } from '../../../platform/hub-orders/order-form-model';
 import type { OrderView } from '../../../platform/hub-orders/orders-shape';
 import { useOrder, type OrderRecordView } from '../../../platform/hub-orders/use-orders-queries';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
@@ -183,7 +183,7 @@ function Holds({ order }: { readonly order: OrderView }) {
           ? []
           : [
               { label: R.facts.recipient, value: recipient.name },
-              { label: R.facts.phone, value: recipient.phone },
+              { label: R.facts.phone, value: phoneAsWritten(recipient.phone) },
               { label: R.facts.address, value: recipient.location.address },
               ...(recipient.location.landmark === undefined
                 ? []
