@@ -398,6 +398,8 @@ export const ORDER_SCHEMA = described({
       type: ['string', 'null'],
       enum: ['EXPECTED', 'ARRIVED', 'MISSING', 'VOID', null],
     },
+    // The picture of the parcel the order is made for (5.120.0, D-S7-14): staff only, null for a vendor counted without photos. Optional in the contract so that an answer of an earlier version stays valid.
+    intake_parcel_photo_evidence_id: NULLABLE_UUID,
     commercial_state: {
       type: ['string', 'null'],
       enum: [

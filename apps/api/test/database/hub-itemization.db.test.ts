@@ -33,6 +33,7 @@ import {
   declareIntakeEvidence,
   intakeEvidenceBody,
   pendingIntakeEvidence,
+  RETRIEVE,
   storedIntakeEvidence,
 } from './support/intake-evidence.js';
 import {
@@ -7306,4 +7307,107 @@ describe('a parcel the officer is waiting on is marked as waiting for the vendor
       await routes.admin.query('rollback');
     }
   }, 120_000);
+});
+
+describe('the staff view of an order carries the photo of its parcel (Run G1, Part 1, item 3: D-S7-14, AC-SLICE-001-90)', () => {
+  interface WithPhoto {
+    intake_parcel_photo_evidence_id?: string | null;
+  }
+  interface ParcelPhotos {
+    parcels: { id: string; origin: string; photo_evidence_id: string }[];
+  }
+  const photosOf = async (intakeId: string): Promise<ParcelPhotos['parcels']> =>
+    ((await officer.client.get(ONE(intakeId))).json() as ParcelPhotos).parcels;
+  const staffOrder = async (
+    actor: Actor,
+    id: string,
+  ): Promise<WithPhoto & Record<string, unknown>> => {
+    const response = await actor.client.get(`${API}/orders/${id}`);
+    expect(response.status, response.text).toBe(200);
+    return response.json() as WithPhoto & Record<string, unknown>;
+  };
+
+  // Break caught: an order page and a change page that cannot show the parcel the order is for (they pass no photo), a photo of another parcel, a member only the answer of the save has, an extra whose photo is lost, a
+  // photo the officer cannot open.
+  it('is the door photo of a door parcel and the officer’s photo of an extra, in the answer of the order and in getOrder, and the officer opens it through the retrieval authorization', async () => {
+    const intake = await opened(2);
+    const [a, b] = intake.parcels as [Parcel, Parcel];
+    // An extra with the photo the officer took at the hub: the vendor is finished as tapped, the two door parcels and the extra arrived.
+    const extraPhoto = await storedIntakeEvidence(routes, officer, intake.id, 'OSD');
+    const added = await officer.client.post(
+      `${ONE(intake.id)}/extra-parcels`,
+      { photo_evidence_id: extraPhoto, note: 'A box with no photo at the door' },
+      { origin: OPS, headers: { 'Idempotency-Key': randomUUID() } },
+    );
+    expect(added.status, added.text).toBe(200);
+    expect((await tap(officer, a.id, true)).status).toBe(200);
+    expect((await tap(officer, b.id, true)).status).toBe(200);
+    expect((await finishAsTapped(officer, intake.id)).status).toBe(200);
+    // An extra is more than the door photos show: a senior accepts it, and the vendor is cleared for its orders.
+    expect((await read(officer, intake.id)).intake.state).toBe('RECONCILIATION_REQUIRED');
+    const boss = await routes.actor(BUNDLE_IDS.seniorOps, HUB_A);
+    const decided = await boss.client.post(
+      `${ONE(intake.id)}/discrepancy`,
+      { outcome: 'ACCEPTED', note: 'The extra box belongs to this vendor' },
+      { origin: OPS, headers: { 'If-Match': (await read(boss, intake.id)).etag } },
+    );
+    expect(decided.status, decided.text).toBe(200);
+    expect((await read(officer, intake.id)).intake.state).toBe('READY_FOR_ITEMIZATION');
+
+    const photos = await photosOf(intake.id);
+    const doorA = photos.find((photo) => photo.id === a.id);
+    const extra = photos.find((photo) => photo.origin === 'HUB_EXTRA');
+    expect(doorA?.photo_evidence_id).toBeTruthy();
+    expect(doorA?.photo_evidence_id).not.toBe(extraPhoto);
+    expect(extra?.photo_evidence_id).toBe(extraPhoto);
+
+    const madeA = orderOf(await itemize(officer, intake.id, body(a.id))) as Order & WithPhoto;
+    expect(madeA.intake_parcel_photo_evidence_id).toBe(doorA?.photo_evidence_id);
+    expect((await staffOrder(officer, madeA.id)).intake_parcel_photo_evidence_id).toBe(
+      doorA?.photo_evidence_id,
+    );
+    const madeExtra = orderOf(await itemize(officer, intake.id, body(extra?.id ?? ''))) as Order &
+      WithPhoto;
+    expect(madeExtra.intake_parcel_photo_evidence_id).toBe(extraPhoto);
+    expect((await staffOrder(officer, madeExtra.id)).intake_parcel_photo_evidence_id).toBe(
+      extraPhoto,
+    );
+
+    // The identifier opens the picture through the authorization the form already uses for the photo beside it.
+    for (const evidenceId of [doorA?.photo_evidence_id ?? '', extraPhoto]) {
+      const authorised = await officer.client.post(RETRIEVE(evidenceId), undefined, {
+        origin: OPS,
+      });
+      expect(authorised.status, authorised.text).toBe(200);
+    }
+    // The photo is in the order's version: the order's `ETag` is still the one a change takes.
+    expect((await officer.client.get(`${API}/orders/${madeA.id}`)).header('etag')).toBeTruthy();
+  }, 180_000);
+
+  // Break caught: an order of a vendor counted without photos that names a photo, and a vendor's view of its own order that carries the staff's identifier of the picture (the vendor's view is an allowlist).
+  it('is null for a vendor counted without photos, and a vendor’s view of its own order never carries it', async () => {
+    const counted = await blind(1);
+    const made = orderOf(await itemize(officer, counted.id, body(null))) as Order & WithPhoto;
+    expect(made.intake_parcel_photo_evidence_id).toBeNull();
+    expect((await staffOrder(officer, made.id)).intake_parcel_photo_evidence_id).toBeNull();
+
+    const intake = await cleared(1);
+    const [only] = intake.parcels as [Parcel];
+    const ordered = orderOf(await itemize(officer, intake.id, body(only.id)));
+    expect(
+      ((await staffOrder(officer, ordered.id)).intake_parcel_photo_evidence_id ?? null) !== null,
+    ).toBe(true);
+    const browser = routes.browser(vendor.device.credential.token);
+    expect((await routes.signIn(browser, vendor.row.accountIdentifier, vendor.secret)).status).toBe(
+      200,
+    );
+    const seen = await browser.get(`${API}/orders/${ordered.id}`);
+    expect(seen.status, seen.text).toBe(200);
+    expect(seen.json() as Record<string, unknown>).not.toHaveProperty(
+      'intake_parcel_photo_evidence_id',
+    );
+    expect(JSON.stringify(seen.json())).not.toContain(
+      String((await staffOrder(officer, ordered.id)).intake_parcel_photo_evidence_id),
+    );
+  }, 180_000);
 });

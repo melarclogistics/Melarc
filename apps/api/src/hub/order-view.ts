@@ -17,6 +17,8 @@ export interface OrderRow {
   readonly responsible_hub_id: string;
   readonly intake_parcel_id: string | null;
   readonly intake_parcel_state: string | null;
+  /** The picture of the parcel the order is made for (Run G1, D-S7-14): the door photo of a door parcel, the officer's photo of an extra; null for an order of a vendor counted without photos. Staff only. */
+  readonly intake_parcel_photo_evidence_id: string | null;
   readonly commercial_state: string | null;
   readonly fulfilment_state: string;
   readonly origin_zone_snapshot: Record<string, unknown>;
@@ -52,7 +54,7 @@ export interface OrderRow {
 
 /** The columns of an order and the state of its parcel, for a read in the caller's transaction. */
 export const ORDER_SELECT = sql.raw(`
-  o.id, o.code, o.pickup_intake_id, o.responsible_hub_id, o.intake_parcel_id, p.state AS intake_parcel_state, o.commercial_state, o.fulfilment_state,
+  o.id, o.code, o.pickup_intake_id, o.responsible_hub_id, o.intake_parcel_id, p.state AS intake_parcel_state, coalesce(p.door_photo_evidence_id, p.hub_photo_evidence_id) AS intake_parcel_photo_evidence_id, o.commercial_state, o.fulfilment_state,
   o.origin_zone_snapshot, o.destination_zone_snapshot, o.destination_zone_resolution, o.declared_value_minor, o.is_serialized_goods, o.serial_imei, o.service_level,
   o.requested_delivery_date::text AS requested_delivery_date, o.derived_delivery_date::text AS derived_delivery_date, o.delivery_date_override,
   o.size_class, o.size_class_selected_by, o.carrier_cost_minor, o.is_high_value, o.is_high_value_manual, o.lane, o.commercial_mode, o.payer_allocation, o.price_components_snapshot,
@@ -113,6 +115,7 @@ export function orderViewOf(row: OrderRow) {
     responsible_hub_id: row.responsible_hub_id,
     intake_parcel_id: row.intake_parcel_id,
     intake_parcel_state: row.intake_parcel_state,
+    intake_parcel_photo_evidence_id: row.intake_parcel_photo_evidence_id,
     commercial_state: row.commercial_state,
     fulfilment_state: row.fulfilment_state,
     origin_zone_snapshot: jsonOf(row.origin_zone_snapshot) as Record<string, unknown>,
