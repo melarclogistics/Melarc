@@ -16,9 +16,15 @@ import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 
 /** A vendor's orders: the work that is really left, and the pages of its acts. */
 export const ordersPath = (intakeId: string): string => `/intakes/${intakeId}/orders`;
-export const newOrderPath = (intakeId: string, parcelId?: string): string =>
+/**
+ * The form of an order: for one parcel, or (with none) for the next one that needs an order. **`after` is the place of the parcel just saved or marked**: the next order moves forward from it, and passes over a
+ * parcel that is waited on (D-S7-12), and only when none is left after it does it go back to the lowest.
+ */
+export const newOrderPath = (intakeId: string, parcelId?: string, after?: number): string =>
   parcelId === undefined
-    ? `/intakes/${intakeId}/orders/new`
+    ? after === undefined
+      ? `/intakes/${intakeId}/orders/new`
+      : `/intakes/${intakeId}/orders/new?after=${String(after)}`
     : `/intakes/${intakeId}/orders/new?parcel=${parcelId}`;
 export const closePath = (intakeId: string): string => `/intakes/${intakeId}/close`;
 export const summaryPath = (intakeId: string): string => `/intakes/${intakeId}/summary`;

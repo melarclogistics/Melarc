@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
-import { useApiClient } from '../api/api-client';
+import { useApiClient, type ApiClient } from '../api/api-client';
 import { answerOf, unexpectedResponse } from '../api/api-response';
 import type { WorkListPageView } from '../pickup-work/pickup-work-shape';
 import {
@@ -16,6 +16,7 @@ import {
   type CorrectionView,
   type OrderView,
   type SummaryView,
+  type WorkItemView,
   type WorkOrderView,
   type WorklistPageView,
   type WorklistViewId,
@@ -127,6 +128,106 @@ export function useLastOrders(
         token = parsed.nextPageToken;
       }
       throw unexpectedResponse(200);
+    },
+  });
+}
+
+/** One page of a vendor's worklist, judged: the one read the lists below are made of. */
+async function readWorklistPage(
+  client: ApiClient,
+  intakeId: string,
+  view: WorklistViewId,
+  token: string | undefined,
+): Promise<WorklistPageView> {
+  const answer = answerOf(
+    await client.GET('/hub-intakes/{id}/orders', {
+      params: {
+        path: { id: intakeId },
+        query: { view, page_size: 100, ...(token === undefined ? {} : { page_token: token }) },
+      },
+    }),
+  );
+  const parsed = parseWorklist(answer.data);
+  if (parsed?.intake_id.toLowerCase() !== intakeId.toLowerCase()) {
+    throw unexpectedResponse(answer.status);
+  }
+  return parsed;
+}
+
+/**
+ * The row of one parcel of a vendor (`listIntakeOrders`, view `all`, `hub.read`): where it stands, the order made for it if there is one (so that the form of a parcel that already has its order says so, with
+ * its code, and is never an empty form) and whether the officer is waiting on the vendor's details for it (D-S7-12). The server lists the parcels by their place and gives no way to ask for one, so the pages are read
+ * until the place of the parcel is passed (a hundred to a page). `null` is a parcel the list does not hold.
+ */
+export function useParcelRow(
+  intakeId: string,
+  parcel: { readonly id: string; readonly ordinal: number },
+  enabled = true,
+): UseQueryResult<WorkItemView | null> {
+  const client = useApiClient();
+  return useQuery({
+    queryKey: [...worklistKey(intakeId), 'parcel', parcel.id.toLowerCase()] as const,
+    enabled,
+    ...NOT_KEPT,
+    queryFn: async (): Promise<WorkItemView | null> => {
+      let token: string | undefined;
+      for (let page = 0; page < MOST_PAGES; page += 1) {
+        const read = await readWorklistPage(client, intakeId, 'all', token);
+        for (const item of read.items) {
+          if (item.parcel?.id.toLowerCase() === parcel.id.toLowerCase()) return item;
+          // The list is in the order of the parcels: once their place is passed the parcel is not in it.
+          if (item.parcel !== null && item.parcel.ordinal > parcel.ordinal) return null;
+        }
+        if (read.nextPageToken === null) return null;
+        token = read.nextPageToken;
+      }
+      throw unexpectedResponse(200);
+    },
+  });
+}
+
+/** What the next order is for: the parcel to make it for, or that every parcel that is left is waited on, or that none is left. */
+export type NextToOrder =
+  | { readonly kind: 'parcel'; readonly parcelId: string }
+  | { readonly kind: 'all-waiting' }
+  | { readonly kind: 'none' };
+
+/**
+ * The next parcel that needs an order (`listIntakeOrders`, view `needs_order`, `hub.read`), **moving forward from the parcel just saved or marked** and passing over a parcel the officer is waiting on the vendor's
+ * details for (D-S7-12). With no `after` it is the lowest parcel that needs an order and is not waited on; with one it is the first after that place, and when none is left after it, the lowest again. Nothing
+ * of this is worked out from a count: the rows are the server's.
+ */
+export function useNextToOrder(
+  intakeId: string,
+  after: number | undefined,
+  enabled = true,
+): UseQueryResult<NextToOrder> {
+  const client = useApiClient();
+  return useQuery({
+    queryKey: [...worklistKey(intakeId), 'next', after ?? null] as const,
+    enabled,
+    ...NOT_KEPT,
+    queryFn: async (): Promise<NextToOrder> => {
+      let token: string | undefined;
+      let lowest: string | undefined;
+      let seen = false;
+      for (let page = 0; page < MOST_PAGES; page += 1) {
+        const read = await readWorklistPage(client, intakeId, 'needs_order', token);
+        for (const item of read.items) {
+          if (item.parcel === null) continue;
+          seen = true;
+          if (item.parcel.waiting_for_vendor !== null) continue;
+          lowest ??= item.parcel.id;
+          if (after === undefined || item.parcel.ordinal > after) {
+            return { kind: 'parcel', parcelId: item.parcel.id };
+          }
+        }
+        if (read.nextPageToken === null) break;
+        token = read.nextPageToken;
+        if (page === MOST_PAGES - 1) throw unexpectedResponse(200);
+      }
+      if (lowest !== undefined) return { kind: 'parcel', parcelId: lowest };
+      return seen ? { kind: 'all-waiting' } : { kind: 'none' };
     },
   });
 }

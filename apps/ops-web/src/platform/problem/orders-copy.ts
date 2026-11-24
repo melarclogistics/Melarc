@@ -282,6 +282,27 @@ export const ORDERS_WORDS = {
     unknownOutcome:
       'We could not tell whether the order was saved. Look at the orders before you try again.',
     checkRecord: 'Look at the orders',
+    /** A parcel the officer is waiting on the vendor's details for (D-S7-12, 24 November 2026): marked on the server so that every officer and tablet sees it; the note is one short line and holds no number. */
+    waiting: {
+      button: 'Waiting for the vendor’s details',
+      title: 'Waiting for the vendor’s details',
+      consequence:
+        'The other officers will see that you are waiting for the vendor for this parcel. Make its order when you have what you need.',
+      noteLabel: 'What you asked, and how',
+      noteHelp:
+        'For example: Called the vendor, waiting on WhatsApp. Leave the number out of the note.',
+      confirm: 'Mark the parcel',
+      cancel: 'Cancel',
+      numberInNote: 'Leave the number out of the note.',
+      badNote: 'Write one short line, without a number or an address.',
+      marked: 'You are waiting for the vendor’s details for this parcel.',
+      takeOff: 'Take the mark off',
+      hasOrder: (ordinal: number, code: string): string =>
+        `Parcel ${String(ordinal)} already has its order, ${code}.`,
+      openOrder: 'Open the order',
+      allWaiting: 'Every parcel that is left is waiting for the vendor’s details.',
+      seeWaiting: 'See the parcels that wait',
+    },
     done: (code: string): string => `Order ${code} is saved.`,
     /** What a vendor with door photos has left, after an order is saved: the server's count of the whole vendor. */
     parcelsLeft: (count: number): string =>
@@ -1161,6 +1182,66 @@ export const ORDERS_COPY: readonly CopyRule[] = [
     operation: 'reverseOrderArrival',
     code: 'HUB_SCOPE_VIOLATION',
     text: 'This order is at a hub your account does not work in.',
+  },
+
+  // A parcel the officer is waiting on the vendor's details for (D-S7-12).
+  { operation: 'setParcelWaitingForVendor', text: 'The mark was not saved.' },
+  {
+    operation: 'setParcelWaitingForVendor',
+    code: 'PERMISSION_DENIED',
+    text: cannotText('hub.intake.itemize'),
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    code: 'NOT_FOUND',
+    text: 'This parcel could not be found.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    code: 'HUB_SCOPE_VIOLATION',
+    text: OTHER_HUB,
+  },
+  { operation: 'setParcelWaitingForVendor', code: 'VALIDATION_FAILED', text: NOTE_REFUSED },
+  {
+    operation: 'setParcelWaitingForVendor',
+    code: 'STATE_CONFLICT',
+    text: 'This vendor is not as it was when you opened it, so nothing was changed. Reload to see it as it is now.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    context: 'stale',
+    code: 'STATE_CONFLICT',
+    text: 'This vendor changed after you opened it, so nothing was changed. Reload to see it as it is now.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    context: 'parcel_ordered',
+    code: 'STATE_CONFLICT',
+    text: 'This parcel already has its order, so there is nothing to wait for.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    context: 'parcel_missing',
+    code: 'STATE_CONFLICT',
+    text: 'This parcel is missing, so nobody is waiting on the vendor for it.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    context: 'parcel_void',
+    code: 'STATE_CONFLICT',
+    text: 'This parcel was taken back, so there is nothing to wait for.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    context: 'reconciliation_open',
+    code: 'STATE_CONFLICT',
+    text: 'This vendor is in review until a senior officer decides. Mark the parcel afterwards.',
+  },
+  {
+    operation: 'setParcelWaitingForVendor',
+    context: 'intake_not_ready',
+    code: 'STATE_CONFLICT',
+    text: 'This vendor is not being checked in or ordered for now.',
   },
 
   // The recipient of a confirmed order, corrected (D-S7-1).

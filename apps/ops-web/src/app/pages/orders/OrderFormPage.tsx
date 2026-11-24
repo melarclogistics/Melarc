@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type SubmitEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
@@ -23,7 +23,13 @@ import {
   previewOrder,
   type SavedOrderView,
 } from '../../../platform/hub-orders/orders-commands';
-import { useLastOrders, useWorklist } from '../../../platform/hub-orders/use-orders-queries';
+import type { WaitingMarkView, WorkItemView } from '../../../platform/hub-orders/orders-shape';
+import {
+  useLastOrders,
+  useNextToOrder,
+  useParcelRow,
+  useWorklist,
+} from '../../../platform/hub-orders/use-orders-queries';
 import type { IntakeRecordView } from '../../../platform/hub-receiving/use-intake-record';
 import { ORDERS_WORDS as WORDS } from '../../../platform/problem/orders-copy';
 import { problemOf } from '../../../platform/problem/problem-copy';
@@ -33,6 +39,7 @@ import { OrderFields } from './OrderFields';
 import { FlowActions, FlowAlerts } from './OrderFlowParts';
 import { OrderPhoto } from './OrderPhoto';
 import { OrderLayout } from './OrderLayout';
+import { ParcelWaiting } from './ParcelWaiting';
 import { OrderPrice } from './OrderPrice';
 import { errorsOf, refusedFields } from './order-refusal-fields';
 import { typedLineOf } from './order-typed';
@@ -83,10 +90,13 @@ function parcelOf(record: IntakeRecordView, parcelId: string): ParcelFacts | und
 function Saved({
   facts,
   order,
+  after,
   onReload,
 }: {
   readonly facts: VendorFacts;
   readonly order: SavedOrderView;
+  /** The place of the parcel just saved: the next order moves forward from it. */
+  readonly after: number | undefined;
   /** Reads the vendor again, for its version. */
   readonly onReload: () => Promise<unknown>;
 }) {
@@ -149,7 +159,7 @@ function Saved({
       <div className="orders-saved__acts">
         {!open ? null : remaining === undefined || remaining > 0 ? (
           <ButtonLink
-            to={newOrderPath(facts.id)}
+            to={newOrderPath(facts.id, undefined, after)}
             size="lg"
             onClick={(event) => {
               // The first order of a vendor moves it from ready to being worked, and its version with it: the next order is made on the vendor as it is now, read before the next form opens, or its
@@ -163,7 +173,7 @@ function Saved({
               )
                 return;
               event.preventDefault();
-              void onReload().then(() => navigate(newOrderPath(facts.id)));
+              void onReload().then(() => navigate(newOrderPath(facts.id, undefined, after)));
             }}
           >
             {WORDS.workspace.acts.makeNext}
@@ -199,10 +209,16 @@ function OrderForm({
   parcel,
   remainingNote,
   reload,
+  mark,
+  onMarkChanged,
 }: {
   readonly facts: VendorFacts;
   readonly vendorName: string | undefined;
   readonly parcel: ParcelFacts | undefined;
+  /** The officer is waiting on the vendor's details for this parcel (D-S7-12), as the server says; null when it is not. */
+  readonly mark: WaitingMarkView | null;
+  /** The mark was taken off: the parcel's row is read again. */
+  readonly onMarkChanged: () => void;
   /** What the vendor says of its orders (blind: how many more are needed). */
   readonly remainingNote: string | undefined;
   readonly reload: () => Promise<IntakeRecordView | undefined>;
@@ -214,6 +230,7 @@ function OrderForm({
   const [attempts, setAttempts] = useState(0);
   const [saved, setSaved] = useState<SavedOrderView | undefined>(undefined);
   const form = useRef<HTMLFormElement>(null);
+  const navigate = useNavigate();
   const version = useRef(facts.etag);
   const gate = useUploadGate();
   const parcelId = parcel?.id ?? null;
@@ -266,7 +283,7 @@ function OrderForm({
   }, [command.phase]);
 
   if (saved !== undefined) {
-    return <Saved facts={facts} order={saved} onReload={() => reload()} />;
+    return <Saved facts={facts} order={saved} after={parcel?.ordinal} onReload={() => reload()} />;
   }
 
   const errors: OrderFieldErrors = errorsOf(fromServer, invalid);
@@ -361,17 +378,40 @@ function OrderForm({
           amendment={false}
           change={change}
         />
+        {parcel === undefined ? null : (
+          <ParcelWaiting
+            parcelId={parcel.id}
+            mark={mark}
+            version={() => version.current}
+            onMarked={() => {
+              // The officer goes on to the next parcel that needs an order, after this one, passing over the ones that are waited on.
+              void navigate(newOrderPath(facts.id, undefined, parcel.ordinal));
+            }}
+            onChanged={onMarkChanged}
+            onReload={reload}
+          />
+        )}
       </OrderLayout>
     </TaskForm>
   );
 }
 
 /** A page that says why there is nothing to make an order for, with the way back. */
-function NothingToOrder({ facts, words }: { readonly facts: VendorFacts; readonly words: string }) {
+function NothingToOrder({
+  facts,
+  words,
+  acts,
+}: {
+  readonly facts: VendorFacts;
+  readonly words: string;
+  /** Acts that lead on from what the words say (the order a parcel has, the parcels that wait), before the way back. */
+  readonly acts?: ReactNode;
+}) {
   return (
     <div className="orders-saved">
       <p className="orders-note">{words}</p>
       <div className="orders-saved__acts">
+        {acts}
         <ButtonLink to={ordersPath(facts.id)} variant="secondary" size="lg">
           {WORDS.common.backToOrders}
         </ButtonLink>
@@ -380,24 +420,103 @@ function NothingToOrder({ facts, words }: { readonly facts: VendorFacts; readonl
   );
 }
 
-/** For a vendor with door photos and no parcel in the address: the first parcel that arrived and has no order, from the server, and the form for it. */
-function NextParcel({ facts }: { readonly facts: VendorFacts }) {
-  const next = useWorklist(facts.id, { view: 'needs_order', pageSize: 1 });
+/**
+ * For a vendor with door photos and no parcel in the address: **the next parcel that arrived and has no order, moving forward from the parcel just saved or marked** (`after`, its place) and passing over a parcel the
+ * officer is waiting on the vendor's details for (D-S7-12), from the server; and the form for it. With none left after it, the lowest again; with every one left waited on, the page says so and leads to them.
+ */
+function NextParcel({
+  facts,
+  after,
+}: {
+  readonly facts: VendorFacts;
+  readonly after: number | undefined;
+}) {
+  const next = useNextToOrder(facts.id, after);
   if (next.status === 'pending') return <Skeleton lines={4} />;
-  const first = next.data?.items[0]?.parcel;
-  if (first === undefined || first === null) {
+  if (next.status === 'error') {
     return (
       <NothingToOrder
         facts={facts}
-        words={
-          next.status === 'error'
-            ? problemOf(next.error, { operation: 'listIntakeOrders' }).message
-            : F.noParcel
+        words={problemOf(next.error, { operation: 'listIntakeOrders' }).message}
+      />
+    );
+  }
+  if (next.data.kind === 'parcel') {
+    return <Navigate replace to={newOrderPath(facts.id, next.data.parcelId)} />;
+  }
+  if (next.data.kind === 'all-waiting') {
+    return (
+      <NothingToOrder
+        facts={facts}
+        words={F.waiting.allWaiting}
+        acts={
+          <ButtonLink to={`${ordersPath(facts.id)}?view=waiting_for_vendor`} size="lg">
+            {F.waiting.seeWaiting}
+          </ButtonLink>
         }
       />
     );
   }
-  return <Navigate replace to={newOrderPath(facts.id, first.id)} />;
+  return <NothingToOrder facts={facts} words={F.noParcel} />;
+}
+
+/** A parcel that already has its order (the officer went Back to its form): said with the order's code and a link to it, and never an empty form to be refused at the price. */
+function ParcelHasOrder({
+  facts,
+  item,
+}: {
+  readonly facts: VendorFacts;
+  readonly item: WorkItemView;
+}) {
+  const me = useSignedInSession();
+  return (
+    <NothingToOrder
+      facts={facts}
+      words={F.waiting.hasOrder(item.parcel?.ordinal ?? 0, item.order?.code ?? '')}
+      acts={
+        item.order !== null && me?.holds('pricing.read') === true ? (
+          <ButtonLink to={orderPath(item.order.id)} size="lg">
+            {F.waiting.openOrder}
+          </ButtonLink>
+        ) : null
+      }
+    />
+  );
+}
+
+/**
+ * The form of an order for one parcel of a vendor with door photos: the parcel's own row is read first (`listIntakeOrders`), so that a parcel that already has its order says so and an officer who is waiting on the
+ * vendor for it sees the mark. A row that cannot be read does not stop the form: the server judges the order again.
+ */
+function ParcelEntry({
+  facts,
+  vendorName,
+  parcel,
+  reload,
+}: {
+  readonly facts: VendorFacts;
+  readonly vendorName: string | undefined;
+  readonly parcel: ParcelFacts;
+  readonly reload: () => Promise<IntakeRecordView | undefined>;
+}) {
+  const row = useParcelRow(facts.id, parcel);
+  if (row.status === 'pending') return <Skeleton lines={4} />;
+  const item = row.data ?? null;
+  if (item?.order != null) return <ParcelHasOrder facts={facts} item={item} />;
+  return (
+    <OrderForm
+      key={parcel.id}
+      facts={facts}
+      vendorName={vendorName}
+      parcel={parcel}
+      remainingNote={undefined}
+      reload={reload}
+      mark={item?.parcel?.waiting_for_vendor ?? null}
+      onMarkChanged={() => {
+        void row.refetch();
+      }}
+    />
+  );
 }
 
 function Entry({
@@ -411,6 +530,10 @@ function Entry({
   const location = useLocation();
   const facts = vendorFactsOf(record);
   const parcelParam = params.get('parcel');
+  const afterParam = params.get('after');
+  // The place of the parcel just saved or marked, from the address: the next order moves forward from it.
+  const after =
+    afterParam !== null && /^\d{1,9}$/.test(afterParam) ? Number(afterParam) : undefined;
   const blind = facts.mode === 'BLIND_COUNT';
   // A vendor counted without photos has places, not parcels: how many more orders it can take is the server's count.
   const places = useWorklist(facts.id, {
@@ -442,6 +565,8 @@ function Entry({
             : WORDS.workspace.blind.remaining(progress.needs_order)
         }
         reload={reload}
+        mark={null}
+        onMarkChanged={() => undefined}
       />
     );
   }
@@ -449,7 +574,9 @@ function Entry({
   if (!facts.cleared && (parcelParam === null || !UUID.test(parcelParam))) {
     return <NothingToOrder facts={facts} words={F.checkInOpen} />;
   }
-  if (parcelParam === null || !UUID.test(parcelParam)) return <NextParcel facts={facts} />;
+  if (parcelParam === null || !UUID.test(parcelParam)) {
+    return <NextParcel facts={facts} after={after} />;
+  }
   const parcel = parcelOf(record, parcelParam);
   if (parcel === undefined || parcel.state === 'VOID') {
     return <NothingToOrder facts={facts} words={F.parcelNotAvailable} />;
@@ -457,16 +584,7 @@ function Entry({
   if (!facts.cleared && parcel.state === 'ARRIVED') {
     return <NothingToOrder facts={facts} words={F.checkInOpen} />;
   }
-  return (
-    <OrderForm
-      key={parcel.id}
-      facts={facts}
-      vendorName={vendorName}
-      parcel={parcel}
-      remainingNote={undefined}
-      reload={reload}
-    />
-  );
+  return <ParcelEntry facts={facts} vendorName={vendorName} parcel={parcel} reload={reload} />;
 }
 
 /**

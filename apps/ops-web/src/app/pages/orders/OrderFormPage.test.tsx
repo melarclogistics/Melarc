@@ -19,6 +19,7 @@ import {
   capturedRefusal,
   EXPECTED_PARCEL,
   NEW_TOKEN,
+  ORDER_ID,
   PARCELS,
   parcelRow,
   termsOf,
@@ -1228,4 +1229,212 @@ describe('the screen after an order is saved offers only what the server would t
       expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
     },
   );
+});
+
+describe('a parcel the officer is waiting on the vendor’s details for (Run G1, Part 2, item 4; D-S7-12)', () => {
+  const [P1, P2] = [PARCELS[0]?.id ?? '', PARCELS[1]?.id ?? ''];
+  const MARK = {
+    since: '2026-11-24T10:30:00.000Z',
+    note: 'Called the vendor, waiting on WhatsApp',
+  };
+  const WAIT = (parcel: string) => `PUT /intake-parcels/${parcel}/waiting-for-vendor`;
+  /** The worklist answers by view, as the server does: the parcels that need an order, or all of them. */
+  const listOf =
+    (rows: readonly ReturnType<typeof parcelRow>[]): Handler =>
+    (request) => {
+      const view = new URL(request.url).searchParams.get('view');
+      const shown =
+        view === 'needs_order' ? rows.filter((row) => row.work_state === 'NEEDS_ORDER') : rows;
+      return json(
+        200,
+        worklistOf(shown, {
+          needs_order: rows.filter((row) => row.work_state === 'NEEDS_ORDER').length,
+          waiting_for_vendor: rows.filter((row) => row.parcel.waiting_for_vendor !== null).length,
+        }),
+      );
+    };
+  const marked = (parcel: string, note: string | null) =>
+    json(200, { parcel_id: parcel, waiting: true, since: MARK.since, note });
+  const markDialog = async (user: User, note?: string): Promise<HTMLElement> => {
+    await user.click(
+      await screen.findByRole('button', { name: 'Waiting for the vendor’s details' }),
+    );
+    const dialog = await screen.findByRole('alertdialog');
+    if (note !== undefined) {
+      await user.type(within(dialog).getByLabelText(/What you asked, and how/), note);
+    }
+    return dialog;
+  };
+
+  // Break caught: a parcel the officer cannot order yet that has no way to be marked, so that the next officer meets the same parcel; a mark that is not on the vendor's version or that sends a key; a note lost; and the
+  // officer left on the form of a parcel that cannot be ordered, or sent back to the lowest parcel and the one just marked.
+  it('marks the parcel with the note on the vendor’s version, and goes on to the next parcel that needs an order, passing over one that is waited on', async () => {
+    const { user } = open(
+      {
+        [LIST]: listOf([
+          parcelRow(1, 'NEEDS_ORDER'),
+          parcelRow(2, 'NEEDS_ORDER', { waiting: MARK }),
+          parcelRow(3, 'NEEDS_ORDER'),
+        ]),
+        [WAIT(P1)]: () => marked(P1, 'Called the vendor'),
+      },
+      `/intakes/${VENDOR_ID}/orders/new?parcel=${P1}`,
+    );
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    const dialog = await markDialog(user, 'Called the vendor');
+    await user.click(within(dialog).getByRole('button', { name: 'Mark the parcel' }));
+    // On to the next parcel that needs an order after this one: parcel 2 is waited on, so parcel 3.
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 3' }),
+    ).toBeVisible();
+    const request = sent(WAIT(P1))[0];
+    expect(request?.headers.get('If-Match')).toBe('"v1"');
+    expect(request?.headers.get('Idempotency-Key')).toBeNull();
+    expect(await bodyOf(request)).toEqual({ waiting: true, note: 'Called the vendor' });
+  });
+
+  // Break caught: a note that is optional made required, or sent as an empty text.
+  it('marks a parcel with no note, and sends none', async () => {
+    const { user } = open(
+      {
+        [LIST]: listOf([parcelRow(1, 'NEEDS_ORDER'), parcelRow(3, 'NEEDS_ORDER')]),
+        [WAIT(P1)]: () => marked(P1, null),
+      },
+      `/intakes/${VENDOR_ID}/orders/new?parcel=${P1}`,
+    );
+    const dialog = await markDialog(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Mark the parcel' }));
+    await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 3' });
+    expect(await bodyOf(sent(WAIT(P1))[0])).toEqual({ waiting: true });
+  });
+
+  // Break caught: a phone number let into a note the audit would then refuse after the act began, or told as "invalid" with nothing the officer can act on; the dialog closed on a refusal.
+  it('refuses a note that holds a number on the note itself, in the words that say what to do, and keeps the dialog and the note', async () => {
+    const { status, body } = capturedRefusal('parcel-wait-refused-number');
+    const { user } = open(
+      {
+        [LIST]: listOf([parcelRow(1, 'NEEDS_ORDER')]),
+        [WAIT(P1)]: () => json(status, body),
+      },
+      `/intakes/${VENDOR_ID}/orders/new?parcel=${P1}`,
+    );
+    const dialog = await markDialog(user, 'the number is 0244123456');
+    await user.click(within(dialog).getByRole('button', { name: 'Mark the parcel' }));
+    expect(await within(dialog).findByText('Leave the number out of the note.')).toBeVisible();
+    expect(within(dialog).getByLabelText(/What you asked, and how/)).toHaveValue(
+      'the number is 0244123456',
+    );
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toMatch(DIAGNOSTIC);
+  });
+
+  // Break caught: a parcel that is waited on drawn as any other (the officer cannot see what was asked, or that another officer is on it) and a mark that cannot be taken off.
+  it('says that the parcel is waited on, with what was asked, and takes the mark off on one press', async () => {
+    let off = false;
+    const { user } = open(
+      {
+        [LIST]: () =>
+          listOf([parcelRow(1, 'NEEDS_ORDER', off ? {} : { waiting: MARK })])(
+            new Request('http://x/?view=all'),
+          ),
+        [WAIT(P1)]: () => {
+          off = true;
+          return json(200, { parcel_id: P1, waiting: false, since: null, note: null });
+        },
+      },
+      `/intakes/${VENDOR_ID}/orders/new?parcel=${P1}`,
+    );
+    expect(
+      await screen.findByText('You are waiting for the vendor’s details for this parcel.'),
+    ).toBeVisible();
+    expect(screen.getByText('Called the vendor, waiting on WhatsApp')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Take the mark off' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByText('You are waiting for the vendor’s details for this parcel.'),
+      ).toBeNull();
+    });
+    expect(await bodyOf(sent(WAIT(P1))[0])).toEqual({ waiting: false });
+    expect(sent(WAIT(P1))[0]?.headers.get('If-Match')).toBe('"v1"');
+    // The parcel is the officer's again: the mark can be made again.
+    expect(screen.getByRole('button', { name: 'Waiting for the vendor’s details' })).toBeVisible();
+  });
+
+  // Break caught: an empty form for a parcel that already has its order (Back to ?parcel=X after saving it): the officer fills it in to be refused at the price.
+  it('says that a parcel already has its order, with the code and a link, and draws no form for it', async () => {
+    open(
+      { [LIST]: listOf([parcelRow(1, 'ITEMIZED')]) },
+      `/intakes/${VENDOR_ID}/orders/new?parcel=${P1}`,
+    );
+    expect(await screen.findByText(/Parcel 1 already has its order, ACC-OR-/)).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Open the order' })).toHaveAttribute(
+      'href',
+      `/orders/${ORDER_ID}`,
+    );
+    expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+    expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
+    expect(sent(PREVIEW)).toHaveLength(0);
+  });
+
+  // Break caught: *Make the next order* that reopens the lowest parcel without an order (the one the officer has just marked or passed) instead of moving forward from the parcel just saved, and that stops at a parcel
+  // that is waited on.
+  it('after an order is saved, moves forward from the parcel just saved and passes over one that is waited on', async () => {
+    const { user } = open(
+      {
+        [LIST]: listOf([parcelRow(1, 'NEEDS_ORDER'), parcelRow(3, 'NEEDS_ORDER')]),
+        [SAVE]: () => json(201, SAVED('11111111-2222-4333-8444-555555555555'), { ETag: '"o1"' }),
+      },
+      `/intakes/${VENDOR_ID}/orders/new?parcel=${P2}`,
+    );
+    await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 2' });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    await screen.findByText('Order ACC-OR-2CD3FG is saved.');
+    // The address too says where to go on from (a link opened in another tab has no click handler to say it).
+    expect(screen.getByRole('link', { name: 'Make the next order' })).toHaveAttribute(
+      'href',
+      `/intakes/${VENDOR_ID}/orders/new?after=2`,
+    );
+    await user.click(screen.getByRole('link', { name: 'Make the next order' }));
+    // Not parcel 1, the lowest that still needs an order: parcel 3, the next after the one just saved.
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 3' }),
+    ).toBeVisible();
+  });
+
+  it('goes back to the lowest parcel that needs an order when none is left after this one', async () => {
+    open(
+      {
+        [LIST]: listOf([
+          parcelRow(1, 'NEEDS_ORDER'),
+          parcelRow(2, 'NEEDS_ORDER', { waiting: MARK }),
+        ]),
+      },
+      `/intakes/${VENDOR_ID}/orders/new?after=3`,
+    );
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Make an order for parcel 1' }),
+    ).toBeVisible();
+  });
+
+  // Break caught: a vendor whose every parcel left is waited on that is sent to a form (or told that every parcel has an order, which is not so).
+  it('says every parcel that is left is waiting for the vendor’s details, and leads to them', async () => {
+    open(
+      { [LIST]: listOf([parcelRow(1, 'NEEDS_ORDER', { waiting: MARK })]) },
+      `/intakes/${VENDOR_ID}/orders/new?after=1`,
+    );
+    expect(
+      await screen.findByText('Every parcel that is left is waiting for the vendor’s details.'),
+    ).toBeVisible();
+    expect(screen.queryByText('Every parcel that arrived has an order.')).toBeNull();
+    expect(screen.getByRole('link', { name: 'See the parcels that wait' })).toHaveAttribute(
+      'href',
+      `/intakes/${VENDOR_ID}/orders?view=waiting_for_vendor`,
+    );
+    expect(screen.queryByLabelText(/Recipient’s name/)).toBeNull();
+  });
 });
