@@ -81,6 +81,11 @@ p.orders-photo__none {
   gap: var(--space-3);
 }
 
+/* The acts that follow the facts of a record or a note in the flow of a page, which is no grid that spaces what it holds: the space of a thumb above them, or the buttons are drawn against the line over them. */
+.orders-saved__acts--after {
+  margin-block-start: var(--space-4);
+}
+
 .orders-notice {
   margin-block-end: var(--space-4);
 }

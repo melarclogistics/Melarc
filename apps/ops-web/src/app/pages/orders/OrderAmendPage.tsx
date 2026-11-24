@@ -245,7 +245,7 @@ function Reading({ id }: { readonly id: string }) {
               <>
                 <PageHeader title={F.amendTitle(record.order.code)} />
                 <p className="orders-note">{reason}</p>
-                <div className="orders-saved__acts">
+                <div className="orders-saved__acts orders-saved__acts--after">
                   <ButtonLink to={orderPath(record.order.id)} variant="secondary" size="lg">
                     {WORDS.record.acts.openVendor}
                   </ButtonLink>

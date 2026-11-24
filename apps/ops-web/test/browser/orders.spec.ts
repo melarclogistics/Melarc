@@ -37,6 +37,7 @@ const ORDERS = `/intakes/${VENDOR}/orders`;
 const NEW_ORDER = `${ORDERS}/new`;
 const FIRST = storedOrder(1);
 const EARLY_ID = storedOrder(2).id;
+const CORRECTION_ID = '0f0f0f0f-0000-4000-8000-000000000001';
 const DIAGNOSTIC = 'Diagnostic text that must never reach a screen.';
 /** D-S7-2: a press in the moment after the price changed at the save is ignored (about 600 ms); a press that is meant comes after it. */
 const GUARD_WAIT_MS = 750;
@@ -1061,4 +1062,69 @@ test.describe('the screens at the verified widths', () => {
       });
     }
   }
+});
+
+/** The least space the acts that follow what a page says keep above them, in pixels: the token `--space-3`, the gap of a thumb. */
+const LEAST_SPACE_ABOVE_ACTS = 12;
+
+/** How far below the element above them the acts are drawn, in pixels. */
+const spaceAboveTheActs = (acts: Locator): Promise<number> =>
+  acts.evaluate((element) => {
+    const above = element.previousElementSibling;
+    return above === null
+      ? Number.NaN
+      : element.getBoundingClientRect().top - above.getBoundingClientRect().bottom;
+  });
+
+// Break caught (found by looking at the pictures of Run F; the checks of text and of axe cannot see a gap): the acts that follow the facts of a record or the note of a page, in a flow that spaces nothing, drawn
+// against the line above them, so that the buttons of a decision touched the last fact.
+test.describe('the buttons that follow what a page says', () => {
+  test('the buttons that decide a change of who pays do not touch the facts above them', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/payer-corrections/${CORRECTION_ID}`, {
+      ...firstMade(),
+      corrections: [
+        {
+          id: CORRECTION_ID,
+          orderId: FIRST.id,
+          state: 'REQUESTED',
+          intent: 'SENDER_PAYS_FULL',
+          note: 'The vendor pays by phone',
+          version: 1,
+          requestedBy: IDS.checker,
+        },
+      ],
+    });
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+    expect(await spaceAboveTheActs(page.locator('.orders-saved__acts'))).toBeGreaterThanOrEqual(
+      LEAST_SPACE_ABOVE_ACTS,
+    );
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  test('the way back under the note of an order that cannot be changed does not touch the note', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}/amend`, firstMade());
+    await expect(page.locator('.orders-saved__acts')).toBeVisible();
+    expect(await spaceAboveTheActs(page.locator('.orders-saved__acts'))).toBeGreaterThanOrEqual(
+      LEAST_SPACE_ABOVE_ACTS,
+    );
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  test('the buttons of a vendor closed with parcels left do not touch the note above them', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, '/closed-vendors', allMade());
+    await page.getByRole('button', { name: /^Open the vendor: / }).click();
+    const acts = page.getByRole('dialog').locator('.orders-saved__acts');
+    await expect(acts).toBeVisible();
+    expect(await spaceAboveTheActs(acts)).toBeGreaterThanOrEqual(LEAST_SPACE_ABOVE_ACTS);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
 });

@@ -121,7 +121,7 @@ export function ClosedVendorsPage() {
                 ]}
               />
               <p className="orders-note">{K.notice}</p>
-              <div className="orders-saved__acts">
+              <div className="orders-saved__acts orders-saved__acts--after">
                 <ButtonLink to={recordPath(item.intake_id)} size="lg">
                   {K.acts.openVendor}
                 </ButtonLink>

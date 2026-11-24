@@ -182,7 +182,7 @@ function Body({
       />
       {waiting && !mayDecide ? <p className="orders-note">{K.mayNotDecide}</p> : null}
       {waiting && mayDecide ? (
-        <div className="orders-saved__acts">
+        <div className="orders-saved__acts orders-saved__acts--after">
           <Button
             type="button"
             size="lg"
