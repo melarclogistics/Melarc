@@ -893,6 +893,16 @@ const firstMade = (): Partial<World> => ({
   orders: [storedOrder(1)],
   permissions: SENIOR_KEYS,
 });
+/** A vendor counted without photos (nine parcels counted) with the given number of orders made: its orders are for no parcel, and the count is all it knows of them (D-S7-3). */
+const blindMade = (orders: number): Partial<World> => ({
+  mode: 'BLIND_COUNT',
+  parcelCount: 9,
+  vendorState: 'ITEMIZING',
+  orders: Array.from({ length: orders }, (_, index) =>
+    storedOrder(index + 1, { parcelless: true }),
+  ),
+  permissions: SENIOR_KEYS,
+});
 
 const SCREENS: readonly Screen[] = [
   {
@@ -1009,6 +1019,17 @@ const SCREENS: readonly Screen[] = [
     ready: (page) => page.getByRole('button', { name: 'Save at GH₵55.00' }),
     then: async (page) => {
       await expect(heading(page, 'Make an order for parcel 2')).toBeVisible();
+      await fillIn(page);
+      await page.getByRole('button', { name: /^Save the order at / }).click();
+    },
+  },
+  {
+    // A vendor counted without photos has no parcel to show the order on: the code is what goes on the parcel, large, with where the vendor stands in its count and the orders made last (D-S7-3).
+    name: 'the saved order of a vendor counted without photos',
+    path: NEW_ORDER,
+    world: () => blindMade(3),
+    ready: (page) => page.getByText('Write this code on the parcel.'),
+    then: async (page) => {
       await fillIn(page);
       await page.getByRole('button', { name: /^Save the order at / }).click();
     },
@@ -1134,6 +1155,53 @@ test.describe('the buttons that follow what a page says', () => {
     const acts = page.getByRole('dialog').locator('.orders-saved__acts');
     await expect(acts).toBeVisible();
     expect(await spaceAboveTheActs(acts)).toBeGreaterThanOrEqual(LEAST_SPACE_ABOVE_ACTS);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
+test.describe('a vendor counted without photos', () => {
+  // Break caught: a saved order that does not say what goes on the parcel (the officer copies a code from a small line), a place in the count taken from the page and not from the server, a list that is not the last
+  // orders, an order made for a parcel that does not exist, and "Make the next order" that brings the saved screen back (D-S7-3).
+  test('after an order the code is large with what to do with it, the place in the count and the last orders are the server’s, and the next form is empty', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER, blindMade(3));
+    await fillIn(page);
+    await page.getByRole('button', { name: /^Save the order at / }).click();
+
+    await expect(page.getByText('Order ACC-OR-8STVWX is saved.')).toBeVisible();
+    await expect(page.getByText('Write this code on the parcel.')).toBeVisible();
+    await expect(page.locator('.orders-blind__code')).toHaveText('ACC-OR-8STVWX');
+    // Both numbers are the server's: the orders made and the parcels counted.
+    await expect(page.getByText('Order 4 of 9 for this vendor.')).toBeVisible();
+    const last = page.locator('.orders-blind__list li');
+    await expect(last).toHaveCount(4);
+    await expect(last.last()).toContainText('ACC-OR-8STVWX');
+    // The order was made for no parcel, and the page named none.
+    const saved = made(api, 'POST', `/hub-intakes/${VENDOR}/orders`);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.body).not.toHaveProperty('parcel_id');
+    expect(api.world.orders).toHaveLength(4);
+
+    // The form for the next order is the form again, empty, and not the screen of the order just saved.
+    await page.getByRole('link', { name: 'Make the next order' }).click();
+    await expect(page.getByLabel('Recipient’s name')).toHaveValue('');
+    await expect(page.getByText(/is saved\.$/)).toHaveCount(0);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a vendor that is told it has more orders to make than parcels it counted, or told it is done while it is not: the last order of the count says so and offers the close.
+  test('the last order of the count leaves nothing to make, and the screen offers the close', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, NEW_ORDER, blindMade(8));
+    await fillIn(page);
+    await page.getByRole('button', { name: /^Save the order at / }).click();
+    await expect(page.getByText('Order 9 of 9 for this vendor.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Make the next order' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Close this vendor' })).toBeVisible();
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });

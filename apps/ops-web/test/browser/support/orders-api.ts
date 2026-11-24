@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import type { BrowserContext, Page, Route } from '@playwright/test';
 
-import { INTAKE_HUB_ID } from '../../../src/test-support/hub-intake-fixture';
+import { INTAKE_HUB_ID, preCountFixture } from '../../../src/test-support/hub-intake-fixture';
+import { MANIFEST_ID } from '../../../src/test-support/manifest-fixture';
 import {
   captured,
   closureOf,
@@ -14,7 +15,11 @@ import {
   VENDOR_ID,
   worklistOf,
 } from '../../../src/test-support/orders-fixture';
-import { checkInFixture } from '../../../src/test-support/receiving-fixture';
+import {
+  blindVendorFixture,
+  checkInFixture,
+  runFixture,
+} from '../../../src/test-support/receiving-fixture';
 import { freezeClock } from './clock';
 import { answerQueueSummary } from './queue-summary';
 import { PICTURE } from './receiving-api';
@@ -57,6 +62,8 @@ export interface StoredOrder {
   price: number;
   /** An early quote is changed here; a fixed price is not. */
   status: 'EARLY_QUOTE' | 'FROZEN';
+  /** An order of a vendor counted without photos is for no parcel: it names none, and is told by its code. */
+  readonly parcelless?: boolean;
   version: number;
   amendments: {
     id: string;
@@ -85,7 +92,9 @@ export interface World {
   permissions: string[];
   /** Who is signed in: the officer, or another one (the checker of what the officer asked). */
   principal: string;
-  /** How many parcels the vendor arrived with: three, unless a test works a longer list a page at a time. */
+  /** How the vendor was checked in: against door photos (the default), or counted without photos (D-S7-3), whose orders are for no parcel and whose parcels are only a count. */
+  mode: 'PHOTO_CHECK_IN' | 'BLIND_COUNT';
+  /** How many parcels the vendor arrived with: three, unless a test works a longer list a page at a time. For a vendor counted without photos it is the committed count. */
   parcelCount: number;
   /** Why the vendor waits for a senior officer (D-S7-7), or none: the list of vendors that wait for one holds the vendor only when the world says so, and says why, as the API's does. */
   seniorNeeded: 'CLOSE_EXCEPTION' | null;
@@ -129,6 +138,7 @@ export function storedOrder(parcel: number, over: Partial<StoredOrder> = {}): St
 export function world(over: Partial<World> = {}): World {
   return {
     principal: IDS.me,
+    mode: 'PHOTO_CHECK_IN',
     parcelCount: 3,
     seniorNeeded: null,
     permissions: [
@@ -235,6 +245,21 @@ const vendorEtag = (w: World): string =>
   `"v${String(w.vendorState === 'READY_FOR_ITEMIZATION' ? 1 : w.vendorState === 'ITEMIZING' ? 2 : 3)}"`;
 
 function vendorWire(w: World) {
+  if (w.mode === 'BLIND_COUNT') {
+    // A vendor counted without photos: the count the hub committed is the whole of what it knows of the parcels (the intake as the blind-count screens judge it).
+    return {
+      ...preCountFixture({ id: VENDOR_ID }),
+      state: w.vendorState,
+      count_phase: 'POST_COUNT',
+      rider_declared_count: w.parcelCount,
+      physical_count: w.parcelCount,
+      count_variance: 'MATCH',
+      count_difference: 0,
+      condition: 'OK',
+      condition_findings: [],
+      parcel_photo_ids: [],
+    };
+  }
   return checkInFixture(PARCELS, {
     id: VENDOR_ID,
     state: w.vendorState,
@@ -255,8 +280,8 @@ function orderWire(order: StoredOrder): Record<string, unknown> {
     id: order.id,
     code: order.code,
     pickup_intake_id: VENDOR_ID,
-    intake_parcel_id: parcelOf(order.parcel)?.id ?? null,
-    intake_parcel_state: 'ARRIVED',
+    intake_parcel_id: order.parcelless === true ? null : (parcelOf(order.parcel)?.id ?? null),
+    intake_parcel_state: order.parcelless === true ? null : 'ARRIVED',
     size_class: order.size,
     locked_price: frozen ? money(order.price) : null,
     price_status: order.status,
@@ -317,7 +342,48 @@ function rowOf(w: World, ordinal: number) {
 /** The most rows a page of the worklist holds when the browser does not say (the contract's page size is smaller than a long vendor). */
 const PAGE_SIZE = 100;
 
+/**
+ * The worklist of a vendor counted without photos: its rows are its orders (it has no parcel to list), the work still to do is a number (the count less the orders, which opens no rows), and the view of the
+ * vendor's orders that the saved screen reads to the end is a hundred to a page, oldest first.
+ */
+function blindWorklistWire(w: World, view: string | null, pageSize: number, offset: number) {
+  const rows = w.orders.map((order) => ({
+    work_state: order.status === 'FROZEN' ? 'ITEMIZED' : 'PREPARED',
+    parcel: null,
+    reversed_order: null,
+    order: {
+      id: order.id,
+      code: order.code,
+      recipient_name: order.name,
+      service_area: 'ACCRA_TEMA',
+      size_class: order.size,
+      commercial_state:
+        order.status === 'FROZEN' ? (order.sender ? 'PAYMENT_REQUIRED' : 'NO_VENDOR_CHARGE') : null,
+      confirmed: order.status === 'FROZEN',
+      payment_required: (order.sender ?? 0) > 0,
+    },
+  }));
+  const wanted = rows.filter((row) =>
+    view === 'needs_order' ? false : view === 'itemized' ? row.work_state === 'ITEMIZED' : true,
+  );
+  const items = wanted.slice(offset, offset + pageSize);
+  const next = offset + pageSize < wanted.length ? String(offset + pageSize) : null;
+  return worklistOf(
+    items,
+    {
+      received: w.parcelCount,
+      needs_order: Math.max(0, w.parcelCount - w.orders.length),
+      itemized: w.orders.filter((each) => each.status === 'FROZEN').length,
+      prepared: w.orders.filter((each) => each.status !== 'FROZEN').length,
+      orders: w.orders.length,
+      payment_required: w.orders.filter((each) => (each.sender ?? 0) > 0).length,
+    },
+    { intake_state: w.vendorState, receiving_mode: 'BLIND_COUNT', next_page_token: next },
+  );
+}
+
 function worklistWire(w: World, view: string | null, pageSize: number, offset: number) {
+  if (w.mode === 'BLIND_COUNT') return blindWorklistWire(w, view, pageSize, offset);
   const rows = Array.from({ length: w.parcelCount }, (_, index) => rowOf(w, index + 1));
   const needs = rows.filter((row) => row.work_state === 'NEEDS_ORDER').length;
   const made = w.orders.length;
@@ -477,6 +543,15 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (await needs('hub.read')) return;
     return route.fulfill(ok(vendorWire(w), 200, vendorEtag(w)));
   }
+  // The run the vendor came in on: the order screens of a vendor counted without photos read its section to know whose it is. A vendor with door photos is known by its own record, and no screen asks.
+  if (
+    method === 'GET' &&
+    path === `/api/v1/receiving-runs/${MANIFEST_ID}` &&
+    w.mode === 'BLIND_COUNT'
+  ) {
+    if (await needs('hub.read')) return;
+    return route.fulfill(ok(runFixture([blindVendorFixture({ intake_id: VENDOR_ID })])));
+  }
   if (method === 'GET' && path === `/api/v1/hub-intakes/${VENDOR_ID}/orders`) {
     if (await needs('hub.read')) return;
     const asked = new URLSearchParams(call.search);
@@ -536,11 +611,19 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     }
     const size = SIZES.find((each) => each === body.size_class);
     const parcelId = typeof body.parcel_id === 'string' ? body.parcel_id : undefined;
-    const ordinal = PARCELS.findIndex((each) => each.id === parcelId) + 1;
+    // A vendor counted without photos makes its orders for no parcel, as many as it counted and no more: the next is the one after those made.
+    const blind = w.mode === 'BLIND_COUNT';
+    const ordinal = blind
+      ? w.orders.length + 1
+      : PARCELS.findIndex((each) => each.id === parcelId) + 1;
     if (size === undefined || ordinal === 0)
       return route.fulfill(error(422, 'SIZE_CLASS_REQUIRED'));
-    if (orderForParcel(w, ordinal) !== undefined) {
-      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'parcel_ordered' }));
+    if (blind ? w.orders.length >= w.parcelCount : orderForParcel(w, ordinal) !== undefined) {
+      return route.fulfill(
+        error(409, 'STATE_CONFLICT', {
+          rule: blind ? 'orders_exceed_received' : 'parcel_ordered',
+        }),
+      );
     }
     if (w.repriceOnce !== undefined) {
       w.prices[size] = w.repriceOnce;
@@ -564,6 +647,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     const made = storedOrder(ordinal, {
       size,
       price,
+      parcelless: blind,
       name: typeof recipient.name === 'string' ? recipient.name : 'Ama Mensah',
       phone: typeof recipient.phone === 'string' ? recipient.phone : '',
       address:
