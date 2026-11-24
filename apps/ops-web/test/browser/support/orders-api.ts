@@ -48,6 +48,10 @@ export const IDS = {
 /** The identifier of the vendor's nth parcel (1 to 3): what the address of the form names. */
 export const parcelIdOf = (ordinal: number): string => PARCELS[ordinal - 1]?.id ?? '';
 
+/** The record of the photo of the vendor's nth parcel, of any place of a long vendor: what the link of its picture is asked for. */
+export const photoIdOf = (ordinal: number): string =>
+  parcelRow(ordinal, 'NEEDS_ORDER').parcel.door_photo_evidence_id;
+
 export type Size = 'SMALL' | 'MEDIUM' | 'LARGE';
 
 export interface StoredOrder {
@@ -115,6 +119,10 @@ export interface World {
   repriceOnce: number | undefined;
   /** How long the stand-in's server takes to work a price out, in milliseconds: none by default. A test that taps while a price is being checked asks for a slow one. */
   previewDelayMs: number;
+  /** How long the stand-in's server takes to give the link of a photo, in milliseconds: none by default. A test that counts how many links are asked for at once asks for a slow one, so that the ones in flight overlap. */
+  linkDelayMs: number;
+  /** The next links of photos answer a 429 with the wait it asks for instead of a link, each using one of its `times`: the API's limit told to a page that draws many photos. */
+  linkFault: { times: number; retryAfterSeconds: number } | undefined;
   /** Saves made under a key already seen are answered as the first was and make nothing, and a key seen with another body is refused. */
   keys: Map<
     string,
@@ -166,6 +174,8 @@ export function world(over: Partial<World> = {}): World {
     prices: { SMALL: 3500, MEDIUM: 4000, LARGE: 5000 },
     repriceOnce: undefined,
     previewDelayMs: 0,
+    linkDelayMs: 0,
+    linkFault: undefined,
     keys: new Map(),
     ...over,
   };
@@ -186,6 +196,17 @@ export interface OrdersApi {
   readonly unexpected: string[];
   /** The pictures the browser fetched from the store. */
   readonly images: string[];
+  /**
+   * The links of photos the browser asked for: the ones not yet answered, the most that were ever asked for at once, the photo of each in the order they were asked for, the moment each was asked for
+   * (`performance.now()` of the test's own process, in milliseconds), and the moment the first refusal was answered, if one was (`linkFault`).
+   */
+  readonly links: {
+    current: number;
+    peak: number;
+    readonly asked: string[];
+    readonly at: number[];
+    refusedAt: number | undefined;
+  };
 }
 
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -433,20 +454,27 @@ function worklistWire(w: World, view: string | null, pageSize: number, offset: n
   );
 }
 
+/** The most outstanding parcels the closure names: the API's own limit, a hundred, with the number of all of them beside the list. */
+const OUTSTANDING_LIMIT = 100;
+
 function closureWire(w: World): Record<string, unknown> {
-  const needs = 3 - w.orders.length;
-  const outstanding = [1, 2, 3]
+  const needs = w.parcelCount - w.orders.length;
+  const outstanding = Array.from({ length: w.parcelCount }, (_, index) => index + 1)
     .filter((ordinal) => orderForParcel(w, ordinal) === undefined)
-    .map((ordinal) => ({
-      origin: 'DOOR_PHOTO',
-      ordinal,
-      parcel_id: parcelOf(ordinal)?.id,
-      hub_photo_evidence_id: null,
-      door_photo_evidence_id: parcelOf(ordinal)?.photo_evidence_id ?? null,
-    }));
+    .slice(0, OUTSTANDING_LIMIT)
+    .map((ordinal) => {
+      const { parcel } = parcelRow(ordinal, 'NEEDS_ORDER');
+      return {
+        origin: 'DOOR_PHOTO',
+        ordinal,
+        parcel_id: parcel.id,
+        hub_photo_evidence_id: null,
+        door_photo_evidence_id: parcel.door_photo_evidence_id,
+      };
+    });
   return closureOf('ready', {
     intake_state: w.vendorState,
-    received: 3,
+    received: w.parcelCount,
     ordered: w.orders.length,
     payment_required: w.orders.filter((each) => (each.sender ?? 0) > 0).length,
     outstanding_count: needs,
@@ -1096,13 +1124,34 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
   // The door photo beside the form: the authorization to read one stored photo, and the picture itself (the store is the page's own origin).
   const photo = id(/^\/api\/v1\/evidence\/([0-9a-f-]{36})\/retrieval-authorization$/);
   if (method === 'POST' && photo !== undefined) {
-    return route.fulfill(
-      ok({
-        method: 'GET',
-        url: `/test-evidence-store/photo/${photo}?token=issued-${String(state.images.length)}`,
-        expires_at: '2026-11-03T08:36:00Z',
-      }),
-    );
+    // How many links are being asked for at once is what a page that draws a hundred photos is held to: counted from the moment a request arrives to the moment it is answered.
+    state.links.asked.push(photo);
+    state.links.at.push(performance.now());
+    state.links.current += 1;
+    state.links.peak = Math.max(state.links.peak, state.links.current);
+    try {
+      await pause(w.linkDelayMs);
+      const fault = w.linkFault;
+      if (fault !== undefined && fault.times > 0) {
+        fault.times -= 1;
+        state.links.refusedAt ??= performance.now();
+        await route.fulfill({
+          ...error(429, 'RATE_LIMITED'),
+          headers: { ...JSON_HEADERS, 'retry-after': String(fault.retryAfterSeconds) },
+        });
+      } else {
+        await route.fulfill(
+          ok({
+            method: 'GET',
+            url: `/test-evidence-store/photo/${photo}?token=issued-${String(state.images.length)}`,
+            expires_at: '2026-11-03T08:36:00Z',
+          }),
+        );
+      }
+    } finally {
+      state.links.current -= 1;
+    }
+    return;
   }
 
   state.unexpected.push(`${method} ${path}`);
@@ -1114,7 +1163,13 @@ export async function stubOrdersApi(
   target: Page | BrowserContext,
   initial: World = world(),
 ): Promise<OrdersApi> {
-  const state: OrdersApi = { world: initial, calls: [], unexpected: [], images: [] };
+  const state: OrdersApi = {
+    world: initial,
+    calls: [],
+    unexpected: [],
+    images: [],
+    links: { current: 0, peak: 0, asked: [], at: [], refusedAt: undefined },
+  };
   await freezeClock(target);
   await target.route('**/test-evidence-store/photo/**', async (route) => {
     state.images.push(new URL(route.request().url()).pathname);

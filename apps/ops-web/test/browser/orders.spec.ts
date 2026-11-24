@@ -5,6 +5,7 @@ import { expect, test } from './support/guarded-test';
 import {
   IDS,
   parcelIdOf,
+  photoIdOf,
   storedOrder,
   stubOrdersApi,
   world,
@@ -654,6 +655,186 @@ test.describe('the parcel’s photo on the order’s page (Run G1, Part 2, item 
   });
 });
 
+/**
+ * Waits until the links of photos have stopped being asked for (none in flight, and the same number at two looks a few hundred milliseconds apart: a page of photos is drawn in several turns of a queue of four, each a
+ * round trip), and says how many were asked for.
+ */
+async function linksSettled(api: OrdersApi): Promise<number> {
+  let before = -1;
+  await expect
+    .poll(
+      () => {
+        const now = api.links.asked.length;
+        const steady = now === before && api.links.current === 0;
+        before = now;
+        return steady;
+      },
+      { intervals: [400], timeout: 20_000 },
+    )
+    .toBe(true);
+  return api.links.asked.length;
+}
+
+test.describe('the photos of the order screens are asked for through the portal’s one queue (Run G2, Part 2, item 4; OB-S1-169 item 20)', () => {
+  // Break caught: the close page that asks for the link of each of its hundred tiles the moment it opens (a hundred requests of the session in a second), or for more than four at once, or for a photo twice.
+  test('the close page asks for the links of its tiles as they come near the screen, four at a time at most, and for none twice', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    const { api, watch } = await open(page, `/intakes/${VENDOR}/close`, {
+      vendorState: 'ITEMIZING',
+      parcelCount: 130,
+      linkDelayMs: 120,
+    });
+    await expect(page.getByRole('heading', { level: 1, name: 'Close Kente Crafts' })).toBeVisible();
+    // The hundred parcels the closure names are drawn, and the thirty after them are told of in a line.
+    await expect(page.getByText(/^Parcel \d+$/)).toHaveCount(100);
+    await expect(page.getByText(/Showing 100 of 130 parcels\./)).toBeVisible();
+
+    // When the page opens only the tiles near the screen are asked for: the last of the hundred is a long way below it.
+    const opened = await linksSettled(api);
+    expect(opened).toBeGreaterThan(0);
+    expect(opened).toBeLessThan(100);
+    expect(api.links.asked).not.toContain(photoIdOf(100));
+
+    // Going down the page, a tile that comes near is asked for as it does, and the last one is asked for when the page gets to it.
+    for (let place = 10; place <= 100; place += 10) {
+      await page.getByText(`Parcel ${String(place)}`, { exact: true }).scrollIntoViewIfNeeded();
+    }
+    const down = await linksSettled(api);
+    expect(down).toBeGreaterThan(opened);
+    expect(down).toBeLessThanOrEqual(100);
+    expect(api.links.asked).toContain(photoIdOf(100));
+
+    // Each photo was asked for once, only the photos of the hundred the page draws were asked for (never one of the thirty it does not), and never more than four were being asked for at once.
+    expect(new Set(api.links.asked).size).toBe(api.links.asked.length);
+    const drawn = new Set(Array.from({ length: 100 }, (_, index) => photoIdOf(index + 1)));
+    expect(api.links.asked.filter((photo) => !drawn.has(photo))).toEqual([]);
+    expect(api.links.peak).toBeLessThanOrEqual(4);
+    // The delay made the requests overlap, so the bound of four was in play and was not met by luck.
+    expect(api.links.peak).toBeGreaterThan(1);
+
+    // Going back up asks for nothing: a picture that is drawn keeps its link.
+    await page
+      .getByRole('heading', { level: 1, name: 'Close Kente Crafts' })
+      .scrollIntoViewIfNeeded();
+    await page.getByText('Parcel 1', { exact: true }).scrollIntoViewIfNeeded();
+    expect(await linksSettled(api)).toBe(down);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a refusal for being too fast (429, with the wait the API asks for) that stops only what is asked for after it: the tiles already waiting in the queue are sent one after another into the limit that has
+  // just been told, and every tile after the first says "not available".
+  test('a refusal for being too fast holds the links not yet asked for, which go on when the wait is over, and refuses no other photo', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    const { api, watch } = await open(page, `/intakes/${VENDOR}/close`, {
+      vendorState: 'ITEMIZING',
+      parcelCount: 130,
+      linkDelayMs: 100,
+      linkFault: { times: 1, retryAfterSeconds: 2 },
+    });
+    await expect(page.getByRole('heading', { level: 1, name: 'Close Kente Crafts' })).toBeVisible();
+    await expect.poll(() => api.links.refusedAt !== undefined).toBe(true);
+    const refusedAt = api.links.refusedAt ?? 0;
+
+    // The wait the API asked for (two seconds) is kept: the next link is asked for after it, not in it.
+    await expect
+      .poll(() => api.links.at.some((moment) => moment > refusedAt), { timeout: 15_000 })
+      .toBe(true);
+    const next = Math.min(...api.links.at.filter((moment) => moment > refusedAt));
+    expect(next - refusedAt).toBeGreaterThanOrEqual(1800);
+
+    // And then the page goes on: the tiles near the screen are asked for and drawn, and the one that was refused is the one that says so.
+    await linksSettled(api);
+    expect(api.links.asked.length).toBeGreaterThan(5);
+    await expect(page.getByText('Photo not available')).toHaveCount(1);
+    expect(api.links.peak).toBeLessThanOrEqual(4);
+    expect(new Set(api.links.asked).size).toBe(api.links.asked.length);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems.filter((problem) => !problem.includes('429'))).toEqual([]);
+  });
+
+  // Break caught: a vendor's orders that draw the photo of each of its twenty-five rows at once, ask for a photo twice when the officer goes on to the next page, or ask for a page's photos that is no longer drawn.
+  test('a vendor’s orders ask for the links of the tiles of the page they are on, and the next page for its own', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    const { api, watch } = await open(page, ORDERS, { parcelCount: 130, linkDelayMs: 80 });
+    const rows = page.getByRole('table', { name: 'Parcels and orders' });
+    await expect(rows.getByText('Parcel 1', { exact: true })).toBeVisible();
+    // At this height the table begins below the first screen, so only the rows near it are asked for when the page opens: the last row of the page is a long way down.
+    const first = await linksSettled(api);
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(25);
+    expect(api.links.asked).not.toContain(photoIdOf(25));
+
+    // Going down the page asks for the others as they come near: only this page's parcels, and each once.
+    for (let place = 5; place <= 25; place += 5) {
+      await rows.getByText(`Parcel ${String(place)}`, { exact: true }).scrollIntoViewIfNeeded();
+    }
+    const down = await linksSettled(api);
+    expect(down).toBeGreaterThan(first);
+    expect(down).toBeLessThanOrEqual(25);
+    expect(api.links.asked).toContain(photoIdOf(25));
+    const page1 = new Set(Array.from({ length: 25 }, (_, index) => photoIdOf(index + 1)));
+    expect(api.links.asked.filter((photo) => !page1.has(photo))).toEqual([]);
+    expect(new Set(api.links.asked).size).toBe(down);
+
+    // The next page asks for its own tiles and none of the first page's.
+    await page.getByRole('button', { name: 'Next page' }).click();
+    await expect(rows.getByText('Parcel 26', { exact: true })).toBeVisible();
+    await linksSettled(api);
+    const page2 = new Set(Array.from({ length: 25 }, (_, index) => photoIdOf(index + 26)));
+    const later = api.links.asked.slice(down);
+    expect(later.length).toBeGreaterThan(0);
+    expect(later.filter((photo) => !page2.has(photo))).toEqual([]);
+    expect(api.links.peak).toBeLessThanOrEqual(4);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: the tile of an order's page and the viewer it opens each asking for a link of their own (two requests of the session for the one photo), or a link asked for again each time the photo is opened.
+  test('the tile of the order’s page and the viewer it opens draw from one link, however often the photo is opened', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    const tile = page.getByRole('button', { name: 'Photo of the parcel' });
+    await expect(tile).toBeVisible();
+    expect(await linksSettled(api)).toBe(1);
+    expect(api.links.asked).toEqual([photoIdOf(1)]);
+    for (let time = 0; time < 2; time += 1) {
+      await tile.click();
+      const viewer = page.getByRole('dialog', { name: 'Photo of the parcel' });
+      await expect(viewer.getByRole('img', { name: 'Photo of the parcel' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(viewer).toHaveCount(0);
+    }
+    expect(await linksSettled(api)).toBe(1);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: the photo beside the order form asked for again when the price appears and the form is drawn again, or asked for by a form that has no parcel.
+  test('the photo beside the order form is asked for once, whatever the form does around it', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `${NEW_ORDER}?parcel=${parcelIdOf(1)}`);
+    await expect.poll(() => api.images.length).toBeGreaterThan(0);
+    await fillIn(page);
+    await expect(page.getByText('GH₵40.00').first()).toBeVisible();
+    expect(await linksSettled(api)).toBe(1);
+    expect(api.links.asked).toEqual([photoIdOf(1)]);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
 test.describe('the recipient correction, refused (Run G1, Part 2, item 7)', () => {
   // Break caught: a refused phone told as "Check the note marked below" with nothing marked; the phone shown to the officer in the API's international form and not as they write it.
   test('a refused phone is marked on the phone with the focus on it, and the phone is shown as it is written', async ({
@@ -954,8 +1135,54 @@ test.describe('correcting the recipient of a confirmed order (D-S7-1, Run F)', (
     await expect(
       page.getByRole('region', { name: 'What it holds' }).getByText('024 765 4321'),
     ).toBeVisible();
-    await expect(page.getByText('Changed: the recipient.')).toBeVisible();
+    // The history says what was corrected in words (Run G2, Part 1, item 3), and not "Changed: the recipient."
+    await expect(page.getByText('Corrected the recipient: the phone number.')).toBeVisible();
+    await expect(page.getByText('Changed: the recipient.')).toHaveCount(0);
     await expect(page.getByText(/Reason: The phone had a digit wrong/)).toBeVisible();
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught (Run G2, Part 1, item 3): a history that words every correction alike, so that nobody reading it can tell a digit of a phone put right from an address that was moved; or one that draws what the
+  // name or the address were and became (the history says which part, never the value).
+  test('the history says which parts of the recipient each correction corrected, and draws none of their values', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `/orders/${FIRST.id}`, {
+      vendorState: 'ITEMIZING',
+      orders: [storedOrder(1)],
+    });
+    // The name and the address (the same zone) are corrected together.
+    await page.getByRole('button', { name: 'Correct the recipient' }).click();
+    let dialog = page.getByRole('alertdialog');
+    await dialog.getByLabel(/Recipient’s name/).fill('Kofi Asante');
+    await dialog.getByLabel(/Delivery address/).fill('7 Spintex Road, near the mall');
+    await dialog.getByLabel(/Why are you correcting this\?/).fill('It was for another person');
+    await dialog.getByRole('button', { name: 'Save the correction' }).click();
+    await expect(
+      page.getByText('Corrected the recipient: the address and the name.'),
+    ).toBeVisible();
+
+    // The phone alone, on the version that correction left.
+    await page.getByRole('button', { name: 'Correct the recipient' }).click();
+    dialog = page.getByRole('alertdialog');
+    await dialog.getByLabel(/Recipient’s phone/).fill('024 765 4321');
+    await dialog.getByLabel(/Why are you correcting this\?/).fill('The phone had a digit wrong');
+    await dialog.getByRole('button', { name: 'Save the correction' }).click();
+    await expect(page.getByText('Corrected the recipient: the phone number.')).toBeVisible();
+
+    // Both records are in the history, each with its reason, and no record says "Changed".
+    await expect(page.getByText(/Reason: It was for another person/)).toBeVisible();
+    await expect(page.getByText(/Reason: The phone had a digit wrong/)).toBeVisible();
+    await expect(page.getByText(/^Changed:/)).toHaveCount(0);
+    // What the recipient was is not in the history: the old name and the old address appear nowhere on the page, and the new ones only where the order says what it holds.
+    await expect(page.getByText('Ama Mensah')).toHaveCount(0);
+    await expect(page.getByText('12 Madina Estate, near the market')).toHaveCount(0);
+    const holds = page.getByRole('region', { name: 'What it holds' });
+    await expect(holds.getByText('Kofi Asante')).toBeVisible();
+    await expect(page.getByText('Kofi Asante')).toHaveCount(1);
+    await expect(page.getByText('7 Spintex Road, near the mall')).toHaveCount(1);
+    expect(made(api, 'POST', `/orders/${FIRST.id}/recipient-correction`)).toHaveLength(2);
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
