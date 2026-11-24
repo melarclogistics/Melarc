@@ -53,6 +53,13 @@ describe('a phone number in the text of a note (Run G1, Part 1, item 5)', () => 
       '0\u03012\u03014\u03014\u03011\u03012\u03013\u03014\u03015\u03016\u0301',
     ],
     ['groups joined by five separators', '024) - (412) - (3456'],
+    // The number glued to another digit by a character that does not show: read with the character removed the digits run together, so each such character is also read as a space (the review of f0e4ff2).
+    ['a number after a digit and a Hangul filler', '7\u31640244123456'],
+    ['a number after a keycap digit', '1\uFE0F\u20E30244123456'],
+    ['a number after a digit and a zero-width space', '7\u200B0244123456'],
+    ['a number after a digit and a combining mark', '7\u03010244123456'],
+    ['the international number after a digit and a filler', '9\u3164233244123456'],
+    ['a plus kept from its digits by a zero-width space', 'call +\u200B14155550123'],
   ])('is found in %s', (_label, text) => {
     expect(holdsPhoneNumber(text), text).toBe(true);
   });

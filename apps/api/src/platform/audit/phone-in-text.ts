@@ -17,13 +17,17 @@
  * ledger refuse an event.
  */
 export function holdsPhoneNumber(text: string): boolean {
-  const normalised = asciiDigits(
-    text
-      .normalize('NFKC')
-      // What does not show (zero-width spaces and joiners, the soft hyphen, variation selectors, fillers, the marks that combine with a digit) is no part of what a reader reads, and every dash is the hyphen.
-      .replaceAll(/[\p{Cf}\p{Default_Ignorable_Code_Point}\p{M}]/gu, '')
-      .replaceAll(/[\p{Pd}\u2212]/gu, '-'),
+  // What does not show (zero-width spaces and joiners, the soft hyphen, variation selectors, fillers, the marks that combine with a digit) is no part of what a reader reads: it is read both ways, removed (so that digits it
+  // separated run together) and as a space (so that a digit it keeps apart from a number does not join it), and the text holds a number if it does either way. Every dash is the hyphen.
+  const invisible = /[\p{Cf}\p{Default_Ignorable_Code_Point}\p{M}]/gu;
+  const folded = asciiDigits(text.normalize('NFKC')).replaceAll(/[\p{Pd}\u2212]/gu, '-');
+  return (
+    holdsNumber(folded.replaceAll(invisible, '')) || holdsNumber(folded.replaceAll(invisible, ' '))
   );
+}
+
+/** Whether the digits of text, already folded, make a telephone number. */
+function holdsNumber(normalised: string): boolean {
   // Digits joined by up to five separators: a space, a dot, a hyphen, a slash, an underscore, a middle dot or a bracket (" - " and " / " are three, ") - (" five).
   for (const match of normalised.matchAll(/\+?\d(?:[\s().\-/_·]{0,5}\d)*/g)) {
     const run = match[0];
