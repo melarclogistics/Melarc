@@ -661,6 +661,8 @@ export interface OrderView {
   readonly pickup_intake_id: string | null;
   readonly intake_parcel_id: string | null;
   readonly intake_parcel_state: ParcelState | null;
+  /** The picture of the parcel the order is made for (D-S7-14): the rider's door photo, or the officer's photo of an extra. Null for a vendor counted without photos. The identifier is never drawn. */
+  readonly intake_parcel_photo_evidence_id: string | null;
   readonly commercial_state: string | null;
   readonly size_class: SizeClass;
   readonly size_class_selected_by: string | null;
@@ -785,6 +787,7 @@ export function parseOrder(body: unknown): OrderView | undefined {
   const code = codeOf(body.code);
   const intake = optional(body.pickup_intake_id, uuidOf);
   const parcel = optional(body.intake_parcel_id, uuidOf);
+  const photo = optional(body.intake_parcel_photo_evidence_id, uuidOf);
   const parcelState = optional(body.intake_parcel_state, (value) =>
     isOneOf(PARCEL_STATES, value) ? value : undefined,
   );
@@ -817,6 +820,7 @@ export function parseOrder(body: unknown): OrderView | undefined {
     code === undefined ||
     intake === undefined ||
     parcel === undefined ||
+    photo === undefined ||
     parcelState === undefined ||
     state === undefined ||
     selectedBy === undefined ||
@@ -881,6 +885,7 @@ export function parseOrder(body: unknown): OrderView | undefined {
     code,
     pickup_intake_id: intake,
     intake_parcel_id: parcel,
+    intake_parcel_photo_evidence_id: photo,
     intake_parcel_state: parcelState,
     commercial_state: state,
     size_class: body.size_class,

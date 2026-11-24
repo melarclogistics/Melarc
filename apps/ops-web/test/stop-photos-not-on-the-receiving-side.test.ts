@@ -87,6 +87,8 @@ const PICTURE_COMPONENT_USERS = [
   'app/pages/receiving/MissingPicture.tsx',
   // The photo of a parcel beside the order made for it, and in the list of a vendor's orders and of the parcels that still have none (S1.40, D-D6: the order is made for a parcel and the parcel's photo is the order's).
   'app/pages/orders/OrderPhoto.tsx',
+  // The photo of the parcel on the order's page and on the change page, a tile that opens it whole (Run G1, D-S7-14, the Product Owner's decision of 24 November 2026): the order is checked against its parcel.
+  'app/pages/orders/ParcelPhotoOpener.tsx',
 ];
 const PHOTO_GRID = 'PhotoGrid';
 const GRID_USERS = [
@@ -94,6 +96,8 @@ const GRID_USERS = [
   // The kit's picture is made for the grid's tile and says so in its words: it names the grid and draws none.
   'app/pages/evidence/PhotoPicture.tsx',
   'app/pages/receiving/ParcelGrid.tsx',
+  // The one-tile grid of the parcel's photo on the order screens (D-S7-14).
+  'app/pages/orders/ParcelPhotoOpener.tsx',
 ];
 
 /** Where a failure's number of photos is drawn: the failure queue, and no other page. */

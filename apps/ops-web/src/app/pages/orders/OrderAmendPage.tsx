@@ -33,7 +33,9 @@ import { copyFor } from '../../../platform/problem/problem-copy';
 import { UUID } from '../staff/WithProfile';
 import { OrderFields } from './OrderFields';
 import { FlowActions, FlowAlerts } from './OrderFlowParts';
+import { useSignedInSession } from '../../../platform/session/use-permissions';
 import { OrderLayout } from './OrderLayout';
+import { ParcelPhotoOpener } from './ParcelPhotoOpener';
 import { OrderPrice } from './OrderPrice';
 import { errorsOf, refusedFields } from './order-refusal-fields';
 import { typedLineOf } from './order-typed';
@@ -54,6 +56,12 @@ function AmendForm({
   const navigate = useNavigate();
   const { order } = record;
   const intakeId = order.pickup_intake_id ?? '';
+  const me = useSignedInSession();
+  // The parcel's photo is drawn where the order carries one and the officer may read it.
+  const photoId =
+    me?.holds('hub.read') === true
+      ? (order.intake_parcel_photo_evidence_id ?? undefined)
+      : undefined;
   const [initial] = useState<OrderFormValues>(() => valuesOf(order));
   const [values, setValues] = useState<OrderFormValues>(initial);
   const [invalid, setInvalid] = useState<OrderFieldErrors>({});
@@ -201,7 +209,10 @@ function AmendForm({
         ],
       }}
     >
-      <OrderLayout photo={null} price={<OrderPrice flow={flow} />}>
+      <OrderLayout
+        photo={photoId === undefined ? null : <ParcelPhotoOpener evidenceId={photoId} />}
+        price={<OrderPrice flow={flow} />}
+      >
         <OrderFields
           values={values}
           errors={errors}

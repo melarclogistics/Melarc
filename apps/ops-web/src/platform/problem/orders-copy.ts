@@ -428,6 +428,8 @@ export const ORDERS_WORDS = {
         'The arrival was taken back, so the order no longer stands. The price and the history are kept.',
     },
     sections: {
+      /** The photo of the parcel the order is made for (D-S7-14): a tile that opens it whole. */
+      photo: 'The parcel’s photo',
       holds: 'What it holds',
       price: 'The price',
       payer: 'Who pays',

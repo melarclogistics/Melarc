@@ -26,6 +26,7 @@ import { formatInstant } from '../../../platform/time/format-time';
 import { serviceDateText } from '../pickup/pickup-presentation';
 import { UUID } from '../staff/WithProfile';
 import { Cedis } from './Cedis';
+import { ParcelPhotoOpener } from './ParcelPhotoOpener';
 import {
   CorrectRecipientDialog,
   PayerCorrectionDialog,
@@ -326,6 +327,10 @@ function RecordBody({
       ? R.notes.seniorReverses
       : undefined;
   const history = historyOf(order);
+  // The parcel's photo is drawn where the order carries one and the officer may read it (a vendor counted without photos has none).
+  const photoId = me.holds('hub.read')
+    ? (order.intake_parcel_photo_evidence_id ?? undefined)
+    : undefined;
 
   return (
     <>
@@ -377,13 +382,22 @@ function RecordBody({
             </Panel>
           </>
         }
-        {...(sideFacts.length === 0
+        {...(sideFacts.length === 0 && photoId === undefined
           ? {}
           : {
               side: (
-                <Panel title={WORDS.common.receiving} headingLevel={2}>
-                  <DescriptionList items={sideFacts} />
-                </Panel>
+                <>
+                  {photoId === undefined ? null : (
+                    <Panel title={R.sections.photo} headingLevel={2}>
+                      <ParcelPhotoOpener evidenceId={photoId} />
+                    </Panel>
+                  )}
+                  {sideFacts.length === 0 ? null : (
+                    <Panel title={WORDS.common.receiving} headingLevel={2}>
+                      <DescriptionList items={sideFacts} />
+                    </Panel>
+                  )}
+                </>
               ),
             })}
         {...(history.length === 0

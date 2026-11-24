@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { installFakeApi, json, type FakeApi, type Handler } from '../../../test-support/fake-api';
 import { INTAKE_HUB_ID } from '../../../test-support/hub-intake-fixture';
@@ -441,6 +441,87 @@ describe('what happened to an order', () => {
     expect(history.getByText('Changed: the recipient and the size.')).toBeVisible();
     expect(history.getByText(/Reason: The recipient moved/)).toBeVisible();
     expect(history.getByText(/09:15/)).toBeVisible();
+  });
+});
+
+describe('the parcel’s photo on the order’s page (Run G1, Part 2, item 6; D-S7-14)', () => {
+  const WITH_PHOTO = captured('order-with-photo') as {
+    id: string;
+    intake_parcel_photo_evidence_id: string;
+  };
+  const AUTHORIZE = `POST /evidence/${WITH_PHOTO.intake_parcel_photo_evidence_id}/retrieval-authorization`;
+  const photo: Record<string, Handler> = {
+    [AUTHORIZE]: () =>
+      json(200, {
+        method: 'GET',
+        url: 'https://photos.example.test/parcel.jpg',
+        expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+      }),
+  };
+
+  // Break caught: an order that shows nothing of the parcel it was made for, so that an officer cannot check the order against the parcel; a photo that cannot be opened whole; one opened with no way to close it
+  // and get back to the order.
+  it('shows the parcel’s photo as a tile that opens it whole, and gives the officer back the order when it is closed', async () => {
+    const { user } = open(WITH_PHOTO, OFFICER, photo, WITH_PHOTO.id);
+    expect(await screen.findByRole('heading', { level: 1, name: /ACC-OR-/ })).toBeVisible();
+    const tile = await screen.findByRole('button', { name: 'Photo of the parcel' });
+    await user.click(tile);
+    const viewer = await screen.findByRole('dialog', { name: 'Photo of the parcel' });
+    expect(await within(viewer).findByRole('img', { name: 'Photo of the parcel' })).toHaveAttribute(
+      'src',
+      'https://photos.example.test/parcel.jpg',
+    );
+    await user.click(within(viewer).getByRole('button', { name: /^Close/ }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Photo of the parcel' })).toBeNull();
+    });
+    expect(screen.getByRole('button', { name: 'Photo of the parcel' })).toHaveFocus();
+    // The identifier of the evidence is never drawn.
+    expect(document.body.textContent).not.toContain(WITH_PHOTO.intake_parcel_photo_evidence_id);
+  });
+
+  // Break caught: the photo asked for before anybody wants it (a tile far from the screen), or not asked for when the officer opens it: the photo is read when it is wanted, and the viewer is what wants it.
+  it('asks for nothing while the tile is far from the screen, and for the photo when it is opened', async () => {
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+        takeRecords = vi.fn(() => []);
+      },
+    );
+    try {
+      const { user } = open(WITH_PHOTO, OFFICER, photo, WITH_PHOTO.id);
+      const tile = await screen.findByRole('button', { name: 'Photo of the parcel' });
+      expect(sent(AUTHORIZE)).toHaveLength(0);
+      await user.click(tile);
+      const viewer = await screen.findByRole('dialog', { name: 'Photo of the parcel' });
+      expect(await within(viewer).findByRole('img', { name: 'Photo of the parcel' })).toBeVisible();
+      expect(sent(AUTHORIZE).length).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // Break caught: a photo tile drawn for a vendor counted without photos (the order has none).
+  it('draws no photo for an order that has none', async () => {
+    open({ ...WITH_PHOTO, intake_parcel_photo_evidence_id: null }, OFFICER, photo, WITH_PHOTO.id);
+    await screen.findByRole('heading', { level: 1, name: /ACC-OR-/ });
+    expect(screen.queryByRole('button', { name: 'Photo of the parcel' })).toBeNull();
+  });
+
+  // Break caught: a photo tile drawn for an officer who may not read the photo (the tile would be a refusal).
+  it('draws no photo for an officer who may not read photos', async () => {
+    open(
+      WITH_PHOTO,
+      OFFICER.filter((key) => key !== 'hub.read'),
+      photo,
+      WITH_PHOTO.id,
+    );
+    await screen.findByRole('heading', { level: 1, name: /ACC-OR-/ });
+    expect(screen.queryByRole('button', { name: 'Photo of the parcel' })).toBeNull();
+    expect(sent(AUTHORIZE)).toHaveLength(0);
   });
 });
 

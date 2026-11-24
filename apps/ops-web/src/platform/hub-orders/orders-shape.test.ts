@@ -277,6 +277,22 @@ describe('the zones of a hub (Run G1, D-S7-5)', () => {
 });
 
 describe('an order', () => {
+  // Break caught: the picture of the parcel lost from the order (the page then shows no parcel), taken from the wrong member, or an identifier that is not one given to the viewer as the photo to ask for.
+  it('reads the photo of the order’s parcel, null where there is none and where the API does not say, and refuses what is not an identifier', () => {
+    expect(parseOrder(load('order-with-photo'))?.intake_parcel_photo_evidence_id).toBe(
+      '01a124d3-7400-7813-9625-17ccd5742a66',
+    );
+    expect(parseOrder(load('order'))?.intake_parcel_photo_evidence_id).toBeNull();
+    const none = copy(load('order-with-photo')) as Record<string, unknown>;
+    none.intake_parcel_photo_evidence_id = null;
+    expect(parseOrder(none)?.intake_parcel_photo_evidence_id).toBeNull();
+    for (const wrong of ['not-an-id', 7, {}, '']) {
+      const broken = copy(load('order-with-photo')) as Record<string, unknown>;
+      broken.intake_parcel_photo_evidence_id = wrong;
+      expect(parseOrder(broken), JSON.stringify(wrong)).toBeUndefined();
+    }
+  });
+
   it('accepts an order whose price is fixed, with its portions and its history', () => {
     const order = parseOrder(load('order'));
     expect(order?.price_status).toBe('FROZEN');

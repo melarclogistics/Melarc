@@ -229,6 +229,45 @@ describe('changing an order, and checking the price first', () => {
   });
 });
 
+describe('the parcel’s photo on the change page (Run G1, Part 2, item 6; D-S7-14)', () => {
+  // The early order of the captured answers, with the picture of its parcel that the order of the same parcel's photo carries (the early order was captured before the member existed).
+  const PHOTO = (captured('order-with-photo') as { intake_parcel_photo_evidence_id: string })
+    .intake_parcel_photo_evidence_id;
+  const AUTHORIZE = `POST /evidence/${PHOTO}/retrieval-authorization`;
+
+  // Break caught: a change page that shows nothing of the parcel the order is changed for (the officer changes the size from memory), a photo that cannot be opened whole, or one that opens with no way back.
+  it('shows the parcel’s photo beside the form, and opens it whole on a tap', async () => {
+    const { user } = open(
+      {
+        [AUTHORIZE]: () =>
+          json(200, {
+            method: 'GET',
+            url: 'https://photos.example.test/early.jpg',
+            expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+          }),
+      },
+      KEYS,
+      { ...orderOf('early'), intake_parcel_photo_evidence_id: PHOTO },
+    );
+    const tile = await screen.findByRole('button', { name: 'Photo of the parcel' });
+    await user.click(tile);
+    const viewer = await screen.findByRole('dialog', { name: 'Photo of the parcel' });
+    expect(await within(viewer).findByRole('img', { name: 'Photo of the parcel' })).toBeVisible();
+    await user.click(within(viewer).getByRole('button', { name: /^Close/ }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Photo of the parcel' })).toBeNull();
+    });
+    expect(document.body.textContent).not.toContain(PHOTO);
+  });
+
+  // Break caught: a tile for an order with no photo.
+  it('draws no photo where the order has none', async () => {
+    open({}, KEYS, { ...orderOf('early'), intake_parcel_photo_evidence_id: null });
+    await screen.findByRole('radio', { name: 'Medium' });
+    expect(screen.queryByRole('button', { name: 'Photo of the parcel' })).toBeNull();
+  });
+});
+
 describe('a new address no zone matches (Run G1, Part 2, item 5; D-S7-5)', () => {
   const INTAKE = (captured('order-early') as { pickup_intake_id: string }).pickup_intake_id;
   const ZONES = `GET /hub-intakes/${INTAKE}/destination-zones`;
