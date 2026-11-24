@@ -611,3 +611,70 @@ describe('the vendors a hub has cleared for their orders', () => {
     expect(parseIntakeListPage(page)).toBeUndefined();
   });
 });
+
+/**
+ * The history of an order (Run G2, Part 1, item 3; contract 5.121.0): each record of a change says what changed **by name and never by value**. For the correction of a confirmed order's recipient the API names the
+ * parts of the recipient it corrected (`recipient.name`, `recipient.phone`, `recipient.address`), and the shape judged only words of `a-z` and `_`, so that **the whole order was refused** the day the API said one.
+ */
+describe('the history of an order', () => {
+  const entry = (over: Record<string, unknown> = {}) => ({
+    id: '5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+    amended_by: '6b2c3d4e-5f60-4b7c-8d8e-0f1a2b3c4d5e',
+    amended_at: '2026-11-24T09:15:00Z',
+    note: 'The surname was typed wrongly at the door',
+    changed: ['recipient.name'],
+    kind: 'RECIPIENT_CORRECTION',
+    ...over,
+  });
+  const withHistory = (...entries: Record<string, unknown>[]): unknown => {
+    const order = copy(load('order')) as Record<string, unknown>;
+    order.amendments = entries;
+    return order;
+  };
+
+  // Break caught: an order refused whole because its history names a part of the recipient, or the kind of the record dropped (the page cannot word a correction apart from an amendment).
+  it('accepts the correction of a recipient, which names the parts it corrected, and keeps its kind', () => {
+    const order = parseOrder(
+      withHistory(entry({ changed: ['recipient.address', 'recipient.name', 'recipient.phone'] })),
+    );
+
+    expect(order?.amendments).toEqual([
+      expect.objectContaining({
+        kind: 'RECIPIENT_CORRECTION',
+        changed: ['recipient.address', 'recipient.name', 'recipient.phone'],
+      }),
+    ]);
+  });
+
+  it('accepts an amendment before the price froze, which names the members of the order', () => {
+    const order = parseOrder(
+      withHistory(entry({ kind: 'AMENDMENT', changed: ['recipient', 'size_class'] })),
+    );
+
+    expect(order?.amendments).toEqual([
+      expect.objectContaining({ kind: 'AMENDMENT', changed: ['recipient', 'size_class'] }),
+    ]);
+  });
+
+  // Break caught: a member of a shape no name has taken (a value, a path of three, a word with a capital or a hyphen), which could carry a person's details into a screen.
+  it.each([
+    'recipient.',
+    '.name',
+    'Recipient.name',
+    'recipient.name.first',
+    'recipient name',
+    'recipient.na-me',
+    '',
+    '0244123456',
+  ])('refuses a member that is not the name of one: %j', (member) => {
+    expect(parseOrder(withHistory(entry({ changed: [member] })))).toBeUndefined();
+  });
+
+  // Break caught: a record of a kind the contract does not have drawn as an amendment, or one with no kind at all (the contract requires it).
+  it('refuses a kind the contract does not have, and a record with none', () => {
+    expect(parseOrder(withHistory(entry({ kind: 'REFUND' })))).toBeUndefined();
+    const without: Record<string, unknown> = entry();
+    delete without.kind;
+    expect(parseOrder(withHistory(without))).toBeUndefined();
+  });
+});

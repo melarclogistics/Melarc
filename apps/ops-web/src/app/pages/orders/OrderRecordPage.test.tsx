@@ -557,6 +557,7 @@ describe('what happened to an order', () => {
             amended_at: '2026-11-22T09:15:00.000Z',
             note: 'The recipient moved',
             changed: ['recipient', 'size_class'],
+            kind: 'AMENDMENT',
           },
         ],
       }),
@@ -569,6 +570,41 @@ describe('what happened to an order', () => {
     expect(history.getByText('Changed: the recipient and the size.')).toBeVisible();
     expect(history.getByText(/Reason: The recipient moved/)).toBeVisible();
     expect(history.getByText(/09:15/)).toBeVisible();
+  });
+
+  // Break caught (Run G2, Part 1, item 3): the correction of a recipient worded as "Changed: the recipient." (it was the name, the phone or the address that was corrected), or worded as an amendment before the price
+  // froze (an officer cannot tell the correction of a confirmed order from a change made before it was priced), or the whole order refused for a member that names a part of the recipient.
+  it.each([
+    [['recipient.name'], 'Corrected the recipient: the name.'],
+    [['recipient.phone'], 'Corrected the recipient: the phone number.'],
+    [['recipient.address'], 'Corrected the recipient: the address.'],
+    [
+      ['recipient.address', 'recipient.name', 'recipient.phone'],
+      'Corrected the recipient: the address, the name and the phone number.',
+    ],
+  ])('says which parts of the recipient a correction corrected: %j', async (changed, words) => {
+    open(
+      orderOf('frozen', {
+        amendments: [
+          {
+            id: 'a2222222-2222-4333-8444-555555555555',
+            amended_by: 'b1111111-2222-4333-8444-555555555555',
+            amended_at: '2026-11-24T09:15:00.000Z',
+            note: 'The surname was typed wrongly at the door',
+            changed,
+            kind: 'RECIPIENT_CORRECTION',
+          },
+        ],
+      }),
+    );
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'What happened' })).toBeVisible();
+    const history = within(screen.getByRole('list', { name: 'What happened of the record' }));
+    expect(history.getByText(words)).toBeVisible();
+    expect(history.getByText(/Reason: The surname was typed wrongly/)).toBeVisible();
+    // The words of a correction are not the words of an amendment, and no value of the recipient is on the page.
+    expect(history.queryByText(/^Changed:/)).toBeNull();
+    expect(document.body.textContent).not.toContain('Ama Mensah-Boateng');
   });
 });
 

@@ -69,7 +69,11 @@ function historyOf(order: OrderView): readonly TimelineEntry[] {
   const entries: TimelineEntry[] = [
     ...order.amendments.map((amendment) => ({
       key: amendment.id,
-      title: R.history.amended(changedText(amendment.changed)),
+      // The correction of a confirmed order's recipient says which parts of it were corrected; an amendment before the price froze says which members of the order changed.
+      title:
+        amendment.kind === 'RECIPIENT_CORRECTION'
+          ? R.history.corrected(changedText(amendment.changed))
+          : R.history.amended(changedText(amendment.changed)),
       details: (
         <>
           {formatInstant(amendment.amended_at) ?? ''}

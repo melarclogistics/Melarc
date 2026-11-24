@@ -909,14 +909,22 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (address !== undefined && /tema/i.test(address)) {
       return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'address_changes_zone' }));
     }
+    // What the record says changed is what the API says: the parts of the recipient that differ, by name (Run G2, Part 1, item 3), sorted; and nothing that differs is no change.
     const changed: string[] = [];
+    if (typeof recipient.name === 'string' && recipient.name !== order.name) {
+      changed.push('recipient.name');
+    }
+    if (typeof recipient.phone === 'string' && recipient.phone !== order.phone) {
+      changed.push('recipient.phone');
+    }
+    if (address !== undefined && address !== order.address) changed.push('recipient.address');
+    if (changed.length === 0) {
+      return route.fulfill(error(400, 'VALIDATION_FAILED', { rule: 'no_change' }));
+    }
+    changed.sort();
     if (typeof recipient.name === 'string') order.name = recipient.name;
     if (typeof recipient.phone === 'string') order.phone = recipient.phone;
     if (address !== undefined) order.address = address;
-    if (Object.keys(recipient).length === 0) {
-      return route.fulfill(error(400, 'VALIDATION_FAILED', { rule: 'no_change' }));
-    }
-    changed.push('recipient');
     order.version += 1;
     order.amendments.push({
       id: randomUUID(),

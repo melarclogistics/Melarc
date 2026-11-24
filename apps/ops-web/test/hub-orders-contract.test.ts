@@ -23,6 +23,7 @@ import {
   SPLIT_BASES,
   WILL_CONFIRM,
   WORK_STATES,
+  AMENDMENT_KINDS,
   WORKLIST_VIEWS,
 } from '../src/platform/hub-orders/orders-shape';
 import { captured, termsOf } from '../src/test-support/orders-fixture';
@@ -159,6 +160,8 @@ describe('the values the guards recognise are the contract’s', () => {
       enumValues(memberOf('OrderPreview', 'payer', 'commercial_state_after_confirmation')),
     ],
     ['CORRECTION_STATES', CORRECTION_STATES, enumValues(memberOf('PayerCorrection', 'state'))],
+    // The kind of a record of the order's history (Run G2): an amendment before the price froze, or the correction of a confirmed order's recipient.
+    ['AMENDMENT_KINDS', AMENDMENT_KINDS, enumValues(memberOf('Order', 'amendments', 'kind'))],
     ['WORK_STATES', WORK_STATES, enumValues(memberOf('IntakeOrderList', 'items', 'work_state'))],
     ['BLOCKERS', BLOCKERS, enumValues(memberOf('IntakeClosureAssessment', 'blockers'))],
     ['RECEIVING_MODES', RECEIVING_MODES, enumValues(schemaNamed('ReceivingMode'))],

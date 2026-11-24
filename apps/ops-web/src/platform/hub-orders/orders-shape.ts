@@ -66,6 +66,10 @@ export const COMMERCIAL_STATES = [
   'REVERSED',
 ] as const;
 export const CORRECTION_STATES = ['REQUESTED', 'APPROVED', 'REJECTED'] as const;
+
+/** What a record of the order's history is of (`Order.amendments[].kind`): an amendment before the price froze, or the correction of the recipient of a confirmed order (Run F, D-S7-1). */
+export const AMENDMENT_KINDS = ['AMENDMENT', 'RECIPIENT_CORRECTION'] as const;
+export type AmendmentKind = (typeof AMENDMENT_KINDS)[number];
 export const CORRECTION_VIEWS = ['REQUESTED', 'APPROVED', 'REJECTED', 'all'] as const;
 export const BLOCKERS = ['intake_not_ready', 'orders_exceed_received', 'order_unpriced'] as const;
 export const RESOLUTIONS = ['SERVER_RESOLVED', 'EXPLICITLY_AUTHORIZED'] as const;
@@ -644,7 +648,9 @@ export interface AmendmentView {
   readonly amended_by: string;
   readonly amended_at: string;
   readonly note: string;
-  /** The members that changed, by name: never their values. */
+  /** What the record is of: an amendment before the price froze, or the correction of a confirmed order's recipient. */
+  readonly kind: AmendmentKind;
+  /** What changed, by name and never by value: the members of the order for an amendment (`recipient`, `size_class`), the parts of the recipient for a correction (`recipient.name`, `recipient.phone`, `recipient.address`). */
   readonly changed: readonly string[];
 }
 
@@ -728,6 +734,9 @@ export function parsePayerChoice(body: unknown): PayerChoiceView | undefined {
   };
 }
 
+const isAmendmentKind = (value: unknown): value is AmendmentKind =>
+  typeof value === 'string' && (AMENDMENT_KINDS as readonly string[]).includes(value);
+
 function parseAmendment(body: unknown): AmendmentView | undefined {
   if (!isRecord(body)) return undefined;
   const id = uuidOf(body.id);
@@ -741,13 +750,22 @@ function parseAmendment(body: unknown): AmendmentView | undefined {
     note === undefined ||
     !Array.isArray(body.changed) ||
     body.changed.length > 64 ||
+    // A name of the API's own: a member of the order, or a part of one (`recipient.name`): lower-case words and one dot at most, never a value.
     !(body.changed as unknown[]).every(
-      (member) => typeof member === 'string' && /^[a-z_]{1,64}$/.test(member),
-    )
+      (member) => typeof member === 'string' && /^[a-z_]{1,64}(\.[a-z_]{1,64})?$/.test(member),
+    ) ||
+    !isAmendmentKind(body.kind)
   ) {
     return undefined;
   }
-  return { id, amended_by: by, amended_at: at, note, changed: body.changed as string[] };
+  return {
+    id,
+    amended_by: by,
+    amended_at: at,
+    note,
+    kind: body.kind,
+    changed: body.changed as string[],
+  };
 }
 
 function parseReversalNote(body: unknown): ReversalNoteView | undefined {

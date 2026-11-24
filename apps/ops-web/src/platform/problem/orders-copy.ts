@@ -494,12 +494,18 @@ export const ORDERS_WORDS = {
     },
     history: {
       amended: (changed: string): string => `Changed: ${changed}.`,
+      /** The correction of a confirmed order's recipient (Run G2, Part 1, item 3): which parts of the recipient it corrected, in the words of `changedMembers`. A draft, with the rest of the table. */
+      corrected: (parts: string): string => `Corrected the recipient: ${parts}.`,
       reversed: 'The arrival was taken back.',
       note: (note: string): string => `Reason: ${note}`,
       current: 'Now',
     },
     changedMembers: {
       recipient: 'the recipient',
+      // The parts of the recipient that a correction names (Run G2, Part 1, item 3; contract 5.121.0).
+      'recipient.name': 'the name',
+      'recipient.phone': 'the phone number',
+      'recipient.address': 'the address',
       size_class: 'the size',
       carrier_cost: 'the carrier’s charge',
       carrier_waybill_evidence_id: 'the waybill photo',
