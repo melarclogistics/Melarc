@@ -3531,6 +3531,14 @@ test.describe('the photo viewer looks closely, in a browser', () => {
           }),
         );
       const before = await where();
+      // Where the buttons draw their words (a tablet and wider) the four are one row, with the level above them and not between them: a fourth button alone on a second row (found by looking at the pictures of Run G2, at 768 px)
+      // is a tool lost under the others.
+      if (width >= 768) {
+        expect(
+          new Set(before.map((place) => place.y)).size,
+          'the four tools are not on one row',
+        ).toBe(1);
+      }
       for (let step = 0; step < 3; step += 1) await page.keyboard.press('+');
       await page.keyboard.press('r');
       expect(await where(), 'the tools moved with the photo').toEqual(before);

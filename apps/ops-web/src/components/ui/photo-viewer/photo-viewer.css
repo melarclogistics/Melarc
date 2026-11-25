@@ -185,6 +185,15 @@
   text-align: center;
 }
 
+/* Where the buttons draw their words but the window is not wide (a tablet), the level is a line of its own above the four, so that the four are one row and not three and a fourth alone (found by looking at the pictures of Run G2, at 768 px). */
+@media (max-width: 56rem) {
+  .ui-photo-viewer__view {
+    order: -1;
+    flex: 0 0 100%;
+    inline-size: auto;
+  }
+}
+
 /* Where there is no room for the words of the buttons, the four are one row of icons and the level is a row of its own under them (it cannot be between the buttons and still leave the row whole on a phone). */
 @media (max-width: 40rem) {
   /* Four buttons of 56px and the gaps between them are 248px with this gap and 260px with the wider one, which a 320px phone (254px in the window) does not have: the row would break and the photo would lose 68px of its room. */
