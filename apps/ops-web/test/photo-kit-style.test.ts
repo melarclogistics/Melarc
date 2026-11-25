@@ -40,9 +40,10 @@ describe('the stylesheet of the wide dialog', () => {
 describe('the stylesheet of the photo viewer', () => {
   const sheet = css('photo-viewer/photo-viewer.css');
 
-  // Break caught: a stage that takes the vertical scroll away from the browser (a photo that cannot be scrolled past on a phone), or one that leaves a drag across to the browser (a swipe that never arrives).
-  it('leaves the vertical scroll to the browser and the drag across to the swipe', () => {
-    expect(ruleOf(sheet, '.ui-photo-viewer__stage')).toMatch(/touch-action:\s*pan-y\s*;/);
+  // Break caught (Run G2, the viewer's zoom and turn; before it the stage left the vertical scroll to the browser, `pan-y`): a stage that leaves a gesture to the browser, so that a pinch zooms the page behind the viewer
+  // and not the photo, a drag scrolls the page and never looks around a zoomed photo, and a double tap zooms the page. The stage is the whole of the viewer's room and has nothing to scroll.
+  it('gives every touch on the stage to the viewer: the pinch, the drag and the double tap', () => {
+    expect(ruleOf(sheet, '.ui-photo-viewer__stage')).toMatch(/touch-action:\s*none\s*;/);
   });
 
   // Break caught: a change of photo that moves by a duration or an easing of its own, or the wrong way (a photo that comes in from the side it is going to).
