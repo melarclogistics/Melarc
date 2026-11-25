@@ -318,6 +318,22 @@ describe('a vendor whose check-in is still open: the early orders (Run G2, Part 
   });
 });
 
+describe('a vendor whose check-in is final and waits for a senior officer (Run G2, Part 2, item 1)', () => {
+  // Break caught: a vendor with a missing parcel, sent to a senior officer's decision, told on its orders page that it is "still being checked in" (it is not: its check-in is final, and what is in the way is a decision
+  // that is not the officer's), so that nobody knows why no order can be made.
+  it('says that a senior officer decides, and not that the check-in is open, and offers no next order', async () => {
+    open({}, OFFICER, 'RECONCILIATION_REQUIRED');
+    await table();
+    expect(
+      await screen.findByText(
+        /A senior officer is deciding what to do about the missing or damaged parcels./,
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/The vendor is still being checked in/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+  });
+});
+
 describe('the order of a parcel that is missing (Run G2, Part 2, item 1; D-D6, D-S7-4)', () => {
   const ORDER_OF_MISSING = {
     id: 'a0000003-0000-4000-8000-000000000003',

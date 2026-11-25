@@ -450,7 +450,11 @@ function Workspace({
       {progress === undefined ? null : <ProgressFacts progress={progress} mode={facts.mode} />}
       {facts.closed ? <p className="orders-note">{WORDS.workspace.notes.closed}</p> : null}
       {!facts.closed && !facts.cleared && !blind ? (
-        <p className="orders-note">{WORDS.workspace.notes.checkInOpen}</p>
+        <p className="orders-note">
+          {facts.state === 'RECONCILIATION_REQUIRED'
+            ? WORDS.workspace.notes.inReview
+            : WORDS.workspace.notes.checkInOpen}
+        </p>
       ) : null}
       {!facts.closed && !blind && everyParcelHasAnOrder ? (
         <p className="orders-note">{WORDS.workspace.notes.allDone}</p>

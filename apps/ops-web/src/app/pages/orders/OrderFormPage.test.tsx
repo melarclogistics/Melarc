@@ -1141,6 +1141,28 @@ describe('a refusal of the parcel or of the vendor (Run F, Part 2, items 5 and 1
     expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
   });
 
+  // Break caught (Run G2, Part 2, item 1): an order made from a photo whose parcel was not here, saved after the vendor's check-in became final, told as "This vendor changed while you were working" with a second check
+  // of the price as the way on (the price is not what is wrong): the words of the rule, and the way back to the orders, where the parcel is told as it stands now.
+  it('tells an early order that the check-in became final in its own words, and offers no second check of the price', async () => {
+    const { user } = open({
+      [SAVE]: () =>
+        json(409, {
+          code: 'STATE_CONFLICT',
+          message: 'Diagnostic text that must never reach a screen.',
+          request_id: 'r9',
+          details: { rule: 'check_in_finished' },
+        }),
+    });
+    await fillIn(user);
+    await user.click(await pricedSave());
+    await alertSaying(
+      /The vendor’s check-in is final, so an order can no longer be made from a photo/,
+    );
+    expect(screen.queryByText(/This vendor changed while you were working/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Check the price again' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Back to the orders' })).toBeVisible();
+  });
+
   // Break caught (Run G1, Part 2, item 8): a refusal that removes the save (the parcel has its order) told in an alert at the top of a form that is two screens tall at 768 px, while the save was at the foot and was
   // replaced by a link: nothing says why the button is gone, and the focus, which was on the button, is lost. It is told next to the save, once, and takes the focus.
   it('tells a refusal that removes the save next to where the save was, once, and moves the focus to it', async () => {
