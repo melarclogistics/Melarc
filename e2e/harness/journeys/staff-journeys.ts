@@ -55,6 +55,7 @@ import {
   vendorRecovery,
 } from './recovery-journeys.ts';
 import { manifestsAndCustody } from './manifest-journeys.ts';
+import { ordersAndClose } from './order-journeys.ts';
 import { countingRequests } from './request-count.ts';
 import { riderHandsets, vendorBrowsersAndSessions } from './rider-journeys.ts';
 import { introduce, worldOf } from './world.ts';
@@ -971,6 +972,11 @@ const JOURNEYS: readonly Journey[] = [
     title:
       'S1.25: Ops builds a manifest from the pool, assigns a rider and dispatches, the rider starts the run, custody is handed to a rider and to the hub, and a stale act is refused',
     run: manifestsAndCustody,
+  },
+  {
+    title:
+      'S1.40, Run G2: a rider’s run is handed to the hub; orders are made from the photos before the parcels are checked in and confirmed at the check-in; a waiting parcel is marked and ordered later; an order is made in one step at the price shown; a recipient is corrected; a vendor is closed, and one counted without photos is counted, ordered and closed by a senior with parcels left',
+    run: ordersAndClose,
   },
 ];
 

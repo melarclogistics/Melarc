@@ -201,3 +201,50 @@ test.describe('the browser can reach the stack origin and nothing else (audit F0
     expect(sandbox.externalBrowserRequests()).toContain(target);
   });
 });
+
+test.describe('the in-process evidence store’s host is answered by the context, and no other host is (Run G2)', () => {
+  // Break caught: a screen that draws a photo (the receiving run, the order screens) asking the stand-in store's host, which is blocked and recorded as an external request, so that no journey could walk a screen with a photo; or
+  // the answer coming from anywhere but the context itself.
+  test('answers a picture of the stand-in store with one made here, and records nothing', async ({
+    page,
+    sandbox,
+  }) => {
+    await page.goto('/');
+
+    const answer = await page.evaluate(async () => {
+      const response = await fetch(
+        'https://evidence.stand-in.invalid/evidence/ev/abc?X-Amz-Signature=x',
+      );
+      return { status: response.status, type: response.headers.get('content-type') };
+    });
+
+    expect(answer).toEqual({ status: 200, type: 'image/gif' });
+    expect(sandbox.externalBrowserRequests()).toEqual([]);
+  });
+
+  // The other side: the answer is for that one host, and another name under `.invalid`, or the same name over plain HTTP, is still a request that left the browser's boundary.
+  test('still blocks and records every other host', async ({ page, sandbox }) => {
+    await page.goto('/');
+    const other = 'https://evidence.elsewhere.invalid/evidence/ev/abc';
+    const plain = 'http://evidence.stand-in.invalid/evidence/ev/abc';
+
+    const outcomes = await page.evaluate(
+      async (urls) => {
+        const results: string[] = [];
+        for (const url of urls) {
+          try {
+            await fetch(url);
+            results.push('answered');
+          } catch {
+            results.push('failed');
+          }
+        }
+        return results;
+      },
+      [other, plain],
+    );
+
+    expect(outcomes).toEqual(['failed', 'failed']);
+    expect(sandbox.externalBrowserRequests()).toEqual([other, plain]);
+  });
+});

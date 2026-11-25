@@ -11,6 +11,8 @@
  * It runs only through `e2e-database` (`tools/e2e-database.ts`), as the cluster administrator, on a database that tool made.
  */
 
+import { randomUUID } from 'node:crypto';
+
 /** The smallest surface the arrangements need from a connection, so that they can be read and tested without one. */
 export interface ArrangementClient {
   query(
@@ -39,6 +41,24 @@ function workEmail(value: string | undefined): string {
   const text = value ?? '';
   if (text === '' || text.length > 320 || /\s/.test(text) || !text.includes('@')) {
     throw new Error('the work email is the canonical address of a staff identity');
+  }
+  return text;
+}
+
+/** A whole number of parcels counted at a stop, from 1 to 20: a stop of the journeys counts a handful. */
+function parcelsCounted(value: string | undefined): number {
+  const text = value ?? '';
+  if (!/^[0-9]{1,2}$/.test(text) || Number(text) < 1 || Number(text) > 20) {
+    throw new Error('parcels is a whole number from 1 to 20');
+  }
+  return Number(text);
+}
+
+/** A rider's phone, as it signs in: E.164. */
+function riderPhone(value: string | undefined): string {
+  const text = value ?? '';
+  if (!/^\+[1-9][0-9]{7,14}$/.test(text)) {
+    throw new Error('the phone is a number in the form of E.164');
   }
   return text;
 }
@@ -291,6 +311,146 @@ export const ARRANGEMENTS: Readonly<Record<string, Arrangement>> = {
         [identifier, day, ARRANGED_ACTOR, codes],
       );
       return result.rowCount ?? 0;
+    },
+  },
+
+  /**
+   * A run of the hub that its rider has finished collecting, as a day of real work would have left it (the orders' journey, Run G2): the run is **in progress and held by the rider**,
+   * with two stops of the demonstration vendor, both counted and closed. The first is counted with the photo of every parcel (a vendor to be checked in against its door photos) and the
+   * second with the exception Ops gives to let a count through without them (a vendor to be counted without photos), each named for what it is. The rider's collection (the arrival,
+   * the photographs, the vendor's code, the count) is not walked, because the Rider app does not exist and its photographs need a store a journey does not run; **the rider's own act
+   * after it is the product's**: the journey hands the run over to the hub through the real route (`submitHubHandover`), which completes the run and opens each stop's intake, and every
+   * act after that is an operation of the product. The rows are the ones the database kit's `handOver` arranges (`test/database/support/handed-over.ts`), written in the same order and in
+   * one transaction, the guards of the two tables that hold bytes put aside for those two statements alone, as the kit does. **Each collection's handshake is confirmed**, as the vendor's code at the door leaves it: it is
+   * the moment custody passed, which every order is dated from. It fails when the rider or the vendor is not there.
+   */
+  'add-collected-run': {
+    arguments: [
+      'rider phone',
+      'account identifier',
+      'service date',
+      'photographed parcels',
+      'unphotographed parcels',
+    ],
+    sample: ['+99900000001', 'ABCDEFGH', '2026-11-03', '17', '18'],
+    async run(client, args) {
+      const number = riderPhone(args[0]);
+      const identifier = accountIdentifier(args[1]);
+      const day = args[2] ?? '';
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(day))
+        throw new Error('the service date is YYYY-MM-DD');
+      const stops = [
+        {
+          counted: parcelsCounted(args[3]),
+          photographed: true,
+          code: 'ACC-PR-HXJ2MN',
+          sender: 'Fixture Kente Crafts',
+        },
+        {
+          counted: parcelsCounted(args[4]),
+          photographed: false,
+          code: 'ACC-PR-HXK3MN',
+          sender: 'Fixture Adwoa Stalls',
+        },
+      ];
+      const manifest = randomUUID();
+      await client.query('begin');
+      try {
+        const made = await client.query(
+          `insert into pickup_manifest (id, code, responsible_hub_id, service_date, state, assigned_rider_id, assigned_at, dispatched_at, started_at, created_by)
+           select $1, 'ACC-MF-HXJ2MN', o.responsible_hub_id, $2::date, 'IN_PROGRESS', r.id, clock_timestamp() - interval '3 hours', clock_timestamp() - interval '2 hours',
+                  clock_timestamp() - interval '1 hour', $3
+             from vendor_account a
+             join vendor_organization o on o.id = a.vendor_organization_id
+             join rider_identity r on r.phone = $4
+            where a.account_identifier = $5`,
+          [manifest, day, ARRANGED_ACTOR, number, identifier],
+        );
+        const reached = made.rowCount ?? 0;
+        if (reached === 0) {
+          await client.query('rollback');
+          return 0;
+        }
+        for (const [at, stop] of stops.entries()) {
+          const request = randomUUID();
+          const stopId = randomUUID();
+          const record = randomUUID();
+          await client.query(
+            `insert into pickup_request (id, code, vendor_organization_id, sender_name, responsible_hub_id, pickup_intent, state, declared_package_count,
+                                         resolved_pickup_location, primary_phone, scheduled_service_date, default_payer_intent, created_by, confirmed_at, confirmed_by,
+                                         rider_assigned)
+             select $1, $2, o.id, $3, o.responsible_hub_id, 'OWN_PACKAGES', 'CONFIRMED', $4::int, '{"address":"Demonstration shop (fixture)"}'::jsonb, '+99900000011',
+                    $5::date, 'RECIPIENT_PAYS', $6, clock_timestamp(), $6, true
+               from vendor_account a join vendor_organization o on o.id = a.vendor_organization_id
+              where a.account_identifier = $7`,
+            [request, stop.code, stop.sender, stop.counted, day, ARRANGED_ACTOR, identifier],
+          );
+          await client.query(
+            `insert into pickup_stop (id, pickup_manifest_id, pickup_request_id, responsible_hub_id, sequence, state, arrived_at, pickup_summary)
+             select $1, $2, $3, m.responsible_hub_id, $4::int, 'ARRIVED', clock_timestamp() - interval '40 minutes',
+                    jsonb_build_object('reference', $5::text, 'sender_display_name', $6::text, 'declared_package_count', $7::int,
+                                       'resolved_pickup_location', jsonb_build_object('address', 'Demonstration shop (fixture)'), 'location_note', null, 'contact_phone', '+99900000011')
+               from pickup_manifest m where m.id = $2`,
+            [stopId, manifest, request, at + 1, stop.code, stop.sender, stop.counted],
+          );
+          if (stop.photographed) {
+            await client.query('set local session_replication_role = replica');
+            await client.query(
+              `insert into evidence (id, owner_type, owner_id, purpose, captured_at, captured_by_actor, captured_by_principal_type, storage_ref, responsible_hub_id,
+                                     vendor_organization_id, access_rule, retention_policy, state, content_type, byte_size, checksum_sha256, upload_ttl_seconds,
+                                     upload_expires_at, uploaded_at, validated_signature, scanner, scanner_signature_version, scanned_at)
+               select gen_random_uuid(), 'PICKUP_STOP', $1::uuid, 'PARCEL_PHOTO', clock_timestamp() - interval '45 minutes', r.id, 'RIDER',
+                      'ev/' || md5(random()::text || clock_timestamp()::text || n::text), m.responsible_hub_id, o.id,
+                      'SUBJECT_READERS', 'PICKUP_STOP_EVIDENCE', 'STORED', 'image/jpeg', 100, repeat('a', 64), 900, clock_timestamp() + interval '15 minutes',
+                      clock_timestamp(), 'JPEG', 'journey', '1', clock_timestamp()
+                 from generate_series(1, $2::int) as n
+                 join pickup_manifest m on m.id = $3
+                 join rider_identity r on r.id = m.assigned_rider_id
+                 join vendor_account a on a.account_identifier = $4
+                 join vendor_organization o on o.id = a.vendor_organization_id`,
+              [stopId, stop.counted, manifest, identifier],
+            );
+            await client.query('set local session_replication_role = origin');
+          }
+          await client.query(
+            `insert into collection_record (id, pickup_stop_id, responsible_hub_id, declared_count, collected_count, variance, handshake_type, recorded_by)
+             select $1, s.id, s.responsible_hub_id, $2::int, $2::int, 'MATCH', 'VENDOR_ENTERED_RIDER_DISPLAYED', m.assigned_rider_id
+               from pickup_stop s join pickup_manifest m on m.id = s.pickup_manifest_id where s.id = $3`,
+            [record, stop.counted, stopId],
+          );
+          if (stop.photographed) {
+            await client.query(
+              `insert into collection_parcel_photo (evidence_id, collection_record_id)
+               select e.id, $1 from evidence e where e.owner_id = $2 and e.purpose = 'PARCEL_PHOTO'`,
+              [record, stopId],
+            );
+          } else {
+            await client.query('set local session_replication_role = replica');
+            await client.query(
+              `insert into parcel_photo_exception (id, pickup_stop_id, responsible_hub_id, authorised_by, authorised_at, note)
+               select gen_random_uuid(), s.id, s.responsible_hub_id, (select id from staff_identity order by created_at limit 1), clock_timestamp(),
+                      'arranged by the journey'
+                 from pickup_stop s where s.id = $1`,
+              [stopId],
+            );
+            await client.query('set local session_replication_role = origin');
+          }
+          await client.query(
+            `update pickup_stop set state = 'COLLECTED', resolved_at = clock_timestamp() where id = $1`,
+            [stopId],
+          );
+          // The vendor's code was entered at the door: the collection's handshake is confirmed, which is the moment custody passed and what every order is dated from (`melarc.pickup_custody_at`).
+          await client.query(
+            `update collection_record set handshake_channel = 'PORTAL', handshake_confirmed_at = clock_timestamp() - interval '30 minutes' where id = $1`,
+            [record],
+          );
+        }
+        await client.query('commit');
+        return reached;
+      } catch (error) {
+        await client.query('rollback').catch(() => undefined);
+        throw error;
+      }
     },
   },
 };
