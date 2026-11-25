@@ -123,6 +123,8 @@ export interface World {
   parcelStates: Map<number, ParcelState>;
   /** A senior officer wrote off the vendor's missing parcels (D-S7-4): the vendor's record says so, in its findings. */
   writtenOff: boolean;
+  /** The vendor's record cannot be read for the moment (a fault of the server): every read of it answers a 503 until a test says otherwise. A refresh that fails, and the page that keeps what it has (Run G2, Part 2, item 3). */
+  vendorReadDown: boolean;
   orders: StoredOrder[];
   corrections: StoredCorrection[];
   /** What the stand-in's server charges for each size, in pesewas. The page never works one out. */
@@ -183,6 +185,7 @@ export function world(over: Partial<World> = {}): World {
     vendorState: 'READY_FOR_ITEMIZATION',
     parcelStates: new Map(),
     writtenOff: false,
+    vendorReadDown: false,
     orders: [],
     corrections: [],
     prices: { SMALL: 3500, MEDIUM: 4000, LARGE: 5000 },
@@ -801,6 +804,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
   }
   if (method === 'GET' && path === `/api/v1/hub-intakes/${VENDOR_ID}`) {
     if (await needs('hub.read')) return;
+    if (w.vendorReadDown) return route.fulfill(error(503, 'SERVICE_UNAVAILABLE'));
     return route.fulfill(ok(vendorWire(w), 200, vendorEtag(w)));
   }
   // The run the vendor came in on: the order screens of a vendor counted without photos read its section to know whose it is. A vendor with door photos is known by its own record, and no screen asks.

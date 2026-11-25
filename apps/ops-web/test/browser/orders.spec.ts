@@ -948,6 +948,47 @@ test.describe('the early orders as a loop (Run G2, Part 2, item 1; D-D6, D-S7-4,
   });
 });
 
+test.describe('a refresh that fails while an officer is typing (Run G2, Part 2, item 3; OB-S1-169 item 10)', () => {
+  // Break caught: the vendor's read that fails drawn as an error in place of the form, which took the name, the phone, the address and the size with it, or a line that the officer cannot answer.
+  test('keeps the page and every entry, says in a line that it could not be refreshed, and mends with Try again', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, `${NEW_ORDER}?parcel=${parcelIdOf(1)}`);
+    await fillIn(page);
+    await expect(page.getByRole('button', { name: /^Save the order at / })).toBeVisible();
+    // Another officer made the vendor's first order meanwhile (its version moved), so the save is refused as stale; and the vendor cannot be read for a moment.
+    api.world.vendorState = 'ITEMIZING';
+    api.world.vendorReadDown = true;
+    await pressSave(page, /^Save the order at /);
+    await expect(page.getByText(/This vendor changed while you were working/)).toBeVisible();
+
+    // The one press that checks again reads the vendor, and the read fails: the page is kept, with every entry, and says so in a line.
+    await page.getByRole('button', { name: 'Check the price again' }).click();
+    await expect(page.getByText('This could not be refreshed.')).toBeVisible();
+    await expect(page.getByLabel('Recipient’s name')).toHaveValue('Kofi Asante');
+    await expect(page.getByLabel('Recipient’s phone')).toHaveValue('024 765 4321');
+    await expect(page.getByLabel('Delivery address')).toHaveValue('7 Spintex Road, near the mall');
+    await expect(page.getByRole('radio', { name: 'Medium' })).toBeChecked();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+
+    // The vendor can be read again: the line's own Try again reads it, the line goes, nothing typed is lost, and the order is saved from the same form on the version that was read.
+    api.world.vendorReadDown = false;
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await expect(page.getByText('This could not be refreshed.')).toHaveCount(0);
+    await expect(page.getByLabel('Recipient’s name')).toHaveValue('Kofi Asante');
+    await pressSave(page, /^Save the order at /);
+    await expect(page.getByText(/^Order ACC-OR-[A-Z0-9]+ is saved\.$/)).toBeVisible();
+    const saves = made(api, 'POST', `/hub-intakes/${VENDOR}/orders`).filter((call) =>
+      call.path.endsWith('/orders'),
+    );
+    expect(saves.at(-1)?.ifMatch).toBe('"v2"');
+    expect(api.unexpected).toEqual([]);
+    expect(
+      watch.problems.filter((problem) => !problem.includes('409') && !problem.includes('503')),
+    ).toEqual([]);
+  });
+});
+
 test.describe('the recipient correction, refused (Run G1, Part 2, item 7)', () => {
   // Break caught: a refused phone told as "Check the note marked below" with nothing marked; the phone shown to the officer in the API's international form and not as they write it.
   test('a refused phone is marked on the phone with the focus on it, and the phone is shown as it is written', async ({
