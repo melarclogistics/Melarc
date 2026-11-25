@@ -829,10 +829,15 @@ test.describe('the photos of the order screens are asked for through the portal�
   }) => {
     const { api, watch } = await open(page, `${NEW_ORDER}?parcel=${parcelIdOf(1)}`);
     await expect.poll(() => api.images.length).toBeGreaterThan(0);
+    // What the photo costs when the form opens: one link in the production build; the development server runs an effect twice (strict mode), and a photo that is wanted from the first moment is asked for by each.
+    const opened = await linksSettled(api);
+    expect(opened).toBeLessThanOrEqual(test.info().project.name.includes('-dev-') ? 2 : 1);
+    expect(new Set(api.links.asked)).toEqual(new Set([photoIdOf(1)]));
+    // And the form's own work asks for no more: the fields, the price that appears and the form drawn again do not ask for the photo again.
     await fillIn(page);
     await expect(page.getByText('GH₵40.00').first()).toBeVisible();
-    expect(await linksSettled(api)).toBe(1);
-    expect(api.links.asked).toEqual([photoIdOf(1)]);
+    expect(await linksSettled(api)).toBe(opened);
+    expect(new Set(api.links.asked)).toEqual(new Set([photoIdOf(1)]));
     expect(api.unexpected).toEqual([]);
     expect(watch.problems).toEqual([]);
   });
@@ -848,10 +853,14 @@ test.describe('the early orders as a loop (Run G2, Part 2, item 1; D-D6, D-S7-4,
       [3, 'EXPECTED'],
     ]),
   });
+  /** The same vendor with its three orders already made from the photos: each waits for its parcel. */
+  const THREE_EARLY = (): Partial<World> => ({
+    ...NOT_HERE(),
+    orders: [1, 2, 3].map((parcel) => storedOrder(parcel, { status: 'EARLY_QUOTE' })),
+  });
 
-  // Break caught: the early orders reachable from the receiving page alone, a loop that costs a trip to the list for each parcel, an order made early drawn as a fixed price, a parcel that arrives whose order is not
-  // confirmed, a missing parcel's order that says it waits for its parcel, or one that is lost from the list.
-  test('three orders are made from the photos, two parcels are then checked in and one is missing', async ({
+  // Break caught: the early orders reachable from the receiving page alone, a loop that costs a trip to the list for each parcel, or an order made early drawn as a fixed price.
+  test('three orders are made from the photos, one after the other, with no trip back to the list', async ({
     page,
   }) => {
     const { api, watch } = await open(page, '/orders-to-make', NOT_HERE());
@@ -898,11 +907,19 @@ test.describe('the early orders as a loop (Run G2, Part 2, item 1; D-D6, D-S7-4,
     await page.getByRole('link', { name: 'Back to the orders' }).click();
     const rows = page.getByRole('table', { name: 'Parcels and orders' });
     await expect(rows.getByText('Waiting for its parcel')).toHaveCount(3);
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+
+  // Break caught: a parcel that arrives whose order is not confirmed, a missing parcel's order that says it waits for its parcel, or one that is lost from the list.
+  test('two parcels are checked in and one is missing: the orders of the two are confirmed, the third is told as missing, and as not received once it is written off', async ({
+    page,
+  }) => {
+    const first = storedOrder(1);
+    const third = storedOrder(3);
+    const { api, watch } = await open(page, `/orders/${first.id}`, THREE_EARLY());
 
     // The first order waits for its parcel, at a price that is calculated and not fixed.
-    const [first, , third] = api.world.orders;
-    if (first === undefined || third === undefined) throw new Error('three orders were made');
-    await page.goto(`/orders/${first.id}`);
     await expect(page.getByRole('heading', { level: 1, name: first.code })).toBeVisible();
     await expect(page.getByText('Calculated price (not fixed)')).toBeVisible();
     await expect(page.getByText('Waiting for its parcel').first()).toBeVisible();
@@ -923,6 +940,7 @@ test.describe('the early orders as a loop (Run G2, Part 2, item 1; D-D6, D-S7-4,
     ).toBeVisible();
     await expect(page.getByText(/still being checked in/)).toHaveCount(0);
     await page.getByRole('tab', { name: /^All/ }).click();
+    const rows = page.getByRole('table', { name: 'Parcels and orders' });
     await expect(rows.getByText('Confirmed — price fixed')).toHaveCount(2);
     await expect(rows.getByText('Missing', { exact: true })).toBeVisible();
 
@@ -1931,7 +1949,8 @@ const SCREENS: readonly Screen[] = [
     name: 'the orders of a vendor whose check-in is open, with an order made from a photo',
     path: ORDERS,
     world: () => ({ ...checkingIn(), orders: [storedOrder(1, { status: 'EARLY_QUOTE' })] }),
-    ready: (page) => page.getByRole('table', { name: 'Parcels and orders' }),
+    // A table where it fits and a card for each parcel where it does not (at 320 px): the heading is in both.
+    ready: (page) => heading(page, 'Orders for Kente Crafts'),
   },
   {
     name: 'the saved screen of an order made from a photo, with the next order offered',
