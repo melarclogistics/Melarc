@@ -456,11 +456,9 @@ function Workspace({
             : WORDS.workspace.notes.checkInOpen}
         </p>
       ) : null}
-      {!facts.closed && !blind && everyParcelHasAnOrder ? (
+      {/* That every parcel has its order, and the vendor can be closed, is said of a vendor that is cleared: while its check-in is open no parcel has arrived, and in a senior's review nothing can be closed (found by looking at the pictures of Run G2). */}
+      {!facts.closed && !blind && facts.cleared && everyParcelHasAnOrder ? (
         <p className="orders-note">{WORDS.workspace.notes.allDone}</p>
-      ) : null}
-      {!facts.closed && !blind && (progress?.awaiting_arrival ?? 0) > 0 ? (
-        <p className="orders-note">{WORDS.workspace.notes.early}</p>
       ) : null}
       {facts.closed && me.holds('hub.intake.close_exception') ? (
         <p className="orders-note">

@@ -304,6 +304,19 @@ describe('a vendor whose check-in is still open: the early orders (Run G2, Part 
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
   });
 
+  // Break caught (found by looking at the pictures of Run G2): a vendor whose check-in is open told "Every parcel that arrived has an order. Close the vendor when you are done." (no parcel has arrived and the vendor
+  // cannot be closed), and a second note that says again what the first says about the price and the confirmation.
+  it('does not say that every parcel has an order and the vendor can be closed, and says what it says about the early orders once', async () => {
+    early();
+    await table();
+    expect(
+      await screen.findByText(/You can make orders now for the parcels that are not here yet/),
+    ).toBeVisible();
+    expect(screen.queryByText(/Every parcel that arrived has an order/)).toBeNull();
+    expect(screen.queryByText(/Close the vendor when you are done/)).toBeNull();
+    expect(screen.queryByText(/keeps the price it was calculated at/)).toBeNull();
+  });
+
   // Break caught: the next order offered to a session that may only read, or when there is no parcel left that is not here yet.
   it('offers the next order to nobody who may not make orders, and when no parcel is left that is not here yet', async () => {
     early({}, ['hub.read']);
@@ -322,7 +335,25 @@ describe('a vendor whose check-in is final and waits for a senior officer (Run G
   // Break caught: a vendor with a missing parcel, sent to a senior officer's decision, told on its orders page that it is "still being checked in" (it is not: its check-in is final, and what is in the way is a decision
   // that is not the officer's), so that nobody knows why no order can be made.
   it('says that a senior officer decides, and not that the check-in is open, and offers no next order', async () => {
-    open({}, OFFICER, 'RECONCILIATION_REQUIRED');
+    // Every parcel that arrived has its order (two confirmed, and the third is the one that is missing): the picture of this state showed the close offered by the page's note.
+    open(
+      {
+        [LIST]: () =>
+          json(
+            200,
+            worklistOf(ROWS, {
+              received: 2,
+              needs_order: 0,
+              itemized: 2,
+              prepared: 1,
+              orders: 3,
+              missing: 1,
+            }),
+          ),
+      },
+      OFFICER,
+      'RECONCILIATION_REQUIRED',
+    );
     await table();
     expect(
       await screen.findByText(
@@ -331,6 +362,8 @@ describe('a vendor whose check-in is final and waits for a senior officer (Run G
     ).toBeVisible();
     expect(screen.queryByText(/The vendor is still being checked in/)).toBeNull();
     expect(screen.queryByRole('link', { name: 'Make the next order' })).toBeNull();
+    // And not that the vendor can be closed: nothing can be closed while a senior officer decides (found by looking at the pictures of Run G2).
+    expect(screen.queryByText(/Close the vendor when you are done/)).toBeNull();
   });
 });
 

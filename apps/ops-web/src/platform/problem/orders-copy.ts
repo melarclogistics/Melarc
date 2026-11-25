@@ -125,8 +125,6 @@ export const ORDERS_WORDS = {
     notes: {
       allDone: 'Every parcel that arrived has an order. Close the vendor when you are done.',
       closed: 'This vendor is closed. Its orders can no longer be changed here.',
-      early:
-        'An order made for a parcel that is not here yet keeps the price it was calculated at, and is confirmed when the check-in is final.',
       notCleared: 'This vendor is not cleared for orders yet.',
       /** A vendor whose check-in is final and that waits for a senior officer's decision about what is missing or damaged: what is in the way is not the check-in, and is not the officer's. */
       inReview:
