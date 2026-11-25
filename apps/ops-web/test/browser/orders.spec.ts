@@ -3,13 +3,16 @@ import type { Locator, Page } from '@playwright/test';
 import { MANIFEST_ID } from '../../src/test-support/manifest-fixture';
 import { expect, test } from './support/guarded-test';
 import {
+  finishCheckIn,
   IDS,
   parcelIdOf,
   photoIdOf,
   storedOrder,
   stubOrdersApi,
   world,
+  writeOffMissing,
   type OrdersApi,
+  type ParcelState,
   type World,
 } from './support/orders-api';
 import { watchPage, wcagViolations } from './support/page';
@@ -835,6 +838,116 @@ test.describe('the photos of the order screens are asked for through the portal�
   });
 });
 
+test.describe('the early orders as a loop (Run G2, Part 2, item 1; D-D6, D-S7-4, OB-S1-169 item 9)', () => {
+  /** A vendor whose check-in is open and whose three parcels are not here yet: the orders are made from the photos. */
+  const NOT_HERE = (): Partial<World> => ({
+    vendorState: 'AWAITING_COUNT',
+    parcelStates: new Map<number, ParcelState>([
+      [1, 'EXPECTED'],
+      [2, 'EXPECTED'],
+      [3, 'EXPECTED'],
+    ]),
+  });
+
+  // Break caught: the early orders reachable from the receiving page alone, a loop that costs a trip to the list for each parcel, an order made early drawn as a fixed price, a parcel that arrives whose order is not
+  // confirmed, a missing parcel's order that says it waits for its parcel, or one that is lost from the list.
+  test('three orders are made from the photos, two parcels are then checked in and one is missing', async ({
+    page,
+  }) => {
+    const { api, watch } = await open(page, '/orders-to-make', NOT_HERE());
+
+    // The way in from Orders to make: the vendors whose check-in is open, and the act that starts their orders.
+    await page.getByRole('tab', { name: 'Being checked in' }).click();
+    await expect(page.getByText('0 of 3 here').first()).toBeVisible();
+    await page.getByRole('link', { name: 'Start orders from the photos: Kente Crafts' }).click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Orders for Kente Crafts' }),
+    ).toBeVisible();
+    // The page opens on the parcels that are not here yet, and says what can be done now.
+    await expect(page.getByRole('tab', { name: /Not here yet/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(
+      page.getByText(/You can make orders now for the parcels that are not here yet/),
+    ).toBeVisible();
+
+    // Three orders, one after the other, each for the next parcel that is not here yet: no trip back to the list.
+    await page.getByRole('link', { name: 'Make the next order' }).first().click();
+    for (const parcel of [1, 2, 3]) {
+      await expect(
+        page.getByRole('heading', {
+          level: 1,
+          name: `Make an order for parcel ${String(parcel)}`,
+        }),
+      ).toBeVisible();
+      await fillIn(page);
+      await pressSave(page, /^Save the order at /);
+      await expect(page.getByText(/^Order ACC-OR-[A-Z0-9]+ is saved\.$/)).toBeVisible();
+      await expect(page.getByText(/The order waits for its parcel\./)).toBeVisible();
+      if (parcel < 3) await page.getByRole('link', { name: 'Make the next order' }).click();
+    }
+    // None is left that is not here yet: the screen says so, and offers neither a next order nor the close.
+    await expect(page.getByText(/Every parcel that is not here yet has an order\./)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Make the next order' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Close this vendor' })).toHaveCount(0);
+    expect(api.world.orders.map((order) => order.parcel)).toEqual([1, 2, 3]);
+    expect(api.world.orders.every((order) => order.status === 'EARLY_QUOTE')).toBe(true);
+
+    // The vendor's page: three orders that wait for their parcels.
+    await page.getByRole('link', { name: 'Back to the orders' }).click();
+    const rows = page.getByRole('table', { name: 'Parcels and orders' });
+    await expect(rows.getByText('Waiting for its parcel')).toHaveCount(3);
+
+    // The first order waits for its parcel, at a price that is calculated and not fixed.
+    const [first, , third] = api.world.orders;
+    if (first === undefined || third === undefined) throw new Error('three orders were made');
+    await page.goto(`/orders/${first.id}`);
+    await expect(page.getByRole('heading', { level: 1, name: first.code })).toBeVisible();
+    await expect(page.getByText('Calculated price (not fixed)')).toBeVisible();
+    await expect(page.getByText('Waiting for its parcel').first()).toBeVisible();
+
+    // The check-in is made final: two parcels are here and one is missing. The page reads the order again and says what it is now.
+    finishCheckIn(api.world, [1, 2]);
+    await page.reload();
+    await expect(page.getByText('Confirmed: its price is fixed.')).toBeVisible();
+    await expect(page.getByText('Fixed price')).toBeVisible();
+    await expect(page.getByText('Waiting for its parcel')).toHaveCount(0);
+
+    // The vendor's page tells where each parcel stands, and that a senior officer decides about the missing one.
+    await page.goto(ORDERS);
+    await expect(
+      page.getByText(
+        /A senior officer is deciding what to do about the missing or damaged parcels\./,
+      ),
+    ).toBeVisible();
+    await expect(page.getByText(/still being checked in/)).toHaveCount(0);
+    await page.getByRole('tab', { name: /^All/ }).click();
+    await expect(rows.getByText('Confirmed — price fixed')).toHaveCount(2);
+    await expect(rows.getByText('Missing', { exact: true })).toBeVisible();
+
+    // The order of the parcel that is missing is told as one that will not go out unless the parcel is found.
+    await page.goto(`/orders/${third.id}`);
+    await expect(page.getByRole('heading', { level: 1, name: third.code })).toBeVisible();
+    await expect(
+      page.getByText('Parcel missing — this order will not go out unless the parcel is found.'),
+    ).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Change this order' })).toHaveCount(0);
+
+    // A senior officer writes off what is missing: the order stays on record as the order of a parcel that was not received.
+    writeOffMissing(api.world);
+    await page.reload();
+    await expect(
+      page.getByText(
+        'Parcel not received — the order stays on record, with no price to pay, and will not go out.',
+      ),
+    ).toBeVisible();
+    await expect(page.getByText(/The parcel was not received, so nothing is owed/)).toBeVisible();
+    expect(api.unexpected).toEqual([]);
+    expect(watch.problems).toEqual([]);
+  });
+});
+
 test.describe('the recipient correction, refused (Run G1, Part 2, item 7)', () => {
   // Break caught: a refused phone told as "Check the note marked below" with nothing marked; the phone shown to the officer in the API's international form and not as they write it.
   test('a refused phone is marked on the phone with the focus on it, and the phone is shown as it is written', async ({
@@ -1460,6 +1573,32 @@ const firstMade = (): Partial<World> => ({
   orders: [storedOrder(1)],
   permissions: SENIOR_KEYS,
 });
+/** A vendor whose check-in is open, with its three parcels not here yet (D-D6): the orders are made from the photos. */
+const checkingIn = (): Partial<World> => ({
+  vendorState: 'AWAITING_COUNT',
+  parcelStates: new Map<number, ParcelState>([
+    [1, 'EXPECTED'],
+    [2, 'EXPECTED'],
+    [3, 'EXPECTED'],
+  ]),
+  permissions: SENIOR_KEYS,
+});
+/** The same vendor once its check-in is final: two parcels are here and the third is missing, and its order (made from the photo) stays as the order of a parcel that is missing. */
+const withAMissingParcel = (writtenOff: boolean): Partial<World> => ({
+  vendorState: writtenOff ? 'ITEMIZING' : 'RECONCILIATION_REQUIRED',
+  parcelStates: new Map<number, ParcelState>([
+    [1, 'ARRIVED'],
+    [2, 'ARRIVED'],
+    [3, 'MISSING'],
+  ]),
+  writtenOff,
+  orders: [
+    storedOrder(1),
+    storedOrder(2, { size: 'MEDIUM', price: 4000 }),
+    storedOrder(3, { status: 'EARLY_QUOTE' }),
+  ],
+  permissions: SENIOR_KEYS,
+});
 /** A vendor counted without photos (nine parcels counted) with the given number of orders made: its orders are for no parcel, and the count is all it knows of them (D-S7-3). */
 const blindMade = (orders: number): Partial<World> => ({
   mode: 'BLIND_COUNT',
@@ -1736,6 +1875,63 @@ const SCREENS: readonly Screen[] = [
       await dialog.getByRole('button', { name: 'Save the correction' }).click();
     },
     refused: '400',
+  },
+  {
+    // D-D6, Run G2: the way in to the early orders from Orders to make.
+    name: 'the queue of the vendors with orders to make, the view of the vendors being checked in',
+    path: '/orders-to-make',
+    world: checkingIn,
+    ready: (page) => page.getByRole('link', { name: 'Start orders from the photos: Kente Crafts' }),
+    then: async (page) => {
+      await page.getByRole('tab', { name: 'Being checked in' }).click();
+    },
+  },
+  {
+    name: 'the orders of a vendor whose check-in is open, with an order made from a photo',
+    path: ORDERS,
+    world: () => ({ ...checkingIn(), orders: [storedOrder(1, { status: 'EARLY_QUOTE' })] }),
+    ready: (page) => page.getByRole('table', { name: 'Parcels and orders' }),
+  },
+  {
+    name: 'the saved screen of an order made from a photo, with the next order offered',
+    path: `${NEW_ORDER}?parcel=${parcelIdOf(1)}`,
+    world: checkingIn,
+    then: async (page) => {
+      await fillIn(page);
+      await pressSave(page, /^Save the order at /);
+    },
+    ready: (page) => page.getByRole('link', { name: 'Make the next order' }),
+  },
+  {
+    name: 'an order that waits for its parcel',
+    path: `/orders/${storedOrder(1).id}`,
+    world: () => ({ ...checkingIn(), orders: [storedOrder(1, { status: 'EARLY_QUOTE' })] }),
+    ready: (page) => heading(page, storedOrder(1).code),
+  },
+  {
+    name: 'the order of a parcel that is missing',
+    path: `/orders/${storedOrder(3).id}`,
+    world: () => withAMissingParcel(false),
+    ready: (page) =>
+      page.getByText('Parcel missing — this order will not go out unless the parcel is found.'),
+  },
+  {
+    name: 'the order of a parcel that was not received',
+    path: `/orders/${storedOrder(3).id}`,
+    world: () => withAMissingParcel(true),
+    ready: (page) =>
+      page.getByText(
+        'Parcel not received — the order stays on record, with no price to pay, and will not go out.',
+      ),
+  },
+  {
+    name: 'the orders of a vendor with a parcel missing, waiting for a senior officer',
+    path: `${ORDERS}?view=all`,
+    world: () => withAMissingParcel(false),
+    ready: (page) =>
+      page.getByText(
+        /A senior officer is deciding what to do about the missing or damaged parcels\./,
+      ),
   },
   {
     name: 'the queue of the vendors with orders to make, a vendor counted without photos named by its vendor',

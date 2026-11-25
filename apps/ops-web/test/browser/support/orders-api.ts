@@ -16,8 +16,10 @@ import {
   worklistOf,
 } from '../../../src/test-support/orders-fixture';
 import {
+  arrivedParcel,
   blindVendorFixture,
   checkInFixture,
+  parcelFixture,
   runFixture,
 } from '../../../src/test-support/receiving-fixture';
 import { freezeClock } from './clock';
@@ -53,6 +55,8 @@ export const photoIdOf = (ordinal: number): string =>
   parcelRow(ordinal, 'NEEDS_ORDER').parcel.door_photo_evidence_id;
 
 export type Size = 'SMALL' | 'MEDIUM' | 'LARGE';
+
+export type ParcelState = 'EXPECTED' | 'ARRIVED' | 'MISSING';
 
 export interface StoredOrder {
   readonly id: string;
@@ -110,7 +114,15 @@ export interface World {
   previewFault:
     | { kind: 'network' | 'server' | 'rate-limit'; times: number; retryAfterSeconds: number }
     | undefined;
-  vendorState: 'READY_FOR_ITEMIZATION' | 'ITEMIZING' | 'CLOSED';
+  vendorState:
+    'AWAITING_COUNT' | 'RECONCILIATION_REQUIRED' | 'READY_FOR_ITEMIZATION' | 'ITEMIZING' | 'CLOSED';
+  /**
+   * Where each of the vendor's parcels is, by its place, while its check-in is not final (D-D6): `EXPECTED` (not here yet), `ARRIVED` or `MISSING`. A parcel that is not named is `ARRIVED`, as it is in every world that
+   * names none, so that a world of the earlier tests is what it was. `finishCheckIn` moves them as the API's act does.
+   */
+  parcelStates: Map<number, ParcelState>;
+  /** A senior officer wrote off the vendor's missing parcels (D-S7-4): the vendor's record says so, in its findings. */
+  writtenOff: boolean;
   orders: StoredOrder[];
   corrections: StoredCorrection[];
   /** What the stand-in's server charges for each size, in pesewas. The page never works one out. */
@@ -169,6 +181,8 @@ export function world(over: Partial<World> = {}): World {
     ],
     // The vendor arrived with three parcels, was checked in, and is cleared for its orders: none is made yet.
     vendorState: 'READY_FOR_ITEMIZATION',
+    parcelStates: new Map(),
+    writtenOff: false,
     orders: [],
     corrections: [],
     prices: { SMALL: 3500, MEDIUM: 4000, LARGE: 5000 },
@@ -179,6 +193,31 @@ export function world(over: Partial<World> = {}): World {
     keys: new Map(),
     ...over,
   };
+}
+
+/**
+ * The vendor's check-in is made final, as the API's act does it (D-D6): the parcels named are here, the others are missing, **the order of each parcel that is here is confirmed and its price fixed** (it was a quote), and a vendor
+ * with a parcel missing goes to a senior officer's decision, where a complete one is cleared for its orders.
+ */
+export function finishCheckIn(w: World, here: readonly number[]): void {
+  for (let ordinal = 1; ordinal <= w.parcelCount; ordinal += 1) {
+    w.parcelStates.set(ordinal, here.includes(ordinal) ? 'ARRIVED' : 'MISSING');
+  }
+  for (const order of w.orders) {
+    if (order.status === 'EARLY_QUOTE' && parcelStateOf(w, order.parcel) === 'ARRIVED') {
+      order.status = 'FROZEN';
+      order.version += 1;
+    }
+  }
+  w.vendorState = here.length < w.parcelCount ? 'RECONCILIATION_REQUIRED' : 'READY_FOR_ITEMIZATION';
+}
+
+/** A senior officer writes off what is missing: the vendor is cleared for the orders of what arrived, and a missing parcel's order stays as a record (D-S7-4). */
+export function writeOffMissing(w: World): void {
+  w.writtenOff = true;
+  w.vendorState = w.orders.some((order) => order.status === 'FROZEN')
+    ? 'ITEMIZING'
+    : 'READY_FOR_ITEMIZATION';
 }
 
 export interface Call {
@@ -268,13 +307,21 @@ const parcelOf = (ordinal: number) => PARCELS[ordinal - 1];
 const orderForParcel = (w: World, ordinal: number) =>
   w.orders.find((each) => each.parcel === ordinal);
 const orderById = (w: World, id: string) => w.orders.find((each) => each.id === id);
+const parcelStateOf = (w: World, ordinal: number): ParcelState =>
+  w.parcelStates.get(ordinal) ?? 'ARRIVED';
 
 /**
  * The vendor's version. **It moves when the vendor's state does and not with each order**, as the API's does (`melarc.itemize_order` writes the intake only to move it from ready to being worked, with the first order),
  * so a save on a read from before the first order is refused as stale, and the second order is made on a read taken after it.
  */
-const vendorEtag = (w: World): string =>
-  `"v${String(w.vendorState === 'READY_FOR_ITEMIZATION' ? 1 : w.vendorState === 'ITEMIZING' ? 2 : 3)}"`;
+const VENDOR_VERSION: Record<World['vendorState'], number> = {
+  AWAITING_COUNT: 0,
+  READY_FOR_ITEMIZATION: 1,
+  ITEMIZING: 2,
+  CLOSED: 3,
+  RECONCILIATION_REQUIRED: 4,
+};
+const vendorEtag = (w: World): string => `"v${String(VENDOR_VERSION[w.vendorState])}"`;
 
 function vendorWire(w: World) {
   if (w.mode === 'BLIND_COUNT') {
@@ -294,17 +341,48 @@ function vendorWire(w: World) {
       vendor_name: 'Fixture Sender',
     };
   }
-  return checkInFixture(PARCELS, {
+  // A world that names where its parcels are has them as the check-in stands (D-D6); every other is the three that arrived.
+  const parcels =
+    w.parcelStates.size === 0
+      ? PARCELS
+      : Array.from({ length: w.parcelCount }, (_, index) => {
+          const ordinal = index + 1;
+          const state = parcelStateOf(w, ordinal);
+          return state === 'ARRIVED'
+            ? arrivedParcel(ordinal)
+            : parcelFixture(ordinal, {
+                state,
+                ...(state === 'MISSING' ? { missing_marked_at: '2026-11-03T08:20:00Z' } : {}),
+              });
+        });
+  const open = w.vendorState === 'AWAITING_COUNT';
+  return checkInFixture(parcels, {
     id: VENDOR_ID,
     state: w.vendorState,
     // The dates are the world's: the page says how long ago the vendor was handed over.
     handed_over_at: '2026-11-03T07:40:00Z',
-    counted_at: '2026-11-03T07:55:00Z',
+    counted_at: open ? null : '2026-11-03T07:55:00Z',
+    ...(open ? { counted_by_name: null } : {}),
+    // A senior's write-off of what is missing is a finding of the vendor's record (D-S7-4).
+    condition_findings: w.writtenOff ? [WRITE_OFF_FINDING] : [],
   });
 }
 
+/** The finding a senior officer's write-off leaves in the vendor's record, as the record carries one. */
+const WRITE_OFF_FINDING = {
+  id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+  kind: 'ADJUDICATION',
+  intake_parcel_id: null,
+  condition: null,
+  outcome: 'WRITTEN_OFF',
+  note: 'The vendor was told and the parcel did not come.',
+  evidence_ids: [],
+  recorded_by_name: 'Synthetic Senior',
+  recorded_at: '2026-11-03T09:00:00.000Z',
+};
+
 /** An order as `getOrder` answers it. */
-function orderWire(order: StoredOrder): Record<string, unknown> {
+function orderWire(order: StoredOrder, w?: World): Record<string, unknown> {
   const base = orderOf(order.status === 'FROZEN' ? 'frozen' : 'early');
   const frozen = order.status === 'FROZEN';
   const recipient = base.recipient as Record<string, unknown>;
@@ -315,7 +393,12 @@ function orderWire(order: StoredOrder): Record<string, unknown> {
     code: order.code,
     pickup_intake_id: VENDOR_ID,
     intake_parcel_id: order.parcelless === true ? null : (parcelOf(order.parcel)?.id ?? null),
-    intake_parcel_state: order.parcelless === true ? null : 'ARRIVED',
+    intake_parcel_state:
+      order.parcelless === true
+        ? null
+        : w === undefined
+          ? 'ARRIVED'
+          : parcelStateOf(w, order.parcel),
     // The picture of the parcel the order is made for (Run G1, D-S7-14): null for a vendor counted without photos.
     intake_parcel_photo_evidence_id:
       order.parcelless === true ? null : (parcelOf(order.parcel)?.photo_evidence_id ?? null),
@@ -361,22 +444,36 @@ function orderWire(order: StoredOrder): Record<string, unknown> {
 function rowOf(w: World, ordinal: number) {
   const order = orderForParcel(w, ordinal);
   const mark = w.waiting.get(ordinal);
+  const state = parcelStateOf(w, ordinal);
   if (order === undefined) {
-    return parcelRow(ordinal, 'NEEDS_ORDER', mark === undefined ? {} : { waiting: mark });
+    return parcelRow(
+      ordinal,
+      state === 'EXPECTED' ? 'AWAITING_ARRIVAL' : state === 'MISSING' ? 'MISSING' : 'NEEDS_ORDER',
+      { parcelState: state, ...(mark === undefined ? {} : { waiting: mark }) },
+    );
   }
-  return parcelRow(ordinal, order.status === 'FROZEN' ? 'ITEMIZED' : 'PREPARED', {
-    order: {
-      id: order.id,
-      code: order.code,
-      recipient_name: order.name,
-      service_area: 'ACCRA_TEMA',
-      size_class: order.size,
-      commercial_state:
-        order.status === 'FROZEN' ? (order.sender ? 'PAYMENT_REQUIRED' : 'NO_VENDOR_CHARGE') : null,
-      confirmed: order.status === 'FROZEN',
-      payment_required: (order.sender ?? 0) > 0,
+  return parcelRow(
+    ordinal,
+    state === 'MISSING' ? 'MISSING' : order.status === 'FROZEN' ? 'ITEMIZED' : 'PREPARED',
+    {
+      parcelState: state,
+      order: {
+        id: order.id,
+        code: order.code,
+        recipient_name: order.name,
+        service_area: 'ACCRA_TEMA',
+        size_class: order.size,
+        commercial_state:
+          order.status === 'FROZEN'
+            ? order.sender
+              ? 'PAYMENT_REQUIRED'
+              : 'NO_VENDOR_CHARGE'
+            : null,
+        confirmed: order.status === 'FROZEN',
+        payment_required: (order.sender ?? 0) > 0,
+      },
     },
-  });
+  );
 }
 
 /** The most rows a page of the worklist holds when the browser does not say: the API's own default, twenty-five (a long vendor is worked a page at a time). */
@@ -427,25 +524,36 @@ function worklistWire(w: World, view: string | null, pageSize: number, offset: n
   const rows = Array.from({ length: w.parcelCount }, (_, index) => rowOf(w, index + 1));
   const needs = rows.filter((row) => row.work_state === 'NEEDS_ORDER').length;
   const made = w.orders.length;
+  // The views are the server's: `awaiting_arrival` lists every parcel that is not here yet, **with an order or without one** (D-D6), and each of the others lists what its name says.
   const wanted = rows.filter((row) =>
     view === 'needs_order'
       ? row.work_state === 'NEEDS_ORDER'
       : view === 'itemized'
         ? row.work_state === 'ITEMIZED'
-        : view === 'waiting_for_vendor'
-          ? row.parcel.waiting_for_vendor !== null
-          : true,
+        : view === 'awaiting_arrival'
+          ? row.parcel.state === 'EXPECTED'
+          : view === 'prepared'
+            ? row.work_state === 'PREPARED'
+            : view === 'missing'
+              ? row.work_state === 'MISSING'
+              : view === 'waiting_for_vendor'
+                ? row.parcel.waiting_for_vendor !== null
+                : true,
   );
+  const count = (state: ParcelState): number =>
+    rows.filter((row) => row.parcel.state === state).length;
   // A page at a time, from the place the token names: the token of the next page is where it begins, and there is none after the last.
   const items = wanted.slice(offset, offset + pageSize);
   const next = offset + pageSize < wanted.length ? String(offset + pageSize) : null;
   return worklistOf(
     items,
     {
-      received: w.parcelCount,
+      received: count('ARRIVED'),
+      awaiting_arrival: count('EXPECTED'),
       needs_order: needs,
       itemized: w.orders.filter((each) => each.status === 'FROZEN').length,
       prepared: w.orders.filter((each) => each.status !== 'FROZEN').length,
+      missing: count('MISSING'),
       orders: made,
       payment_required: w.orders.filter((each) => (each.sender ?? 0) > 0).length,
       waiting_for_vendor: w.waiting.size,
@@ -669,10 +777,16 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (await needs('hub.read')) return;
     const asked = new URLSearchParams(call.search);
     // `senior_needed` is present when a senior officer is needed, in whichever view the vendor is listed (the contract's words), and absent otherwise.
+    // The order counts are carried by a vendor in a state where orders are made, and by no other (the contract's words): not by a vendor whose check-in is open.
+    const ordering = w.vendorState === 'READY_FOR_ITEMIZATION' || w.vendorState === 'ITEMIZING';
     const counted = {
       ...vendorWire(w),
-      orders_made: w.orders.length,
-      parcels_needing_order: Math.max(0, w.parcelCount - w.orders.length),
+      ...(ordering
+        ? {
+            orders_made: w.orders.length,
+            parcels_needing_order: Math.max(0, w.parcelCount - w.orders.length),
+          }
+        : {}),
       ...(w.seniorNeeded === null ? {} : { senior_needed: w.seniorNeeded }),
     };
     const items =
@@ -783,6 +897,18 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
         }),
       );
     }
+    // What the database refuses by where the parcel is (D-D6): a missing parcel is never ordered; a parcel that is not here yet is ordered while the check-in is open and no longer; a parcel that is here is
+    // ordered once the check-in is final.
+    const parcelState: ParcelState = blind ? 'ARRIVED' : parcelStateOf(w, ordinal);
+    if (parcelState === 'MISSING') {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'parcel_missing' }));
+    }
+    if (parcelState === 'EXPECTED' && w.vendorState !== 'AWAITING_COUNT') {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'check_in_finished' }));
+    }
+    if (parcelState === 'ARRIVED' && w.vendorState === 'AWAITING_COUNT') {
+      return route.fulfill(error(409, 'STATE_CONFLICT', { rule: 'check_in_open' }));
+    }
     if (w.repriceOnce !== undefined) {
       w.prices[size] = w.repriceOnce;
       w.repriceOnce = undefined;
@@ -805,6 +931,8 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     const made = storedOrder(ordinal, {
       size,
       price,
+      // An order for a parcel that is not here yet is a quote: it is confirmed, and its price fixed, when the check-in is final.
+      status: parcelState === 'ARRIVED' ? 'FROZEN' : 'EARLY_QUOTE',
       parcelless: blind,
       name: typeof recipient.name === 'string' ? recipient.name : 'Ama Mensah',
       phone: typeof recipient.phone === 'string' ? recipient.phone : '',
@@ -818,7 +946,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     w.waiting.delete(ordinal);
     // The first order of a vendor moves it from ready to being worked, and its version with it.
     if (w.vendorState === 'READY_FOR_ITEMIZATION') w.vendorState = 'ITEMIZING';
-    const saved = { ...orderWire(made) };
+    const saved = { ...orderWire(made, w) };
     w.keys.set(call.idempotencyKey, {
       status: 201,
       body: saved,
@@ -835,7 +963,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
     if (order === undefined) return route.fulfill(error(404, 'NOT_FOUND'));
     if (method === 'GET') {
       if (await needs('pricing.read')) return;
-      return route.fulfill(ok(orderWire(order), 200, `"o${String(order.version)}"`));
+      return route.fulfill(ok(orderWire(order, w), 200, `"o${String(order.version)}"`));
     }
     if (method === 'PATCH') {
       if (await needs('hub.intake.itemize')) return;
@@ -878,7 +1006,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
         at: '2026-11-03T08:28:00.000Z',
         kind: 'AMENDMENT',
       });
-      const answered = ok(orderWire(order), 200, `"o${String(order.version)}"`);
+      const answered = ok(orderWire(order, w), 200, `"o${String(order.version)}"`);
       w.keys.set(call.idempotencyKey, {
         status: 200,
         body: answered.json,
@@ -961,7 +1089,7 @@ async function answer(route: Route, state: OrdersApi, call: Call): Promise<void>
       at: '2026-11-03T08:29:00.000Z',
       kind: 'RECIPIENT_CORRECTION',
     });
-    const answered = ok(orderWire(order), 200, `"o${String(order.version)}"`);
+    const answered = ok(orderWire(order, w), 200, `"o${String(order.version)}"`);
     w.keys.set(call.idempotencyKey, {
       status: 200,
       body: answered.json,
