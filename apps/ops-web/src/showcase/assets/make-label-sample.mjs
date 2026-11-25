@@ -1,8 +1,10 @@
 // Makes the sample parcel label of the photo viewer's showcase: a synthetic 4 x 6 inch label at 200 dots per inch (800 x 1200), portrait, the shape of a real parcel label,
 // with an asymmetric mark so that a turn of the photo can be told from its pixels. It is drawn, never photographed: no real parcel, person, address or code is in it.
 // Usage (from this folder): node make-label-sample.mjs label-sample.png. The same bytes come out every time, and the file is held to its size by test/showcase-label-sample.test.ts.
-import { deflateSync } from 'node:zlib';
+import { Buffer } from 'node:buffer';
 import { writeFileSync } from 'node:fs';
+import process from 'node:process';
+import { deflateSync } from 'node:zlib';
 
 const W = 800;
 const H = 1200;
@@ -100,4 +102,5 @@ const png = Buffer.concat([
 const out = process.argv[2];
 if (out === undefined) throw new Error('give the output path');
 writeFileSync(out, png);
-console.log(`${out}: ${String(png.length)} bytes, ${String(W)} x ${String(H)}`);
+process.stdout.write(`${out}: ${String(png.length)} bytes, ${String(W)} x ${String(H)}
+`);
