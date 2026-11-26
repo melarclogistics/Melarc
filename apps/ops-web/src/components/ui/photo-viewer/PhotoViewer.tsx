@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type ReactNode,
 } from 'react';
@@ -333,6 +334,14 @@ export function PhotoViewer({
     }
   }
 
+  /** WebKit does not focus a button a click lands on, and the keys above are heard where the focus is: after a click on a button the next key would reach the page behind the dialog and not the viewer. What was clicked takes the focus. */
+  function onClick(event: MouseEvent<HTMLDivElement>): void {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest('button');
+    if (button !== null && !button.disabled && document.activeElement !== button) button.focus();
+  }
+
   /** Where a pointer is in the window the photo is looked at in. */
   function placeOf(event: PointerEvent<HTMLDivElement>, stage: HTMLElement): Point {
     const { box } = geometryOf(stage);
@@ -520,7 +529,7 @@ export function PhotoViewer({
       onRequestClose={onClose}
     >
       {/* The keys are heard anywhere in the dialog: the keyboard events of a control inside it reach this box. */}
-      <div className="ui-photo-viewer" ref={root} onKeyDown={onKeyDown}>
+      <div className="ui-photo-viewer" ref={root} onKeyDown={onKeyDown} onClick={onClick}>
         <div
           className="ui-photo-viewer__stage"
           ref={stageRef}
