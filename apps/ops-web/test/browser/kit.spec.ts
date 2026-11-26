@@ -3390,13 +3390,25 @@ test.describe('the photo viewer looks closely, in a browser', () => {
     const dragged = await box(picture);
     near(dragged.x - before.x, 60, 2, 'dragged across');
     near(dragged.y - before.y, 40, 2, 'dragged down');
-    await page.mouse.move(start.x, start.y);
-    await page.mouse.down();
-    await page.mouse.move(start.x + 3000, start.y + 3000, { steps: 4 });
-    await page.mouse.up();
+    // A pull as long as the photo is tall goes out of the window the photo is in and across the page behind it, and is made of as many drags as it takes to go that far inside the screen: a pull to a point outside the viewport moved nothing in Firefox (its driver delivers no move there, and the photo stayed where the first drag left it), and a hand does not go there either.
+    const screen = page.viewportSize() ?? { width: 1280, height: 720 };
+    for (let pull = 0; pull < 4; pull += 1) {
+      await page.mouse.move(stage.x + 8, stage.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(screen.width - 2, screen.height - 2, { steps: 4 });
+      await page.mouse.up();
+    }
     const furthest = await box(picture);
     near(furthest.x, window.x, 1.5, 'the left edge of the photo stops at the window');
     near(furthest.y, window.y, 1.5, 'the top edge of the photo stops at the window');
+
+    // The keys are still heard after the mouse has been on the photo (a press on it moves the focus nowhere out of the viewer).
+    await page.keyboard.press('ArrowRight');
+    const afterwards = await box(picture);
+    expect(
+      furthest.x - afterwards.x,
+      'an arrow after a drag looks around the photo, to the right',
+    ).toBeGreaterThan(10);
   });
 
   // Break caught: a double tap that does not zoom, one that zooms about the middle and not about the tap (what was tapped slides away), one that does not zoom back out, and one made by two taps far apart in time.

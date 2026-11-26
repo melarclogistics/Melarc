@@ -541,7 +541,12 @@ test.describe('a parcel the officer is waiting on the vendor’s details for (Ru
     expect(marks.at(-1)?.ifMatch).toBe('"v1"');
     expect(marks.at(-1)?.idempotencyKey).toBeUndefined();
 
-    // The page is left when the picture beside the form has finished loading: leaving it with the load in flight is an engine's cancelled request (WebKit words it as a failed one), which the test caused and the page did not.
+    // The page is left when the picture beside the form has been drawn: leaving it with the load in flight is an engine's cancelled request (WebKit words it as a failed one), which the test caused and the page did not. The
+    // network being idle is not enough on the development server: it can be so before the picture has been asked for at all (seen on WebKit, with the hook of the start of the run as well as the one of the end).
+    await expect(page.getByRole('img', { name: 'Photo of the parcel: Parcel 2' })).toHaveJSProperty(
+      'complete',
+      true,
+    );
     await page.waitForLoadState('networkidle');
     // The vendor's orders page has a tab for the parcels that wait, with the server's count and the note.
     await page.goto(ORDERS);
@@ -559,6 +564,8 @@ test.describe('a parcel the officer is waiting on the vendor’s details for (Ru
       )
       .toBe(true);
 
+    // The row's picture is drawn before the page is left, for the reason above.
+    await expect(rows.locator('img')).toHaveJSProperty('complete', true);
     await page.waitForLoadState('networkidle');
     // The parcel's own form says it is waited on, and one press takes the mark off.
     await page.goto(FIRST_PARCEL);
