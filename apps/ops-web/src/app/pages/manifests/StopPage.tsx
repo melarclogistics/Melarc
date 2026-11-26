@@ -9,7 +9,7 @@ import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenS
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
 import { Panel } from '../../../components/ui/panel/Panel';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState, RefreshFailed } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import { RecordPage } from '../../../components/ui/templates/RecordPage';
@@ -225,19 +225,24 @@ function Reading({ manifestId, stopId }: { readonly manifestId: string; readonly
 
   const code = stop?.pickup_summary?.reference ?? request.data?.request.code;
   const runCode = run.data?.manifest.code;
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): the stop is shown as it was read, with a line that says so.
+  const stopRecord = drawnData(stopQuery, { operation: 'getPickupStop' });
   return (
     <>
       <title>
         {`${stop === undefined ? 'Stop' : `Stop ${String(stop.sequence)}`} · Melarc Ops Portal`}
       </title>
-      {stopQuery.status === 'success' ? (
-        <Stop
-          manifestId={manifestId}
-          stopId={stopId}
-          record={stopQuery.data}
-          runCode={runCode}
-          code={code}
-        />
+      {stopRecord !== undefined ? (
+        <>
+          <RefreshFailed query={stopQuery} operation="getPickupStop" />
+          <Stop
+            manifestId={manifestId}
+            stopId={stopId}
+            record={stopRecord}
+            runCode={runCode}
+            code={code}
+          />
+        </>
       ) : (
         <>
           <PageHeader

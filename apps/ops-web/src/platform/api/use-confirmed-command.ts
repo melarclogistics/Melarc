@@ -34,6 +34,11 @@ export interface ConfirmedCommandOptions<Command extends object, Result> {
   readonly send: (command: Command, idempotencyKey: string) => Promise<Result>;
   /** The API said it was done. Not called for a screen that has gone, or for a session that has changed. A fault in it surfaces from `submit`; it does not undo the command. */
   readonly onDone?: (result: Result) => void;
+  /**
+   * The API refused the command, or says the record is not as the person saw it (`refused` and `conflict`), **as the refusal arrives and in the same turn that sets the phase**: a screen that marks a field from it
+   * is drawn with the refusal, in one render, so the focus that follows a refusal finds the mark. Told once for each refusal; not for an unknown outcome, a command done, a screen that has gone or a session that changed.
+   */
+  readonly onRefused?: (problem: Problem) => void;
   /** The person asks to see the record as it is now: after a conflict, or to find out whether an unknown outcome was done. */
   readonly onReload?: () => unknown;
   /**
@@ -143,7 +148,14 @@ export function useConfirmedCommand<Command extends object, Result>(
           setState(IDLE);
           return;
         }
-        setState(afterFailure(error, slot.describe().unresolved, latest.current.operation));
+        const after = afterFailure(error, slot.describe().unresolved, latest.current.operation);
+        setState(after);
+        if (
+          (after.phase === 'refused' || after.phase === 'conflict') &&
+          after.problem !== undefined
+        ) {
+          latest.current.onRefused?.(after.problem);
+        }
         return;
       } finally {
         busy.current = false;

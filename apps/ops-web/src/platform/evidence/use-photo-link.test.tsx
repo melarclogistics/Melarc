@@ -1,4 +1,5 @@
 import { act, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -113,6 +114,82 @@ describe('usePhotoLink while the page is held', () => {
       expect(into.current?.link).toEqual({ status: 'ready', url: ONE });
     });
     expect(asked()).toBe(1);
+  });
+
+  // Break caught (Run G2, Part 2 item 4: the close page draws a hundred tiles at once and the queue sends four at a time): the tiles that were already waiting for their place in the queue when a
+  // refusal began the hold, sent one after another into the limit the API has just told, so that every tile of a long page after the first refusal says "unavailable" and the wait is never kept.
+  it('holds the tiles that were waiting for a place in the queue when a refusal began the hold, and asks for them once it is over', async () => {
+    const ids = Array.from(
+      { length: 10 },
+      (_, n) => `5f6a7b8c-9d0e-4f1a-8b2c-${String(n).padStart(12, '0')}`,
+    );
+    const pathOf = (id: string): string => `/evidence/${id}/retrieval-authorization`;
+    const askedFor = (from: number, to: number): number =>
+      ids.slice(from, to).reduce((sum, id) => sum + requestsTo(api, pathOf(id)).length, 0);
+    // The first four are in the queue's four places, and stay there until the test answers them; the six after them wait for a place.
+    const answers = new Map<string, (answer: Response) => void>();
+    const answeredLater = (id: string) => (): Promise<Response> =>
+      new Promise((resolve) => {
+        answers.set(id, resolve);
+      });
+    api = installFakeApi(
+      Object.fromEntries(
+        ids.map((id, n) => [`POST ${pathOf(id)}`, n < 4 ? answeredLater(id) : () => link(ONE)]),
+      ),
+    );
+    const tiles = ids.map(() => held());
+    const page = (): ReactElement => (
+      <>
+        {ids.map((id, n) => {
+          const into = tiles[n];
+          return into === undefined ? null : (
+            <Probe key={id} into={into} id={id} enabled automatic />
+          );
+        })}
+      </>
+    );
+    try {
+      const view = renderWithProviders(page(), { signedIn: true });
+      await waitFor(() => {
+        expect(askedFor(0, 4)).toBe(4);
+      });
+      expect(askedFor(4, 10)).toBe(0);
+
+      // The first of the four is refused for being too fast, the other three are given their links: the four places are free, and the six that waited are next in the queue.
+      answers.get(ids[0] ?? '')?.(
+        json(
+          429,
+          { code: 'RATE_LIMITED', message: 'Too fast.', request_id: 'req-test-429' },
+          { 'Retry-After': '1' },
+        ),
+      );
+      for (const id of ids.slice(1, 4)) answers.get(id)?.(link(ONE));
+      await waitFor(() => {
+        expect(holdOf(view.queryClient).held).toBe(true);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // The wait is kept: not one of the six was sent while the hold was on, and none has failed.
+      expect(askedFor(4, 10)).toBe(0);
+      expect(tiles[5]?.current?.link).toEqual({ status: 'loading' });
+
+      // The hold is over: each of the six is asked for, once.
+      await waitFor(
+        () => {
+          for (const into of tiles.slice(4)) {
+            expect(into.current?.link).toEqual({ status: 'ready', url: ONE });
+          }
+        },
+        { timeout: 4000 },
+      );
+      expect(askedFor(4, 10)).toBe(6);
+      // The tile that was refused is told so, and is not asked again by itself.
+      expect(tiles[0]?.current?.link.status).toBe('failed');
+      expect(askedFor(0, 1)).toBe(1);
+    } finally {
+      // Whatever happened, no place of the queue is left held for the tests that follow.
+      for (const answer of answers.values()) answer(link(ONE));
+    }
   });
 
   it('leaves the wait of a tile that scrolled away: nothing is asked for it when the hold ends', async () => {

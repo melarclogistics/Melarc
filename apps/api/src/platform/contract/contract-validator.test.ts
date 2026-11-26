@@ -1611,6 +1611,7 @@ describe('the real contract, enforced at run time', () => {
         location: { address: 'Accra' },
       },
       size_class: 'SMALL',
+      reviewed_terms: 'a'.repeat(64),
     };
     const parts = { params: { id: UUID }, headers: { 'idempotency-key': 'k', 'if-match': '"1"' } };
 
@@ -1623,6 +1624,76 @@ describe('the real contract, enforced at run time', () => {
         request({ ...parts, body: { ...body, price_minor: 100 }, hasBody: true }),
       ),
     ).toEqual([{ in: 'body', pointer: '', rule: 'additionalProperties' }]);
+  });
+
+  // Break caught (the review of 21 November 2026, finding 4): request types that accept what the API refuses, so that a screen built from them compiles and fails: a create without the token it must carry, an
+  // amendment without its token or its reason, a preview that carries the save's members, an exception without the assessment it is written for.
+  describe('the request types say what the operations require', () => {
+    const token = 'a'.repeat(64);
+    const order = {
+      recipient: { name: 'Ama', phone: '0240000000', location: { address: 'Accra' } },
+      size_class: 'SMALL',
+    };
+    const violationsOf = (operationId: string, body: unknown, headers = {}) =>
+      real.validateRequest(
+        operationId,
+        request({ params: { id: UUID }, headers, body, hasBody: true }),
+      );
+    const save = { 'idempotency-key': 'k', 'if-match': '"1"' };
+
+    it('requires the terms a create was reviewed on, and has a preview that carries none', () => {
+      expect(violationsOf('itemizeOrder', { ...order, reviewed_terms: token }, save)).toEqual([]);
+      expect(violationsOf('itemizeOrder', order, save)).toEqual([
+        { in: 'body', pointer: '/reviewed_terms', rule: 'required' },
+      ]);
+      expect(violationsOf('previewOrder', order)).toEqual([]);
+      expect(violationsOf('previewOrder', { ...order, reviewed_terms: token })).toEqual([
+        { in: 'body', pointer: '', rule: 'additionalProperties' },
+      ]);
+    });
+
+    it('requires the reason and the terms of an amendment, and has a preview that carries neither', () => {
+      expect(
+        violationsOf(
+          'amendOrder',
+          { note: 'Larger', reviewed_terms: token, size_class: 'LARGE' },
+          save,
+        ),
+      ).toEqual([]);
+      expect(
+        violationsOf('amendOrder', { size_class: 'LARGE' }, save).toSorted((a, b) =>
+          a.pointer.localeCompare(b.pointer),
+        ),
+      ).toEqual([
+        { in: 'body', pointer: '/note', rule: 'required' },
+        { in: 'body', pointer: '/reviewed_terms', rule: 'required' },
+      ]);
+      expect(violationsOf('previewOrderAmendment', { size_class: 'LARGE' })).toEqual([]);
+      expect(
+        violationsOf('previewOrderAmendment', { size_class: 'LARGE', note: 'Larger' }),
+      ).toEqual([{ in: 'body', pointer: '', rule: 'additionalProperties' }]);
+    });
+
+    it('is a close that has parity, or the exception with the assessment it is written for', () => {
+      const close = (body: unknown) =>
+        real.validateRequest(
+          'closeHubIntake',
+          request({ params: { id: UUID }, headers: save, body, hasBody: body !== undefined }),
+        );
+      expect(close(undefined)).toEqual([]);
+      expect(close({})).toEqual([]);
+      expect(close({ reviewed_assessment: token })).toEqual([]);
+      expect(
+        close({
+          reviewed_assessment: token,
+          parity_exception: { note: 'One is still with the rider' },
+        }),
+      ).toEqual([]);
+      // The exception without its assessment is no body of either kind.
+      expect(close({ parity_exception: { note: 'One is still with the rider' } })).toEqual([
+        { in: 'body', pointer: '', rule: 'oneOf' },
+      ]);
+    });
   });
 
   // Break caught: the conditional rules a description cannot carry. PickupRequestCreate decides what is

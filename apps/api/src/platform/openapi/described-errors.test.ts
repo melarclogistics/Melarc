@@ -55,7 +55,7 @@ describe('the errors an operation describes (S0.31)', () => {
   });
 
   it('refuses a code whose status no document decides, a repeated code, and none at all', () => {
-    expect(() => DescribeErrors(ErrorCode.SettingMissing)).toThrow(/No status is decided/);
+    expect(() => DescribeErrors(ErrorCode.SettingInvalid)).toThrow(/No status is decided/);
     expect(() => DescribeErrors(ErrorCode.RateLimited, ErrorCode.RateLimited)).toThrow(TypeError);
     expect(() => DescribeErrors()).toThrow(TypeError);
   });

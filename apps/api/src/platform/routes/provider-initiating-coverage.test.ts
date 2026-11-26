@@ -201,6 +201,11 @@ const FIXED_OPERATION_WRITERS: Readonly<Record<string, { operation: string; call
     operation: 'recordCollection',
     caller: 'pickup/collection.service.ts',
   },
+  // OB-S1-143 (migration 0116): the envelope of a completed intake, written by the close itself in the transaction of the act, and called from the one service of the close.
+  'melarc.close_intake': {
+    operation: 'closeHubIntake',
+    caller: 'hub/check-in.service.ts',
+  },
 };
 
 /** The operation a writer function names in its own envelope: the literal that follows the originating principal in its `VALUES`. */
@@ -277,6 +282,7 @@ describe('the provider-initiating ceiling covers every operation that writes a n
         .filter((name, at, all) => all.indexOf(name) === at)
         .toSorted(),
     ).toEqual([
+      'melarc.close_intake',
       'melarc.failure_envelope',
       'melarc.handshake_envelope',
       'melarc.over_count_envelope',
@@ -312,6 +318,7 @@ describe('the provider-initiating ceiling covers every operation that writes a n
 
     expect(declaredProviderInitiating()).toEqual(writes);
     expect(writes).toEqual([
+      'closeHubIntake',
       'confirmPickupRequest',
       'dispatchManifest',
       'initiateHandshake',

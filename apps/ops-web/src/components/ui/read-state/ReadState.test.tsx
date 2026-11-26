@@ -314,24 +314,6 @@ describe('ReadState: the other refusals', () => {
     expect(list.matches(UNCLAIMED_FOCUS_SELECTOR)).toBe(false);
   });
 
-  it('shows the error and not the data of an earlier answer when a refresh fails', () => {
-    const query: ReadQuery<string[]> = {
-      status: 'error',
-      data: ['old'],
-      error: new TypeError('Failed to fetch'),
-      refetch: () => Promise.resolve(),
-      isFetching: false,
-    };
-    renderWithProviders(
-      <ReadState query={query} isEmpty={() => false} empty={null}>
-        {(data) => <p>{data.join()}</p>}
-      </ReadState>,
-    );
-
-    expect(screen.queryByText('old')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
-  });
-
   it('has no WCAG 2.1 A or AA violations that can be checked without a layout engine in any of its states', async () => {
     api.on(`GET ${LIST}`, () => errorResponse(500, 'INTERNAL_ERROR'));
     const failing = renderWithProviders(<Reasons />);
@@ -449,5 +431,232 @@ describe('ReadState: a way out that a retry is not', () => {
 
     expect(screen.getByRole('alert')).toBeVisible();
     expect(screen.queryByRole('button')).toBeNull();
+  });
+});
+
+/**
+ * Run G2, OB-S1-169 item 10 (the Product Owner's decision of 24 November 2026, D-S7-16): a read that was drawn and is asked for again, and fails
+ * the way a retry could mend (no answer, a fault, a rate limit), **keeps the page and everything typed into it** and tells the failure in one
+ * line with *Try again*. What the page replaced before was lost with it: an officer who went to the vendor's messages for a phone number and
+ * came back to a refresh that failed found an error where the form had been.
+ */
+describe('ReadState: a read that fails again keeps the page it has', () => {
+  const failedAgain = (error: unknown, data: string[] = ['old']): ReadQuery<string[]> => ({
+    status: 'error',
+    data,
+    error,
+    refetch: () => Promise.resolve(),
+    isFetching: false,
+  });
+  const forbidden = (code: string, status = 403) =>
+    new OperationFailure(new ApiError({ kind: 'http', status, code }), []);
+
+  function draw(query: ReadQuery<string[]>) {
+    return renderWithProviders(
+      <ReadState
+        query={query}
+        isEmpty={(data) => data.length === 0}
+        empty={<p>nothing</p>}
+        permission="pickup.read"
+      >
+        {(data) => <p>{data.join()}</p>}
+      </ReadState>,
+    );
+  }
+
+  it('keeps what was read and says, in a line, that it could not be refreshed, with Try again beside it', () => {
+    draw(failedAgain(new TypeError('Failed to fetch')));
+
+    expect(screen.getByText('old')).toBeVisible();
+    const line = screen.getByRole('alert');
+    expect(line).toHaveTextContent(/could not be refreshed/i);
+    expect(line).toHaveTextContent(/read earlier/i);
+    // The retry is a control beside the line, as it is beside the error (COMPONENT_PATTERNS section 33.1).
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    expect(line).not.toContainElement(retry);
+    expect(document.body.textContent).not.toContain('Failed to fetch');
+  });
+
+  it('keeps the page, with the wait the API asked for, when the read was too fast', () => {
+    draw(failedAgain(forbidden('RATE_LIMITED', 429)));
+
+    expect(screen.getByText('old')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(/going a little fast/i);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+  });
+
+  // Break caught (the stop's photo dialog, found by the whole suite): a link asked for again because the picture it gave would not load, whose renewal failed, drawn as the old link's picture with "what you see may be out of
+  // date", when the old link is the very thing that failed. A read whose earlier answer is no use says so (`keepOnFailure`), and its failure is told in its own words, as it always was.
+  it('replaces the page when the screen says its earlier answer is no use once a new one could not be had', () => {
+    renderWithProviders(
+      <ReadState
+        query={failedAgain(new TypeError('Failed to fetch'))}
+        isEmpty={() => false}
+        empty={null}
+        keepOnFailure={false}
+      >
+        {(data) => <p>{data.join()}</p>}
+      </ReadState>,
+    );
+
+    expect(screen.queryByText('old')).toBeNull();
+    expect(screen.queryByText(/could not be refreshed/i)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+  });
+
+  it('keeps the nothing it was showing, with the same line', () => {
+    draw(failedAgain(new TypeError('Failed to fetch'), []));
+
+    expect(screen.getByText('nothing')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not be refreshed/i);
+  });
+
+  // Break caught: keeping the page for every failure. A record that is gone, or one the account may no longer read, is not what was drawn:
+  // the page that was kept would be a page of something the person can no longer have.
+  it.each([
+    ['a record that is not there any more', forbidden('NOT_FOUND', 404), /could not be found/i],
+    ['a record outside the hubs now', forbidden('HUB_SCOPE_VIOLATION'), /outside your hubs/i],
+  ])('replaces the page for %s, as it always did', (_what, error, words) => {
+    draw(failedAgain(error));
+
+    expect(screen.queryByText('old')).toBeNull();
+    expect(screen.getByText(words)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('replaces the page for a refusal of authority, which keeping the page would only hide', () => {
+    draw(failedAgain(forbidden('PERMISSION_DENIED')));
+
+    expect(screen.queryByText('old')).toBeNull();
+    expect(screen.getByText(cannotText('pickup.read'))).toBeVisible();
+  });
+
+  it('shows nothing, as before, when the refresh ended the session', () => {
+    const { container } = draw(failedAgain(forbidden('SESSION_INVALID', 401)));
+
+    expect(container.textContent).toBe('');
+    expect(container.querySelector('.ui-alert')).toBeNull();
+  });
+
+  // Break caught: the line drawn for a read that did not fail, or for one that has no data yet (that one is the error, as before).
+  it('draws no line while the read is fine or has nothing yet', () => {
+    draw({ ...failedAgain(null), status: 'success', error: null });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('has the page as its one place for focus, and marks it once', () => {
+    const { container } = draw(failedAgain(new TypeError('Failed to fetch')));
+
+    expect(container.querySelectorAll(UNCLAIMED_FOCUS_SELECTOR)).toHaveLength(1);
+  });
+
+  function Entries() {
+    const client = useApiClient();
+    const query = useQuery({
+      queryKey: ['read-state-entries'],
+      queryFn: async () =>
+        answerOf(
+          await client.GET('/reason-definitions', {
+            params: { query: { operation: 'revokeSession' } },
+          }),
+        ).data,
+      retry: false,
+      refetchOnWindowFocus: false,
+    });
+    return (
+      <ReadState
+        query={query}
+        operation="listReasonDefinitions"
+        permission="settings.reason.read"
+        isEmpty={(data) => data.length === 0}
+        empty={null}
+      >
+        {(data) => (
+          <form>
+            <label>
+              Why
+              <input name="why" />
+            </label>
+            <ul aria-label="Reasons">
+              {data.map((reason) => (
+                <li key={reason.code}>{reason.label}</li>
+              ))}
+            </ul>
+            <button type="button" onClick={() => void query.refetch()}>
+              Read again
+            </button>
+          </form>
+        )}
+      </ReadState>
+    );
+  }
+
+  // The whole point of the change, through the real client: what the person typed is in the same field after the failed refresh, after the
+  // retry that mends it, and the page is not drawn again in between (a field that was drawn again would be empty, or would keep its text by luck).
+  it('keeps what was typed, in the same field, through a refresh that fails and the retry that mends it', async () => {
+    let answers = 0;
+    api.on(`GET ${LIST}`, () => {
+      answers += 1;
+      return answers === 2
+        ? errorResponse(500, 'INTERNAL_ERROR')
+        : json(200, reasons('Demo reason one'));
+    });
+    const { user } = renderWithProviders(<Entries />);
+    const field = await screen.findByLabelText('Why');
+    await user.type(field, 'the label is torn, the phone is on the other side');
+
+    await user.click(screen.getByRole('button', { name: 'Read again' }));
+    const line = await screen.findByRole('alert');
+    expect(line).toHaveTextContent(/could not be refreshed/i);
+    expect(screen.getByLabelText('Why')).toBe(field);
+    expect(field).toHaveValue('the label is torn, the phone is on the other side');
+    expect(screen.getByRole('list', { name: 'Reasons' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    expect(answers).toBe(3);
+    expect(screen.getByLabelText('Why')).toBe(field);
+    expect(field).toHaveValue('the label is torn, the phone is on the other side');
+    // The button that was pressed went with the line: focus is not dropped to the top of the document.
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('asks again from the line, and the line says it is asking while it does', async () => {
+    let answers = 0;
+    const second = gate();
+    api.on(`GET ${LIST}`, async () => {
+      answers += 1;
+      if (answers === 2) return errorResponse(500, 'INTERNAL_ERROR');
+      if (answers === 3) await second.open;
+      return json(200, reasons('Demo reason one'));
+    });
+    const { user } = renderWithProviders(<Entries />);
+    await screen.findByLabelText('Why');
+    await user.click(screen.getByRole('button', { name: 'Read again' }));
+    await screen.findByRole('alert');
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Try again' })).toHaveAttribute(
+        'aria-busy',
+        'true',
+      );
+    });
+    expect(screen.getByLabelText('Why')).toBeVisible();
+    await act(async () => {
+      second.release();
+      await second.open;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
+
+  it('has no WCAG 2.1 A or AA violations that can be checked without a layout engine with the line drawn', async () => {
+    const { container } = draw(failedAgain(new TypeError('Failed to fetch')));
+
+    expect(await wcagViolations(container)).toEqual([]);
   });
 });

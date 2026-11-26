@@ -53,8 +53,13 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/collection-shortfalls' },
       { method: 'GET', path: '/api/v1/evidence-limits' },
       { method: 'GET', path: '/api/v1/handshakes-for-ops' },
+      { method: 'GET', path: '/api/v1/hub-intake-exceptions' },
       { method: 'GET', path: '/api/v1/hub-intakes' },
       { method: 'GET', path: '/api/v1/hub-intakes/:id' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id/closure' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id/destination-zones' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id/orders' },
+      { method: 'GET', path: '/api/v1/hub-intakes/:id/summary' },
       { method: 'GET', path: '/api/v1/missing-parcels' },
       { method: 'GET', path: '/api/v1/notifications' },
       { method: 'GET', path: '/api/v1/ops/queue-summary' },
@@ -63,6 +68,9 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/ops/staff/:id/trusted-browsers' },
       { method: 'GET', path: '/api/v1/ops/vendors' },
       { method: 'GET', path: '/api/v1/ops/vendors/:id' },
+      { method: 'GET', path: '/api/v1/orders/:id' },
+      { method: 'GET', path: '/api/v1/payer-corrections' },
+      { method: 'GET', path: '/api/v1/payer-corrections/:id' },
       { method: 'GET', path: '/api/v1/pickup-failures' },
       { method: 'GET', path: '/api/v1/pickup-manifests' },
       { method: 'GET', path: '/api/v1/pickup-manifests/:id' },
@@ -81,6 +89,7 @@ describe('the real application', () => {
       { method: 'GET', path: '/api/v1/vendor-organizations/:id/pickup-locations' },
       { method: 'GET', path: '/livez' },
       { method: 'GET', path: '/readyz' },
+      { method: 'PATCH', path: '/api/v1/orders/:id' },
       { method: 'POST', path: '/api/v1/auth/recovery/complete' },
       { method: 'POST', path: '/api/v1/auth/recovery/request' },
       { method: 'POST', path: '/api/v1/auth/rider/device/enrol' },
@@ -101,12 +110,15 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/evidence/:id/complete' },
       { method: 'POST', path: '/api/v1/evidence/:id/retrieval-authorization' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/check-in' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/close' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/condition' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/correction' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/count' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/discrepancy' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/extra-parcels' },
       { method: 'POST', path: '/api/v1/hub-intakes/:id/lock' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/orders' },
+      { method: 'POST', path: '/api/v1/hub-intakes/:id/orders/preview' },
       { method: 'POST', path: '/api/v1/ops/lookup' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/register' },
       { method: 'POST', path: '/api/v1/ops/riders/:riderId/device/reregister' },
@@ -117,6 +129,11 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/ops/staff/:id/trusted-browsers/revoke' },
       { method: 'POST', path: '/api/v1/ops/vendors/:id/credential/recover' },
       { method: 'POST', path: '/api/v1/ops/vendors/:id/credential/setup/reissue' },
+      { method: 'POST', path: '/api/v1/orders/:id/amendment-preview' },
+      { method: 'POST', path: '/api/v1/orders/:id/arrival-reversal' },
+      { method: 'POST', path: '/api/v1/orders/:id/payer-correction' },
+      { method: 'POST', path: '/api/v1/orders/:id/recipient-correction' },
+      { method: 'POST', path: '/api/v1/payer-corrections/:id/decision' },
       { method: 'POST', path: '/api/v1/pickup-manifests' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/assign-rider' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/cancel' },
@@ -127,6 +144,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/hub-handover' },
       { method: 'POST', path: '/api/v1/pickup-manifests/:id/start' },
       { method: 'POST', path: '/api/v1/pickup-requests' },
+      { method: 'POST', path: '/api/v1/pickup-requests/:id/amend' },
       { method: 'POST', path: '/api/v1/pickup-requests/:id/attempt-extension' },
       { method: 'POST', path: '/api/v1/pickup-requests/:id/cancel' },
       { method: 'POST', path: '/api/v1/pickup-requests/:id/cancellation-charge/waiver' },
@@ -150,6 +168,7 @@ describe('the real application', () => {
       { method: 'POST', path: '/api/v1/staff-identities' },
       { method: 'POST', path: '/api/v1/staff-identities/:id/approve' },
       { method: 'PUT', path: '/api/v1/intake-parcels/:parcel_id/arrival' },
+      { method: 'PUT', path: '/api/v1/intake-parcels/:parcel_id/waiting-for-vendor' },
       { method: 'PUT', path: '/api/v1/pickup-manifests/:id/stops' },
     ]);
     expect(inspection.declared).toEqual([
@@ -254,6 +273,18 @@ describe('the real application', () => {
         authenticated: { surfaces: ['OPS_PORTAL'], activity: 'qualifying' },
         credentialModes: new Set(['COOKIE']),
       },
+      // Stage 7 (OB-S1-151): the closes that left work, found again by the senior who may close with the exception; hub-scoped by the grant, and no record is named.
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intake-exceptions',
+        access: 'permission',
+        permission: 'hub.intake.close_exception',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
       // S1.12e: the Ops message log, `notification.read` at the hubs of the grant, on the browser surface alone.
       // S1.32: the receiving side's reads and lock, for the staff of the Ops Portal alone (the contract names the rider's session beside the browser's for the two reads; the surface gate refuses it, OB-S1-96).
       // The intake is the record the scope probe is asked about, so another hub's intake is HUB_SCOPE_VIOLATION and one that does not exist NOT_FOUND. The lock's request is `background` activity: the page keeping
@@ -277,6 +308,56 @@ describe('the real application', () => {
           record: { entity: 'pickup_intake', param: 'id' },
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.38: the vendor-facing summary of a closed intake (`pickup.read`; the staff of the hub and the vendor whose intake it is) and the read of an order (`pricing.read`).
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id/closure',
+        access: 'permission',
+        permission: 'hub.intake.close',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      // Run F (D-S7-5): the zones of the hub an intake belongs to, for an officer to choose one for an address that matches none, under the key that itemizes.
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id/destination-zones',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id/orders',
+        access: 'permission',
+        permission: 'hub.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/hub-intakes/:id/summary',
+        access: 'permission',
+        permission: 'pickup.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
+          activity: 'background',
+          record: { entity: 'pickup_intake', param: 'id', surfaces: ['OPS_PORTAL'] },
+        },
+        credentialModes: new Set(['COOKIE']),
       },
       // S1.35b: receiving by run. The reads are `hub.read` at the hubs of the grant, on the browser surface alone; the acts are the keys of the counting and of the adjudication, on the intake
       // (or on the parcel, whose hub is its intake's): another hub's is HUB_SCOPE_VIOLATION and one that does not exist NOT_FOUND.
@@ -358,6 +439,41 @@ describe('the real application', () => {
           surfaces: ['OPS_PORTAL'],
           activity: 'qualifying',
           record: { entity: 'vendor_account', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/orders/:id',
+        access: 'permission',
+        permission: 'pricing.read',
+        authenticated: {
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
+          activity: 'background',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/payer-corrections',
+        access: 'permission',
+        permission: 'pricing.correction.create',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+        },
+        credentialModes: new Set(['COOKIE']),
+      },
+      {
+        method: 'GET',
+        path: '/api/v1/payer-corrections/:id',
+        access: 'permission',
+        permission: 'pricing.correction.create',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'payer_correction', param: 'id' },
         },
         credentialModes: new Set(['COOKIE']),
       },
@@ -537,6 +653,18 @@ describe('the real application', () => {
       },
       { method: 'GET', path: '/livez', access: 'technical' },
       { method: 'GET', path: '/readyz', access: 'technical' },
+      {
+        method: 'PATCH',
+        path: '/api/v1/orders/:id',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       // S0.51a: the completion of a recovery link, a page of both surfaces, limited per token in the recovery bucket.
       {
         method: 'POST',
@@ -719,6 +847,21 @@ describe('the real application', () => {
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
+      // S1.38: the close of an intake, by the officer who holds `hub.intake.close` (the exception to parity is the same route with `hub.intake.close_exception` held besides).
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/close',
+        access: 'permission',
+        permission: 'hub.intake.close',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+          // The close writes the envelope of the vendor's text (`intake.completed`, OB-S1-143), so it carries the sub-ceiling of the operations that can cause an outbound text.
+          providerInitiating: true,
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       // Task C2: the lookup of a record by its code, a name or a phone number typed in full. A `self` operation of the Ops Portal, `qualifying`: a
       // search typed into the top bar is the person's own act. Each kind it searches is gated by the key of that kind's own read. A POST that
       // changes nothing (the Product Owner, 6 November 2026), so that a number typed in full is in no URL: the CSRF guard judges it like any POST.
@@ -792,6 +935,31 @@ describe('the real application', () => {
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'background',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.36: the order made for a parcel, with its first commitment (itemization, price and promise), by the officer who itemizes.
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/orders',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_intake', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/hub-intakes/:id/orders/preview',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
           record: { entity: 'pickup_intake', param: 'id' },
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
@@ -920,6 +1088,69 @@ describe('the real application', () => {
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
+      // Stage 7 (the review of 20 November 2026, finding 3): what an amendment would give, calculated and written nowhere, under the key that itemizes.
+      {
+        method: 'POST',
+        path: '/api/v1/orders/:id/amendment-preview',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.39: the payer correction after the price froze, by the maker and by the checker.
+      {
+        method: 'POST',
+        path: '/api/v1/orders/:id/arrival-reversal',
+        access: 'permission',
+        permission: 'hub.osd.adjudicate',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/orders/:id/payer-correction',
+        access: 'permission',
+        permission: 'pricing.correction.create',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // Run F (D-S7-1): the correction of the recipient of a confirmed order, with a reason, under the key that itemizes (no new key).
+      {
+        method: 'POST',
+        path: '/api/v1/orders/:id/recipient-correction',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'order', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'POST',
+        path: '/api/v1/payer-corrections/:id/decision',
+        access: 'permission',
+        permission: 'pricing.correction.approve',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'payer_correction', param: 'id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
       // S1.20: the creation of a manifest, Ops alone (a manifest groups the stops of many vendors and no vendor builds one).
       {
         method: 'POST',
@@ -1035,6 +1266,19 @@ describe('the real application', () => {
         authenticated: {
           surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
           activity: 'qualifying',
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      // S1.39: the payer edit before the price freezes.
+      {
+        method: 'POST',
+        path: '/api/v1/pickup-requests/:id/amend',
+        access: 'permission',
+        permission: 'pickup.request.create',
+        authenticated: {
+          surfaces: ['OPS_PORTAL', 'VENDOR_PWA'],
+          activity: 'qualifying',
+          record: { entity: 'pickup_request', param: 'id' },
         },
         credentialModes: new Set(['COOKIE', 'BEARER']),
       },
@@ -1301,6 +1545,18 @@ describe('the real application', () => {
         path: '/api/v1/intake-parcels/:parcel_id/arrival',
         access: 'permission',
         permission: 'hub.intake.count',
+        authenticated: {
+          surfaces: ['OPS_PORTAL'],
+          activity: 'qualifying',
+          record: { entity: 'intake_parcel', param: 'parcel_id' },
+        },
+        credentialModes: new Set(['COOKIE', 'BEARER']),
+      },
+      {
+        method: 'PUT',
+        path: '/api/v1/intake-parcels/:parcel_id/waiting-for-vendor',
+        access: 'permission',
+        permission: 'hub.intake.itemize',
         authenticated: {
           surfaces: ['OPS_PORTAL'],
           activity: 'qualifying',

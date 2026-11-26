@@ -2,3 +2,23 @@
 .ui-read-state__retry {
   margin: var(--space-3) 0 0;
 }
+
+/*
+ * The line of a page that is kept when its read failed again (Run G2, OB-S1-169 item 10): the failure in the alert and *Try again* beside it, in one row where there is room and under it where there is not,
+ * above the page it speaks of. It is a line and not a layer: it takes the room of its own text and pushes the page down, and the page keeps its place in the tree.
+ */
+.ui-read-state__kept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+.ui-read-state__kept > .ui-alert {
+  flex: 1 1 20rem;
+}
+
+.ui-read-state__kept > .ui-read-state__retry {
+  margin: 0;
+}

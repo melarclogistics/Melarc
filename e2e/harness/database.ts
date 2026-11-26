@@ -270,6 +270,9 @@ export async function resumeAdministrator(
  * Lets time pass for something by changing the data (plan section 3, "Time": there is no production time-travel switch): a closed list
  * of arrangements that `e2e-database` holds (`apps/api/src/tools/e2e/arrangements.ts`). Fails when the arrangement changed no row.
  */
+/** What a collected run was counted at: the photographed stop, then the stop counted without photos. */
+type Counts = readonly [photographed: string, unphotographed: string];
+
 export type Arrangement =
   | readonly ['expire-setup-grant', workEmail: string, purpose: string]
   | readonly ['expire-mfa-challenge', workEmail: string]
@@ -280,7 +283,9 @@ export type Arrangement =
   | readonly ['expire-vendor-setup-grant', accountIdentifier: string]
   | readonly ['lapse-rider-lock', phone: string]
   // The pool of a day's confirmed pickups of the demonstration vendor (at most eight; the codes are `fixturePickupCode` of the arrangements).
-  | readonly ['add-confirmed-pickups', vendor: string, day: string, count: string];
+  | readonly ['add-confirmed-pickups', vendor: string, day: string, count: string]
+  // A run its rider has finished collecting: two stops of the demonstration vendor, the first counted with the photo of every parcel and the second counted with the exception that lets a count through without them.
+  | readonly ['add-collected-run', rider: string, vendor: string, day: string, ...counts: Counts];
 
 export async function arrange(database: string, ...arrangement: Arrangement): Promise<number> {
   const [name, ...args] = arrangement;

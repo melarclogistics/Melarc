@@ -212,8 +212,29 @@ describe('the generated description of the real application', () => {
       ['/missing-parcels', ['get'], ['listMissingParcels']],
       ['/intake-parcels/{parcel_id}/arrival', ['put'], ['recordParcelArrival']],
       ['/hub-intakes/{id}/check-in', ['post'], ['finishCheckIn']],
+      // S1.38: the close of an intake.
+      ['/hub-intakes/{id}/close', ['post'], ['closeHubIntake']],
       ['/hub-intakes/{id}/extra-parcels', ['post'], ['addExtraParcel']],
       ['/hub-intakes/{id}/correction', ['post'], ['correctIntakeCount']],
+      // S1.36: the order made for a parcel (itemization), and its preview (Stage 7).
+      ['/hub-intakes/{id}/orders', ['post', 'get'], ['itemizeOrder', 'listIntakeOrders']],
+      ['/hub-intakes/{id}/orders/preview', ['post'], ['previewOrder']],
+      // S1.38: the read of an order (and its amendment, Stage 7) and the vendor's summary of a closed intake.
+      ['/orders/{id}', ['get', 'patch'], ['getOrder', 'amendOrder']],
+      ['/hub-intakes/{id}/summary', ['get'], ['getIntakeSummary']],
+      // S1.39: the payer correction after the price froze, and the reads a checker opens it with (Stage 7).
+      ['/payer-corrections', ['get'], ['listPayerCorrections']],
+      ['/payer-corrections/{id}', ['get'], ['getPayerCorrection']],
+      ['/orders/{id}/payer-correction', ['post'], ['requestPayerCorrection']],
+      ['/payer-corrections/{id}/decision', ['post'], ['approvePayerCorrection']],
+      ['/hub-intakes/{id}/destination-zones', ['get'], ['listDestinationZones']],
+      // Stage 7: what a close would find, and the reversal of a mistaken arrival.
+      ['/hub-intake-exceptions', ['get'], ['listClosedIntakeExceptions']],
+      ['/hub-intakes/{id}/closure', ['get'], ['getIntakeClosure']],
+      ['/orders/{id}/recipient-correction', ['post'], ['correctOrderRecipient']],
+      ['/orders/{id}/amendment-preview', ['post'], ['previewOrderAmendment']],
+      ['/orders/{id}/arrival-reversal', ['post'], ['reverseOrderArrival']],
+      ['/intake-parcels/{parcel_id}/waiting-for-vendor', ['put'], ['setParcelWaitingForVendor']],
       // S1.12e: the Ops message log.
       ['/notifications', ['get'], ['listNotifications']],
       // The domain modules (S0.35): the bundles a maker may name, the reason catalogue and the staff reads.
@@ -271,6 +292,8 @@ describe('the generated description of the real application', () => {
       ['/pickup-requests/{id}/cancel', ['post'], ['cancelPickupRequest']],
       ['/pickup-requests/{id}/cancellation-charge/waiver', ['post'], ['waiveCancellationCharge']],
       // S1.18: the force-extension of the attempt cap, and the escalation.
+      // S1.39: the payer edit before the price freezes.
+      ['/pickup-requests/{id}/amend', ['post'], ['amendPickupRequest']],
       ['/pickup-requests/{id}/attempt-extension', ['post'], ['extendPickupAttempts']],
       ['/pickup-requests/{id}/escalate', ['post'], ['escalatePickupRequest']],
       ['/ad-hoc-senders', ['get'], ['findAdHocSender']],

@@ -51,6 +51,43 @@ export interface HandOverOptions {
    * of them. Otherwise Ops lets each stop through without photos, which the count of a test about something else need not make.
    */
   readonly photos?: boolean;
+  /**
+   * With `photos`: the photos are made by one statement with the guards put aside (as `staged-parcel-photos` does) and not one at a time through the rider's real operations, for a collection too large
+   * to be photographed through the HTTP stack (the review of 20 November 2026: an intake of more than a hundred parcels must stay workable).
+   */
+  readonly bulkPhotos?: boolean;
+}
+
+/** `count` stored `PARCEL_PHOTO` records of a stop, as the rider's operations make them, by one statement with the guards put aside. */
+async function bulkParcelPhotos(
+  routes: VendorRoutes,
+  vendor: ArrangedVendor,
+  riderId: string,
+  stopId: string,
+  hubId: string,
+  count: number,
+): Promise<string[]> {
+  await routes.admin.query('begin');
+  try {
+    await routes.admin.query('set local session_replication_role = replica');
+    const made = await routes.admin.query<{ id: string }>(
+      `insert into evidence (id, owner_type, owner_id, purpose, captured_at, captured_by_actor, captured_by_principal_type, storage_ref, responsible_hub_id, vendor_organization_id,
+                             access_rule, retention_policy, state, content_type, byte_size, checksum_sha256, upload_ttl_seconds, upload_expires_at, uploaded_at, validated_signature,
+                             scanner, scanner_signature_version, scanned_at)
+       select gen_random_uuid(), 'PICKUP_STOP', $1::uuid, 'PARCEL_PHOTO', now() - interval '1 minute', $2::uuid, 'RIDER',
+              'ev/' || md5(random()::text || clock_timestamp()::text || n::text), $3::uuid, $4::uuid,
+              'SUBJECT_READERS', 'PICKUP_STOP_EVIDENCE', 'STORED', 'image/jpeg', 12, repeat('a', 64), 900, now() + interval '15 minutes', now(), 'JPEG',
+              'test', '1', now()
+         from generate_series(1, $5::int) as n
+       returning id`,
+      [stopId, riderId, hubId, vendor.row.organizationId, count],
+    );
+    await routes.admin.query('commit');
+    return made.rows.map((row) => row.id);
+  } catch (error) {
+    await routes.admin.query('rollback').catch(() => undefined);
+    throw error;
+  }
 }
 
 /** The run's collected stops are arranged as the rider's count leaves them (a collection record, the stop closed), and the rider hands the run over. */
@@ -78,7 +115,11 @@ export async function handOver(
     // Each parcel's photo is a stored record the rider made through the real operations; the count that attaches them and the links are one transaction, as the database holds the number of
     // photos of a count at the end of its transaction. Without photos, Ops lets the stop through without them.
     const photos =
-      options.photos === true ? await parcelPhotosOf(routes, run.rider, stop.id, counted) : [];
+      options.photos !== true
+        ? []
+        : options.bulkPhotos === true
+          ? await bulkParcelPhotos(routes, vendor, run.rider.id, stop.id, hubId, counted)
+          : await parcelPhotosOf(routes, run.rider, stop.id, counted);
     if (options.photos !== true) await excusePhotos(routes, stop.id);
     photoIds.push(...photos);
     const recordId = randomUUID();

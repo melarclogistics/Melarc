@@ -8,6 +8,7 @@ import { HUB_INTAKE_COPY } from './hub-intake-copy';
 import { RECEIVING_COPY } from './receiving-copy';
 import { MANIFEST_COPY } from './manifest-copy';
 import { NOTIFICATION_COPY } from './notification-copy';
+import { ORDERS_COPY } from './orders-copy';
 import { PICKUP_COPY } from './pickup-copy';
 import { PICKUP_WORK_COPY } from './pickup-work-copy';
 import { RIDER_COPY } from './rider-copy';
@@ -285,6 +286,7 @@ export const PROBLEM_COPY: readonly CopyRule[] = [
   ...PICKUP_WORK_COPY,
   ...HUB_INTAKE_COPY,
   ...RECEIVING_COPY,
+  ...ORDERS_COPY,
   ...NOTIFICATION_COPY,
 ];
 
@@ -298,6 +300,15 @@ const DEFAULT_MESSAGE: Readonly<Record<Exclude<ProblemKind, 'forbidden'>, string
   'session-ended': '',
   stale: '',
 };
+
+/**
+ * What a page says when a read it had drawn was asked for again and failed in a way asking once more could mend (`ReadState`, Run G2, OB-S1-169 item 10): the page stays as it was read, with whatever a person
+ * typed into it, and this is the line above it. A rate limit says its own calm words (`RATE_LIMITED_MESSAGE`) in place of the headline. Drafts, with the rest of the generic wording, for the Product Owner.
+ */
+export const REFRESH_FAILED = {
+  headline: 'This could not be refreshed.',
+  note: 'What you see was read earlier and may be out of date.',
+} as const;
 
 // What a refusal says is the table's (`capability-words.ts`), for every kind: the message a problem carries is the sentence the refusal components draw, one wording.
 const FORBIDDEN_MESSAGE: Readonly<Record<ForbiddenKind, string>> = {

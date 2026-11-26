@@ -1,0 +1,73 @@
+{
+  "intake_id": "01a124d3-7400-7e35-a54a-047ada763661",
+  "intake_state": "ITEMIZING",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "progress": {
+    "received": 3,
+    "awaiting_arrival": 0,
+    "needs_order": 2,
+    "prepared": 0,
+    "itemized": 1,
+    "payment_required": 0,
+    "missing": 0,
+    "orders": 1,
+    "waiting_for_vendor": 1
+  },
+  "items": [
+    {
+      "work_state": "ITEMIZED",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20d0d-ba77-7758-82d2-492025452fc8",
+        "ordinal": 1,
+        "origin": "DOOR_PHOTO",
+        "state": "ARRIVED",
+        "door_photo_evidence_id": "01a124d3-7400-7813-9625-17ccd5742a66",
+        "hub_photo_evidence_id": null,
+        "waiting_for_vendor": null
+      },
+      "order": {
+        "id": "01a124d3-7400-7592-b819-fcd8569f1f3c",
+        "code": "ACC-OR-GCWTVV",
+        "recipient_name": "Ama Mensah",
+        "service_area": "ACCRA_TEMA",
+        "size_class": "SMALL",
+        "commercial_state": "NO_VENDOR_CHARGE",
+        "confirmed": true,
+        "payment_required": false
+      }
+    },
+    {
+      "work_state": "NEEDS_ORDER",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20d0d-ba83-7d8b-9fac-06ae4d2996ff",
+        "ordinal": 2,
+        "origin": "DOOR_PHOTO",
+        "state": "ARRIVED",
+        "door_photo_evidence_id": "01a124d3-7400-7489-a4ec-19136456b661",
+        "hub_photo_evidence_id": null,
+        "waiting_for_vendor": {
+          "since": "2026-11-24T10:15:35.467Z",
+          "note": "Called the vendor, waiting on WhatsApp"
+        }
+      },
+      "order": null
+    },
+    {
+      "work_state": "NEEDS_ORDER",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20d0d-ba8e-778a-abe4-6af55859de08",
+        "ordinal": 3,
+        "origin": "DOOR_PHOTO",
+        "state": "ARRIVED",
+        "door_photo_evidence_id": "01a124d3-7400-7262-9730-e2a05e0352da",
+        "hub_photo_evidence_id": null,
+        "waiting_for_vendor": null
+      },
+      "order": null
+    }
+  ],
+  "next_page_token": null
+}

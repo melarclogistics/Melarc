@@ -373,6 +373,18 @@ export class EvidenceService {
         });
       }
     }
+    // The evidence of an itemization is declared while the intake is open to itemizing: a photo intake whose vendor is being checked in (an order for a parcel not yet checked in waits for it), an intake cleared for
+    // itemization or being itemized (the database holds the same for every writer, migration 0110). One that waits for its count is told as it is below.
+    if (
+      act.write.key === 'hub.intake.itemize' &&
+      row.state !== 'AWAITING_COUNT' &&
+      row.state !== 'READY_FOR_ITEMIZATION' &&
+      row.state !== 'ITEMIZING'
+    ) {
+      throw ApiException.of(ErrorCode.StateConflict, 'The intake is not open to itemizing', {
+        rule: 'itemization_not_open',
+      });
+    }
     // A blind-count intake takes its evidence after its count. A PHOTO intake's receiver takes the photos of a damaged parcel while the vendor's check-in is open and the photo of an extra while the
     // vendor or the case is open (Run D, D-D2; migration 0104 holds the purpose and the state for every writer), so such an intake is not refused here for waiting.
     if (row.state === 'AWAITING_COUNT' && row.receiving_mode !== 'PHOTO_CHECK_IN') {

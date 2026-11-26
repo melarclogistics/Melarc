@@ -3183,3 +3183,418 @@ test.describe('the photo kit in a browser', () => {
     }
   });
 });
+
+/**
+ * The photo viewer looks closely (Run G2, OB-S1-168; the Product Owner's decision D-S7-14 of 24 November 2026): zoom, a look around a zoomed photo and a turn by quarters, on a label as tall as a parcel's (the showcase's
+ * `label-sample.png`: 800 x 1200 pixels, drawn, with a red square top-left and a blue bar along the right edge, so that a turn can be told from the pixels). The numbers and the keys are held in jsdom
+ * (`PhotoViewer.test.tsx`); this is what the stylesheet draws of them: the photo's own aspect, the fit of a turned photo, the clip of a zoomed one and the motion, in three engines.
+ */
+test.describe('the photo viewer looks closely, in a browser', () => {
+  /** The label's own shape and marks, as fractions of its width and height: the middle of the red square and of the blue bar, upright, and where a turn takes each. */
+  const ASPECT = 800 / 1200;
+  const RED = { x: 94 / 800, y: 94 / 1200 };
+  const BLUE = { x: 758 / 800, y: 500 / 1200 };
+
+  async function openLabel(page: Page, options: OpenOptions = {}) {
+    await openKit(page, 'photos', { width: 1280, height: 900, reducedMotion: true, ...options });
+    await page.getByRole('button', { name: 'Open the sample label' }).click();
+    const dialog = page.getByRole('dialog', { name: /^Sample label \d$/ });
+    await expect(dialog.getByText('1 of 2')).toBeVisible();
+    const picture = dialog.locator('.ui-photo-viewer__stage img');
+    await expect(picture).toHaveJSProperty('complete', true);
+    await atRest(dialog);
+    return {
+      dialog,
+      picture,
+      room: dialog.locator('.ui-photo-viewer__photo > :first-child'),
+      level: dialog.locator('.ui-photo-viewer__view'),
+    };
+  }
+
+  /** The colour of one pixel of what the page draws in a rectangle, found at a fraction of it: the page is photographed and the photograph is read back in the page (a canvas), so that no decoder is needed here. */
+  async function colourAt(
+    page: Page,
+    clip: { x: number; y: number; width: number; height: number },
+    at: { x: number; y: number },
+  ): Promise<readonly [number, number, number]> {
+    const photograph = await page.screenshot({ clip });
+    return page.evaluate(
+      async ([encoded, across, down]) => {
+        const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d');
+        if (context === null) throw new Error('no canvas');
+        context.drawImage(bitmap, 0, 0);
+        const x = Math.min(bitmap.width - 1, Math.round(across * bitmap.width));
+        const y = Math.min(bitmap.height - 1, Math.round(down * bitmap.height));
+        const [red = 0, green = 0, blue = 0] = context.getImageData(x, y, 1, 1).data;
+        return [red, green, blue] as const;
+      },
+      [photograph.toString('base64'), at.x, at.y] as const,
+    );
+  }
+  const isRed = ([r, g, b]: readonly [number, number, number]): boolean =>
+    r > 150 && g < 90 && b < 90;
+  const isBlue = ([r, g, b]: readonly [number, number, number]): boolean =>
+    b > 150 && r < 90 && g < 130;
+
+  const near = (a: number, b: number, within: number, what: string): void => {
+    expect(Math.abs(a - b), `${what}: ${String(a)} against ${String(b)}`).toBeLessThanOrEqual(
+      within,
+    );
+  };
+
+  // Break caught: a photo stretched by the zoom (its aspect is not the file's), one that is not the size the level says, one that spills over the controls or the page instead of being clipped to its window, and a button
+  // or a key that does not reach the stylesheet.
+  test('zooms by the buttons and the keys, keeps the photo’s own aspect, and clips it to its window', async ({
+    page,
+  }) => {
+    const { dialog, picture, room, level } = await openLabel(page);
+    const whole = await box(picture);
+    const window = await box(room);
+    near(whole.width / whole.height, ASPECT, 0.01, 'the photo whole has its own aspect');
+    expect(whole.height, 'the photo whole fits the window').toBeLessThanOrEqual(window.height + 1);
+
+    await dialog.getByRole('button', { name: 'Zoom in' }).click();
+    await expect(level).toHaveText('150%');
+    const first = await box(picture);
+    near(first.width / whole.width, 1.5, 0.02, 'one step in');
+    near(first.width / first.height, ASPECT, 0.01, 'the aspect at 150%');
+    await page.keyboard.press('+');
+    await expect(level).toHaveText('200%');
+    const second = await box(picture);
+    near(second.width / whole.width, 2, 0.02, 'two steps in');
+    near(second.height / whole.height, 2, 0.02, 'two steps in, tall');
+    // Zoomed, the photo is bigger than its window and clipped to it: the window does not grow, nothing scrolls and nothing reaches over the controls.
+    expect(second.height).toBeGreaterThan(window.height);
+    expect(await room.evaluate((element) => getComputedStyle(element).overflow)).toBe('hidden');
+    near((await box(room)).height, window.height, 1, 'the window does not grow with the photo');
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    const tools = await box(dialog.getByRole('group', { name: 'Look at the photo closely' }));
+    expect(tools.y, 'the tools are under the window').toBeGreaterThanOrEqual(
+      window.y + window.height - 1,
+    );
+
+    await page.keyboard.press('-');
+    await page.keyboard.press('_');
+    await expect(level).toHaveText('100%');
+    const back = await box(picture);
+    near(back.width, whole.width, 1, 'back to the photo whole: wide');
+    near(back.x, whole.x, 1, 'back to the photo whole: in the middle');
+    near(back.y, whole.y, 1, 'back to the photo whole: and level');
+  });
+
+  // Break caught: a photo turned the wrong way, one that is not a quarter, one that spills out of its window when it is turned (a photo on its side is wider than a window that was the right shape for it upright), a turn that
+  // stretches it, and a turn that the pixels do not show (the CSS says so and the picture does not).
+  test('turns by quarters either way, fits the turned photo to its window, and the marks go where a turn takes them', async ({
+    page,
+  }) => {
+    const { dialog, picture, room, level } = await openLabel(page);
+    const window = await box(room);
+    let turnedRed = RED;
+    let turnedBlue = BLUE;
+    const marks = async () => {
+      const shape = await box(picture);
+      // The pixels are read where the red square and the blue bar must be for the turn the photo has: the fractions are of the photo as it is drawn, turned.
+      return {
+        shape,
+        red: await colourAt(page, shape, turnedRed),
+        blue: await colourAt(page, shape, turnedBlue),
+      };
+    };
+
+    // Upright: the red square is top-left, the blue bar is on the right edge.
+    let seen = await marks();
+    expect(isRed(seen.red), 'upright: red top-left').toBe(true);
+    expect(isBlue(seen.blue), 'upright: blue at the right edge').toBe(true);
+
+    // A quarter to the right: the top-left goes to the top-right and the right edge goes to the bottom. The photo is wider than tall, fits its window, and has its own aspect turned.
+    await dialog.getByRole('button', { name: 'Turn right' }).click();
+    await expect(level).toHaveText('100%, turned right');
+    turnedRed = { x: 1 - RED.y, y: RED.x };
+    turnedBlue = { x: 1 - BLUE.y, y: BLUE.x };
+    seen = await marks();
+    near(seen.shape.width / seen.shape.height, 1 / ASPECT, 0.01, 'a quarter to the right');
+    expect(seen.shape.width).toBeLessThanOrEqual(window.width + 1);
+    expect(seen.shape.height).toBeLessThanOrEqual(window.height + 1);
+    expect(
+      Math.min(window.width - seen.shape.width, window.height - seen.shape.height),
+      'a turned photo is fitted to its window, as the upright one was',
+    ).toBeLessThanOrEqual(2);
+    expect(isRed(seen.red), 'right: red top-right').toBe(true);
+    expect(isBlue(seen.blue), 'right: blue at the bottom').toBe(true);
+
+    // Upside down.
+    await page.keyboard.press('r');
+    await expect(level).toHaveText('100%, upside down');
+    turnedRed = { x: 1 - RED.x, y: 1 - RED.y };
+    turnedBlue = { x: 1 - BLUE.x, y: 1 - BLUE.y };
+    seen = await marks();
+    near(seen.shape.width / seen.shape.height, ASPECT, 0.01, 'upside down');
+    expect(isRed(seen.red), 'upside down: red bottom-right').toBe(true);
+    expect(isBlue(seen.blue), 'upside down: blue at the left edge').toBe(true);
+
+    // And back by the left: a quarter to the left of upright puts the red square bottom-left.
+    await page.keyboard.press('Shift+r');
+    await page.keyboard.press('Shift+r');
+    await expect(level).toHaveText('100%');
+    await page.keyboard.press('Shift+r');
+    await expect(level).toHaveText('100%, turned left');
+    turnedRed = { x: RED.y, y: 1 - RED.x };
+    turnedBlue = { x: BLUE.y, y: 1 - BLUE.x };
+    seen = await marks();
+    near(seen.shape.width / seen.shape.height, 1 / ASPECT, 0.01, 'a quarter to the left');
+    expect(isRed(seen.red), 'left: red bottom-left').toBe(true);
+    expect(isBlue(seen.blue), 'left: blue at the top').toBe(true);
+  });
+
+  // Break caught: a zoomed photo that cannot be looked around (the corner with the small print is out of reach), one that can be pulled past its own edge into the grey of the window, and arrows that go the wrong way
+  // (they move where the person looks, so the photo goes the other way).
+  test('looks around a zoomed photo by the arrow keys and by dragging, and never past its edge', async ({
+    page,
+  }) => {
+    const { dialog, picture, room } = await openLabel(page);
+    const window = await box(room);
+    for (let step = 0; step < 3; step += 1) await page.keyboard.press('+');
+    const centred = await box(picture);
+    near(centred.x + centred.width / 2, window.x + window.width / 2, 1, 'zoomed about the middle');
+
+    // An arrow looks to the right: the photo goes to the left, by a quarter of the window, or by as far as the photo reaches where that is less (at 300% a photo as narrow as this one is not much wider than its window).
+    await page.keyboard.press('ArrowRight');
+    const right = await box(picture);
+    const reach = (centred.width - window.width) / 2;
+    near(centred.x - right.x, Math.min(window.width * 0.25, reach), 2, 'one arrow to the right');
+    for (let step = 0; step < 12; step += 1) await page.keyboard.press('ArrowRight');
+    const far = await box(picture);
+    near(
+      far.x + far.width,
+      window.x + window.width,
+      1.5,
+      'the right edge of the photo is the right edge of the window and goes no further',
+    );
+    for (let step = 0; step < 12; step += 1) await page.keyboard.press('ArrowDown');
+    const low = await box(picture);
+    near(low.y + low.height, window.y + window.height, 1.5, 'the bottom edge goes no further');
+
+    // A drag with a mouse (the pointer events of one) takes the photo back by as far as the hand goes, and stops at the edge on the other side.
+    const stage = await box(dialog.locator('.ui-photo-viewer__stage'));
+    const start = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
+    const before = await box(picture);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 60, start.y + 40, { steps: 4 });
+    await page.mouse.up();
+    const dragged = await box(picture);
+    near(dragged.x - before.x, 60, 2, 'dragged across');
+    near(dragged.y - before.y, 40, 2, 'dragged down');
+    // A pull as long as the photo is tall goes out of the window the photo is in and across the page behind it, and is made of as many drags as it takes to go that far inside the screen: a pull to a point outside the viewport moved nothing in Firefox (its driver delivers no move there, and the photo stayed where the first drag left it), and a hand does not go there either.
+    const screen = page.viewportSize() ?? { width: 1280, height: 720 };
+    for (let pull = 0; pull < 4; pull += 1) {
+      await page.mouse.move(stage.x + 8, stage.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(screen.width - 2, screen.height - 2, { steps: 4 });
+      await page.mouse.up();
+    }
+    const furthest = await box(picture);
+    near(furthest.x, window.x, 1.5, 'the left edge of the photo stops at the window');
+    near(furthest.y, window.y, 1.5, 'the top edge of the photo stops at the window');
+
+    // The keys are still heard after the mouse has been on the photo (a press on it moves the focus nowhere out of the viewer).
+    await page.keyboard.press('ArrowRight');
+    const afterwards = await box(picture);
+    expect(
+      furthest.x - afterwards.x,
+      'an arrow after a drag looks around the photo, to the right',
+    ).toBeGreaterThan(10);
+  });
+
+  // Break caught: a double tap that does not zoom, one that zooms about the middle and not about the tap (what was tapped slides away), one that does not zoom back out, and one made by two taps far apart in time.
+  test('double-taps to zoom in on the point tapped, and back out on the next', async ({ page }) => {
+    const { dialog, picture, level } = await openLabel(page);
+    const stage = dialog.locator('.ui-photo-viewer__stage');
+    const whole = await box(picture);
+    // A point of the photo a little off its middle: the point tapped, and what must stay under the finger. (Nearer a corner, zooming about the tap would need a gap beside the photo, which no viewer allows: the photo is held to its edges and the point moves.)
+    const at = { x: 0.4, y: 0.4 };
+    const tapped = { x: whole.x + whole.width * at.x, y: whole.y + whole.height * at.y };
+    const touch = { pointerType: 'touch', pointerId: 11, isPrimary: true };
+    const tap = async (): Promise<void> => {
+      await stage.dispatchEvent('pointerdown', { ...touch, clientX: tapped.x, clientY: tapped.y });
+      await stage.dispatchEvent('pointerup', { ...touch, clientX: tapped.x, clientY: tapped.y });
+    };
+
+    await tap();
+    await tap();
+    await expect(level).toHaveText('300%');
+    const zoomed = await box(picture);
+    near(zoomed.width / whole.width, 3, 0.03, 'zoomed to 300%');
+    // The part of the photo that was under the finger is still under it.
+    near(zoomed.x + zoomed.width * at.x, tapped.x, 3, 'the tapped point stays across');
+    near(zoomed.y + zoomed.height * at.y, tapped.y, 3, 'the tapped point stays down');
+
+    await tap();
+    await tap();
+    await expect(level).toHaveText('100%');
+    near((await box(picture)).width, whole.width, 1, 'back to the photo whole');
+  });
+
+  // Break caught: a pinch that zooms about the middle of the window and not about the fingers (the thing looked at slides out from between them), or that goes past the limit.
+  test('pinches about the point between the fingers', async ({ page }) => {
+    const { dialog, picture, level } = await openLabel(page);
+    const stage = dialog.locator('.ui-photo-viewer__stage');
+    const whole = await box(picture);
+    const middle = { x: whole.x + whole.width * RED.x * 2, y: whole.y + whole.height * RED.y * 2 };
+    const finger = (id: number, primary: boolean) => ({
+      pointerType: 'touch',
+      pointerId: id,
+      isPrimary: primary,
+    });
+    // Two fingers 40px apart on either side of the middle, and then 160px apart: four times as far, so four times as big (the level says 400%).
+    await stage.dispatchEvent('pointerdown', {
+      ...finger(21, true),
+      clientX: middle.x - 20,
+      clientY: middle.y,
+    });
+    await stage.dispatchEvent('pointerdown', {
+      ...finger(22, false),
+      clientX: middle.x + 20,
+      clientY: middle.y,
+    });
+    await stage.dispatchEvent('pointermove', {
+      ...finger(21, true),
+      clientX: middle.x - 80,
+      clientY: middle.y,
+    });
+    await stage.dispatchEvent('pointermove', {
+      ...finger(22, false),
+      clientX: middle.x + 80,
+      clientY: middle.y,
+    });
+    await expect(level).toHaveText('400%');
+    const zoomed = await box(picture);
+    near(zoomed.width / whole.width, 4, 0.04, 'four times as far apart');
+    // The point that was between the fingers is still between them.
+    const was = { x: (middle.x - whole.x) / whole.width, y: (middle.y - whole.y) / whole.height };
+    near(zoomed.x + zoomed.width * was.x, middle.x, 3, 'the point between the fingers: across');
+    near(zoomed.y + zoomed.height * was.y, middle.y, 3, 'the point between the fingers: down');
+    await stage.dispatchEvent('pointerup', {
+      ...finger(22, false),
+      clientX: middle.x + 80,
+      clientY: middle.y,
+    });
+    await stage.dispatchEvent('pointerup', {
+      ...finger(21, true),
+      clientX: middle.x - 80,
+      clientY: middle.y,
+    });
+    await expect(level).toHaveText('400%');
+  });
+
+  // Break caught: a zoom that animates when a person asked for less motion, or one that does not move over the token's time when they did not (the stylesheet has the transition and the token is the only clock).
+  test('is instant under reduced motion', async ({ page }) => {
+    const { picture } = await openLabel(page);
+    expect(await picture.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe(
+      '0s',
+    );
+    await page.keyboard.press('+');
+    await page.keyboard.press('r');
+    expect(await picture.evaluate((element) => getComputedStyle(element).transform)).not.toBe(
+      'none',
+    );
+  });
+
+  test('moves over the motion token when a person has not asked for less', async ({ page }) => {
+    const { picture } = await openLabel(page, { reducedMotion: false });
+    const seconds = await picture.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).transitionDuration),
+    );
+    near(seconds, 0.12, 0.001, 'the transition of the zoom is the token motion.fast');
+  });
+
+  // Break caught: a button of the viewer that is under the floor or off the screen on a phone, one that moves when the photo is zoomed, and a window that scrolls for the extra row.
+  for (const [width, height] of [
+    [320, 568],
+    [390, 844],
+    [768, 1024],
+    [1280, 800],
+    [1024, 600],
+  ] as const) {
+    test(`keeps the four tools on the screen at the floor’s size, and still, at ${String(width)} x ${String(height)}`, async ({
+      page,
+    }) => {
+      const { dialog } = await openLabel(page, { width, height });
+      const names = ['Zoom out', 'Zoom in', 'Turn left', 'Turn right'];
+      const where = async (): Promise<{ y: number; x: number }[]> =>
+        Promise.all(
+          names.map(async (name) => {
+            const found = await box(dialog.getByRole('button', { name }));
+            expect(found.height, `${name} is under the floor`).toBeGreaterThanOrEqual(56);
+            expect(found.width, `${name} is narrower than the floor`).toBeGreaterThanOrEqual(56);
+            expect(found.x, `${name} starts left of the screen`).toBeGreaterThanOrEqual(0);
+            expect(found.x + found.width, `${name} ends right of the screen`).toBeLessThanOrEqual(
+              width,
+            );
+            expect(found.y + found.height, `${name} ends below the screen`).toBeLessThanOrEqual(
+              height,
+            );
+            return { x: found.x, y: found.y };
+          }),
+        );
+      const before = await where();
+      // Where the buttons draw their words (a tablet and wider) the four are one row, with the level above them and not between them: a fourth button alone on a second row (found by looking at the pictures of Run G2, at 768 px)
+      // is a tool lost under the others.
+      if (width >= 768) {
+        expect(
+          new Set(before.map((place) => place.y)).size,
+          'the four tools are not on one row',
+        ).toBe(1);
+      }
+      for (let step = 0; step < 3; step += 1) await page.keyboard.press('+');
+      await page.keyboard.press('r');
+      expect(await where(), 'the tools moved with the photo').toEqual(before);
+      const scroll = await dialog.evaluate((element) => ({
+        beyond: element.scrollHeight - element.clientHeight,
+        across: element.scrollWidth - element.clientWidth,
+      }));
+      expect(scroll.beyond, 'the viewer scrolls').toBeLessThanOrEqual(1);
+      expect(scroll.across, 'the viewer scrolls across').toBeLessThanOrEqual(1);
+      // The photo still has room to be looked at: it is the part that gives way.
+      expect((await box(dialog.locator('.ui-photo-viewer__stage'))).height).toBeGreaterThanOrEqual(
+        60,
+      );
+    });
+  }
+
+  // Break caught: a control that is a bare icon with no border in forced colours, where an icon alone is nothing a person with that setting can find.
+  test('draws every tool with a border in forced colours', async ({ page }) => {
+    const { dialog } = await openLabel(page, { forcedColors: true });
+    for (const name of ['Zoom out', 'Zoom in', 'Turn left', 'Turn right']) {
+      const style = await dialog.getByRole('button', { name }).evaluate((element) => {
+        const computed = getComputedStyle(element);
+        return {
+          width: Number.parseFloat(computed.borderTopWidth),
+          kind: computed.borderTopStyle,
+        };
+      });
+      expect(style.width, `${name} has a border`).toBeGreaterThanOrEqual(1);
+      expect(style.kind, `${name} has a border that is drawn`).not.toBe('none');
+    }
+  });
+
+  // Break caught: a control, a name or a colour of the new buttons that fails a rule only while the viewer is open and the photo is zoomed and turned, in either theme.
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`has no violation with the viewer open, zoomed and turned, in the ${scheme} theme`, async ({
+      page,
+    }) => {
+      const { dialog } = await openLabel(page, { scheme });
+      await page.keyboard.press('+');
+      await page.keyboard.press('+');
+      await page.keyboard.press('r');
+      await expect(dialog.locator('.ui-photo-viewer__view')).toHaveText('200%, turned right');
+
+      expect(await wcagViolations(page)).toEqual([]);
+    });
+  }
+});

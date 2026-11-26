@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "id": "01a124d3-7400-7533-b8f2-20553383ce74",
+      "code": "ACC-IN-84JZ9N",
+      "state": "READY_FOR_ITEMIZATION",
+      "hub_id": "5eed0100-0000-4000-8000-000000000001",
+      "pickup_request_id": "b4efb7c8-05c7-4325-97ef-aede60295051",
+      "pickup_manifest_id": "48ecea66-9c2d-4413-b4d8-eb1bba715956",
+      "handed_over_by": "ebed5b42-8e83-49f9-8a2c-18bbcda3fdd8",
+      "handed_over_at": "2026-11-24T13:15:39.543Z",
+      "declaration_captured_at": "2026-11-24T13:14:39.218Z",
+      "active_receiver_id": null,
+      "lock_acquired_at": null,
+      "count_phase": "POST_COUNT",
+      "rider_declared_count": 3,
+      "physical_count": 3,
+      "count_variance": "MATCH",
+      "count_difference": 0,
+      "condition": "OK",
+      "vendor_name": "Fixture Sender",
+      "orders_made": 0,
+      "parcels_needing_order": 3
+    }
+  ],
+  "next_page_token": null
+}

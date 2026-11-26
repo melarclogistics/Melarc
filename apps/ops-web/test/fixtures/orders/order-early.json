@@ -1,0 +1,66 @@
+{
+  "id": "01a124d3-7400-78d9-a6ac-84e78569efd0",
+  "code": "ACC-OR-UA7K72",
+  "pickup_intake_id": "01a124d3-7400-7bc4-9ead-088b44a26ee6",
+  "responsible_hub_id": "5eed0100-0000-4000-8000-000000000001",
+  "intake_parcel_id": "01a20575-8ec0-7cc7-bfb7-f128f772179d",
+  "intake_parcel_state": "EXPECTED",
+  "commercial_state": null,
+  "fulfilment_state": "AWAITING_RECIPIENT_CONFIRMATION",
+  "origin_zone_snapshot": {
+    "scope": "UNRESOLVED",
+    "reason": "NONE"
+  },
+  "destination_zone_snapshot": {
+    "alias": "madina",
+    "scope": "SERVICE_AREA",
+    "zone_id": "5eed0101-0000-4000-8000-000000000001",
+    "zone_code": "TEMA",
+    "zone_name": "Tema",
+    "service_area": "ACCRA_TEMA"
+  },
+  "size_class": "SMALL",
+  "size_class_selected_by": "3334dd52-48f0-44a9-919b-b662389b31d8",
+  "derived_delivery_date": "2026-11-23",
+  "is_high_value": false,
+  "is_high_value_manual": false,
+  "lane": "DOORSTEP",
+  "commercial_mode": null,
+  "price_status": "EARLY_QUOTE",
+  "locked_price": null,
+  "price_components_snapshot": {
+    "currency": "GHS",
+    "components": [
+      {
+        "kind": "SERVICE_AREA_BASE_FEE",
+        "hub_id": "5eed0100-0000-4000-8000-000000000001",
+        "scope_ref": "ACCRA_TEMA",
+        "setting_key": "service_area_base_fee",
+        "amount_minor": 3500,
+        "effective_version": 1
+      }
+    ],
+    "total_minor": 3500
+  },
+  "delivery_attempt_count": 0,
+  "recipient": {
+    "name": "Ama Mensah",
+    "phone": "+233241234567",
+    "location": {
+      "address": "12 Madina Estate, near the market"
+    },
+    "phone_as_entered": "024 123 4567"
+  },
+  "declared_value_minor": null,
+  "is_serialized_goods": false,
+  "serial_imei": null,
+  "requested_delivery_date": null,
+  "service_level": "STANDARD",
+  "destination_zone_resolution": "SERVER_RESOLVED",
+  "delivery_date_override": null,
+  "payer_override": null,
+  "high_value_evidence_ids": [],
+  "carrier_waybill_evidence_id": null,
+  "amendments": [],
+  "reversal": null
+}

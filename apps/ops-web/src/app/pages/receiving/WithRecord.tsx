@@ -6,7 +6,7 @@ import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenS
 import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader, type BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import {
   useIntakeRecord,
@@ -100,9 +100,12 @@ function Reading({
   children,
 }: WithRecordProps) {
   const query = useIntakeRecord(id);
-  // A vendor counted without photos carries no name of its own: its run does, and the page that names the vendor reads it (once, and only for such a vendor).
+  // A vendor counted without photos is named by its own record (the API names it, Run G1 Part 1 item 4). Where the record names none, its run does, and the page that names the vendor reads it (once, and only for
+  // such a vendor).
   const blindRun =
-    namesTheVendor && query.data?.kind === 'blind' ? query.data.intake.pickup_manifest_id : '';
+    namesTheVendor && query.data?.kind === 'blind' && query.data.intake.vendor_name === null
+      ? query.data.intake.pickup_manifest_id
+      : '';
   const run = useReceivingRun(blindRun, blindRun !== '');
   const read = query.data;
   const vendor =
@@ -110,9 +113,10 @@ function Reading({
       ? undefined
       : read.kind === 'check-in'
         ? read.view.vendor_name
-        : run.data?.vendors.find(
+        : (read.intake.vendor_name ??
+          run.data?.vendors.find(
             (candidate) => candidate.intake_id.toLowerCase() === read.intake.id.toLowerCase(),
-          )?.vendor_name;
+          )?.vendor_name);
 
   if (query.status === 'error') {
     const problem = problemOf(query.error, { operation: 'getHubIntake' });
@@ -135,7 +139,8 @@ function Reading({
     }
   }
 
-  const loaded = ownsHeading && query.status === 'success';
+  // A page that is kept after a read that failed again (`ReadState`) is a page that is drawn: its own heading is there, and this wrapper draws none.
+  const loaded = ownsHeading && drawnData(query, { operation: 'getHubIntake' }) !== undefined;
   const named = heading(query.data, vendor);
   const trail = breadcrumb?.(query.data, vendor);
   return (

@@ -1,4 +1,8 @@
-import { QueryClientProvider, QueryErrorResetBoundary } from '@tanstack/react-query';
+import {
+  QueryClientProvider,
+  QueryErrorResetBoundary,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 
 import { ApiClientProvider } from '../platform/api/api-client';
@@ -21,6 +25,11 @@ export interface AppProvidersProps {
    * handed in: the router of an application instance does not change, and this is read once.
    */
   readonly navigate?: (to: string) => void;
+  /**
+   * A query client made by the caller, so that a test can make a read ask again (a page's reads are idle, and only an act of its own reads one again). The application makes its own and passes none;
+   * what is given here is used as it is, and the session's end empties it as it empties any.
+   */
+  readonly queryClient?: QueryClient;
 }
 
 /**
@@ -34,9 +43,9 @@ export interface AppProvidersProps {
  * a request sent for a session that has gone does not end the next one. It is also where a `429` is noticed, by the same rule: the
  * client's hold keeps the automatic reads still for the wait the API asked for (`platform/query/read-hold.ts`).
  */
-export function AppProviders({ children, navigate }: AppProvidersProps) {
+export function AppProviders({ children, navigate, queryClient: given }: AppProvidersProps) {
   const [session] = useState(() => new SessionStore());
-  const [queryClient] = useState(() => createQueryClient());
+  const [queryClient] = useState(() => given ?? createQueryClient());
   // What the portal does when an act of its own is answered with success: read the queue summary again if the act can change a queue.
   const [onAct] = useState(() => queueSummaryObserver(queryClient));
   const [boundary] = useState(

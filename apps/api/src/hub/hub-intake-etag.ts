@@ -22,8 +22,11 @@ import type {
  */
 const DOMAIN = 'melarc.hub-intake-etag.v1';
 
-/** The members of the view the digest leaves out: the two of the advisory lock. A member added to the view has to be said here or hashed below, or this file does not build. */
-type LeftOutOfTheDigest = 'active_receiver_id' | 'lock_acquired_at';
+/**
+ * The members of the view the digest leaves out: the two of the advisory lock, and **the vendor's name** (Run G1, Part 1, item 4: it is said beside the intake and is no fact the intake's acts compare, so a vendor
+ * renamed makes no count stale). A member added to the view has to be said here or hashed below, or this file does not build.
+ */
+type LeftOutOfTheDigest = 'active_receiver_id' | 'lock_acquired_at' | 'vendor_name';
 
 /** The members of an intake as it is read before its count, but the lock's, and the members only the post-count shape adds: each hashed, and a record type that says every one. */
 type BeforeTheCount = Omit<HubIntakePreCountView, LeftOutOfTheDigest>;

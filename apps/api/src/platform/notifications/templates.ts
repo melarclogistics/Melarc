@@ -45,6 +45,59 @@ export interface Template {
 
 export const TEMPLATES: readonly Template[] = [
   {
+    // SUPERSEDED by version 2 (the review of 20 November 2026, finding 1): these words said that each parcel was listed for delivery, which a close with an exception does not say. They were never approved
+    // and never sent to a real provider; they stay so that a notification recorded under version 1 reads back as it was said.
+    kind: 'INTAKE_COMPLETED_SENDER',
+    version: 1,
+    title: null,
+    wording:
+      'Melarc: we have received the parcels of your pickup {code} at our hub and listed each one for delivery.',
+    placeholders: ['code'],
+    approvedBy: null,
+    approvedOn: null,
+    approvedDigest: null,
+  },
+  {
+    // SUPERSEDED by version 2, as the text above: these words said the same of each parcel and promised a summary that the vendor could not yet reach from the entry.
+    kind: 'INTAKE_COMPLETED_VENDOR_FEED',
+    version: 1,
+    title: 'Parcels received',
+    wording:
+      'The hub has received the parcels of your pickup request {code} and listed each one for delivery. The order summary is ready to read.',
+    placeholders: ['code'],
+    approvedBy: null,
+    approvedOn: null,
+    approvedDigest: null,
+  },
+  {
+    // Stage 7 (OB-S1-143, OB-S1-153; the review of 20 November 2026): the text to an individual sender when the hub has finished checking in the pickup. **It says that and nothing more**, so that it is
+    // true of a close with every order and of a close with the approved exception: it does not say that each parcel has an order, that anything is paid or cleared, or that delivery has begun, and it holds
+    // no order, no count, no amount and no link. **Approved by the Product Owner on 22 November 2026, for exactly these words (OB-S1-153).** The approval is of the wording only, and holds for it as it stands. It sends
+    // nothing and waives nothing: a real provider still needs the controlled window, its allow-list of numbers, its cap and its credentials (`lane-policy.ts`), and a notice that the lane suppressed while the words
+    // were drafts stays suppressed (approving later does not send what was held).
+    kind: 'INTAKE_COMPLETED_SENDER',
+    version: 2,
+    title: null,
+    wording: 'Melarc: our hub has finished checking in pickup {code}.',
+    placeholders: ['code'],
+    approvedBy: 'Mathias Elorm, Product Owner',
+    approvedOn: '2026-11-22',
+    approvedDigest: '1729bee0dab85c55d527c17b6caf141d7a17e72a74f4f30e2398a965af7e5b3f',
+  },
+  {
+    // The registered vendor's feed entry for the same fact, in the same words, **approved by the Product Owner on 22 November 2026, for exactly these words (OB-S1-153)**. It promises no link to a summary: the vendor
+    // reaches the summary of its closed intake by the intake's identifier, which the entry (whose subject is the pickup request) does not carry. "View pickup summary" is built with the vendor's screens in SLICE-015
+    // and checks ownership again when the vendor opens it (OB-S1-160); the words change when that link works, as a new version.
+    kind: 'INTAKE_COMPLETED_VENDOR_FEED',
+    version: 2,
+    title: 'Hub check-in complete',
+    wording: 'Our hub has finished checking in pickup {code}.',
+    placeholders: ['code'],
+    approvedBy: 'Mathias Elorm, Product Owner',
+    approvedOn: '2026-11-22',
+    approvedDigest: '930ab9ac820171dd78ffea2906ed0c402c91e4fbc9b09d953ac231a608699cd6',
+  },
+  {
     kind: 'PICKUP_CONFIRMED_SENDER',
     version: 1,
     title: null,

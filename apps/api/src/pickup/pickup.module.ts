@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AdHocSendersController } from './ad-hoc-senders.controller.js';
 import { CutoffExceptionController } from './cutoff-exception.controller.js';
 import { OnePackageExceptionController } from './one-package-exception.controller.js';
+import { PickupRequestAmendmentController } from './pickup-request-amendment.controller.js';
 import { PickupRequestCancellationController } from './pickup-request-cancellation.controller.js';
 import { PickupRequestChainController } from './pickup-request-chain.controller.js';
 import { PickupRequestConfirmationController } from './pickup-request-confirmation.controller.js';
@@ -53,6 +54,7 @@ import { pickupStopEvidenceProviders } from './pickup-stop-evidence-providers.js
     CutoffExceptionController,
     OnePackageExceptionController,
     PickupRequestCancellationController,
+    PickupRequestAmendmentController,
     PickupRequestChainController,
     AdHocSendersController,
   ],

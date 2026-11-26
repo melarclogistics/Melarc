@@ -1,4 +1,5 @@
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -40,7 +41,9 @@ import {
   Package,
   PackagePlus,
   Plus,
+  ReceiptText,
   RotateCcw,
+  RotateCw,
   Scale,
   Search,
   Store,
@@ -49,9 +52,12 @@ import {
   User,
   UserPlus,
   Users,
+  Wallet,
   Warehouse,
   WifiOff,
   X,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -90,6 +96,10 @@ export const ICONS = {
   receiving: Warehouse,
   // The parcels being searched for (S1.35c, D-D4): the list's entry.
   'missing-parcels': Binoculars,
+  // The orders a hub makes for a vendor (S1.40): a slip with its lines, in a family of its own (the manifests' picture is a clipboard).
+  orders: ReceiptText,
+  'payer-corrections': Wallet,
+  'closed-vendors': Archive,
   messages: MessageSquareText,
   staff: Users,
   'add-staff': UserPlus,
@@ -134,6 +144,11 @@ export const ICONS = {
   camera: Camera,
   gallery: Images,
   retake: RotateCcw,
+  // The photo viewer's way of looking closely (Run G2, OB-S1-168): zoom in and out, and turn a quarter to the left or the right (each with words beside it).
+  'zoom-in': ZoomIn,
+  'zoom-out': ZoomOut,
+  'turn-left': RotateCcw,
+  'turn-right': RotateCw,
   // The connection banner (Run D, S1.35c-0): the connection is gone and what a person does now is not saved (the words say so: the icon never does alone).
   offline: WifiOff,
 } as const satisfies Record<string, LucideIcon>;

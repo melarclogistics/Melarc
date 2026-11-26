@@ -4,7 +4,7 @@ import { test as base, expect, type Page } from '@playwright/test';
 
 import { collectFailureArtifacts } from './artifacts.ts';
 import { readCaptured, type CapturedAttempt } from './capture.ts';
-import { guardBrowserContext } from './browser-guard.ts';
+import { answerStandInPictures, guardBrowserContext } from './browser-guard.ts';
 import { artifactSourceOf, connectionFromEnvironment, type StackConnection } from './connection.ts';
 import { createFixtures, FIXED_INSTANT, type Fixtures } from './fixtures.ts';
 
@@ -73,6 +73,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // The boundary is on the context, so it covers every page in it: the test's page and whatever it opens.
   context: async ({ browserOrigin, context, externalRequests }, use) => {
     await guardBrowserContext(context, browserOrigin, (url) => externalRequests.push(url));
+    await answerStandInPictures(context);
     await use(context);
   },
 

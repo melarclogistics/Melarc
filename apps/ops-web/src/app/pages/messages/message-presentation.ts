@@ -124,8 +124,9 @@ export const MESSAGE_KIND_LABELS = {
   PICKUP_SKIPPED_VENDOR_FEED: 'Pickup stop skipped',
   PICKUP_FAILURE_ESCALATED_OPS_FEED: 'Pickup failure escalated',
   HUB_HANDOVER_SUBMITTED_OPS_FEED: 'Hub handover submitted',
-  INTAKE_COMPLETED_SENDER: 'Intake completed',
-  INTAKE_COMPLETED_VENDOR_FEED: 'Intake completed',
+  // The words of the floor: the message says the hub has finished checking in the pickup, and "intake" is the system's word, which no screen of the Ops Portal uses.
+  INTAKE_COMPLETED_SENDER: 'Check-in finished',
+  INTAKE_COMPLETED_VENDOR_FEED: 'Check-in finished',
   RECIPIENT_HEADS_UP: 'Delivery heads-up',
   RUN_DISPATCHED_RIDER: 'Pickup run dispatched',
   DELIVERY_RUN_DISPATCHED_RIDER: 'Delivery run dispatched',

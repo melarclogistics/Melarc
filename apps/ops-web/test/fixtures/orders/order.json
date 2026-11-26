@@ -1,0 +1,73 @@
+{
+  "id": "01a124d3-7400-7ccc-afeb-d02b8225c62c",
+  "code": "ACC-OR-E5VMPB",
+  "pickup_intake_id": "01a124d3-7400-7715-b5da-bd22578028d0",
+  "responsible_hub_id": "5eed0100-0000-4000-8000-000000000001",
+  "intake_parcel_id": "01a20575-7a2f-7698-931a-e00fe930f426",
+  "intake_parcel_state": "ARRIVED",
+  "commercial_state": "NO_VENDOR_CHARGE",
+  "fulfilment_state": "AWAITING_RECIPIENT_CONFIRMATION",
+  "origin_zone_snapshot": {
+    "scope": "UNRESOLVED",
+    "reason": "NONE"
+  },
+  "destination_zone_snapshot": {
+    "alias": "madina",
+    "scope": "SERVICE_AREA",
+    "zone_id": "5eed0101-0000-4000-8000-000000000001",
+    "zone_code": "TEMA",
+    "zone_name": "Tema",
+    "service_area": "ACCRA_TEMA"
+  },
+  "size_class": "SMALL",
+  "size_class_selected_by": "3334dd52-48f0-44a9-919b-b662389b31d8",
+  "derived_delivery_date": "2026-11-23",
+  "is_high_value": false,
+  "is_high_value_manual": false,
+  "lane": "DOORSTEP",
+  "commercial_mode": null,
+  "price_status": "FROZEN",
+  "locked_price": {
+    "amount_minor": 3500,
+    "currency": "GHS"
+  },
+  "price_components_snapshot": {
+    "currency": "GHS",
+    "components": [
+      {
+        "kind": "SERVICE_AREA_BASE_FEE",
+        "hub_id": "5eed0100-0000-4000-8000-000000000001",
+        "scope_ref": "ACCRA_TEMA",
+        "setting_key": "service_area_base_fee",
+        "amount_minor": 3500,
+        "effective_version": 1
+      }
+    ],
+    "total_minor": 3500
+  },
+  "delivery_attempt_count": 0,
+  "recipient": {
+    "name": "Ama Mensah",
+    "phone": "+233241234567",
+    "location": {
+      "address": "12 Madina Estate, near the market"
+    },
+    "phone_as_entered": "024 123 4567"
+  },
+  "declared_value_minor": 30000,
+  "is_serialized_goods": false,
+  "serial_imei": null,
+  "requested_delivery_date": null,
+  "service_level": "STANDARD",
+  "destination_zone_resolution": "SERVER_RESOLVED",
+  "delivery_date_override": null,
+  "payer_override": null,
+  "high_value_evidence_ids": [],
+  "carrier_waybill_evidence_id": null,
+  "payer_allocation": {
+    "sender_minor": 0,
+    "recipient_minor": 3500
+  },
+  "amendments": [],
+  "reversal": null
+}

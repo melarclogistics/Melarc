@@ -14,8 +14,11 @@ import {
 
 /** What the portal declares evidence for: the receiving side's, and the owner is always an intake. */
 export type EvidenceOwnerType = 'PICKUP_INTAKE';
-/** `CONDITION` is the receiver's photo of what was found (under the key of the count), `OSD` is the adjudicator's (under the key of the adjudication). */
-export type IntakeEvidencePurpose = 'CONDITION' | 'OSD';
+/**
+ * `CONDITION` is the receiver's photo of what was found (under the key of the count), `OSD` is the adjudicator's (under the key of the adjudication), and `ITEMIZATION` is what an order cites: the photos a
+ * high-value parcel needs and the photo of a carrier's waybill (under the key that makes orders). Their owner is the vendor's intake, for an order does not exist when its evidence is declared.
+ */
+export type IntakeEvidencePurpose = 'CONDITION' | 'OSD' | 'ITEMIZATION';
 
 export interface EvidenceDeclaration {
   readonly ownerId: string;

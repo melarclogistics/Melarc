@@ -212,6 +212,54 @@ export const APPROVED_DEFINER_EXECUTE: Readonly<Record<string, readonly string[]
     'melarc.receiving_runs',
     'melarc.missing_parcels',
     'melarc.receiving_run_codes',
+    // And the three operations of an itemization (migration 0110, S1.36): what an order is made from (`melarc.itemization_source`: the intake's hub, the place its request was collected at, whether the
+    // booking acknowledged the liability cap and the moment custody passed, for staff under `hub.intake.itemize` alone), the order and its first commitment (`melarc.itemize_order`: the same key, the intake's
+    // lock first, the owner writes both in the one change, freezes the price of a parcel that has arrived and moves the intake to ITEMIZING) and the confirmation of the orders that waited for a parcel
+    // (`melarc.freeze_orders`: staff under `hub.intake.count` or `hub.osd.adjudicate`, once the act that committed the arrival is made). The policies that admit the writes name the owner, and the
+    // guards of both tables hold what an order and a commitment are for every writer, so the login can write neither.
+    'melarc.itemization_source',
+    'melarc.itemize_order',
+    'melarc.freeze_orders',
+    // The close of an intake (migration `0112`, S1.38): the facts the officer judges first and the close itself (staff under `hub.intake.close` or `hub.intake.close_exception`, the intake locked, its guard holding
+    // the parity, the unpriced orders and the exception for every writer), and the vendor's summary of a closed intake (a vendor or staff under `pickup.read`, nothing but what a vendor may know).
+    'melarc.intake_close_facts',
+    'melarc.close_intake',
+    'melarc.intake_summary',
+    // The payer correction and the payer edit (migration `0113`, S1.39): the portion of a locked price an arrangement gives the sender (immutable, the arithmetic of the freeze), the request and the decision of a
+    // correction (staff under `pricing.correction.create` and `pricing.correction.approve`, the order locked first, the guards of the table and of the order holding every rule), and the edit of a request's payer
+    // arrangement before the freeze (a vendor or staff under `pickup.request.create`).
+    'melarc.payer_portion',
+    'melarc.request_payer_correction',
+    'melarc.decide_payer_correction',
+    'melarc.amend_request_payer',
+    // The reads of Stage 7's worklist (migration `0114`): the parcels and orders of an intake with no price (`melarc.intake_worklist`) and the counts of the whole intake (`melarc.intake_progress`), for staff
+    // under `hub.read`; what a close would find (`melarc.intake_closure_assessment`, staff under the keys of the close); the names of the officers on the corrections a reader may see
+    // (`melarc.correction_names`, staff under the keys of the correction, for the one statement that reads the names under the capability of `0106`).
+    'melarc.intake_worklist',
+    'melarc.intake_progress',
+    'melarc.intake_closure_assessment',
+    'melarc.correction_names',
+    // The controlled changes of an order (migration `0115`): the correction of an order before its price freezes (`melarc.amend_order`, staff under `hub.intake.itemize`: the intake locked first and the order second, the
+    // record of the amendment written first and demanded by the guards), the reversal of a mistaken arrival (`melarc.reverse_order_arrival`, staff under `hub.osd.adjudicate`: the record of the reversal beside the move of the
+    // order, the parcel and the intake) and the payer arrangement resolved into portions for the preview (`melarc.payer_preview`, read-only, staff under `hub.intake.itemize`).
+    'melarc.amend_order',
+    'melarc.reverse_order_arrival',
+    'melarc.payer_preview',
+    // The review of 20 November 2026 (migration `0118`): the lock the service takes on the request's payer arrangement before it calculates who pays (`melarc.hold_request_payer`, staff under `hub.intake.itemize`:
+    // the lock the freeze takes, for share), and the condition the guard of the order applies to the evidence an order cites, asked before the order is made (`melarc.evidence_citable`, read-only, staff under the same key).
+    'melarc.hold_request_payer',
+    'melarc.evidence_citable',
+    // The intakes closed with the approved exception that still have work left (`melarc.closed_intake_exceptions`, read-only, staff under `hub.intake.close_exception`).
+    'melarc.closed_intake_exceptions',
+    // What a vendor is told of the parcel of its own order (migration `0122`, D-S7-4): the state, for the vendor of the order alone, under `pricing.read` (read-only).
+    'melarc.vendor_order_parcel_state',
+    // Whether a vendor waits for a senior officer (migration `0123`, D-S7-7): the reason, for staff under `hub.read` (read-only).
+    'melarc.intake_senior_needed',
+    // The correction of the recipient of a confirmed order (migration `0124`, D-S7-1): the act, for staff under `hub.intake.itemize`, and the proof helper the guard of the order asks, which the runtime login's update fires.
+    'melarc.correct_order_recipient',
+    'melarc.order_recipient_corrected_here',
+    // The mark of a parcel the officer is waiting on the vendor's details for (migration `0126`, D-S7-12): the act, for staff under `hub.intake.itemize` (the vendor's intake locked first; the guard of the table holds every rule).
+    'melarc.set_parcel_vendor_wait',
   ],
   // The notification lane's grant set holds the one operation that tells a handshake its code was accepted by the provider (migration 0070, S1.27):
   // it moves a handshake from CODE_GENERATED to CODE_DELIVERED at the generation it was told and writes the event, and answers the notification

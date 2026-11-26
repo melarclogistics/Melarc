@@ -5,7 +5,13 @@ import { CheckInController } from './check-in.controller.js';
 import { HubHandoverController } from './hub-handover.controller.js';
 import { HubIntakesController } from './hub-intakes.controller.js';
 import { IntakeFindingsController } from './intake-findings.controller.js';
+import { IntakeWorklistController } from './intake-worklist.controller.js';
+import { ItemizationController } from './itemization.controller.js';
 import { hubProviders } from './hub-providers.js';
+import { OrderChangesController } from './order-changes.controller.js';
+import { OrderReadsController } from './order-reads.controller.js';
+import { ParcelVendorWaitController } from './parcel-vendor-wait.controller.js';
+import { PayerCorrectionsController } from './payer-corrections.controller.js';
 import { ReceivingController } from './receiving.controller.js';
 
 /**
@@ -23,6 +29,12 @@ import { ReceivingController } from './receiving.controller.js';
     IntakeFindingsController,
     ReceivingController,
     CheckInController,
+    ItemizationController,
+    OrderReadsController,
+    PayerCorrectionsController,
+    IntakeWorklistController,
+    OrderChangesController,
+    ParcelVendorWaitController,
   ],
   providers: [...hubProviders],
 })

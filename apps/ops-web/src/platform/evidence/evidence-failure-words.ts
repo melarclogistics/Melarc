@@ -39,7 +39,7 @@ export const UPLOAD_STEP_WORDS: Readonly<Record<UploadStep, string>> = {
  * Whose act the photo is made for, which is what decides the capability a refusal names: the receiver's (`count`: the key of the check-in and of a condition) or the senior's decision (`decision`: the key of
  * the adjudication). The platform asks for the key of the act the photo belongs to, so a refusal of a photo for a decision names the decision, never the receiver's work.
  */
-export type EvidenceUse = 'count' | 'decision';
+export type EvidenceUse = 'count' | 'decision' | 'itemize';
 
 /** A file that could not be stored, with the step it was at, so that the words are the step's: the platform's for the two calls, the store's for the bytes. */
 export class UploadFailure extends Error {
@@ -97,7 +97,7 @@ export function evidenceFailureWords(error: unknown, use: EvidenceUse = 'count')
   if (step === 'declaring' || step === 'confirming') {
     const message = problemOf(reason, {
       operation: step === 'declaring' ? 'createEvidence' : 'completeEvidenceUpload',
-      ...(use === 'decision' ? { context: 'decision' } : {}),
+      ...(use === 'count' ? {} : { context: use }),
     }).message;
     return message === '' ? STORE_UNREACHABLE : message;
   }

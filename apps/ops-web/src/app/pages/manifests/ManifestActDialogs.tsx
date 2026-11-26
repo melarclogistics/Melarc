@@ -87,6 +87,8 @@ function OpenAct<Command extends object, Result>({
     send,
     onDone,
     onReload,
+    // Told as the refusal arrives, in the turn that sets the phase: what the dialog marks on a field is drawn with it, and the focus below finds it.
+    ...(onRefused === undefined ? {} : { onRefused }),
     retryable,
     operation,
   });
@@ -101,13 +103,6 @@ function OpenAct<Command extends object, Result>({
     }
   }, [command.phase]);
   const problem = command.problem;
-  useEffect(() => {
-    if (problem !== undefined && (command.phase === 'refused' || command.phase === 'conflict')) {
-      onRefused?.(problem);
-    }
-    // Told once for each refusal that arrives, not for each render of the page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [problem, command.phase]);
 
   return (
     <Dialog
@@ -123,6 +118,8 @@ function OpenAct<Command extends object, Result>({
         aria-busy={command.phase === 'sending' ? true : undefined}
         onSubmit={(event) => {
           event.preventDefault();
+          // Its submit stays inside the dialog: one drawn where a form holds it (the mark on the form of an order) must never be heard by that form, which would save what is on it (as AlertDialog does).
+          event.stopPropagation();
           if (command.locked) return;
           const built = build();
           if (built === undefined) {

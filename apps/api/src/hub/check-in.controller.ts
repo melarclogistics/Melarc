@@ -35,6 +35,7 @@ import type {
   CheckedIntake,
   ExtraParcelBody,
   HubCheckIns,
+  IntakeCloseBody,
   IntakeCorrectionBody,
   ParcelAnswer,
   ParcelArrivalBody,
@@ -44,6 +45,7 @@ import {
   CHECK_IN_FINISH_BODY,
   EXTRA_PARCEL_BODY,
   HUB_INTAKE_CHECK_IN_SCHEMA,
+  INTAKE_CLOSE_BODY,
   INTAKE_CORRECTION_BODY,
   INTAKE_CORRECTED_SCHEMA,
   INTAKE_PARCEL_ANSWER_SCHEMA,
@@ -135,6 +137,55 @@ export class CheckInController {
       ifMatch,
       idempotencyKey,
       fingerprint: fingerprintOfRequest(request, 'finishCheckIn'),
+    });
+    response.setHeader('ETag', done.etag);
+    return done.intake;
+  }
+
+  @Post('hub-intakes/:id/close')
+  @HttpCode(200)
+  @ContractOperation('closeHubIntake')
+  @ApiParam({ name: 'id', schema: { type: 'string', format: 'uuid' } })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: IDEMPOTENCY_KEY_SCHEMA })
+  @ApiHeader({ name: 'If-Match', required: true, schema: IF_MATCH_SCHEMA })
+  @ApiBody({ schema: INTAKE_CLOSE_BODY, required: false })
+  @ApiResponse({ status: 200, schema: INTAKE_CORRECTED_SCHEMA, headers: ETAG_HEADERS })
+  @DescribeErrors(
+    ErrorCode.CsrfValidationFailed,
+    ErrorCode.HubScopeViolation,
+    ErrorCode.IdempotencyKeyConflict,
+    ErrorCode.InsufficientAuthority,
+    ErrorCode.NotFound,
+    ErrorCode.OrderUnpriced,
+    ErrorCode.ParityNotMet,
+    ErrorCode.PermissionDenied,
+    ErrorCode.ReasonRequired,
+    ErrorCode.SessionInvalid,
+    ErrorCode.StateConflict,
+    ErrorCode.ValidationFailed,
+  )
+  @RequiresPermission('hub.intake.close', {
+    surfaces: ['OPS_PORTAL'],
+    activity: 'qualifying',
+    record: { entity: 'pickup_intake', param: 'id' },
+    // The close writes the envelope of the vendor's or the sender's text (`intake.completed`, OB-S1-143; migration 0116), so the route carries the sub-ceiling of the operations that can cause an outbound text.
+    providerInitiating: true,
+  })
+  async close(
+    @Authorized() authorized: AuthorizedRequest,
+    @Param('id') id: string,
+    @Body() body: IntakeCloseBody | undefined,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<CheckedIntake['intake']> {
+    if (this.checkIns === undefined) throw new OperationUnavailableError('closeHubIntake');
+    const done = await this.checkIns.close(authorized, correlation(), id, {
+      body,
+      ifMatch,
+      idempotencyKey,
+      fingerprint: fingerprintOfRequest(request, 'closeHubIntake'),
     });
     response.setHeader('ETag', done.etag);
     return done.intake;

@@ -1,0 +1,27 @@
+{
+  "status": 400,
+  "body": {
+    "code": "VALIDATION_FAILED",
+    "message": "The request is not valid",
+    "details": {
+      "violations": [
+        {
+          "in": "body",
+          "pointer": "/recipient/location",
+          "rule": "destination_zone_ambiguous"
+        }
+      ],
+      "candidates": [
+        {
+          "zone_id": "5eed0101-0000-4000-8000-000000000002",
+          "name": "Accra Central"
+        },
+        {
+          "zone_id": "5eed0101-0000-4000-8000-000000000001",
+          "name": "Tema"
+        }
+      ]
+    },
+    "request_id": "9d22aafe-1966-4bce-ac65-2aff5ac6dc9f"
+  }
+}

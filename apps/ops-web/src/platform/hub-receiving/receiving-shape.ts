@@ -11,6 +11,7 @@ import {
   type IntakeCondition,
   type IntakeState,
 } from '../hub-intake/hub-intake-shape';
+import { nameOf } from '../hub-intake/display-name';
 
 /**
  * What the receiving screens of a run (S1.35c: the queue by run, the run page, the missing list) believe of an answer, judged field by field before anything is drawn, as the other screens' guards are
@@ -38,7 +39,6 @@ export type MissingView = (typeof MISSING_VIEWS)[number];
 /** The most a page of either list can hold (the contract's largest `page_size`). */
 export const MAX_PAGE_ITEMS = 100;
 const MAX_TOKEN = 2048;
-const MAX_NAME = 120;
 const MAX_NOTE = 1000;
 /**
  * A run holds at most 64 stops (the manifest's ceiling, `MAX_STOPS`) and one vendor's check-in is opened for each stop that was collected, so this is a bound no run can reach, kept so that a list
@@ -48,21 +48,7 @@ const MAX_NOTE = 1000;
  */
 const MAX_VENDORS = 500;
 
-/**
- * A display name: one line of text, bounded, with no control character, and **never a number that could be dialled**. A name is told by what the screens draw of a person, and a telephone number
- * in its place would be a number drawn (OB-S1-106: no phone number on the receiving side), so an answer whose name carries seven digits in a run, separators allowed, is refused.
- */
-export function nameOf(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const text = value.trim();
-  if (text === '' || text.length > MAX_NAME) return undefined;
-  for (let index = 0; index < text.length; index += 1) {
-    const unit = text.charCodeAt(index);
-    if (unit < 0x20 || unit === 0x7f) return undefined;
-  }
-  if (/(?:\+?\d[\s().-]?){7,}/.test(text)) return undefined;
-  return text;
-}
+export { nameOf };
 
 /** A text an officer wrote, as one block: bounded, with no control character but a line break or a tab. It is drawn as text and never as markup. */
 function noteOf(value: unknown): string | undefined {

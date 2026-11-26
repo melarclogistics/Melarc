@@ -735,6 +735,42 @@ describe('the functions, as the catalogue and the posture check see them', () =>
       'melarc.receiving_runs',
       'melarc.missing_parcels',
       'melarc.receiving_run_codes',
+      // S1.36 (migration 0110): what an order is made from, the order with its first commitment, and the confirmation of the orders that waited for a parcel.
+      'melarc.itemization_source',
+      'melarc.itemize_order',
+      'melarc.freeze_orders',
+      // S1.38 (migration 0112): the facts of a close, the close and the vendor's summary of a closed intake.
+      'melarc.intake_close_facts',
+      'melarc.close_intake',
+      'melarc.intake_summary',
+      // S1.39 (migration 0113): the portion of a locked price, the request and the decision of a payer correction and the payer edit before the freeze.
+      'melarc.payer_portion',
+      'melarc.request_payer_correction',
+      'melarc.decide_payer_correction',
+      'melarc.amend_request_payer',
+      // Stage 7 (migrations 0114 and 0115): the worklist, the counts and the assessment of a close (no money in any of them), the names a correction shows, the amendment and the
+      // reversal of an arrival, and the preview of a price.
+      'melarc.intake_worklist',
+      'melarc.intake_progress',
+      'melarc.intake_closure_assessment',
+      'melarc.correction_names',
+      'melarc.amend_order',
+      'melarc.reverse_order_arrival',
+      'melarc.payer_preview',
+      // The review of 20 November 2026 (migration 0118): the lock on the request's payer arrangement taken before the payer is calculated, and the condition on the evidence an order cites, asked before the order is made.
+      'melarc.hold_request_payer',
+      'melarc.evidence_citable',
+      // The intakes closed with the approved exception that still have work left (OB-S1-151).
+      'melarc.closed_intake_exceptions',
+      // What a vendor is told of the parcel of its own order (migration 0122, D-S7-4).
+      'melarc.vendor_order_parcel_state',
+      // Whether a vendor waits for a senior officer (migration 0123, D-S7-7).
+      'melarc.intake_senior_needed',
+      // The correction of the recipient of a confirmed order (migration 0124, D-S7-1).
+      'melarc.correct_order_recipient',
+      'melarc.order_recipient_corrected_here',
+      // The mark of a parcel the officer is waiting on the vendor's details for (migration 0126, D-S7-12).
+      'melarc.set_parcel_vendor_wait',
     ]);
     // And the notification lane's, through its grant set and through the worker login that inherits it (the check asks both): the one operation that tells a
     // handshake its code was accepted by the provider (0070), and the one that gives the lane the number a fallback code is texted to (0073, F-23).

@@ -226,12 +226,37 @@ beforeAll(async () => {
   // the one the handover would have opened without photos, so that the parcel is not a door photo's: the sweep asks whether a record is another party's and never what is in it).
   await routes.admin.query('begin');
   let parcelE: { rows: { id: string }[] };
+  let orderE: { rows: { id: string }[] };
+  let correctionE: { rows: { id: string }[] };
   try {
     await routes.admin.query('set local session_replication_role = replica');
     parcelE = await routes.admin.query<{ id: string }>(
       `insert into intake_parcel (id, pickup_intake_id, responsible_hub_id, ordinal, origin, hub_photo_evidence_id, state, arrived_by, arrived_at)
        values (gen_random_uuid(), $1, $2, 1, 'HUB_EXTRA', gen_random_uuid(), 'ARRIVED', gen_random_uuid(), now()) returning id`,
       [intakeE.rows[0]?.id, HUB_A],
+    );
+    // S1.38: the intake the sweep asks about is a closed one (the vendor's summary exists only for such an intake), with an order of another vendor's standing on it (the read of an order is addressed by one).
+    await routes.admin.query(
+      `update pickup_intake set state = 'CLOSED', physical_count = 3, counted_at = now(), counted_by = gen_random_uuid(), count_variance = 'MATCH', count_difference = 0,
+              closed_at = now(), closed_by = gen_random_uuid() where id = $1`,
+      [intakeE.rows[0]?.id],
+    );
+    orderE = await routes.admin.query<{ id: string }>(
+      `insert into "order" (id, code, pickup_intake_id, vendor_organization_id, responsible_hub_id, recipient, origin_zone_snapshot, destination_zone_snapshot, destination_zone_resolution,
+                            derived_delivery_date, size_class, size_class_selected_by, is_high_value, lane, price_components_snapshot, initial_commitment_id, created_by,
+                            locked_price_minor, locked_at, commercial_state, payer_allocation)
+       values (gen_random_uuid(), 'ACC-OR-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 6)), $1, $2, $3, '{"name":"Ama","phone":"0241234567","location":{"address":"Madina"}}'::jsonb,
+               '{"scope":"UNRESOLVED"}'::jsonb, '{"scope":"SERVICE_AREA"}'::jsonb, 'SERVER_RESOLVED', current_date, 'SMALL', gen_random_uuid(), false, 'DOORSTEP',
+               '{"total_minor":3500,"components":[]}'::jsonb, gen_random_uuid(), gen_random_uuid(),
+               -- A payer correction is of an order whose price is frozen (the guard says so for every writer), so the order this fixture makes for the correction is one.
+               3500, now(), 'NO_VENDOR_CHARGE', '{"payer_intent":"RECIPIENT_PAYS","sender_minor":0,"recipient_minor":3500}'::jsonb) returning id`,
+      [intakeE.rows[0]?.id, vendorC.organizationId, HUB_A],
+    );
+    // S1.39: a payer correction of that order (`approvePayerCorrection` is addressed by one).
+    correctionE = await routes.admin.query<{ id: string }>(
+      `insert into payer_correction (id, order_id, responsible_hub_id, requested_by, previous_allocation, proposed, note)
+       values (gen_random_uuid(), $1, $2, gen_random_uuid(), '{"sender_minor":0,"recipient_minor":3500}'::jsonb, '{"payer_intent":"SENDER_PAYS_FULL"}'::jsonb, 'The vendor agreed') returning id`,
+      [orderE.rows[0]?.id, HUB_A],
     );
     await routes.admin.query('commit');
   } catch (error) {
@@ -313,6 +338,8 @@ beforeAll(async () => {
     pickupIntake: intakeE.rows[0]?.id ?? '',
     receivingRun: manifestE.id,
     intakeParcel: parcelE.rows[0]?.id ?? '',
+    order: orderE.rows[0]?.id ?? '',
+    payerCorrection: correctionE.rows[0]?.id ?? '',
     vendorOrganization: vendorC.organizationId,
     evidence: evidenceB.rows[0]?.id ?? '',
   };
@@ -334,6 +361,9 @@ function kindOf(operation: Operation): string {
   if (operation.path.startsWith('/pickup-stops/')) return 'pickupStop';
   if (operation.path.startsWith('/run-custody-handovers/')) return 'runCustodyHandover';
   if (operation.path.startsWith('/hub-intakes/')) return 'pickupIntake';
+  // S1.38: the read of an order is addressed by the order.
+  if (operation.path.startsWith('/orders/')) return 'order';
+  if (operation.path.startsWith('/payer-corrections/')) return 'payerCorrection';
   // S1.35b: a run's receiving page is the run (a manifest the hub has opened intakes for), and a parcel is a photo intake's.
   if (operation.path.startsWith('/receiving-runs/')) return 'receivingRun';
   if (operation.path.startsWith('/intake-parcels/')) return 'intakeParcel';
@@ -507,6 +537,8 @@ const TABLE_OF: Readonly<Record<string, string>> = {
   pickupIntake: 'pickup_intake',
   receivingRun: 'pickup_manifest',
   intakeParcel: 'intake_parcel',
+  order: '"order"',
+  payerCorrection: 'payer_correction',
   vendorOrganization: 'vendor_organization',
   evidence: 'evidence',
 };
@@ -531,6 +563,21 @@ describe('the existence rule is asked about records that are real (the control o
       approveOnePackageException: 'pickupRequest',
       acceptRunCustodyHandover: 'pickupManifest',
       acquireIntakeLock: 'pickupIntake',
+      amendPickupRequest: 'pickupRequest',
+      approvePayerCorrection: 'payerCorrection',
+      requestPayerCorrection: 'order',
+      closeHubIntake: 'pickupIntake',
+      getIntakeSummary: 'pickupIntake',
+      getOrder: 'order',
+      amendOrder: 'order',
+      previewOrderAmendment: 'order',
+      reverseOrderArrival: 'order',
+      correctOrderRecipient: 'order',
+      getPayerCorrection: 'payerCorrection',
+      previewOrder: 'pickupIntake',
+      listIntakeOrders: 'pickupIntake',
+      listDestinationZones: 'pickupIntake',
+      getIntakeClosure: 'pickupIntake',
       addExtraParcel: 'pickupIntake',
       adjudicateDiscrepancy: 'pickupIntake',
       approveStaffIdentity: 'staff',
@@ -561,6 +608,7 @@ describe('the existence rule is asked about records that are real (the control o
       getStaffIdentity: 'staff',
       getVendorAccount: 'vendor',
       initiateHandshake: 'pickupStop',
+      itemizeOrder: 'pickupIntake',
       listPickupStopEvidence: 'pickupStop',
       listStaffTrustedBrowsers: 'staff',
       listVendorPickupLocations: 'vendorOrganization',
@@ -568,6 +616,7 @@ describe('the existence rule is asked about records that are real (the control o
       recordCollection: 'pickupStop',
       recordIntakeCondition: 'pickupIntake',
       recordParcelArrival: 'intakeParcel',
+      setParcelWaitingForVendor: 'intakeParcel',
       recoverVendorCredential: 'vendor',
       registerRiderDevice: 'rider',
       reportPickupFailure: 'pickupStop',
@@ -612,6 +661,8 @@ describe('the existence rule is asked about records that are real (the control o
           'pickupManifest',
           'pickupStop',
           'pickupIntake',
+          'order',
+          'payerCorrection',
           'receivingRun',
           'runCustodyHandover',
           'vendorOrganization',

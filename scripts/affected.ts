@@ -401,6 +401,15 @@ export const SPEC_AREAS: Readonly<Record<string, readonly string[]>> = {
     'apps/ops-web/src/platform/evidence/',
     'apps/ops-web/config/',
   ],
+  // The order screens: their own folder, and what they are drawn on or reached from: the work list the queues are drawn on, the vendor's record and its section (the receiving folder), the photo picture the form shows beside the
+  // fields (the evidence folder) and the labels of the messages the summary lists (the messages folder).
+  'orders.spec.ts': [
+    'apps/ops-web/src/app/pages/orders/',
+    'apps/ops-web/src/app/pages/pickup-work/',
+    'apps/ops-web/src/app/pages/receiving/',
+    'apps/ops-web/src/app/pages/evidence/',
+    'apps/ops-web/src/app/pages/messages/',
+  ],
   'messages.spec.ts': [
     'apps/ops-web/src/app/pages/messages/',
     'apps/ops-web/src/app/pages/pickup/',

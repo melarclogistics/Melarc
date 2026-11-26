@@ -14,6 +14,11 @@ import {
   VARIANCE_MAP,
 } from '../pages/intakes/intake-presentation';
 import { FEED_STATE_MAP, NOTIFICATION_STATE_MAP } from '../pages/messages/message-presentation';
+import {
+  CORRECTION_STATE_MAP,
+  ORDER_STANDING_MAP,
+  WORK_STATE_MAP,
+} from '../pages/orders/orders-presentation';
 import { PICKUP_STATE_MAP } from '../pages/pickup/pickup-presentation';
 import {
   DECISION_MAP,
@@ -57,6 +62,10 @@ export const STATUS_TABLE = {
   // Receiving by run (S1.35c; Run D): where a vendor stands and where a parcel stands, in the words of the floor (the same states as above, told as the floor tells them).
   RECEIVING_VENDOR: VENDOR_STATE_MAP,
   RECEIVING_PARCEL: PARCEL_STATE_MAP,
+  // The order screens (S1.40): where a parcel's work stands, what an order's price is, and where a request to change who pays stands.
+  ORDER_WORK: WORK_STATE_MAP,
+  ORDER_PRICE: ORDER_STANDING_MAP,
+  PAYER_CORRECTION: CORRECTION_STATE_MAP,
 } as const satisfies Readonly<Record<string, StatusMap<string>>>;
 
 export type StatusDomain = keyof typeof STATUS_TABLE;

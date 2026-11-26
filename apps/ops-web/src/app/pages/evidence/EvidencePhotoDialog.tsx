@@ -173,6 +173,7 @@ export function EvidencePhotoDialog({
           isEmpty={() => false}
           empty={null}
           loadingLabel="Opening the photo…"
+          keepOnFailure={false}
           permission="pickup.read"
           capability="see pickup runs"
           operation="createEvidenceRetrievalAuthorization"
@@ -185,6 +186,7 @@ export function EvidencePhotoDialog({
           isEmpty={() => false}
           empty={null}
           loadingLabel="Opening the photo…"
+          keepOnFailure={false}
           permission="hub.read"
           context="intake"
           operation="createEvidenceRetrievalAuthorization"

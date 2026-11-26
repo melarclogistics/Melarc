@@ -146,7 +146,7 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
  *   `IDEMPOTENCY_KEY_CONFLICT`; `429` `RATE_LIMITED`; and `503` `TRUST_DATA_UNAVAILABLE`, the contract's only declared `5xx`;
  * - every other code states a business rule (every domain code of §5, `SELF_APPROVAL_FORBIDDEN`, and the sign-in, factor, grant,
  *   challenge and recovery codes) and is `422`;
- * - **`SETTING_MISSING` and `SETTING_INVALID` have no status in any retained document** (§4 gives their meaning and not their
+ * - **`SETTING_MISSING` is `422` since `itemizeOrder` (S1.36), the one operation that raises it as a business answer, and the contract says so; `SETTING_INVALID` has no status in any retained document** (§4 gives their meaning and not their
  *   status). They are `null` here and are not given one: the status of the business answers of the hub-settings paths that declare
  *   them is each such operation's own task's (plan §7.16, §7.18), and `statusOf` refuses to answer for them until it is made. The
  *   runtime's own failure to read a setting it needs is not one of them on the wire: it is the code-less `503` (decision B of 12
@@ -166,7 +166,9 @@ const NAMED_STATUS: Readonly<Partial<Record<ErrorCode, number | null>>> = {
   [ErrorCode.IdempotencyKeyConflict]: 409,
   [ErrorCode.RateLimited]: 429,
   [ErrorCode.TrustDataUnavailable]: 503,
-  [ErrorCode.SettingMissing]: null,
+  // Decided with the first operation that raises it as a business answer (S1.36, `itemizeOrder`, 19 November 2026): the contract gives that operation a `422` for it, as it gives every other business rule, and no
+  // other operation declares it. A hub with no approved value for a price it needs is refused visibly, never priced from another hub's. `SETTING_INVALID` is raised by no operation and stays undecided.
+  [ErrorCode.SettingMissing]: 422,
   [ErrorCode.SettingInvalid]: null,
 };
 

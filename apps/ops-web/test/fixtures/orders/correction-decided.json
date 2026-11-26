@@ -1,0 +1,35 @@
+{
+  "id": "01a124d3-7400-7712-9bfb-f1b40daecc2b",
+  "order_id": "01a124d3-7400-7ccc-afeb-d02b8225c62c",
+  "state": "APPROVED",
+  "requested_by": "3334dd52-48f0-44a9-919b-b662389b31d8",
+  "approved_by": "f4c117e9-50c1-4953-b0e9-18f474dc9f88",
+  "previous_allocation": {
+    "sender_minor": 0,
+    "recipient_minor": 3500
+  },
+  "proposed": {
+    "payer_intent": "SENDER_PAYS_FULL"
+  },
+  "resulting_allocation": {
+    "sender_minor": 3500,
+    "recipient_minor": 0
+  },
+  "resulting_commercial_state": "PAYMENT_REQUIRED",
+  "note": "The vendor will pay on the phone",
+  "created_at": "2026-11-22T22:51:58.399Z",
+  "decided_at": "2026-11-22T22:51:58.536Z",
+  "order_code": "ACC-OR-E5VMPB",
+  "total": {
+    "amount_minor": 3500,
+    "currency": "GHS"
+  },
+  "proposed_allocation": {
+    "sender_minor": 3500,
+    "recipient_minor": 0
+  },
+  "proposed_commercial_state": "PAYMENT_REQUIRED",
+  "order_commercial_state": "PAYMENT_REQUIRED",
+  "requested_by_name": "Ama Mensah",
+  "approved_by_name": "Ama Mensah"
+}

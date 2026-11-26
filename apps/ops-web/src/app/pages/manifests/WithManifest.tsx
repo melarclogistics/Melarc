@@ -5,7 +5,7 @@ import { PageHeading } from '../../../components/PageHeading';
 import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenState';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState, RefreshFailed } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { ManifestRecord } from '../../../platform/manifest/manifest-commands';
 import { useManifest } from '../../../platform/manifest/use-manifest-queries';
@@ -129,7 +129,9 @@ function Reading({ id, heading, ownsHeading = false, children }: WithManifestPro
   }
 
   const { title, description, documentTitle } = heading(query.data);
-  const loaded = ownsHeading && query.status === 'success';
+  // A page that is kept after a read that failed again is a page that is drawn (`ReadState`): the run is shown as it was read, with a line that says so, and its own heading is in it.
+  const record = drawnData(query, { operation: 'getPickupManifest' });
+  const loaded = ownsHeading && record !== undefined;
   return (
     <>
       <title>{`${documentTitle} · Melarc Ops Portal`}</title>
@@ -137,9 +139,7 @@ function Reading({ id, heading, ownsHeading = false, children }: WithManifestPro
       {loaded ? null : (
         <PageHeader title={title} {...(description === undefined ? {} : { description })} />
       )}
-      {query.status === 'success' ? (
-        children(query.data, query)
-      ) : (
+      {record === undefined ? (
         <ReadState<ManifestRecord>
           query={query}
           isEmpty={() => false}
@@ -152,6 +152,11 @@ function Reading({ id, heading, ownsHeading = false, children }: WithManifestPro
         >
           {() => null}
         </ReadState>
+      ) : (
+        <>
+          <RefreshFailed query={query} operation="getPickupManifest" />
+          {children(record, query)}
+        </>
       )}
     </>
   );

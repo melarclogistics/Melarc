@@ -1,0 +1,31 @@
+{
+  "intake_id": "01a124d3-7400-7715-b5da-bd22578028d0",
+  "intake_state": "ITEMIZING",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "progress": {
+    "received": 3,
+    "awaiting_arrival": 0,
+    "needs_order": 1,
+    "prepared": 0,
+    "itemized": 2,
+    "payment_required": 0,
+    "missing": 0,
+    "orders": 2
+  },
+  "items": [
+    {
+      "work_state": "NEEDS_ORDER",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20575-7a46-7fcd-8ec1-7cd85025eeb4",
+        "ordinal": 3,
+        "origin": "DOOR_PHOTO",
+        "state": "ARRIVED",
+        "door_photo_evidence_id": "01a124d3-7400-7b45-b8af-00f1b58ff340",
+        "hub_photo_evidence_id": null
+      },
+      "order": null
+    }
+  ],
+  "next_page_token": null
+}

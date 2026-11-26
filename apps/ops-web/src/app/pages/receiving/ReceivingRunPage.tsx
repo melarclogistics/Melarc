@@ -8,7 +8,7 @@ import { ForbiddenPage } from '../../../components/ui/forbidden-state/ForbiddenS
 import { HubFloor } from '../../../components/ui/hub-floor/HubFloor';
 import { Link } from '../../../components/ui/link/Link';
 import { PageHeader } from '../../../components/ui/page-header/PageHeader';
-import { ReadState } from '../../../components/ui/read-state/ReadState';
+import { drawnData, ReadState } from '../../../components/ui/read-state/ReadState';
 import { Skeleton } from '../../../components/ui/skeleton/Skeleton';
 import type { RunPageView, VendorView } from '../../../platform/hub-receiving/receiving-shape';
 import { useReceivingRun } from '../../../platform/hub-receiving/use-receiving-queries';
@@ -87,6 +87,8 @@ function Run({
 }) {
   const me = useSignedInSession();
   const mayCount = me?.holds('hub.intake.count') === true;
+  // The key that makes orders, for the way from a vendor whose check-in is open to its early orders (D-D6).
+  const mayOrder = me?.holds('hub.intake.itemize') === true;
   // An officer sent here from the count of a vendor that was photographed at the door is told why, once: that vendor is checked in on this page and is never counted.
   const sentHere =
     (useLocation().state as { readonly told?: string } | null)?.told === 'photographed';
@@ -146,6 +148,7 @@ function Run({
           key={vendor.intake_id}
           vendor={vendor}
           mayCount={mayCount}
+          mayOrder={mayOrder}
           acts={acts}
           next={nextWaiting(page.vendors, vendor)}
           firstToCheck={vendor.intake_id === firstWaiting?.intake_id}
@@ -191,7 +194,9 @@ function Reading({
     }
   }
 
-  const loaded = query.status === 'success';
+  // A run kept after a read that failed again is a run that is drawn (`ReadState`): its own header is there, and this one is not. The page tells a failed refresh itself (the freshness line of its header and its
+  // connection banner), so `ReadState` draws no line of its own.
+  const loaded = drawnData(query, { operation: 'getReceivingRun' }) !== undefined;
   return (
     <>
       {loaded ? null : (
@@ -208,6 +213,7 @@ function Reading({
         skeleton={<Skeleton lines={4} />}
         permission="hub.read"
         operation="getReceivingRun"
+        ownsRefreshFailure
       >
         {(page) => children(page, query)}
       </ReadState>

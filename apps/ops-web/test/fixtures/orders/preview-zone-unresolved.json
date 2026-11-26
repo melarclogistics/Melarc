@@ -1,0 +1,11 @@
+{
+  "status": 422,
+  "body": {
+    "code": "SETTING_MISSING",
+    "message": "The address resolves to no active zone of the hub, so the order cannot be priced",
+    "details": {
+      "rule": "destination_zone_unresolved"
+    },
+    "request_id": "edf6432e-d5eb-4648-aae0-f1e1b7981145"
+  }
+}

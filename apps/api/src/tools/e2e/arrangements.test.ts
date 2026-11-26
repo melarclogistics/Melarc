@@ -268,3 +268,105 @@ describe('the pool and the rider lock of the manifest journey (S1.25)', () => {
     expect(asked[0]?.values).toEqual(['+99900000001']);
   });
 });
+
+describe('the collected run of the orders’ journey (Run G2)', () => {
+  const ARGS = ['+99900000001', 'ABCDEFGH', '2026-11-03', '17', '18'];
+  const texts = (asked: readonly { text: string }[]) => asked.map((statement) => statement.text);
+
+  // Break caught: a run that is not written in one transaction (a failure half way would leave a run with a stop and no count), one that does not close each stop with its count, or photographs written for the stop
+  // that is counted without them (a vendor the journey means to count blind would be checked in against photos), or none for the stop that has them.
+  it('writes the run, its two stops and what each stop was counted with, in one transaction, the photographs for the first stop alone', async () => {
+    const { client, asked } = fakeClient([{ rowCount: 1 }, { rowCount: 1 }]);
+
+    expect(await arrange(client, 'add-collected-run', ARGS)).toBe(1);
+
+    const all = texts(asked);
+    expect(all[0]).toBe('begin');
+    expect(all.at(-1)).toBe('commit');
+    expect(all.filter((text) => text.startsWith('insert into pickup_manifest'))).toHaveLength(1);
+    expect(all.filter((text) => text.startsWith('insert into pickup_request'))).toHaveLength(2);
+    expect(all.filter((text) => text.startsWith('insert into pickup_stop'))).toHaveLength(2);
+    expect(all.filter((text) => text.startsWith('insert into collection_record'))).toHaveLength(2);
+    expect(all.filter((text) => text.startsWith('insert into evidence'))).toHaveLength(1);
+    expect(
+      all.filter((text) => text.startsWith('insert into collection_parcel_photo')),
+    ).toHaveLength(1);
+    expect(
+      all.filter((text) => text.startsWith('insert into parcel_photo_exception')),
+    ).toHaveLength(1);
+    // The run is in progress and held by the rider, and each stop is closed as counted.
+    expect(all.find((text) => text.startsWith('insert into pickup_manifest'))).toContain(
+      "'IN_PROGRESS'",
+    );
+    expect(
+      all.filter((text) => text.startsWith("update pickup_stop set state = 'COLLECTED'")),
+    ).toHaveLength(2);
+    // The handshake of each collection is confirmed (the moment custody passed, which an order is dated from): without it the first order is refused as having no date.
+    expect(
+      all.filter((text) => text.startsWith('update collection_record set handshake_channel')),
+    ).toHaveLength(2);
+  });
+
+  // Break caught: the guards of the tables put aside for more than the two statements that need it (the photographs and the exception), or left off when the transaction goes on.
+  it('puts the guards aside only around the evidence and the exception, and puts them back at once', async () => {
+    const { client, asked } = fakeClient([{ rowCount: 1 }, { rowCount: 1 }]);
+    await arrange(client, 'add-collected-run', ARGS);
+    const all = texts(asked);
+    for (let at = 0; at < all.length; at += 1) {
+      if (all[at] !== 'set local session_replication_role = replica') continue;
+      expect(all[at + 1]).toMatch(/^insert into (evidence|parcel_photo_exception)/);
+      expect(all[at + 2]).toBe('set local session_replication_role = origin');
+    }
+    expect(all.filter((text) => text.endsWith('= replica'))).toHaveLength(2);
+    expect(all.filter((text) => text.endsWith('= origin'))).toHaveLength(2);
+  });
+
+  // Break caught: a run made when the rider or the vendor is not there (a stop with nobody to hand it over), or a transaction left open.
+  it('makes nothing and rolls back when the rider or the vendor is not there', async () => {
+    const { client, asked } = fakeClient([{ rowCount: 1 }, { rowCount: 0 }]);
+
+    await expect(arrange(client, 'add-collected-run', ARGS)).rejects.toThrow(/changed no row/);
+
+    expect(texts(asked)).toEqual([
+      expect.stringMatching(/^begin$/),
+      expect.stringMatching(/^insert into pickup_manifest/),
+      expect.stringMatching(/^rollback$/),
+    ]);
+  });
+
+  it.each([
+    ['a rider that is not a phone', ['0200000001', 'ABCDEFGH', '2026-11-03', '3', '4']],
+    ['a vendor that is not an identifier', ['+99900000001', 'a@b.example', '2026-11-03', '3', '4']],
+    ['a day that is not a date', ['+99900000001', 'ABCDEFGH', '03/11/2026', '3', '4']],
+    ['no parcel counted', ['+99900000001', 'ABCDEFGH', '2026-11-03', '0', '4']],
+    ['more than twenty parcels', ['+99900000001', 'ABCDEFGH', '2026-11-03', '3', '21']],
+    [
+      'a count that is not a whole number',
+      ['+99900000001', 'ABCDEFGH', '2026-11-03', 'three', '4'],
+    ],
+  ])('refuses %s, before a statement is sent', async (_why, args) => {
+    const { client, asked } = fakeClient([{ rowCount: 1 }]);
+
+    await expect(arrange(client, 'add-collected-run', args)).rejects.toThrow();
+
+    expect(asked).toEqual([]);
+  });
+
+  // Break caught: the one transaction left open by a statement that failed half way.
+  it('rolls back, and tells why, when a statement fails', async () => {
+    const asked: string[] = [];
+    const client: ArrangementClient = {
+      query: (text) => {
+        asked.push(text.replace(/s+/g, ' ').trim());
+        if (text.includes('insert into collection_record'))
+          return Promise.reject(new Error('the guard said no'));
+        return Promise.resolve({ rows: [], rowCount: 1 });
+      },
+    };
+
+    await expect(arrange(client, 'add-collected-run', ARGS)).rejects.toThrow(/the guard said no/);
+
+    expect(asked.at(-1)).toBe('rollback');
+    expect(asked).not.toContain('commit');
+  });
+});

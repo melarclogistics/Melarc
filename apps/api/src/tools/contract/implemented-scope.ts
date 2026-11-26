@@ -117,4 +117,29 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'listMissingParcels',
   'listReceivingRuns',
   'recordParcelArrival',
+  // Stage 7, S1.36: the order made for a parcel, with its first commitment (itemization, price and promise).
+  'itemizeOrder',
+  // Stage 7, S1.37 and S1.38: the close of an intake, the vendor's summary of it and the read of an order.
+  'closeHubIntake',
+  'getIntakeSummary',
+  'getOrder',
+  // Stage 7, S1.39: the payer edit before the price freezes and the maker-checker correction after it.
+  'amendPickupRequest',
+  'requestPayerCorrection',
+  'approvePayerCorrection',
+  // Stage 7, the reads a screen cannot do without (the external review of 19 November 2026): the parcel worklist with the counts of the whole intake, what a close would find, and the corrections a checker opens.
+  'listIntakeOrders',
+  'listDestinationZones',
+  'getIntakeClosure',
+  'listPayerCorrections',
+  'getPayerCorrection',
+  // Stage 7, the review of 20 November 2026: the closes that left work (OB-S1-151).
+  'listClosedIntakeExceptions',
+  // Stage 7, the controlled changes of an order: the preview before confirming, the edit of an order that is not confirmed, and the reversal of a mistaken arrival.
+  'previewOrder',
+  'previewOrderAmendment',
+  'amendOrder',
+  'reverseOrderArrival',
+  'correctOrderRecipient',
+  'setParcelWaitingForVendor',
 ];

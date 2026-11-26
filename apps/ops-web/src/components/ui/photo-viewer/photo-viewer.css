@@ -1,7 +1,7 @@
 /*
  * The photo viewer (design/COMPONENT_PATTERNS.md, PhotoViewer): one photo at a time in the wide dialog that fills the screen's height, and under it the controls: Previous, where the person is and Next in one row, and Close apart.
  * **The photo is what gives way and the controls are what does not** (the pictures of the receiving screens, 16 November 2026): a viewer as tall as its content was as tall as the photo, with the controls below the fold
- * of a short screen and a scroll that went back to the top at every change of photo. A vertical scroll stays the browser's (`touch-action: pan-y`) and a drag across is the viewer's swipe. The change of photo fades in
+ * of a short screen and a scroll that went back to the top at every change of photo. Every touch on the stage is the viewer's (`touch-action: none`): a pinch zooms the photo, a drag looks around it or, at fit, is the swipe to the next, a double tap zooms, and there is no scroll under it. The change of photo fades in
  * from the side it came from over motion.fast, and not at all under reduced motion. Every colour, size and space comes from tokens.css.
  */
 .ui-photo-viewer {
@@ -20,7 +20,8 @@
   position: relative;
   flex: 1 1 0;
   min-height: 0;
-  touch-action: pan-y;
+  /* The pinch, the drag that looks around a zoomed photo and the double tap are the viewer's (`PhotoViewer.tsx`): the browser takes none of them, and a vertical scroll has nothing to scroll here (the stage does not scroll). */
+  touch-action: none;
 }
 
 /*
@@ -44,6 +45,9 @@
   align-items: center;
   justify-content: center;
   width: 100%;
+  /* A zoomed photo is clipped by the place it is looked at in, which is the picture's box and not the stage (a button the page draws under the picture is not covered by it); and that box is the container whose size a turned photo is fitted to (below). */
+  overflow: hidden;
+  container-type: size;
 }
 
 .ui-photo-viewer__photo > :not(:first-child) {
@@ -120,5 +124,111 @@
   .ui-photo-viewer__photo[data-way='next'],
   .ui-photo-viewer__photo[data-way='previous'] {
     animation: none;
+  }
+}
+
+/*
+ * Looking closely (Run G2, OB-S1-168; the Product Owner's decision D-S7-14): the viewer says the zoom, the turn and where the photo was moved to as four variables on the stage, and the photo is drawn with them: moved
+ * (in pixels, as the window shows it), turned and zoomed about its own middle, which is the middle of the box it is centred in. The photo keeps its own aspect: it is scaled and turned and never stretched. A change made
+ * by a button or a key moves over motion.fast, and one made by a finger or a mouse (the stage says it is `data-gesture`) follows it at once; reduced motion removes the first as the tokens do (they are 0ms).
+ */
+.ui-photo-viewer__stage img {
+  /* Dragged to look around and never dragged away or selected (the stage stops the browser's drag of an image). */
+  user-select: none;
+  -webkit-user-drag: none;
+  transform: translate(var(--ui-photo-x, 0px), var(--ui-photo-y, 0px))
+    rotate(var(--ui-photo-turn, 0deg)) scale(var(--ui-photo-zoom, 1));
+  transform-origin: center;
+  transition: transform var(--motion-fast) var(--motion-ease-enter);
+}
+
+.ui-photo-viewer__stage[data-gesture='true'] img {
+  transition: none;
+}
+
+/*
+ * A photo turned a quarter is laid out for the box it will be turned into: its width is limited by the box's height and its height by the box's width, so that after the turn it fits the window as it fitted before it
+ * (the container units are the picture's box: its size is the window the photo is looked at in).
+ */
+.ui-photo-viewer__stage[data-quarter='true'] img {
+  max-inline-size: 100cqh;
+  max-block-size: 100cqw;
+}
+
+/*
+ * The tools of looking closely: zoom out, the level, zoom in, and the two turns, in one row that wraps, between the photo and the controls. The buttons keep the floor's target (56px high, and at least as wide)
+ * with the padding of the navigation's, and draw their words where there is room (a desk, a tablet) and their icon alone where there is not: each is named in full by its label.
+ */
+.ui-photo-viewer__tools {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.ui-photo-viewer__tools .ui-button {
+  flex: none;
+  min-width: var(--control-height-lg);
+  padding-inline: var(--space-4);
+}
+
+/* The level, said between the two buttons that change it, in the room of the longest thing it says ("600%, turned right") and not a pixel more or less, so that the buttons around it do not move as it changes. */
+.ui-photo-viewer__view {
+  inline-size: 10rem;
+  white-space: nowrap;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-md-line-height);
+  text-align: center;
+}
+
+/* Where the buttons draw their words but the window is not wide (a tablet), the level is a line of its own above the four, so that the four are one row and not three and a fourth alone (found by looking at the pictures of Run G2, at 768 px). */
+@media (max-width: 56rem) {
+  .ui-photo-viewer__view {
+    order: -1;
+    flex: 0 0 100%;
+    inline-size: auto;
+  }
+}
+
+/* Where there is no room for the words of the buttons, the four are one row of icons and the level is a row of its own under them (it cannot be between the buttons and still leave the row whole on a phone). */
+@media (max-width: 40rem) {
+  /* Four buttons of 56px and the gaps between them are 248px with this gap and 260px with the wider one, which a 320px phone (254px in the window) does not have: the row would break and the photo would lose 68px of its room. */
+  .ui-photo-viewer__tools {
+    gap: var(--space-2);
+  }
+
+  .ui-photo-viewer__tools .ui-photo-viewer__label {
+    display: none;
+  }
+
+  /* The level is still said (it is a polite live region) and is not drawn: on a phone the photo shows how far it is zoomed and the button that cannot be pressed shows the end, and a row of its own would take 30px of the photo's room. */
+  .ui-photo-viewer__view {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+/* On a short screen (a phone upright) the sections of the viewer sit closer together, so that the extra row of looking closely takes as little of the photo's room as it can. */
+@media (max-height: 40rem) {
+  .ui-photo-viewer {
+    gap: var(--space-2);
+  }
+
+  .ui-photo-viewer__controls {
+    gap: var(--space-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-photo-viewer__stage img {
+    transition: none;
   }
 }

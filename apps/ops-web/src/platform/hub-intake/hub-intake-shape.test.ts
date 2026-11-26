@@ -15,6 +15,7 @@ import {
   preCountFixture,
   shortCountFixture,
 } from '../../test-support/hub-intake-fixture';
+import { captured } from '../../test-support/orders-fixture';
 import {
   parseFinding,
   parseIntake,
@@ -50,6 +51,7 @@ describe('an intake that has not been counted', () => {
       active_receiver_id: INTAKE_RECEIVER_ID,
       lock_acquired_at: '2026-11-14T09:10:00Z',
       state: 'AWAITING_COUNT',
+      vendor_name: null,
       count_phase: 'PRE_COUNT',
     });
     expect(Object.keys(intake ?? {})).not.toContain('rider_declared_count');
@@ -90,6 +92,34 @@ describe('an intake that has not been counted', () => {
     expect(parseIntake(preCountFixture({ state: 'READY_FOR_ITEMIZATION' }))).toBeUndefined();
     expect(parseIntake(postCountFixture({ state: 'AWAITING_COUNT' }))).toBeUndefined();
   });
+});
+
+describe('the vendor of an intake counted without photos (Run G1, Part 2, item 9)', () => {
+  // Break caught: a vendor counted without photos that the order screens can only call by its code (the API names it now, from the stop's dispatch snapshot), or a name taken from somewhere else.
+  it('is named by the vendor the API names, counted or not, and by nothing where it names none', () => {
+    expect(parseIntake(captured('intake-blind-named'))?.vendor_name).toBe('Fixture Sender');
+    expect(parseIntake({ ...preCountFixture(), vendor_name: 'Kente Crafts' })?.vendor_name).toBe(
+      'Kente Crafts',
+    );
+    expect(parseIntake(preCountFixture())?.vendor_name).toBeNull();
+    expect(parseIntake({ ...postCountFixture(), vendor_name: null })?.vendor_name).toBeNull();
+  });
+
+  // Break caught: a value that is not text at all (a number, an object, a list) read as a vendor's name, or as no name, when it is not what the API says.
+  it.each([7, {}, ['Kente'], true])('refuses a name that is %j, which is not text', (name) => {
+    expect(parseIntake({ ...preCountFixture(), vendor_name: name })).toBeUndefined();
+  });
+
+  // Break caught (the security review of b568c3a): an intake made unreadable by what is written in one optional field. A name that does not pass as one (empty, with a control character, too long, or a number
+  // that could be dialled) is no name: the intake is still read, and the screens call the vendor by its code, as they always did. The number is never drawn as a name.
+  it.each(['', '   ', 'Kente\nCrafts', 'x'.repeat(500), '024 123 4567 Shop', '+233241234567'])(
+    'reads the intake all the same when the name is %j, with no name',
+    (name) => {
+      const intake = parseIntake({ ...preCountFixture(), vendor_name: name });
+      expect(intake).toBeDefined();
+      expect(intake?.vendor_name).toBeNull();
+    },
+  );
 });
 
 describe('an intake that has been counted', () => {

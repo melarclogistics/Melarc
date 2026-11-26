@@ -1,0 +1,75 @@
+{
+  "status": 409,
+  "body": {
+    "code": "STATE_CONFLICT",
+    "message": "What confirming gives is not what was reviewed: the terms are shown again",
+    "details": {
+      "rule": "terms_changed",
+      "current_terms": {
+        "intake_id": "01a124d3-7400-7715-b5da-bd22578028d0",
+        "parcel_id": "01a20575-7a46-7fcd-8ec1-7cd85025eeb4",
+        "order_id": null,
+        "order_version": null,
+        "status": "CURRENT_PREVIEW",
+        "validation": {
+          "evidence": "NONE_CITED"
+        },
+        "cited_evidence": {
+          "high_value": [],
+          "carrier_waybill": null
+        },
+        "will_confirm": "ON_CONFIRMATION",
+        "quote_policy": "PROTECTED_UNTIL_AMENDED",
+        "price": {
+          "total": {
+            "amount_minor": 3500,
+            "currency": "GHS"
+          },
+          "components": [
+            {
+              "kind": "SERVICE_AREA_BASE_FEE",
+              "amount": {
+                "amount_minor": 3500,
+                "currency": "GHS"
+              }
+            }
+          ]
+        },
+        "is_high_value": false,
+        "high_value_surcharge": null,
+        "destination_zone_snapshot": {
+          "scope": "SERVICE_AREA",
+          "zone_id": "5eed0101-0000-4000-8000-000000000001",
+          "zone_code": "TEMA",
+          "zone_name": "Tema",
+          "service_area": "ACCRA_TEMA",
+          "alias": "madina"
+        },
+        "destination_zone_resolution": "SERVER_RESOLVED",
+        "delivery": {
+          "default_date": "2026-11-23",
+          "requested_date": null,
+          "committed_date": "2026-11-23",
+          "window_start": "10:00",
+          "window_end": "16:00"
+        },
+        "payer": {
+          "source": "ORDER",
+          "payer_intent": "SENDER_PAYS_FULL",
+          "sender": {
+            "amount_minor": 3500,
+            "currency": "GHS"
+          },
+          "recipient": {
+            "amount_minor": 0,
+            "currency": "GHS"
+          },
+          "commercial_state_after_confirmation": "PAYMENT_REQUIRED"
+        },
+        "current": null,
+        "terms_token": "61a4d1487779380f57b99f997335456376529124bd7f129a8f7197a886f3fb1f"
+      }
+    },
+    "request_id": "7f8a3fd7-e8e1-4b1d-9de2-46e8535b5723"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "intake_id": "01a124d3-7400-7bc4-9ead-088b44a26ee6",
+  "intake_state": "AWAITING_COUNT",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "progress": {
+    "received": 0,
+    "awaiting_arrival": 2,
+    "needs_order": 0,
+    "prepared": 1,
+    "itemized": 0,
+    "payment_required": 0,
+    "missing": 0,
+    "orders": 1
+  },
+  "items": [
+    {
+      "work_state": "PREPARED",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20575-8ec0-7cc7-bfb7-f128f772179d",
+        "ordinal": 1,
+        "origin": "DOOR_PHOTO",
+        "state": "EXPECTED",
+        "door_photo_evidence_id": "01a124d3-7400-711c-86ad-731e7e4fa8e2",
+        "hub_photo_evidence_id": null
+      },
+      "order": {
+        "id": "01a124d3-7400-78d9-a6ac-84e78569efd0",
+        "code": "ACC-OR-UA7K72",
+        "recipient_name": "Ama Mensah",
+        "service_area": "ACCRA_TEMA",
+        "size_class": "SMALL",
+        "commercial_state": null,
+        "confirmed": false,
+        "payment_required": false
+      }
+    },
+    {
+      "work_state": "AWAITING_ARRIVAL",
+      "reversed_order": null,
+      "parcel": {
+        "id": "01a20575-8ec8-7930-822b-793cd33e97ca",
+        "ordinal": 2,
+        "origin": "DOOR_PHOTO",
+        "state": "EXPECTED",
+        "door_photo_evidence_id": "01a124d3-7400-7656-885b-373ac481e98c",
+        "hub_photo_evidence_id": null
+      },
+      "order": null
+    }
+  ],
+  "next_page_token": null
+}

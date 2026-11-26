@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { guardBrowserContext } from './browser-guard.ts';
+import { answerStandInPictures, guardBrowserContext } from './browser-guard.ts';
 import { ENGINES, planEngineTrust, trustRootOf, type Engine } from './engine-trust.ts';
 import { withFreshProfile } from './fresh-profile.ts';
 import { expect, test as base } from './playwright.ts';
@@ -89,6 +89,7 @@ export const test = base.extend<HttpsFixtures>({
           playwright.firefox.launchPersistentContext(directory, { ...launchOptions, ...options }),
         async (context) => {
           await guardBrowserContext(context, browserOrigin, (url) => externalRequests.push(url));
+          await answerStandInPictures(context);
           await use(context);
         },
       );
@@ -96,6 +97,7 @@ export const test = base.extend<HttpsFixtures>({
     }
     const context = await browser.newContext(options);
     await guardBrowserContext(context, browserOrigin, (url) => externalRequests.push(url));
+    await answerStandInPictures(context);
     await use(context);
     await context.close();
   },

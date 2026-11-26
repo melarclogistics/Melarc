@@ -1,0 +1,60 @@
+{
+  "items": [
+    {
+      "id": "01a124d3-7400-7a50-9499-e0229cecbceb",
+      "code": "ACC-IN-8V5XY4",
+      "hub_id": "5eed0100-0000-4000-8000-000000000001",
+      "pickup_request_id": "1d9f4564-585d-4e1d-a0d2-0ef229963712",
+      "pickup_manifest_id": "e5815da4-0c41-40c0-81ca-c691b943ec2d",
+      "run_code": "ACC-MF-PM89F7",
+      "state": "RECONCILIATION_REQUIRED",
+      "count_phase": "CHECK_IN",
+      "receiving_mode": "PHOTO_CHECK_IN",
+      "vendor_name": "Fixture Sender",
+      "handed_over_by_name": "Rider df1c0988",
+      "handed_over_at": "2026-11-24T10:15:36.471Z",
+      "parcels_expected": 2,
+      "rider_declared_count": 2,
+      "arrived_count": 1,
+      "received_count": 1,
+      "count_variance": "SHORT",
+      "count_difference": -1,
+      "counted_at": "2026-11-24T10:15:37.021Z",
+      "counted_by_name": "Ama Mensah",
+      "lock": null,
+      "parcels": [
+        {
+          "id": "01a20d0d-c74b-783c-a902-d3af565b316f",
+          "ordinal": 1,
+          "origin": "DOOR_PHOTO",
+          "state": "MISSING",
+          "photo_evidence_id": "01a124d3-7400-740d-a9e4-fe4421209ec7",
+          "arrived_by_name": null,
+          "arrived_at": null,
+          "missing_marked_at": "2026-11-24T10:15:38.295Z",
+          "condition": null
+        },
+        {
+          "id": "01a20d0d-c753-7e4e-8117-b63fd43b4b7d",
+          "ordinal": 2,
+          "origin": "DOOR_PHOTO",
+          "state": "ARRIVED",
+          "photo_evidence_id": "01a124d3-7400-7d48-ae26-66bc40223a6d",
+          "arrived_by_name": "Ama Mensah",
+          "arrived_at": "2026-11-24T10:15:37.012Z",
+          "missing_marked_at": null,
+          "condition": null
+        }
+      ],
+      "missing_count": 1,
+      "extra_count": 0,
+      "damaged_count": 0,
+      "condition": "OK",
+      "condition_findings": [],
+      "orders_made": 0,
+      "parcels_needing_order": 1,
+      "senior_needed": "ARRIVAL_TAKEN_BACK"
+    }
+  ],
+  "next_page_token": null
+}

@@ -13,12 +13,14 @@ import { RecordPage } from '../../../components/ui/templates/RecordPage';
 import type { IntakeState } from '../../../platform/hub-intake/hub-intake-shape';
 import type { CheckInView } from '../../../platform/hub-receiving/receiving-shape';
 import type { IntakeRecordView } from '../../../platform/hub-receiving/use-intake-record';
+import { ORDERS_WORDS } from '../../../platform/problem/orders-copy';
 import { RECEIVING_WORDS as WORDS } from '../../../platform/problem/receiving-copy';
 import {
   useSignedInSession,
   type SignedInSession,
 } from '../../../platform/session/use-permissions';
 import { formatInstant } from '../../../platform/time/format-time';
+import { ordersPath } from '../orders/orders-presentation';
 import { hubNameOf } from '../staff/staff-presentation';
 import { BlindDamageDialog } from './BlindDamageDialog';
 import { CorrectionDialog, type CorrectionTarget } from './CorrectionDialog';
@@ -196,10 +198,23 @@ function RecordBody({
       <ButtonLink to={decisionPath(id)}>{WORDS.record.acts.decide}</ButtonLink>
     ) : mayRecordTold ? (
       <ButtonLink to={decisionPath(id)}>{WORDS.record.acts.vendorTold}</ButtonLink>
+    ) : state === 'READY_FOR_ITEMIZATION' || state === 'ITEMIZING' ? (
+      // The vendor is cleared for its orders: the work that is next is making them, and the page of the orders counts what is really left (S1.40).
+      <ButtonLink to={ordersPath(id)}>{ORDERS_WORDS.workspace.acts.makeOrders}</ButtonLink>
+    ) : state === 'CLOSED' ? (
+      <ButtonLink to={ordersPath(id)}>{ORDERS_WORDS.workspace.acts.seeOrders}</ButtonLink>
     ) : undefined;
+  // A vendor checked in against its photos may have an order begun from a photo before its parcels are checked in for good (D-D6): the orders page says which parcels are not here yet.
+  const mayBeginEarly =
+    checkIn !== undefined && state === 'AWAITING_COUNT' && me.holds('hub.intake.itemize');
   const secondary: ReactNode =
-    mayCorrect || mayRecordDamage ? (
+    mayCorrect || mayRecordDamage || mayBeginEarly ? (
       <>
+        {mayBeginEarly ? (
+          <ButtonLink to={ordersPath(id)} variant="secondary">
+            {ORDERS_WORDS.workspace.acts.earlyOrders}
+          </ButtonLink>
+        ) : null}
         {mayRecordDamage ? (
           <Button
             type="button"

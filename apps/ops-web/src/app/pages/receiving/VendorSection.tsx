@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Button } from '../../../components/ui/button/Button';
 import { ButtonLink } from '../../../components/ui/button/ButtonLink';
+import { ORDERS_WORDS } from '../../../platform/problem/orders-copy';
+import { ordersPath } from '../orders/orders-presentation';
 import { StatusBadge } from '../../../components/ui/status-badge/StatusBadge';
 import type { ParcelView, VendorView } from '../../../platform/hub-receiving/receiving-shape';
 import type { LockStatus } from '../../../platform/hub-receiving/use-receiving-locks';
@@ -35,6 +37,8 @@ export interface VendorSectionProps {
   readonly vendor: VendorView;
   /** The officer holds the key that checks parcels in: without it the section shows the vendor and offers no act. */
   readonly mayCount: boolean;
+  /** The officer holds the key that makes orders: a vendor whose check-in is open may then have its orders started from the photos (D-D6). */
+  readonly mayOrder: boolean;
   readonly acts: RunActs;
   /** The vendor to check in after this one, or nothing when none waits. */
   readonly next: VendorView | undefined;
@@ -124,6 +128,29 @@ function Notice({
 const barClass = (inWork: boolean): string =>
   inWork ? 'receiving-actions receiving-actions--sticky' : 'receiving-actions';
 
+/** The way on from a vendor that is cleared for its orders, or closed: to its orders, where the work that is really left is counted (S1.40). Nothing is drawn for a vendor that is not there yet. */
+function OrdersWay({ vendor }: { readonly vendor: VendorView }) {
+  if (vendor.state === 'READY_FOR_ITEMIZATION' || vendor.state === 'ITEMIZING') {
+    return (
+      <div className={barClass(false)}>
+        <ButtonLink to={ordersPath(vendor.intake_id)} size="lg">
+          {ORDERS_WORDS.workspace.acts.makeOrders}
+        </ButtonLink>
+      </div>
+    );
+  }
+  if (vendor.state === 'CLOSED') {
+    return (
+      <div className={barClass(false)}>
+        <ButtonLink to={ordersPath(vendor.intake_id)} variant="secondary" size="lg">
+          {ORDERS_WORDS.workspace.acts.seeOrders}
+        </ButtonLink>
+      </div>
+    );
+  }
+  return null;
+}
+
 /** A vendor whose parcels are counted and not checked in (Ops excused the door photos): one line says how, and the count is typed before the rider's number is shown. Nothing of that number is here. */
 function BlindVendor({
   vendor,
@@ -155,6 +182,7 @@ function BlindVendor({
         <p>{WORDS.vendor.blind.variance[vendor.count_variance]}</p>
       )}
       <p>{WORDS.vendor.standing[vendor.state]}</p>
+      <OrdersWay vendor={vendor} />
     </>
   );
 }
@@ -168,13 +196,14 @@ function BlindVendor({
 function PhotoVendor({
   vendor,
   mayCount,
+  mayOrder,
   firstToCheck,
   acts,
   onNotice,
   readAgain,
 }: Pick<
   VendorSectionProps,
-  'vendor' | 'mayCount' | 'firstToCheck' | 'acts' | 'onNotice' | 'readAgain'
+  'vendor' | 'mayCount' | 'mayOrder' | 'firstToCheck' | 'acts' | 'onNotice' | 'readAgain'
 >) {
   const [chosen, setChosen] = useState(false);
   const [dialog, setDialog] = useState<'all' | 'finish' | 'extra' | undefined>(undefined);
@@ -231,11 +260,20 @@ function PhotoVendor({
               {WORDS.vendor.tally(vendor.arrived_count ?? 0, expected, vendor.extra_count)}
             </p>
           ) : null}
+          {/* The orders of a vendor whose check-in is open may be started from its photos (D-D6): the officer who is looking at them is offered the way, and the orders page says which parcels are not here yet. */}
+          {mayOrder && expected > 0 ? (
+            <p>
+              <ButtonLink to={ordersPath(vendor.intake_id)} variant="secondary">
+                {ORDERS_WORDS.workspace.acts.earlyOrders}
+              </ButtonLink>
+            </p>
+          ) : null}
         </>
       ) : (
         <>
           <p>{WORDS.vendor.standing[vendor.state]}</p>
           <p>{countsText(vendor)}</p>
+          <OrdersWay vendor={vendor} />
           {mayCount && vendor.state === 'RECONCILIATION_REQUIRED' && vendor.missing_count > 0 ? (
             <p>{WORDS.vendor.findHint}</p>
           ) : null}
@@ -432,6 +470,7 @@ function PhotoVendor({
 export function VendorSection({
   vendor,
   mayCount,
+  mayOrder,
   acts,
   next,
   firstToCheck,
@@ -463,6 +502,7 @@ export function VendorSection({
         <PhotoVendor
           vendor={vendor}
           mayCount={mayCount}
+          mayOrder={mayOrder}
           firstToCheck={firstToCheck}
           acts={acts}
           onNotice={onNotice}

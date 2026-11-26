@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { HubConfiguration, type HubSettingRecord } from '../platform/settings/hub-configuration.js';
 import { HUB_SETTINGS, LAUNCH_HUB_ID } from '../tools/seed/hub-configuration.js';
 import { bookingEstimate } from './booking-estimate.js';
-import { priceOf, weekdayOf, PricingRefusal, type PriceInput } from './price-calculation.js';
+import {
+  isHighValue,
+  priceOf,
+  weekdayOf,
+  PricingRefusal,
+  type PriceInput,
+} from './price-calculation.js';
+import { SettingInvalidError } from '../platform/settings/settings-reader.js';
 
 /**
  * The fee of a destination and the booking estimate (S1.6; settings.md §7.2; itemization.md §5.1; `MSC-DEC-207`, `-209`, `-210`,
@@ -325,5 +332,145 @@ describe('the booking estimate (MSC-DEC-211)', () => {
     expect(
       codeOf(() => bookingEstimate(configWith(), { packageCount: 2, serviceDate: SUNDAY })),
     ).toBe('SERVICE_DATE_NOT_PERMITTED');
+  });
+});
+
+describe('the high-value surcharge (D-06, AC-SLICE-001-54)', () => {
+  const area = { kind: 'IN_AREA_DOORSTEP', serviceArea: 'ACCRA_TEMA' } as const;
+  const priced = (declaredValueMinor: number | undefined) =>
+    priceOf(configWith(), {
+      destination: area,
+      deliveryDate: MONDAY,
+      sizeClass: 'SMALL',
+      ...(declaredValueMinor === undefined ? {} : { declaredValueMinor }),
+    });
+
+  // Break caught: a band boundary moved by a pesewa (exactly GH₵500 is below the first band; exactly GH₵2,000 is still in it), a band charged twice, or the bands read from the wrong end.
+  it.each([
+    [0, 0],
+    [49999, 0],
+    [50000, 0],
+    [50001, 1000],
+    [150000, 1000],
+    [200000, 1000],
+    [200001, 2000],
+    [5_000_000, 2000],
+  ])('a declared value of %i pesewas adds a surcharge of %i', (declared, surcharge) => {
+    const price = priced(declared);
+    expect(price.totalMinor).toBe(3500 + surcharge);
+    expect(price.components.some((component) => component.kind === 'HIGH_VALUE_SURCHARGE')).toBe(
+      surcharge > 0,
+    );
+  });
+
+  // Break caught: the surcharge dropped for a destination, or applied in place of the fee instead of on top of it (D-06: its own component, stacked).
+  it.each([
+    ['a doorstep delivery', area, 3500],
+    ['a Station Drop', { kind: 'STATION_DROP' }, 2000],
+    [
+      'a third-party delivery',
+      { kind: 'OUTSIDE_SERVICE_AREA', carrierCostMinor: 5000 },
+      5000 + 3000 + 3000,
+    ],
+  ] as const)('is stacked on %s', (_name, destination, fee) => {
+    const price = priceOf(configWith(), {
+      destination,
+      deliveryDate: MONDAY,
+      sizeClass: 'LARGE',
+      declaredValueMinor: 300000,
+    });
+    expect(price.totalMinor).toBe(fee + 2000);
+    expect(price.components.at(-1)).toMatchObject({
+      kind: 'HIGH_VALUE_SURCHARGE',
+      amountMinor: 2000,
+    });
+    expect(price.components.reduce((sum, component) => sum + component.amountMinor, 0)).toBe(
+      price.totalMinor,
+    );
+  });
+
+  // Break caught: a component that does not name where its amount came from (a frozen price that cannot be explained, §3.7), or one that names the wrong key.
+  it('names the hub, the key and the version it was read from', () => {
+    const component = priced(100000).components.find(
+      (each) => each.kind === 'HIGH_VALUE_SURCHARGE',
+    );
+    expect(component?.reference).toEqual({
+      hubId: LAUNCH_HUB_ID,
+      settingKey: 'MELARC_HIGH_VALUE_TIERS',
+      scopeRef: '',
+      effectiveVersion: 1,
+    });
+  });
+
+  // Break caught: the tiers read for a parcel that has no declared value (the estimate has none), which would make a booking fail for a setting it never needs.
+  it('reads the tiers only for a parcel that has a declared value', () => {
+    const without = configWith({ without: ['MELARC_HIGH_VALUE_TIERS'] });
+    const input = { destination: area, deliveryDate: MONDAY, sizeClass: 'SMALL' } as const;
+    expect(priceOf(without, input).totalMinor).toBe(3500);
+    expect(codeOf(() => priceOf(without, { ...input, declaredValueMinor: 1000 }))).toBe(
+      'SETTING_MISSING',
+    );
+  });
+
+  // Break caught: a parcel flagged high value at, or below, the declaration threshold, or not flagged above it.
+  it.each([
+    [0, false],
+    [50000, false],
+    [50001, true],
+    [200000, true],
+    [9_999_999, true],
+  ])('flags a declared value of %i as high value: %s', (declared, flagged) => {
+    expect(isHighValue(configWith(), declared)).toBe(flagged);
+  });
+
+  it('refuses to flag without the hub’s tiers, and refuses a declared value that is not pesewas', () => {
+    expect(
+      codeOf(() => isHighValue(configWith({ without: ['MELARC_HIGH_VALUE_TIERS'] }), 60000)),
+    ).toBe('SETTING_MISSING');
+    for (const declared of [-1, 1.5, Number.NaN]) {
+      expect(() => isHighValue(configWith(), declared), String(declared)).toThrow(RangeError);
+    }
+  });
+
+  // Break caught: a tiers value that is not bands (read as no band and so no surcharge, silently).
+  it.each([
+    ['not a list', { above_minor: 50000, surcharge_minor: 1000 }],
+    ['an empty list', []],
+    ['a band with a third member', [{ above_minor: 50000, surcharge_minor: 1000, extra: 1 }]],
+    ['a negative amount', [{ above_minor: 50000, surcharge_minor: -1 }]],
+    [
+      'bands that do not rise',
+      [
+        { above_minor: 200000, surcharge_minor: 2000 },
+        { above_minor: 50000, surcharge_minor: 1000 },
+      ],
+    ],
+    [
+      'two bands with one boundary',
+      [
+        { above_minor: 50000, surcharge_minor: 1000 },
+        { above_minor: 50000, surcharge_minor: 2000 },
+      ],
+    ],
+  ])('reads %s as an invalid setting, not as no surcharge', (_name, value) => {
+    const config = new HubConfiguration({
+      hubId: LAUNCH_HUB_ID,
+      at: AT,
+      zones: [],
+      aliases: [],
+      settings: [
+        {
+          hubId: LAUNCH_HUB_ID,
+          key: 'MELARC_HIGH_VALUE_TIERS',
+          scopeRef: '',
+          version: 1,
+          value,
+          unit: 'pesewas, by band',
+          effectiveFrom: new Date('2026-10-01T00:00:00Z'),
+        },
+      ],
+      company: [],
+    });
+    expect(() => config.highValueTiers()).toThrow(SettingInvalidError);
   });
 });

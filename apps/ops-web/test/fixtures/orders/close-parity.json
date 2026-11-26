@@ -1,0 +1,52 @@
+{
+  "id": "01a124d3-7400-77c4-bdb1-af656ac0909f",
+  "code": "ACC-IN-2P6VNW",
+  "hub_id": "5eed0100-0000-4000-8000-000000000001",
+  "pickup_request_id": "8b91f6af-04ea-4c2d-8a6b-9c8d9f196a9a",
+  "pickup_manifest_id": "7d8c3867-7cc8-4d92-9297-479272c46178",
+  "run_code": "ACC-MF-J4V88J",
+  "state": "CLOSED",
+  "count_phase": "CHECK_IN",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "vendor_name": "Fixture Sender",
+  "handed_over_by_name": "Rider ac4a99de",
+  "handed_over_at": "2026-11-22T22:52:03.111Z",
+  "parcels_expected": 2,
+  "rider_declared_count": 2,
+  "arrived_count": 2,
+  "received_count": 2,
+  "count_variance": "MATCH",
+  "count_difference": 0,
+  "counted_at": "2026-11-22T22:52:03.662Z",
+  "counted_by_name": "Ama Mensah",
+  "lock": null,
+  "parcels": [
+    {
+      "id": "01a20575-9ad1-7771-8dd9-7fd9645803de",
+      "ordinal": 1,
+      "origin": "DOOR_PHOTO",
+      "state": "ARRIVED",
+      "photo_evidence_id": "01a124d3-7400-7a20-8c37-4c6f669e009e",
+      "arrived_by_name": "Ama Mensah",
+      "arrived_at": "2026-11-22T22:52:03.651Z",
+      "missing_marked_at": null,
+      "condition": null
+    },
+    {
+      "id": "01a20575-9ada-70a7-87c9-98be60877300",
+      "ordinal": 2,
+      "origin": "DOOR_PHOTO",
+      "state": "ARRIVED",
+      "photo_evidence_id": "01a124d3-7400-737c-92d0-2248cec1db58",
+      "arrived_by_name": "Ama Mensah",
+      "arrived_at": "2026-11-22T22:52:03.652Z",
+      "missing_marked_at": null,
+      "condition": null
+    }
+  ],
+  "missing_count": 0,
+  "extra_count": 0,
+  "damaged_count": 0,
+  "condition": "OK",
+  "condition_findings": []
+}

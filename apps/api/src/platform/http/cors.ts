@@ -31,10 +31,11 @@ import { writeFailure } from './all-exceptions.filter.js';
 const ALLOWED_METHODS = 'GET, HEAD, POST, PUT, PATCH, DELETE';
 const ALLOWED_HEADERS = 'Content-Type, X-CSRF-Token, Idempotency-Key, If-Match';
 /**
- * What a page may read of an answer besides the safelisted headers: the request id, the record version and `Retry-After`, the wait a `429` tells (A2 of the
- * audit; `RETRY_AFTER` of the contract's headers): it is not a safelisted header, so a page of another configured origin could not read it without this.
+ * What a page may read of an answer besides the safelisted headers: the request id, the record version, **the vendor's version an order is answered with** (`Intake-ETag` of `itemizeOrder`, Run G1 Part 1 item 7:
+ * the Ops Portal's page makes the next order on it, and a cross-origin page could not read it without this) and `Retry-After`, the wait a `429` tells (A2 of the audit; `RETRY_AFTER` of the contract's headers): none is a
+ * safelisted header, so a page of another configured origin could not read them without this.
  */
-const EXPOSED_HEADERS = 'X-Request-Id, ETag, Retry-After';
+const EXPOSED_HEADERS = 'X-Request-Id, ETag, Intake-ETag, Retry-After';
 
 const isPreflight = (request: Request): boolean =>
   request.method === 'OPTIONS' && request.headers['access-control-request-method'] !== undefined;

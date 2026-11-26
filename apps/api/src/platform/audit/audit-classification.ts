@@ -80,6 +80,8 @@ export const ENHANCED_CODES = [
   'pricing.reprice.approved',
   'pricing.size_class.selected',
   'pricing.carrier_cost.captured',
+  'order.amendment.recorded',
+  'order.arrival.reversed',
   'staff.identity.approved',
   'staff.identity.rejected',
   'staff.identity.suspended',

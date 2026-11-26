@@ -7,7 +7,10 @@ import type { AuditWriter } from '../platform/auth/ports/audit-writer.port.js';
 import type { Clock } from '../platform/auth/ports/clock.port.js';
 import type { IdempotencyStore } from '../platform/auth/ports/idempotency-store.port.js';
 import type { TransactionHandle } from '../platform/auth/ports/unit-of-work.port.js';
-import type { AuthorizedRequest } from '../platform/authorization/authorized-request.js';
+import {
+  authorizationForKey,
+  type AuthorizedRequest,
+} from '../platform/authorization/authorized-request.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import {
   guardReasonIn,
@@ -21,6 +24,8 @@ import { isIdempotencyKey } from '../platform/idempotency/idempotency-scope.js';
 import { noteHubCrossing } from './hub-crossing.js';
 import { hubIntakeEtagMatches } from './hub-intake-etag.js';
 import type { HubIntakePostCountView } from './hub-intake-view.js';
+import { closureTokenOf, closureViewOf, readClosureRow } from './intake-worklist.service.js';
+import { confirmWaitingOrders } from './order-confirmation.js';
 import {
   RECEIVING_INTAKE_COLUMNS,
   loadIntakes,
@@ -70,6 +75,43 @@ export interface ParcelAnswer {
 export interface CheckedIntake {
   readonly intake: HubIntakeCheckInView | HubIntakePostCountView;
   readonly etag: string;
+}
+
+/** The body of `closeHubIntake`: nothing, or the approved exception to parity with its reason (S1.38). */
+export interface IntakeCloseBody {
+  /** The `assessment_token` of the closure the officer read: required with the exception, and when given it must be what a close would find now. */
+  readonly reviewed_assessment?: string;
+  readonly parity_exception?: { readonly note: string };
+}
+
+/**
+ * What the close of the database refused, as the answer the contract names (`ORDER_UNPRICED`, `PARITY_NOT_MET` and `INSUFFICIENT_AUTHORITY` are the reasons its guard names; the states, the shapes and the
+ * rest are `receivingRefusalOf`'s). The service has judged each of them before it asks, so these are the answers of a race and of every other writer's guard.
+ */
+export function closeRefusalOf(error: unknown): ApiException | undefined {
+  const rule = guardRuleIn(error);
+  switch (guardReasonIn(error)) {
+    case 'ORDER_UNPRICED':
+      return ApiException.of(
+        ErrorCode.OrderUnpriced,
+        'An order of a parcel that arrived has no locked price',
+        { rule: rule ?? 'order_unpriced' },
+      );
+    case 'PARITY_NOT_MET':
+      return ApiException.of(
+        ErrorCode.ParityNotMet,
+        'The orders are not as many as the parcels the hub received',
+        { rule: rule ?? 'parity_not_met' },
+      );
+    case 'INSUFFICIENT_AUTHORITY':
+      return ApiException.of(
+        ErrorCode.InsufficientAuthority,
+        'Closing without parity is the approved exception, and it is Senior Ops’s',
+        { rule: rule ?? 'close_exception_required' },
+      );
+    default:
+      return undefined;
+  }
 }
 
 const OPERATIONS = {
@@ -171,6 +213,10 @@ export class HubCheckIns {
       }
       if (moved === undefined) throw new Error('A locked parcel was not asked about its arrival');
       const after = await this.#reload(tx, intakeId, caller);
+      // A parcel found after the vendor was finished is an arrival that can no longer be taken back: the order that waited for it is confirmed (D-D6). A tap made while the vendor is open confirms nothing.
+      if (moved.parcel_previous_state === 'MISSING' && moved.parcel_resulting_state === 'ARRIVED') {
+        await confirmWaitingOrders(handle, this.#options.audit, after.row);
+      }
       if (moved.parcel_previous_state === 'MISSING' && moved.parcel_resulting_state === 'ARRIVED') {
         await this.#options.audit.write(handle, {
           code: 'hub.parcel.found',
@@ -253,6 +299,8 @@ export class HubCheckIns {
         throw receivingRefusalOf(error, '/confirmed_count') ?? error;
       }
       if (moved === undefined) throw new Error('A locked vendor was not finished');
+      // The vendor is finished: the arrivals are committed, and the orders that waited for the parcels that arrived are confirmed (D-D6).
+      await confirmWaitingOrders(handle, this.#options.audit, row);
       const after = await this.#reload(tx, id, caller);
       const declared = after.view.rider_declared_count;
       await this.#options.audit.write(handle, {
@@ -434,6 +482,8 @@ export class HubCheckIns {
         );
       }
       if (moved === undefined) throw new Error('A locked intake was not corrected');
+      // A correction that brings a parcel back commits its arrival: the order that waited for it is confirmed (D-D6). A parcel whose order is priced is never taken back (the database holds it).
+      await confirmWaitingOrders(handle, this.#options.audit, row);
       const after = await this.#reload(tx, id, caller);
       const changed = Array.isArray(moved.changed)
         ? (moved.changed as Record<string, unknown>[])
@@ -498,6 +548,184 @@ export class HubCheckIns {
         violations: [{ in: 'header', pointer: 'Idempotency-Key', rule: 'format' }],
       });
     }
+  }
+
+  /**
+   * `closeHubIntake` (S1.38; `hub.intake.close`, and `hub.intake.close_exception` for a close without parity; features/hub/itemization.md sections 5.1 and 5.2; `AC-SLICE-001-40`, `-51`, `-52`): the intake is
+   * closed when every parcel the hub received has its order. **Parity is the orders of the parcels that arrived (and of a blind count) against the hub-received count, never against the rider's declaration**, and
+   * an order in `PAYMENT_REQUIRED` counts (it is blocked from dispatch and not from the close); an order with no locked price refuses the close (`ORDER_UNPRICED`). **The only way past a parity that is not met
+   * is the approved exception**: a body with `parity_exception.note`, which the officer may give only if the session holds `hub.intake.close_exception` (`INSUFFICIENT_AUTHORITY` when it holds the close alone,
+   * the key held and the tier not), with a reason in words (`REASON_REQUIRED`); an exception for an intake that has parity is refused (`VALIDATION_FAILED`, rule `exception_not_needed`). An intake whose orders
+   * were all made early is still `READY_FOR_ITEMIZATION` and is closed through `ITEMIZING` in the same change (OB-S1-142). The event is `hub.intake.closed`, or `hub.intake.closed_exception` (enhanced, the reason
+   * as its note); **`intake.completed` is the business name of the transition and has no store of its own** (OB-S1-143), and the vendor reads the summary with `getIntakeSummary`.
+   */
+  async close(
+    authorized: AuthorizedRequest,
+    correlationId: string,
+    id: string,
+    request: {
+      readonly body: IntakeCloseBody | undefined;
+      readonly ifMatch: string | undefined;
+      readonly idempotencyKey: string;
+      readonly fingerprint: string;
+    },
+  ): Promise<CheckedIntake> {
+    this.#requireStaff(authorized);
+    this.#requireKey(request.idempotencyKey);
+    const caller = authorized.session.principalId.toLowerCase();
+    const exception = request.body?.parity_exception;
+    let note: string | null = null;
+    // The exception is judged where a malformed body is: before the operation begins, in the order of the repo (a blank reason is told before a shape, the key last).
+    if (exception !== undefined) {
+      note = requiredNote(exception.note, '/parity_exception/note').trim();
+    }
+    let acting = authorized;
+    if (exception !== undefined) {
+      const held = authorizationForKey(authorized, 'hub.intake.close_exception');
+      if (held === undefined) {
+        throw ApiException.of(
+          ErrorCode.InsufficientAuthority,
+          'Closing without parity is the approved exception, and it is Senior Ops’s',
+          { rule: 'close_exception_required' },
+        );
+      }
+      acting = held;
+      // A reason is written for what the officer read: the exception is closed against that assessment (the review of 20 November 2026, finding 6). Told after the authority, which is the senior's.
+      if (request.body?.reviewed_assessment === undefined) {
+        throw invalid('/reviewed_assessment', 'required');
+      }
+    }
+    return this.#options.runner.mutate(acting, correlationId, async (handle) => {
+      const tx = transactionOf(handle);
+      const { replay, scope } = await this.#begin(handle, acting, 'closeHubIntake', request);
+      if (replay !== undefined) return replay;
+      const row = await this.#lock(handle, acting, id);
+      await this.#requireCurrent(tx, row, request.ifMatch, acting);
+      const read = await tx.execute(
+        sql`select state, receiving_mode, received, ordered, unpriced from melarc.intake_close_facts(${id}::uuid)`,
+      );
+      const facts = read.rows[0] as
+        | {
+            state: string;
+            receiving_mode: string;
+            received: number | null;
+            ordered: number;
+            unpriced: number;
+          }
+        | undefined;
+      if (facts === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+      // The state first (a state is told before a reason): an intake is closed once it is cleared for itemizing, and only once.
+      if (facts.state !== 'READY_FOR_ITEMIZATION' && facts.state !== 'ITEMIZING') {
+        const rule =
+          facts.state === 'CLOSED'
+            ? 'already_closed'
+            : facts.state === 'RECONCILIATION_REQUIRED'
+              ? 'reconciliation_open'
+              : facts.state === 'AWAITING_COUNT'
+                ? facts.receiving_mode === 'PHOTO_CHECK_IN'
+                  ? 'check_in_open'
+                  : 'intake_not_counted'
+                : 'intake_not_ready';
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'The intake cannot be closed in this state',
+          {
+            rule,
+          },
+        );
+      }
+      // What the officer read is what a close would find now, or the close is refused with what it would find, for the officer to read again. The orders move under the intake's lock and not under its
+      // version (the `ETag` above does not change when an order is added), so the assessment is read here, after the lock, and compared.
+      const given = request.body?.reviewed_assessment;
+      if (given !== undefined) {
+        const assessed = await readClosureRow(tx, id);
+        if (assessed === undefined) throw ApiException.of(ErrorCode.NotFound, 'Not found');
+        if (given !== closureTokenOf(id, assessed)) {
+          throw ApiException.of(
+            ErrorCode.StateConflict,
+            'What a close would find is not what was reviewed: the assessment is shown again',
+            { rule: 'assessment_changed', current_assessment: closureViewOf(id, assessed) },
+          );
+        }
+      }
+      const received = facts.received ?? 0;
+      // More orders than parcels received is never closed over, with the exception or without it: the exception is for parcels that are missing an order, and an order with no parcel is corrected first (the review of
+      // 21 November 2026, finding 1). The database holds the same for every writer.
+      if (facts.ordered > received) {
+        throw ApiException.of(
+          ErrorCode.StateConflict,
+          'The orders are more than the parcels the hub received: the surplus is corrected before the intake is closed',
+          {
+            rule: 'orders_exceed_received',
+            received_count: received,
+            itemized_count: facts.ordered,
+          },
+        );
+      }
+      if (facts.unpriced > 0) {
+        throw ApiException.of(
+          ErrorCode.OrderUnpriced,
+          'An order of a parcel that arrived has no locked price',
+          { rule: 'order_unpriced', unpriced_count: facts.unpriced },
+        );
+      }
+      const parity = facts.ordered === received;
+      if (!parity && exception === undefined) {
+        throw ApiException.of(
+          ErrorCode.ParityNotMet,
+          'The orders are not as many as the parcels the hub received',
+          { rule: 'parity_not_met', received_count: received, itemized_count: facts.ordered },
+        );
+      }
+      if (parity && exception !== undefined)
+        throw invalid('/parity_exception', 'exception_not_needed');
+      const exceptionId = exception === undefined ? null : randomUUIDv7(this.#options.clock);
+      let moved: { previous_state: string } | undefined;
+      try {
+        const done = await tx.execute(
+          sql`select previous_state from melarc.close_intake(${id}::uuid, ${exceptionId}::uuid, ${note}::text)`,
+        );
+        moved = done.rows[0] as typeof moved;
+      } catch (error) {
+        throw closeRefusalOf(error) ?? receivingRefusalOf(error, '/parity_exception') ?? error;
+      }
+      if (moved === undefined) throw new Error('A locked intake was not closed');
+      const after = await this.#reload(tx, id, caller);
+      await this.#options.audit.write(handle, {
+        code: exception === undefined ? 'hub.intake.closed' : 'hub.intake.closed_exception',
+        enhanced: exception !== undefined,
+        outcome: 'SUCCEEDED',
+        object: { type: 'PickupIntake', id },
+        responsibleHubId: after.row.responsible_hub_id,
+        previousState: moved.previous_state,
+        resultingState: 'CLOSED',
+        ...(note === null ? {} : { note }),
+        ...(exception === undefined
+          ? {}
+          : {
+              beforeAfter: {
+                state: { before: 'ITEMIZING', after: 'CLOSED' },
+                itemized_count: { before: facts.ordered, after: facts.ordered },
+                received_count: { before: received, after: received },
+                parity_exception_id: { before: null, after: exceptionId },
+              },
+            }),
+        relatedIds: {
+          pickup_manifest_id: after.row.pickup_manifest_id,
+          pickup_request_id: after.row.pickup_request_id,
+        },
+        detail: {
+          receiving_mode: facts.receiving_mode,
+          received_count: received,
+          itemized_count: facts.ordered,
+          closed_from: moved.previous_state,
+          parity_met: parity,
+        },
+      });
+      const answer: CheckedIntake = { intake: after.view, etag: after.etag };
+      await this.#complete(handle, scope, answer);
+      return answer;
+    });
   }
 
   /** The retry: a replay is answered before anything about the intake is judged, another body under the same key is a conflict, and a record that began and did not complete is stranded. */

@@ -1,0 +1,72 @@
+{
+  "id": "01a124d3-7400-749c-b3c2-efab47c467a9",
+  "code": "ACC-OR-ERQWXE",
+  "pickup_intake_id": "01a124d3-7400-7107-a477-1868836f641f",
+  "responsible_hub_id": "5eed0100-0000-4000-8000-000000000001",
+  "intake_parcel_id": "01a20d67-9651-731b-be48-968f4480feb8",
+  "intake_parcel_state": "ARRIVED",
+  "intake_parcel_photo_evidence_id": "01a124d3-7400-7f35-90fd-d30c9647b7a8",
+  "commercial_state": "NO_VENDOR_CHARGE",
+  "fulfilment_state": "AWAITING_RECIPIENT_CONFIRMATION",
+  "origin_zone_snapshot": {
+    "scope": "UNRESOLVED",
+    "reason": "NONE"
+  },
+  "destination_zone_snapshot": {
+    "alias": "madina",
+    "scope": "SERVICE_AREA",
+    "zone_id": "5eed0101-0000-4000-8000-000000000001",
+    "zone_code": "TEMA",
+    "zone_name": "Tema",
+    "service_area": "ACCRA_TEMA"
+  },
+  "size_class": "SMALL",
+  "size_class_selected_by": "9cf27b4d-a842-4b2d-875d-c1cc837e6304",
+  "derived_delivery_date": "2026-11-25",
+  "is_high_value": false,
+  "is_high_value_manual": false,
+  "lane": "DOORSTEP",
+  "commercial_mode": null,
+  "price_status": "FROZEN",
+  "locked_price": {
+    "amount_minor": 3500,
+    "currency": "GHS"
+  },
+  "price_components_snapshot": {
+    "currency": "GHS",
+    "components": [
+      {
+        "kind": "SERVICE_AREA_BASE_FEE",
+        "hub_id": "5eed0100-0000-4000-8000-000000000001",
+        "scope_ref": "ACCRA_TEMA",
+        "setting_key": "service_area_base_fee",
+        "amount_minor": 3500,
+        "effective_version": 1
+      }
+    ],
+    "total_minor": 3500
+  },
+  "delivery_attempt_count": 0,
+  "recipient": {
+    "name": "Ama Mensah-Boateng",
+    "phone": "+233557654321",
+    "location": {
+      "address": "12 Madina Estate, near the market"
+    },
+    "phone_as_entered": "055 765 4321"
+  },
+  "declared_value_minor": null,
+  "is_serialized_goods": false,
+  "serial_imei": null,
+  "requested_delivery_date": null,
+  "service_level": "STANDARD",
+  "destination_zone_resolution": "SERVER_RESOLVED",
+  "delivery_date_override": null,
+  "payer_override": null,
+  "high_value_evidence_ids": [],
+  "carrier_waybill_evidence_id": null,
+  "payer_allocation": {
+    "sender_minor": 0,
+    "recipient_minor": 3500
+  }
+}

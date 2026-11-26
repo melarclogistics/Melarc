@@ -309,6 +309,35 @@ describe('who can reach the bootstrap, and by what', () => {
       'melarc.receiving_runs',
       'melarc.missing_parcels',
       'melarc.receiving_run_codes',
+      // S1.36 (migration 0110): what an order is made from, the order with its first commitment, and the confirmation of the orders that waited for a parcel.
+      'melarc.itemization_source',
+      'melarc.itemize_order',
+      'melarc.freeze_orders',
+      // S1.38 (migration 0112): the facts of a close, the close and the vendor's summary of a closed intake.
+      'melarc.intake_close_facts',
+      'melarc.close_intake',
+      'melarc.intake_summary',
+      // S1.39 (migration 0113): the portion of a locked price, the request and the decision of a payer correction and the payer edit before the freeze.
+      'melarc.payer_portion',
+      'melarc.request_payer_correction',
+      'melarc.decide_payer_correction',
+      'melarc.amend_request_payer',
+      // S1.39b and S1.39c (migrations 0114 to 0118): the parcel worklist, the counts of the whole intake and what a close would find, the names of a correction, the change and the reversal of an order, the payer preview, the lock on the request's payer, the judgement of cited evidence and the queue of the closes that left work.
+      'melarc.intake_worklist',
+      'melarc.intake_progress',
+      'melarc.intake_closure_assessment',
+      'melarc.correction_names',
+      'melarc.amend_order',
+      'melarc.reverse_order_arrival',
+      'melarc.payer_preview',
+      'melarc.hold_request_payer',
+      'melarc.evidence_citable',
+      'melarc.closed_intake_exceptions',
+      'melarc.vendor_order_parcel_state',
+      'melarc.intake_senior_needed',
+      'melarc.correct_order_recipient',
+      'melarc.order_recipient_corrected_here',
+      'melarc.set_parcel_vendor_wait',
     ]);
   });
 

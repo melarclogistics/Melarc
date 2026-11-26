@@ -76,8 +76,17 @@ export function usePhotoLink(
     staleTime: LINK_FRESH_MS,
     queryFn: async ({ signal }) => {
       // A tile that came near the screen is **automatic** work: while the API has asked the page to wait it waits too, and goes on when the wait is over (it is not retried). The photo the person opened is theirs, and is never held.
-      if (automatic) await hold.untilFree(`photo-link:${evidenceId}`, signal);
-      return photoLinkQueue.run(() => createRetrievalAuthorization(client, evidenceId), signal);
+      for (;;) {
+        if (automatic) await hold.untilFree(`photo-link:${evidenceId}`, signal);
+        const authorization = await photoLinkQueue.run(async () => {
+          // **The hold is judged again when its turn comes**, not only before it joined the queue: a page that draws a hundred tiles puts them all in the queue at once, and a refusal that arrives for the first
+          // of them must stop the ninety-six that have not been sent, not let them run one after another into the limit it has just told. A tile whose turn comes in a hold gives its place up at once (the places
+          // stay free for the photo a person opens) and waits for the end of it outside the queue.
+          if (automatic && hold.held) return undefined;
+          return createRetrievalAuthorization(client, evidenceId);
+        }, signal);
+        if (authorization !== undefined) return authorization;
+      }
     },
   });
   const { data, refetch } = query;

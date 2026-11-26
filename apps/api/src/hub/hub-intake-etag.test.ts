@@ -86,6 +86,28 @@ describe('the ETag of an intake', () => {
     ).toBe(free);
   });
 
+  // Break caught: a digest that takes in the vendor's name (Run G1, Part 1, item 4), so that a vendor renamed, or a read that names the vendor and a recomputation from the stored row that does not, would make every count and
+  // every itemization the officer has read stale.
+  it('does not move with the vendor’s name, which is said beside the intake and is no fact it holds', () => {
+    const unnamed = hubIntakeEtagOf(view(), 1);
+    expect(hubIntakeEtagOf({ ...view(), vendor_name: 'Ama Traders' }, 1)).toBe(unnamed);
+    expect(hubIntakeEtagOf({ ...view(), vendor_name: 'Another name' }, 1)).toBe(unnamed);
+    expect(
+      hubIntakeEtagOf(
+        {
+          ...view({ physical_count: 3, count_variance: 'MATCH', count_difference: 0 }, 3),
+          vendor_name: 'Ama Traders',
+        },
+        1,
+      ),
+    ).toBe(
+      hubIntakeEtagOf(
+        view({ physical_count: 3, count_variance: 'MATCH', count_difference: 0 }, 3),
+        1,
+      ),
+    );
+  });
+
   // Break caught: the facts of a count left out of the digest of a counted intake (its comparison, its declaration), or the declaration let into the digest of one that has not been counted.
   it('moves with the facts of a count, and a pre-count digest is made of nothing a declaration could change', () => {
     const counted = {

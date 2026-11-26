@@ -1,0 +1,68 @@
+{
+  "items": [
+    {
+      "id": "01a124d3-7400-7715-b5da-bd22578028d0",
+      "code": "ACC-IN-TSWQVE",
+      "hub_id": "5eed0100-0000-4000-8000-000000000001",
+      "pickup_request_id": "dba04bb7-3bb3-4b27-9917-31ce9724daa9",
+      "pickup_manifest_id": "b8ec7484-0596-4d34-a9d0-fc4d3ed5172b",
+      "run_code": "ACC-MF-SMU5WW",
+      "state": "ITEMIZING",
+      "count_phase": "CHECK_IN",
+      "receiving_mode": "PHOTO_CHECK_IN",
+      "vendor_name": "Fixture Sender",
+      "handed_over_by_name": "Rider 744b40ae",
+      "handed_over_at": "2026-11-22T22:51:54.732Z",
+      "parcels_expected": 3,
+      "rider_declared_count": 3,
+      "arrived_count": 3,
+      "received_count": 3,
+      "count_variance": "MATCH",
+      "count_difference": 0,
+      "counted_at": "2026-11-22T22:51:55.439Z",
+      "counted_by_name": "Ama Mensah",
+      "lock": null,
+      "parcels": [
+        {
+          "id": "01a20575-7a2f-7698-931a-e00fe930f426",
+          "ordinal": 1,
+          "origin": "DOOR_PHOTO",
+          "state": "ARRIVED",
+          "photo_evidence_id": "01a124d3-7400-7f0a-9b7d-02fbb58f252e",
+          "arrived_by_name": "Ama Mensah",
+          "arrived_at": "2026-11-22T22:51:55.400Z",
+          "missing_marked_at": null,
+          "condition": null
+        },
+        {
+          "id": "01a20575-7a3b-7d45-9d1d-5f28a9980369",
+          "ordinal": 2,
+          "origin": "DOOR_PHOTO",
+          "state": "ARRIVED",
+          "photo_evidence_id": "01a124d3-7400-7293-be59-ccceb897c935",
+          "arrived_by_name": "Ama Mensah",
+          "arrived_at": "2026-11-22T22:51:55.404Z",
+          "missing_marked_at": null,
+          "condition": null
+        },
+        {
+          "id": "01a20575-7a46-7fcd-8ec1-7cd85025eeb4",
+          "ordinal": 3,
+          "origin": "DOOR_PHOTO",
+          "state": "ARRIVED",
+          "photo_evidence_id": "01a124d3-7400-7b45-b8af-00f1b58ff340",
+          "arrived_by_name": "Ama Mensah",
+          "arrived_at": "2026-11-22T22:51:55.406Z",
+          "missing_marked_at": null,
+          "condition": null
+        }
+      ],
+      "missing_count": 0,
+      "extra_count": 0,
+      "damaged_count": 0,
+      "condition": "OK",
+      "condition_findings": []
+    }
+  ],
+  "next_page_token": null
+}

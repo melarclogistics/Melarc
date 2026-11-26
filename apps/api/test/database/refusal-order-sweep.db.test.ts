@@ -96,6 +96,8 @@ const VENDOR_SELF = new Set([
 const VENDOR_SERVED = new Set([
   'createPickupRequest',
   'cancelPickupRequest',
+  // S1.39: the vendor edits the payer arrangement of its own pending request.
+  'amendPickupRequest',
   // S1.27 and S1.29: the vendor enters the code its rider shows, and disputes the collection of its own pickup.
   'verifyHandshake',
   'disputeCollection',

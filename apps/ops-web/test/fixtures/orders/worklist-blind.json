@@ -1,0 +1,33 @@
+{
+  "intake_id": "01a124d3-7400-7123-a7e2-9b24f258ca05",
+  "intake_state": "ITEMIZING",
+  "receiving_mode": "BLIND_COUNT",
+  "progress": {
+    "received": 2,
+    "awaiting_arrival": 0,
+    "needs_order": 1,
+    "prepared": 0,
+    "itemized": 1,
+    "payment_required": 0,
+    "missing": 0,
+    "orders": 1
+  },
+  "items": [
+    {
+      "work_state": "ITEMIZED",
+      "reversed_order": null,
+      "parcel": null,
+      "order": {
+        "id": "01a124d3-7400-7b1c-9017-26a3825ef48f",
+        "code": "ACC-OR-SBAZD3",
+        "recipient_name": "Ama Mensah",
+        "service_area": "ACCRA_TEMA",
+        "size_class": "SMALL",
+        "commercial_state": "NO_VENDOR_CHARGE",
+        "confirmed": true,
+        "payment_required": false
+      }
+    }
+  ],
+  "next_page_token": null
+}

@@ -634,3 +634,52 @@ export const PICKUP_REQUEST_PAGE_SCHEMA = described({
     next_page_token: { type: ['string', 'null'] },
   },
 });
+
+const AMEND_LOCATION = {
+  type: 'object',
+  required: ['address'],
+  properties: {
+    address: { type: 'string' },
+    landmark: { type: 'string' },
+    map_link: { type: 'string', format: 'uri' },
+    latitude: { type: 'number' },
+    longitude: { type: 'number' },
+  },
+} as const;
+
+/** The body of `amendPickupRequest` (the contract's `PickupRequestAmend`): at least one member; the payer arrangement is the one the build edits (S1.39), and the other members are refused by name. */
+export const PICKUP_REQUEST_AMEND_BODY = described({
+  type: 'object',
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    pickup_location: AMEND_LOCATION,
+    location_overrides: AMEND_LOCATION,
+    vendor_pickup_location_id: { type: 'string', format: 'uuid' },
+    primary_phone: { type: 'string' },
+    secondary_phone: { type: 'string' },
+    payer: {
+      type: 'object',
+      required: ['payer_intent'],
+      additionalProperties: false,
+      properties: {
+        payer_intent: { type: 'string', enum: ['RECIPIENT_PAYS', 'SENDER_PAYS_FULL', 'SPLIT'] },
+        split_basis: { type: 'string', enum: ['FIXED_AMOUNT', 'PERCENTAGE'] },
+        split_sender_amount: {
+          type: 'object',
+          required: ['amount_minor', 'currency'],
+          properties: {
+            amount_minor: {
+              type: 'integer',
+              description:
+                'Minor units — Ghana pesewas. Never a float, never a decimal string. 2550 is GH₵25.50.\n',
+            },
+            currency: { type: 'string', enum: ['GHS'] },
+          },
+        },
+        split_sender_percentage: { type: 'number', minimum: 0, maximum: 100 },
+      },
+    },
+    note: { type: 'string' },
+  },
+});

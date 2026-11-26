@@ -1,0 +1,335 @@
+/*
+ * The order screens (S1.40: a vendor's orders, the form of an order and its review, an order's record, its change, the close, the summary, the payer corrections and the queues that find the work again).
+ * Presentation only: what a page shows and offers is its own and the API's. Every size, space and colour is a token. These are hub-floor screens (design/DESIGN_SYSTEM.md sections 11 and 12): the controls are
+ * the 56px of `--control-height-lg` (the page asks for it, the components draw it), and a line of text is never narrower than the page lets it be.
+ */
+
+/* A quiet sentence under a heading or beside a figure: what a rule is, or what the page does not do. It is not a warning. */
+.orders-note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.orders-quiet {
+  color: var(--color-text-secondary);
+}
+
+/* The figures above the list of a vendor's orders: the counts of the whole vendor, never of a page, and the sentences that go with them. */
+.orders-summary {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.orders-summary p {
+  margin: 0;
+}
+
+/* The parcel of a row: its photo and its name side by side, the photo a small square cropped to its box and never stretched, so that two rows are the same height. */
+.orders-parcel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.orders-photo__tile,
+.orders-photo__none {
+  display: block;
+  inline-size: var(--space-16);
+  block-size: var(--space-16);
+  margin-block: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+  flex: none;
+}
+
+/* The photo of a parcel with none, opened whole: a line and not an empty box. */
+p.orders-photo__none {
+  inline-size: auto;
+  block-size: auto;
+  background: none;
+  color: var(--color-text-secondary);
+}
+
+/* Where a row stands: the badge, and the one fact beside it that the badge does not say. */
+.orders-standing {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The reason a vendor waits for a senior officer and, under it, the act of that reason, in the one fact of a card (the table has a column for each). */
+.orders-senior {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+/* The page that says what came of an act (an order saved, a vendor closed) and the way on: focus comes to it, so that a keyboard or a screen reader is told what happened. */
+.orders-saved {
+  display: grid;
+  gap: var(--space-4);
+  max-inline-size: 40rem;
+}
+
+.orders-saved:focus-visible,
+.orders-notice:focus-visible,
+.orders-refusal:focus-visible {
+  outline: 2px solid var(--color-border-strong);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-md);
+}
+
+/* The acts of that page: side by side while they fit and one under the other when they do not, with the gap of a thumb between them. */
+.orders-saved__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* The acts that follow the facts of a record or a note in the flow of a page, which is no grid that spaces what it holds: the space of a thumb above them, or the buttons are drawn against the line over them. */
+.orders-saved__acts--after {
+  margin-block-start: var(--space-4);
+}
+
+.orders-notice {
+  margin-block-end: var(--space-4);
+}
+
+/* The review before an order is saved: what the server worked out, in blocks that are read from the top, the price first. */
+.orders-review {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.orders-review__block {
+  display: grid;
+  gap: var(--space-2);
+  padding-block-end: var(--space-4);
+  border-block-end: 1px solid var(--color-border-subtle);
+}
+
+.orders-review__block:last-child {
+  border-block-end: 0;
+  padding-block-end: 0;
+}
+
+.orders-review__block p {
+  margin: 0;
+}
+
+.orders-review__heading {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  line-height: var(--text-heading-sm-line-height);
+  font-weight: var(--text-heading-sm-weight);
+}
+
+/* The price, the one figure that is read first: larger than the words around it. */
+.orders-review__total {
+  font-size: var(--text-heading-md-size);
+  line-height: var(--text-heading-md-line-height);
+  font-weight: var(--text-heading-md-weight);
+}
+
+.orders-review__changed-title {
+  margin: 0;
+  font-weight: var(--text-heading-sm-weight);
+}
+
+.orders-review__changes {
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-6);
+}
+
+/* The parcels that have no order yet, at the close: a photo and a name each, wrapping, so that a hundred of them are a few lines and not a column. */
+.orders-outstanding {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orders-outstanding__item {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  inline-size: var(--space-16);
+}
+
+/* What was said about a close, and what became of it: one message to a line, with its status, so that a held-back message is as plain as a delivered one. */
+.orders-said {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orders-said__entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The form of an order with the photo and the price beside it (D-S7-2 and the review of 23 November 2026, item 1). The form is a container (task-form): where it has about 40rem (a tablet at 768px has 41rem) the
+   photo and the price are a column beside the fields and stay in view while the fields scroll; where it has not, the photo is at the top and stays there while the fields scroll under it, the fields come next
+   and the price follows them, above the save. */
+.orders-layout {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'photo'
+    'fields'
+    'price';
+}
+
+.orders-layout__side {
+  display: contents;
+}
+
+.orders-layout__photo {
+  grid-area: photo;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-block: var(--space-2);
+  background: var(--color-surface-page, var(--color-surface-subtle));
+}
+
+.orders-layout__photo img {
+  max-height: 38dvh;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.orders-layout__fields {
+  grid-area: fields;
+  min-width: 0;
+}
+
+.orders-layout__price {
+  grid-area: price;
+  min-width: 0;
+}
+
+@container task-form (min-width: 40rem) {
+  .orders-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 22rem);
+    grid-template-areas: 'fields side';
+    align-items: start;
+  }
+
+  .orders-layout__side {
+    display: grid;
+    gap: var(--space-4);
+    grid-area: side;
+    position: sticky;
+    top: var(--space-4);
+    max-height: calc(100dvh - var(--space-8));
+    overflow-y: auto;
+  }
+
+  /* Inside the column the photo and the price are the two rows of the column's own grid. They carry the names of the cells of the layout around it, and left named both were put in one cell, the photo drawn over the top
+     of the price (the title, the total, the zone) where nothing could be read. */
+  .orders-layout__photo {
+    grid-area: auto;
+    position: static;
+    padding-block: 0;
+    background: none;
+  }
+
+  .orders-layout__price {
+    grid-area: auto;
+  }
+
+  .orders-layout__photo img {
+    max-height: 32dvh;
+  }
+}
+
+.orders-price {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.orders-price__title {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+/* What was typed, above the one save: a line the officer reads before pressing it. */
+.orders-typed {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.orders-typed__label {
+  font-weight: var(--text-heading-sm-weight);
+  color: inherit;
+}
+
+/* The screen of a saved order of a vendor counted without photos (D-S7-3): the code is what goes on the parcel, so it is large; where the vendor stands by the count and the orders made last follow it. */
+.orders-blind {
+  display: grid;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+}
+
+.orders-blind__lead {
+  margin: 0;
+  font-size: var(--text-heading-md-size);
+  font-weight: var(--text-heading-md-weight);
+  line-height: var(--text-heading-md-line-height);
+}
+
+.orders-blind__code {
+  margin: 0;
+  font-size: var(--text-display-sm-size);
+  line-height: var(--text-display-sm-line-height);
+  overflow-wrap: anywhere;
+}
+
+.orders-blind__position {
+  margin: 0;
+  font-size: var(--text-heading-sm-size);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.orders-blind__heading {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-heading-sm-size);
+  font-weight: var(--text-heading-sm-weight);
+  line-height: var(--text-heading-sm-line-height);
+}
+
+.orders-blind__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orders-blind__list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  align-items: baseline;
+}
+
+/* A refusal that removes the save, told where the save was (Run G1, Part 2, item 8): a row of its own among the actions. It is focusable (above) so that the focus has somewhere to go when the button it was on is gone. */
+.orders-refusal {
+  flex: 1 1 100%;
+}

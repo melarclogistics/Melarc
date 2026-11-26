@@ -100,6 +100,14 @@ export const pickupIntake = pgTable(
     lockOpenedAt: timestamp('lock_opened_at', { withTimezone: true }),
     /** `PHOTO_CHECK_IN` or `BLIND_COUNT` (`RECEIVING_MODES`): derived by the guard at the handover from the stop's door photos, and frozen. */
     receivingMode: text('receiving_mode').notNull().default('BLIND_COUNT'),
+    /**
+     * The close (S1.38, migration `0112`): the database's moment, the officer who closed the intake and, when it was closed without parity, the exception that allowed it and the reason in words. Written
+     * only by `melarc.close_intake`, held by the guard for every writer, never changed once made, and read by no grant of the runtime login (the summary and the audit say what they need).
+     */
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closedBy: uuid('closed_by'),
+    parityExceptionId: uuid('parity_exception_id'),
+    parityExceptionNote: text('parity_exception_note'),
     version: integer('version').notNull().default(1),
   },
   (table): PgTableExtraConfigValue[] => [
@@ -156,6 +164,11 @@ export const pickupIntake = pgTable(
     check(
       'pickup_intake_count_facts',
       sql`(${table.state} = 'AWAITING_COUNT') = (${table.physicalCount} IS NULL) AND (${table.physicalCount} IS NULL) = (${table.countedAt} IS NULL) AND (${table.physicalCount} IS NULL) = (${table.countedBy} IS NULL) AND (${table.physicalCount} IS NULL) = (${table.countVariance} IS NULL) AND (${table.physicalCount} IS NULL) = (${table.countDifference} IS NULL)`,
+    ),
+    // The close exists as a whole or not at all: the moment and the officer together, and an exception with its reason, only for a closed intake (S1.38).
+    check(
+      'pickup_intake_close_facts',
+      sql`(${table.closedAt} IS NULL) = (${table.closedBy} IS NULL) AND (${table.parityExceptionId} IS NULL) = (${table.parityExceptionNote} IS NULL) AND (${table.parityExceptionId} IS NULL OR ${table.closedAt} IS NOT NULL)`,
     ),
     // The advisory lock names its receiver and its moment together (S1.32).
     check(

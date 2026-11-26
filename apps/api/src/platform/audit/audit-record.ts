@@ -25,6 +25,7 @@ import {
   AUDIT_OBJECT_TYPES,
   AUDIT_SERIALISATION_VERSION,
 } from './audit-vocabulary.js';
+import { holdsPhoneNumber } from './phone-in-text.js';
 
 /** What the writer refuses, by the names the port's descriptor gives (`raises`). */
 export type AuditRefusal =
@@ -39,6 +40,8 @@ export class AuditRefusedError extends Error {
   constructor(
     readonly code: AuditRefusal,
     readonly field: string,
+    /** What it was in the text that made the writer refuse: a telephone number in the words of a note (its own rule, Run G1 item 5), or the shape of the value. Never the value. */
+    readonly why: 'phone_number' | 'format' = 'format',
   ) {
     super(`The audit event was refused (${code}): ${field}`);
     this.name = 'AuditRefusedError';
@@ -125,17 +128,24 @@ function screenName(key: string, field: string): void {
     refuseDetail(field);
 }
 
-/** A text value, screened: an address or a number is refused, a secret that travels inside the text is removed. */
-function screenText(text: string, field: string, maxLength: number): string {
+/**
+ * A text value, screened: an address or a number is refused, a secret that travels inside the text is removed. **A note is the free text of a person** and is screened more closely (`note`): a telephone number in any
+ * form a person in Ghana writes one is refused with a rule of its own (`phone-in-text.ts`; Run G1, Part 1, item 5), after the shape (a control character, an address) which is told first. A fact of an event
+ * keeps the narrower screening, so that no identifier can make the ledger refuse an event.
+ */
+function screenText(text: string, field: string, maxLength: number, note = false): string {
   if (text.length > maxLength || CONTROL.test(text)) refuseDetail(field);
   const scrubbed = scrubText(text);
-  if (EMAIL.test(scrubbed.replaceAll(URL_USERINFO, '://')) || PHONE.test(scrubbed))
-    refuseDetail(field);
+  const address = EMAIL.test(scrubbed.replaceAll(URL_USERINFO, '://'));
+  if (note && !address && holdsPhoneNumber(text)) {
+    throw new AuditRefusedError('AUDIT_DETAIL_REFUSED', field, 'phone_number');
+  }
+  if (address || PHONE.test(scrubbed)) refuseDetail(field);
   return scrubbed;
 }
 
-/** Why the writer would not keep a note: too long, or text its screening refuses (a control character, an address, a number). */
-export type NoteRefusal = 'maxLength' | 'format';
+/** Why the writer would not keep a note: too long, a telephone number in its words (a rule of its own), or text its screening refuses (a control character, an address). */
+export type NoteRefusal = 'maxLength' | 'format' | 'phone_number';
 
 /**
  * Whether the audit writer would keep this note, asked before the act so that a caller is refused with a reason of their own and not met
@@ -145,10 +155,10 @@ export type NoteRefusal = 'maxLength' | 'format';
 export function noteRefusal(note: string): NoteRefusal | undefined {
   if (note.length > AUDIT_LIMITS.maxNoteLength) return 'maxLength';
   try {
-    screenText(note, 'note', AUDIT_LIMITS.maxNoteLength);
+    screenText(note, 'note', AUDIT_LIMITS.maxNoteLength, true);
     return undefined;
   } catch (error) {
-    if (error instanceof AuditRefusedError) return 'format';
+    if (error instanceof AuditRefusedError) return error.why;
     throw error;
   }
 }
@@ -161,7 +171,7 @@ export function noteRefusal(note: string): NoteRefusal | undefined {
 export function screenedNote(note: string): string | undefined {
   if (note.length > AUDIT_LIMITS.maxNoteLength) return undefined;
   try {
-    return screenText(note, 'note', AUDIT_LIMITS.maxNoteLength);
+    return screenText(note, 'note', AUDIT_LIMITS.maxNoteLength, true);
   } catch (error) {
     if (error instanceof AuditRefusedError) return undefined;
     throw error;
@@ -524,7 +534,9 @@ export function buildAuditRecord(
     reasonCode,
     reasonLabel,
     note:
-      input.note === undefined ? null : screenText(input.note, 'note', AUDIT_LIMITS.maxNoteLength),
+      input.note === undefined
+        ? null
+        : screenText(input.note, 'note', AUDIT_LIMITS.maxNoteLength, true),
     approvalId: optionalUuid(input.approvalId, 'approvalId'),
     beforeAfter,
     relatedIds,

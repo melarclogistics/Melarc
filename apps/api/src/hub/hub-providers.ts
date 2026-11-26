@@ -7,14 +7,22 @@ import {
   type IdempotencyStore,
 } from '../platform/auth/ports/idempotency-store.port.js';
 import { OPERATION_RUNNER } from '../platform/authorization/authorization-providers.js';
+import { DatabaseService } from '../platform/database/database.service.js';
 import type { OperationRunner } from '../platform/authorization/operation-runner.js';
 import { RUN_ACCESS, type RunAccess } from '../platform/domain-ports/run-access.port.js';
 import { RUN_CUSTODY, type RunCustody } from '../platform/domain-ports/run-custody.port.js';
+import { ConfigurationReader } from '../platform/settings/configuration-reader.js';
 import { HubBlindCounts } from './blind-count.service.js';
 import { HubHandovers } from './hub-handover.service.js';
 import { HubCheckIns } from './check-in.service.js';
 import { HubIntakes } from './hub-intakes.service.js';
 import { HubIntakeFindings } from './intake-findings.service.js';
+import { HubItemization } from './itemization.service.js';
+import { IntakeWorklist } from './intake-worklist.service.js';
+import { HubOrderReads } from './order-reads.service.js';
+import { OrderReversals } from './order-reversals.service.js';
+import { ParcelVendorWaits } from './parcel-vendor-wait.service.js';
+import { PayerCorrections } from './payer-corrections.service.js';
 import { ReceivingReads } from './receiving-reads.service.js';
 
 /** The injection token of the service of the hub handover (S1.31), which its controller asks for. */
@@ -35,7 +43,18 @@ export const HUB_RECEIVING_READS = Symbol('HUB_RECEIVING_READS');
 /** The injection token of the service of the acts of the check-in (Run D, S1.35b), which its controller asks for. */
 export const HUB_CHECK_INS = Symbol('HUB_CHECK_INS');
 
-const optional = (token: symbol) => ({ token, optional: true });
+/** The injection token of the service of `itemizeOrder` (S1.36), which its controller asks for. */
+export const HUB_ITEMIZATION = Symbol('HUB_ITEMIZATION');
+export const HUB_ORDER_READS = Symbol('HUB_ORDER_READS');
+export const HUB_PAYER_CORRECTIONS = Symbol('HUB_PAYER_CORRECTIONS');
+/** The injection token of the parcel worklist and the closure assessment (Stage 7), which its controller asks for. */
+export const HUB_INTAKE_WORKLIST = Symbol('HUB_INTAKE_WORKLIST');
+/** The injection token of the reversal of an arrival (Stage 7), which its controller asks for. */
+export const HUB_ORDER_REVERSALS = Symbol('HUB_ORDER_REVERSALS');
+/** The injection token of the mark of a parcel the officer is waiting on the vendor's details for (Run G1, D-S7-12), which its controller asks for. */
+export const HUB_PARCEL_VENDOR_WAITS = Symbol('HUB_PARCEL_VENDOR_WAITS');
+
+const optional = (token: symbol | typeof DatabaseService) => ({ token, optional: true });
 
 /**
  * The service of the hub handover, `undefined` where what it needs is missing: an application composed without a database has none, so it has no service, and the operation fails closed
@@ -124,6 +143,82 @@ export const hubProviders: readonly FactoryProvider[] = [
     inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
   },
   {
+    provide: HUB_ORDER_READS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+    ): HubOrderReads | undefined =>
+      runner === undefined || audit === undefined
+        ? undefined
+        : new HubOrderReads({ runner, audit }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_INTAKE_WORKLIST,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+    ): IntakeWorklist | undefined =>
+      runner === undefined || audit === undefined
+        ? undefined
+        : new IntakeWorklist({ runner, audit }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER)],
+  },
+  {
+    provide: HUB_ORDER_REVERSALS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+    ): OrderReversals | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined
+        ? undefined
+        : new OrderReversals({ runner, audit, idempotency, clock }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+    ],
+  },
+  {
+    provide: HUB_PARCEL_VENDOR_WAITS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      clock: Clock | undefined,
+    ): ParcelVendorWaits | undefined =>
+      runner === undefined || audit === undefined || clock === undefined
+        ? undefined
+        : new ParcelVendorWaits({ runner, audit, clock }),
+    inject: [optional(OPERATION_RUNNER), optional(AUDIT_WRITER), optional(CLOCK)],
+  },
+  {
+    provide: HUB_PAYER_CORRECTIONS,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+    ): PayerCorrections | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined
+        ? undefined
+        : new PayerCorrections({ runner, audit, idempotency, clock }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+    ],
+  },
+  {
     provide: HUB_CHECK_INS,
     useFactory: (
       runner: OperationRunner | undefined,
@@ -142,6 +237,38 @@ export const hubProviders: readonly FactoryProvider[] = [
       optional(AUDIT_WRITER),
       optional(IDEMPOTENCY_STORE),
       optional(CLOCK),
+    ],
+  },
+  {
+    // The itemization needs the runner, the audit, the idempotency store, the clock (for the identifiers of the order and of its first commitment) and the database (for the configuration reader, which opens its own
+    // read transaction under the `configuration` capability, as the booking's does); any one missing and the operation fails closed (`503`).
+    provide: HUB_ITEMIZATION,
+    useFactory: (
+      runner: OperationRunner | undefined,
+      audit: AuditWriter | undefined,
+      idempotency: IdempotencyStore | undefined,
+      clock: Clock | undefined,
+      database: DatabaseService | undefined,
+    ): HubItemization | undefined =>
+      runner === undefined ||
+      audit === undefined ||
+      idempotency === undefined ||
+      clock === undefined ||
+      database === undefined
+        ? undefined
+        : new HubItemization({
+            runner,
+            audit,
+            idempotency,
+            clock,
+            configuration: new ConfigurationReader(database),
+          }),
+    inject: [
+      optional(OPERATION_RUNNER),
+      optional(AUDIT_WRITER),
+      optional(IDEMPOTENCY_STORE),
+      optional(CLOCK),
+      optional(DatabaseService),
     ],
   },
 ];

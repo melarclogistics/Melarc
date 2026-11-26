@@ -6,6 +6,7 @@ import { createMemoryRouter } from 'react-router';
 import { App } from '../app/App';
 import type { SignedInRoute } from '../app/navigation/route-registry';
 import { createAppRoutes } from '../app/routes';
+import { createQueryClient } from '../platform/query/query-client';
 import { failWhenAPermissionKeyIsDrawn } from './permission-keys';
 
 /**
@@ -13,9 +14,10 @@ import { failWhenAPermissionKeyIsDrawn } from './permission-keys';
  * history instead of the browser's. `extraRoutes` adds routes that exist only in a test, inside the
  * same frame and error handling the real routes get, and `signedIn` gives the tree a registry of signed-in routes of its own.
  * The test fails if a permission key of the catalogue is drawn, as text or in an attribute, at any moment of it (`permission-keys.ts`).
+ * A page that a screen hands something to through the history state is opened with `{ pathname, state }`.
  */
 export function renderApp(
-  initialPath = '/',
+  initialPath: string | { readonly pathname: string; readonly state: unknown } = '/',
   extraRoutes: RouteObject[] = [],
   signedIn?: readonly SignedInRoute[],
 ) {
@@ -23,6 +25,8 @@ export function renderApp(
   const router = createMemoryRouter(createAppRoutes(extraRoutes, signedIn), {
     initialEntries: [initialPath],
   });
-  const view = render(<App router={router} />);
-  return { ...view, router, user: userEvent.setup() };
+  // The application's own kind of client, kept here so that a test can make a read ask again (a page's reads are idle: only an act of its own reads one again).
+  const queryClient = createQueryClient();
+  const view = render(<App router={router} queryClient={queryClient} />);
+  return { ...view, router, queryClient, user: userEvent.setup() };
 }

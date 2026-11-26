@@ -51,6 +51,15 @@ export default defineConfig({
     './src/hub/intake-parcel.schema.ts',
     // SLICE-001 (S1.34): what was found at an intake after its count: the receiver's conditions and Senior Ops's adjudications.
     './src/hub/pickup-intake-finding.schema.ts',
+    // SLICE-001 (S1.36): the order made for a parcel at itemization, and what Melarc promised for it (its first commitment is written with it).
+    './src/hub/order.schema.ts',
+    './src/hub/delivery-commitment.schema.ts',
+    // SLICE-001 (S1.39): the maker-checker record of a payer correction after the price froze.
+    './src/hub/payer-correction.schema.ts',
+    // SLICE-001 (Stage 7, the review of 19 November 2026): the record of an edit of an order that is not yet confirmed, and of the reversal of one that is.
+    './src/hub/order-change.schema.ts',
+    // SLICE-001 (Run G1, D-S7-12): a parcel the officer is waiting on the vendor's details for, marked on the server so that every officer and tablet sees it.
+    './src/hub/intake-parcel-wait.schema.ts',
   ],
   out: './migrations',
   strict: true,

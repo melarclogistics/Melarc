@@ -17,7 +17,7 @@ describe('the acts of the evidence owners', () => {
   it('state, for each side, the keys of every act by kind of principal, each once', () => {
     expect(ownerKeysOf('write')).toEqual({
       RIDER: ['pickup.failure.report', 'pickup.collection.confirm'],
-      STAFF: ['hub.intake.count', 'hub.osd.adjudicate'],
+      STAFF: ['hub.intake.count', 'hub.osd.adjudicate', 'hub.intake.itemize'],
     });
     expect(ownerKeysOf('read')).toEqual({ STAFF: ['pickup.read', 'hub.read'] });
     expect(Object.isFrozen(ownerKeysOf('write'))).toBe(true);

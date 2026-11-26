@@ -2,6 +2,7 @@ import { described } from '../platform/openapi/described-schema.js';
 import {
   HUB_INTAKE_POST_COUNT_SCHEMA,
   HUB_INTAKE_PRE_COUNT_SCHEMA,
+  INTAKE_QUEUE_FACTS_PROPERTIES,
   INTAKE_STATES,
 } from './hub-intake-schemas.js';
 
@@ -199,6 +200,7 @@ export const HUB_INTAKE_CHECK_IN_SCHEMA = described({
     condition_findings: { type: 'array', items: INTAKE_FINDING_SCHEMA },
     dispute_state: { type: ['string', 'null'] },
     parity_exception_id: NULLABLE_UUID,
+    ...INTAKE_QUEUE_FACTS_PROPERTIES,
   },
 });
 
@@ -453,4 +455,40 @@ export const HUB_INTAKE_PAGE_SCHEMA = described({
     items: { type: 'array', items: HUB_INTAKE_VIEW_SCHEMA },
     next_page_token: { type: ['string', 'null'] },
   },
+});
+
+/** The `assessment_token` of the closure the officer read (the review of 20 November 2026, finding 6). */
+const REVIEWED_ASSESSMENT = {
+  type: 'string',
+  pattern: '^[0-9a-f]{64}$',
+  description: 'The `assessment_token` of the closure the officer read.',
+} as const;
+
+/**
+ * The body of `closeHubIntake` (S1.38; the review of 21 November 2026, finding 4): **a close that has parity, or the approved exception to it**. The first takes nothing, or the `assessment_token` the officer read (judged when
+ * it is given); the second takes the senior's reason in words **and** the `assessment_token` of the closure the exception is written for, which it requires, and a token that is not what a close would find now is `STATE_CONFLICT`,
+ * rule `assessment_changed`, with the assessment as it is. A blank reason is `REASON_REQUIRED`, which the service says before the shape.
+ */
+export const INTAKE_CLOSE_BODY = described({
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: { reviewed_assessment: REVIEWED_ASSESSMENT },
+    },
+    {
+      type: 'object',
+      required: ['parity_exception', 'reviewed_assessment'],
+      additionalProperties: false,
+      properties: {
+        reviewed_assessment: REVIEWED_ASSESSMENT,
+        parity_exception: {
+          type: 'object',
+          required: ['note'],
+          additionalProperties: false,
+          properties: { note: { type: 'string', minLength: 1 } },
+        },
+      },
+    },
+  ],
 });

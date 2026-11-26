@@ -1,0 +1,28 @@
+{
+  "intake_id": "01a124d3-7400-7e71-bd8d-a560d31a60e3",
+  "intake_state": "ITEMIZING",
+  "receiving_mode": "PHOTO_CHECK_IN",
+  "received": 3,
+  "ordered": 2,
+  "unpriced": 0,
+  "payment_required": 0,
+  "missing": 0,
+  "outstanding_count": 1,
+  "excess_count": 0,
+  "assessment_token": "bf80cef1c3baf49eb1403d76788ea41f294541255e6f6f9b82b3f7de7ae0e689",
+  "outstanding_parcels": [
+    {
+      "origin": "DOOR_PHOTO",
+      "ordinal": 3,
+      "parcel_id": "01a20575-abdc-740e-a53f-7d012972a137",
+      "hub_photo_evidence_id": null,
+      "door_photo_evidence_id": "01a124d3-7400-76e5-98dc-12822d64e75b"
+    }
+  ],
+  "closed_at": null,
+  "parity_exception_note": null,
+  "can_close": false,
+  "needs_exception": true,
+  "blockers": [],
+  "payment_still_required": false
+}

@@ -48,7 +48,12 @@ describe('the note of a decision or a request', () => {
 
   // Break caught: a note the ledger will not keep accepted here, so the act fails as an unexplained 500 after it has begun.
   it.each([
-    ['an international number', 'Call him on +233244123456', 'format'],
+    // A telephone number is refused with a rule of its own, in any form a person in Ghana writes one (Run G1, Part 1, item 5): the rule was `format` for the international form.
+    ['an international number', 'Call him on +233244123456', 'phone_number'],
+    ['a local number', 'The right number is 0244123456', 'phone_number'],
+    ['a local number in groups', 'Call him on 024 412 3456', 'phone_number'],
+    ['a local number with hyphens', '024-412-3456', 'phone_number'],
+    ['the international number without a plus', '233244123456', 'phone_number'],
     ['an address', 'Write to ama@example.com', 'format'],
     ['a control character', 'two\nlines', 'format'],
     ['more than the ledger keeps', 'x'.repeat(1001), 'maxLength'],

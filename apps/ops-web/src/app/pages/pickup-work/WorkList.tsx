@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router';
 
 import { Alert } from '../../../components/ui/alert/Alert';
 import { Field } from '../../../components/ui/field/Field';
+import type { BreadcrumbEntry } from '../../../components/ui/page-header/PageHeader';
 import { useQueuePaging } from '../../../components/ui/queue-table/use-queue-paging';
 import { Select } from '../../../components/ui/select/Select';
 import { QueuePager } from '../../../components/ui/templates/QueuePager';
@@ -40,6 +41,8 @@ export interface WorkView {
   readonly open: boolean | undefined;
   /** What an empty view says, under "No <things> yet" ("Nothing is waiting for Ops"). */
   readonly none: string;
+  /** How many the server stated for the view, where it states one (a vendor's orders: the counts of the whole vendor). Left out, no count is drawn: a count that was not given is never drawn as 0. */
+  readonly count?: number | null;
 }
 
 /** What a panel's body can ask of the page it is beside. */
@@ -66,6 +69,10 @@ export interface WorkListProps<Item> {
   readonly operation: string;
   readonly title: string;
   readonly description: string;
+  /** The pages above this one (a list that belongs to a record: the vendor's orders). */
+  readonly breadcrumb?: readonly BreadcrumbEntry[];
+  /** Actions of the whole page, the one primary in Ink (a vendor's orders: *Make the next order*, *Close this vendor*). */
+  readonly actions?: ReactNode;
   readonly viewsLabel: string;
   /** The first view is the one a visit starts at. */
   readonly views: readonly [WorkView, ...WorkView[]];
@@ -124,6 +131,8 @@ export function WorkList<Item>({
   operation,
   title,
   description,
+  breadcrumb,
+  actions,
   viewsLabel,
   views,
   noun,
@@ -355,7 +364,12 @@ export function WorkList<Item>({
             <Alert variant="success">{notice}</Alert>
           </div>
         )}
-        {note === undefined ? null : <p className="pickup-form-note">{note}</p>}
+        {note === undefined ? null : typeof note === 'string' ? (
+          <p className="pickup-form-note">{note}</p>
+        ) : (
+          // A note that is more than text (the orders page's summary has paragraphs and a list of facts) is a block: a paragraph cannot hold one, and React says so in development.
+          <div className="pickup-form-note">{note}</div>
+        )}
       </>
     );
 
@@ -367,6 +381,8 @@ export function WorkList<Item>({
         header={{
           title,
           description,
+          ...(breadcrumb === undefined ? {} : { breadcrumb }),
+          ...(actions === undefined ? {} : { actions }),
           freshness: {
             state: list.isFetching ? 'refreshing' : list.isError ? 'failed' : 'idle',
             ...(updatedAt === undefined ? {} : { updatedAt }),
@@ -379,7 +395,11 @@ export function WorkList<Item>({
           label: viewsLabel,
           value: current.id,
           onValueChange: changeView,
-          tabs: views.map((view) => ({ id: view.id, label: view.label })),
+          tabs: views.map((view) => ({
+            id: view.id,
+            label: view.label,
+            ...(view.count === undefined || view.count === null ? {} : { count: view.count }),
+          })),
         }}
         {...(lookup === undefined && choice === undefined
           ? {}
